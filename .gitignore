@@ -1,0 +1,40 @@
+# Workspace - all downloaded posters live here
+/app/workspace/
+/workspace/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+
+# App data — never commit these
+poster.db
+.first_admin.txt
+workspace/
+backups/
+data/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% from "_macros.html" import info %}
+{% block title %}Backups · Admin{% endblock %}
+
+{% block content %}
+<div class="admin-grid">
+
+  <section class="panel">
+    <div class="panel-head"><span>SAVE A SNAPSHOT NOW {{ info("A snapshot is a copy of the database in its current state. Use this before risky changes; restore from it if anything goes wrong. Manual snapshots are kept forever (delete manually when you no longer need them).") }}</span></div>
+    <div class="panel-body">
+      <div class="filter-row">
+        <label>NAME (optional)
+          <input type="text" id="bk-snapshot-name" placeholder="e.g. before-csv-reimport" maxlength="80">
+        </label>
+        <button type="button" class="btn btn-accent" id="bk-snapshot-create">SAVE SNAPSHOT</button>
+        <span class="muted mono" id="bk-snapshot-status"></span>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><span>BACKUPS &amp; SNAPSHOTS ({{ backups|length }}) {{ info("'auto' = made automatically at midnight (kept for 14 days, then pruned). 'manual' = saved snapshots you created (kept forever). Restoring will replace the live database with the chosen file. A safety snapshot is auto-created before every restore.") }}</span></div>
+    <div class="panel-body">
+      {% if backups %}
+        <table class="data-table">
+          <thead>
+            <tr><th>KIND</th><th>LABEL</th><th>SIZE</th><th>WHEN</th><th>ACTIONS</th></tr>
+          </thead>
+          <tbody>
+            {% for b in backups %}
+              <tr data-filename="{{ b.filename }}">
+                <td><span class="status-pill status-{{ 'auto' if b.kind == 'auto' else 'manual' }}">{{ b.kind }}</span></td>
+                <td class="mono">{{ b.label }}</td>
+                <td class="mono">{{ '%.1f' | format((b.size or 0)/1024) }} KB</td>
+                <td class="mono">{{ b.mtime }}</td>
+                <td class="actions-cell">
+                  <button class="btn btn-error btn-tiny" data-action="restore">RESTORE</button>
+                  <button class="btn btn-ghost btn-tiny" data-action="delete">DELETE</button>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">No backups yet. The first auto-backup will run at midnight.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><span>HOW THIS WORKS</span></div>
+    <div class="panel-body">
+      <p>Daily auto-backups are created at <strong>00:00:05 server time</strong> via SQLite's online backup API
+      (no service interruption). They live in the <code>backups/</code> folder under the project root.</p>
+      <p>If the server is offline at midnight, a catch-up backup runs at startup.</p>
+      <p>Auto-backups are pruned to the last 14 days. Manual snapshots are never auto-pruned.</p>
+      <p><strong>Restore:</strong> the live <code>poster.db</code> is replaced. The DB connection pool is recycled
+      automatically — workers may need to refresh their browser tab once.</p>
+      <p><strong>Note:</strong> backups cover the database only. Saved poster files in <code>workspace/</code> are
+      not in the backup. They aren't affected by restore either, so as long as you don't manually delete
+      files on disk, restoring an older DB will still find every file in its frozen folder path.</p>
+    </div>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/admin_backups.js"></script>
+{% endblock %}

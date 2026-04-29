@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign In · Poster Downloader</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    :root {
+      --bg:      {{ palette.BG }};
+      --card:    {{ palette.CARD }};
+      --border:  {{ palette.BORDER }};
+      --accent:  {{ palette.ACCENT }};
+      --accent2: {{ palette.ACCENT2 }};
+      --text:    {{ palette.TEXT }};
+      --subtext: {{ palette.SUBTEXT }};
+      --error:   {{ palette.ERROR }};
+    }
+  </style>
+</head>
+<body class="login-shell">
+  <div class="login-card">
+    <div class="brand brand-large"><span class="brand-mark">▌</span> POSTER&nbsp;DOWNLOADER</div>
+    <p class="login-sub">Sign in to continue.</p>
+    <form method="post" action="/login" class="login-form">
+      <label>USERNAME
+        <input type="text" name="username" autocomplete="username" required autofocus>
+      </label>
+      <label>PASSWORD
+        <input type="password" name="password" autocomplete="current-password" required>
+      </label>
+      {% if error %}<div class="login-error">{{ error }}</div>{% endif %}
+      <button type="submit" class="btn btn-accent btn-wide">SIGN IN</button>
+    </form>
+  </div>
+</body>
+</html>

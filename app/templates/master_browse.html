@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% from "_macros.html" import info, status_pill %}
+{% block title %}Browse Master · Poster Downloader{% endblock %}
+
+{% block content %}
+<div class="master-browse">
+  <div class="panel">
+    <div class="panel-head">
+      <span>BROWSE ALL TITLES {{ info("Read-only view of every title. Click rows (shift-click for ranges, drag to lasso) and click ADD TO MY LIST to claim them.") }}</span>
+      <a class="btn btn-ghost" href="/">← Back to dashboard</a>
+    </div>
+    <div class="panel-body">
+
+      <div class="filter-row">
+        <input type="search" id="mb-q" placeholder="Search title…" class="filter-input">
+        <select id="mb-status" class="filter-input">
+          <option value="">All statuses</option>
+          <option value="pending">Pending</option>
+          <option value="in_progress">In progress</option>
+          <option value="complete">Complete</option>
+          <option value="skipped">Skipped</option>
+        </select>
+        <select id="mb-type" class="filter-input">
+          <option value="">All types</option>
+          <option value="movie">Movie</option>
+          <option value="tvSeries">TV Series</option>
+        </select>
+        <label class="toggle-label">
+          <input type="checkbox" id="mb-only-unclaimed" checked>
+          Hide claimed by others {{ info("Off shows everyone's claims; on shows pending and your own.") }}
+        </label>
+        <input type="number" id="mb-jump" min="1" placeholder="Jump to page…" class="filter-input filter-input-narrow">
+        <button class="btn btn-ghost" id="mb-jump-btn">GO</button>
+      </div>
+
+      <div class="select-bar">
+        <span class="select-count mono"><span id="mb-selected">0</span> selected</span>
+        <button class="btn btn-accent" id="mb-add" disabled>ADD TO MY LIST</button>
+        <button class="btn btn-ghost" id="mb-clear">Clear selection</button>
+        <span class="muted" id="mb-msg"></span>
+      </div>
+
+      <div class="master-table-wrap" id="mb-wrap">
+        <table class="master-table" id="mb-table">
+          <thead>
+            <tr>
+              <th class="col-cb"><input type="checkbox" id="mb-cb-all" title="Select page"></th>
+              <th class="col-num">#</th>
+              <th class="col-type">Type</th>
+              <th class="col-title">Title</th>
+              <th class="col-year">Year</th>
+              <th class="col-status">Status</th>
+              <th class="col-claim">Claimed by</th>
+            </tr>
+          </thead>
+          <tbody id="mb-body">
+            <tr><td colspan="7" class="loading">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="paginator">
+        <button class="btn btn-ghost" id="mb-prev">‹ PREV</button>
+        <span class="mono" id="mb-page-info">page – / –</span>
+        <button class="btn btn-ghost" id="mb-next">NEXT ›</button>
+        <span class="muted mono" id="mb-total"></span>
+      </div>
+
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/master_browse.js"></script>
+{% endblock %}

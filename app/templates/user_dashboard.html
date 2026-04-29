@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% from "_macros.html" import info, status_pill %}
+{% block title %}Dashboard · Poster Downloader{% endblock %}
+
+{% block content %}
+<div class="user-grid"
+     data-state='{{ state | tojson | safe }}'>
+
+  {# Stat row #}
+  <section class="stat-row">
+    <div class="stat-tile">
+      <div class="stat-label">SAVED TODAY {{ info("Posters you saved between midnight today and now (server time). Excludes deleted posters.") }}</div>
+      <div class="stat-value" data-stat="saved_today">{{ state.saved_today }}</div>
+    </div>
+    <div class="stat-tile">
+      <div class="stat-label">SAVED THIS WEEK {{ info("Posters you saved Mon–Sun of the current week. Excludes deleted posters.") }}</div>
+      <div class="stat-value" data-stat="saved_week">{{ state.saved_week }}</div>
+    </div>
+    <div class="stat-tile">
+      <div class="stat-label">TITLES TOUCHED TODAY {{ info("Distinct titles you saved at least one poster on today.") }}</div>
+      <div class="stat-value" data-stat="titles_today">{{ state.titles_today }}</div>
+    </div>
+    <div class="stat-tile">
+      <div class="stat-label">DATE</div>
+      <div class="stat-value mono">{{ state.today }}</div>
+    </div>
+  </section>
+
+  {# Changes-requested banner — only shown when active revisions exist #}
+  <section class="revisions-banner" data-revisions-banner hidden>
+    <div class="revisions-banner-head">
+      <strong data-banner-title>CHANGES REQUESTED</strong>
+      {{ info("An admin asked you to redo or fix a poster. Replace the file (preferred) or delete it; once admin approves your fix, this clears automatically. 'Awaiting approval' = you've sent it back for review.") }}
+      <span class="muted" data-rev-count></span>
+    </div>
+    <div class="revisions-list" data-revisions-list></div>
+  </section>
+
+  {# Two-column work area #}
+  <section class="work-area">
+
+    {# Left: queue + pull controls #}
+    <div class="panel queue-panel">
+      <div class="panel-head">
+        <span class="step-badge">1</span>
+        <span>MY TITLES {{ info("Titles you have claimed from the master list. Anything you haven't started can be returned to the pool. Things you've started stay yours.") }}</span>
+      </div>
+
+      <div class="panel-body">
+        <div class="pull-row">
+          <label class="pull-label">
+            Get next
+            <input type="number" min="1" max="500" step="1" id="pull-size" value="{{ state.default_pull_size }}">
+            titles {{ info("Adds the next N titles from the master list to your own list. They are reserved for you until you complete, skip, or return them.") }}
+          </label>
+          <button class="btn btn-accent" id="btn-pull-next">GET</button>
+          <a class="btn btn-ghost" href="/master_browse">BROWSE&nbsp;ALL&nbsp;TITLES</a>
+          <button class="btn btn-ghost" id="btn-release" title="Return titles you haven't started back to the pool">RETURN&nbsp;UNWORKED</button>
+        </div>
+
+        <div class="title-list" data-title-list>
+          <div class="empty-hint">Loading…</div>
+        </div>
+      </div>
+    </div>
+
+    {# Right: active title #}
+    <div class="panel active-panel">
+      <div class="panel-head">
+        <span class="step-badge">2</span>
+        <span>CURRENT TITLE</span>
+      </div>
+
+      <div class="panel-body" data-active-panel>
+        <div class="empty-hint" data-empty-hint>
+          Click any title in your list on the left to open it.
+          Then click the <strong>Open TMDB</strong> link to find a poster.
+        </div>
+      </div>
+    </div>
+
+  </section>
+
+</div>
+
+{# Hidden template for the active-title panel (rendered by JS on lock/state-update) #}
+<template id="tpl-active-title">
+  <div class="active-title-box">
+    <div class="att-line1">
+      <span class="att-num mono"></span>
+      <span class="att-title"></span>
+      <span class="att-year mono"></span>
+      <span class="att-type mono"></span>
+    </div>
+    <div class="att-desc"></div>
+    <div class="att-admin-note" hidden>
+      <strong>ADMIN NOTE:</strong> <span class="att-admin-note-text"></span>
+    </div>
+    <div class="att-skip-note" hidden>
+      <strong>PREVIOUSLY SKIPPED:</strong> <span class="att-skip-note-text"></span>
+    </div>
+    <div class="att-actions">
+      <a class="btn btn-accent att-tmdb" target="_blank" rel="noopener">↗ Open TMDB</a>
+      <button class="btn btn-ghost" data-action="unlock">CLOSE</button>
+    </div>
+  </div>
+
+  <div class="save-box">
+    <div class="save-label">
+      Paste poster image URL ({{ info("On TMDB, click the poster thumbnail to open the full-size view, then right-click → Copy link address (NOT 'Copy image address'). Press Enter or click SAVE POSTER.") }})
+    </div>
+    <div class="flash-bar"></div>
+    <div class="save-row">
+      <input type="url" class="save-url" placeholder="https://image.tmdb.org/t/p/original/...jpg" autocomplete="off">
+      <button class="btn btn-accent" data-action="save">SAVE POSTER</button>
+    </div>
+    <div class="save-msg"></div>
+  </div>
+
+  <div class="posters-box">
+    <div class="posters-head">
+      SAVED POSTERS {{ info("Posters saved on this title (live count). Hover one to delete or replace.") }}
+      <span class="mono posters-count"></span>
+    </div>
+    <div class="posters-grid"></div>
+  </div>
+
+  <div class="title-actions">
+    <div class="done-row">
+      <input type="text" class="done-comment" placeholder="(optional) note — e.g. 'only 2 HD posters available'">
+      <button class="btn btn-success" data-action="complete">DONE {{ info("Marks this title finished. Add an optional note for the admin if anything is unusual.") }}</button>
+    </div>
+    <div class="skip-row">
+      <input type="text" class="skip-reason" placeholder="(optional) reason — e.g. 'no posters on TMDB'">
+      <button class="btn btn-skip" data-action="skip">SKIP {{ info("Marks this title skipped. Use when no usable poster exists. Admin can review skipped titles and ask you to look again.") }}</button>
+    </div>
+    <button class="btn btn-ghost" data-action="reopen" hidden>REOPEN</button>
+  </div>
+</template>
+
+<template id="tpl-poster-card">
+  <div class="poster-card">
+    <img class="poster-img" loading="lazy" alt="">
+    <div class="poster-meta">
+      <span class="poster-name mono"></span>
+      <span class="poster-size mono"></span>
+    </div>
+    <div class="poster-actions">
+      <input type="url" class="poster-replace-url" placeholder="Paste replacement URL">
+      <button class="btn btn-ghost btn-tiny" data-action="replace">REPLACE</button>
+      <button class="btn btn-error btn-tiny" data-action="delete">DELETE</button>
+    </div>
+  </div>
+</template>
+
+<template id="tpl-revision">
+  <div class="revision-item">
+    <div class="rev-meta">
+      <span class="rev-title"></span>
+      <span class="rev-file mono"></span>
+      <span class="rev-status-pill"></span>
+      <a class="btn btn-ghost btn-tiny rev-tmdb" target="_blank" rel="noopener">↗ Open TMDB</a>
+    </div>
+    <div class="rev-rejected-banner" hidden>
+      <strong>⚠ ADMIN REJECTED YOUR FIX — please look again.</strong>
+      <span class="rev-verdict-text"></span>
+    </div>
+    <div class="rev-comment"></div>
+    <div class="rev-flagged"></div>
+
+    <!-- 'simple' single-poster controls -->
+    <div class="rev-actions" data-mode="simple">
+      <img class="rev-thumb" alt="" loading="lazy">
+      <input type="url" placeholder="Paste replacement image URL" data-replace-url>
+      <button class="btn btn-accent" data-action="replace">REPLACE FILE</button>
+      <button class="btn btn-error"  data-action="delete-revision">DELETE FILE</button>
+      <button class="btn btn-ghost"  data-action="resolve">SEND FOR APPROVAL</button>
+    </div>
+
+    <!-- 'similar' multi-poster controls (worker picks one to redo) -->
+    <div class="rev-similar-grid" data-mode="similar" hidden></div>
+  </div>
+</template>
+
+<template id="tpl-similar-poster">
+  <div class="rev-similar-card">
+    <img class="rev-similar-thumb" alt="" loading="lazy">
+    <div class="rev-similar-name mono"></div>
+    <input type="url" placeholder="Paste replacement URL for this one" data-replace-url>
+    <div class="rev-similar-btns">
+      <button class="btn btn-accent btn-tiny" data-action="replace">REPLACE THIS</button>
+      <button class="btn btn-error btn-tiny" data-action="delete-revision">DELETE THIS</button>
+    </div>
+  </div>
+</template>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/user.js"></script>
+{% endblock %}

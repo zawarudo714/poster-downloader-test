@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Poster Downloader{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    :root {
+      --bg:      {{ palette.BG }};
+      --card:    {{ palette.CARD }};
+      --border:  {{ palette.BORDER }};
+      --accent:  {{ palette.ACCENT }};
+      --accent2: {{ palette.ACCENT2 }};
+      --text:    {{ palette.TEXT }};
+      --subtext: {{ palette.SUBTEXT }};
+      --success: {{ palette.SUCCESS }};
+      --skip:    {{ palette.SKIP }};
+      --error:   {{ palette.ERROR }};
+    }
+  </style>
+  {% block head %}{% endblock %}
+  <script>
+    // Apply saved theme synchronously (avoids flash-of-dark when switching to light).
+    try {
+      var t = localStorage.getItem('poster-theme');
+      if (t === 'light') document.documentElement.classList.add('theme-light');
+    } catch (e) {}
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand"><span class="brand-mark">▌</span> POSTER&nbsp;DOWNLOADER</div>
+      <nav class="topnav">
+        {% if user is defined and user %}
+          {% if user.role == 'admin' %}
+            <a href="/admin"           class="navlink {% if active_tab == 'dashboard' %}active{% endif %}">Dashboard</a>
+            <a href="/admin/browse"    class="navlink {% if active_tab == 'browse' %}active{% endif %}">Review&nbsp;Posters</a>
+            <a href="/admin/master"    class="navlink {% if active_tab == 'master' %}active{% endif %}">Title&nbsp;List</a>
+            <a href="/admin/revisions" class="navlink {% if active_tab == 'revisions' %}active{% endif %}">Changes&nbsp;Requested</a>
+            <a href="/admin/skipped"   class="navlink {% if active_tab == 'skipped' %}active{% endif %}">Skipped</a>
+            <a href="/admin/users"     class="navlink {% if active_tab == 'users' %}active{% endif %}">Users</a>
+            <a href="/admin/backups"   class="navlink {% if active_tab == 'backups' %}active{% endif %}">Backups</a>
+            <a href="/admin/envs"      class="navlink {% if active_tab == 'envs' %}active{% endif %}">Test&nbsp;Envs</a>
+            <a href="/admin/audit"     class="navlink {% if active_tab == 'audit' %}active{% endif %}">Activity&nbsp;Log</a>
+            <a href="/worker"          class="navlink">Work&nbsp;Mode</a>
+          {% else %}
+            <a href="/"                class="navlink {% if active_tab == 'dashboard' %}active{% endif %}">Dashboard</a>
+          {% endif %}
+        {% endif %}
+      </nav>
+      <div class="user-pill">
+        <button id="theme-toggle" class="theme-toggle" type="button" title="Toggle light/dark mode" aria-label="Toggle theme">☾</button>
+        {% if user is defined and user %}
+          {% if user.role == 'admin' %}<span class="role-badge role-admin">ADMIN</span>{% endif %}
+          <span class="username">{{ user.username }}</span>
+          <a class="logout" href="/logout">Logout</a>
+        {% endif %}
+      </div>
+    </div>
+  </header>
+
+  {% if not is_live_env() %}
+  <div class="env-banner" role="status" aria-live="polite">
+    <div class="env-banner-inner">
+      <span class="env-banner-icon">⚠</span>
+      <strong>TEST ENVIRONMENT:</strong>
+      <code class="env-banner-name">{{ active_env() }}</code>
+      <span class="env-banner-msg">— sandbox data only. Resets every midnight. Nothing here affects live.</span>
+      {% if user is defined and user and user.role == 'admin' %}
+        <form class="env-banner-leave" action="/admin/envs/leave" method="post">
+          <button type="submit" class="btn btn-ghost btn-tiny">EXIT TO LIVE</button>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  <main class="page">
+    {% block content %}{% endblock %}
+  </main>
+
+  <div id="tooltip" role="tooltip" hidden></div>
+
+  <script src="/static/js/tooltip.js"></script>
+  <script src="/static/js/theme.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

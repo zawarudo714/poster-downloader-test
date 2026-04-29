@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% from "_macros.html" import info %}
+{% block title %}Skipped Titles · Admin{% endblock %}
+
+{% block content %}
+<div class="admin-grid">
+
+  <section class="panel">
+    <div class="panel-head"><span>SKIPPED TITLES ({{ titles|length }}) {{ info("Titles a user marked as skipped, with their reason. Type a note and SEND BACK to bounce the title to the user with your instructions. The user sees both the original skip reason and your note.") }}</span></div>
+    <div class="panel-body">
+      {% if titles %}
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>#</th><th>TITLE</th><th>YEAR</th><th>USER</th><th>SKIPPED REASON</th><th>SEND BACK WITH NOTE</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for t in titles %}
+              <tr data-master-id="{{ t.id }}">
+                <td class="mono">{{ t.external_id or '–' }}</td>
+                <td>{{ t.title }}</td>
+                <td class="mono">{{ t.year }}</td>
+                <td class="mono">{{ t.claimed_by_name or '(unclaimed)' }}</td>
+                <td class="muted">{{ t.skip_reason or '(no reason given)' }}</td>
+                <td class="actions-cell">
+                  <input type="text" placeholder="Note for user (required)" data-skip-note>
+                  <button class="btn btn-accent btn-tiny" data-action="send-back">SEND BACK</button>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">No skipped titles. ✓</p>
+      {% endif %}
+    </div>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/admin_skipped.js"></script>
+{% endblock %}

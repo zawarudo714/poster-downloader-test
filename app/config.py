@@ -1,0 +1,85 @@
+"""
+Configuration for the Poster Downloader web app.
+
+Reads from environment variables when present; falls back to sane local
+development defaults so `uvicorn app.main:app --reload` works out of the box.
+"""
+
+import os
+import secrets
+from pathlib import Path
+
+
+# ── Paths ────────────────────────────────────────────────────────────────────
+BASE_DIR = Path(__file__).resolve().parent.parent
+APP_DIR = Path(__file__).resolve().parent
+
+# Workspace lives at <project_root>/workspace by default. Override with WORKSPACE_DIR
+# in production to put it on a larger volume.
+WORKSPACE_DIR = Path(os.environ.get("WORKSPACE_DIR", BASE_DIR / "workspace")).resolve()
+WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+
+# Database
+DATABASE_URL = os.environ.get("DATABASE_URL", f"sqlite:///{BASE_DIR / 'poster.db'}")
+
+# Where the SQLite file lives on disk (used by backup/restore — only meaningful
+# when DATABASE_URL is sqlite:///). Pulled out of DATABASE_URL for convenience.
+DB_PATH = BASE_DIR / "poster.db"
+
+# Backups + snapshots live under <project_root>/backups/. Daily auto-backups are
+# written here at midnight; admin-triggered manual snapshots also go here.
+BACKUPS_DIR = Path(os.environ.get("BACKUPS_DIR", BASE_DIR / "backups")).resolve()
+BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
+# Auto-backups older than this are pruned (manual snapshots are never pruned).
+AUTO_BACKUP_RETENTION_DAYS = int(os.environ.get("AUTO_BACKUP_RETENTION_DAYS", "14"))
+
+# ── Secrets ──────────────────────────────────────────────────────────────────
+# In production set SESSION_SECRET to a long random string (e.g. `openssl rand -hex 32`).
+# A randomly-generated fallback is used if missing — but it changes on every restart,
+# which would log everyone out, so DO set this in production.
+SESSION_SECRET = os.environ.get("SESSION_SECRET") or secrets.token_hex(32)
+
+# Cookie name + max-age (seconds). 14 days by default.
+SESSION_COOKIE_NAME = "poster_session"
+SESSION_MAX_AGE = 60 * 60 * 24 * 14
+
+# ── Palette (matches original main.py exactly) ───────────────────────────────
+PALETTE = {
+    "BG":      "#0e0e14",
+    "CARD":    "#1c1c28",
+    "BORDER":  "#2a2a3d",
+    "ACCENT":  "#e8b84b",
+    "ACCENT2": "#c47f17",
+    "TEXT":    "#f0ede6",
+    "SUBTEXT": "#8a8799",
+    "SUCCESS": "#4ec98a",
+    "SKIP":    "#e8a84b",
+    "ERROR":   "#e8554b",
+}
+
+# ── Image constraints ────────────────────────────────────────────────────────
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+ALLOWED_DOWNLOAD_HOSTS = {
+    "image.tmdb.org",
+    "www.themoviedb.org",
+    "themoviedb.org",
+    # If posters are sometimes hosted elsewhere, add here.
+}
+# Allow any host by default (worker may grab from various sources). Set
+# RESTRICT_HOSTS=1 in env to enforce ALLOWED_DOWNLOAD_HOSTS instead.
+RESTRICT_HOSTS = os.environ.get("RESTRICT_HOSTS", "0") == "1"
+
+MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024  # 25 MB safety cap per image
+DOWNLOAD_TIMEOUT_S = 20
+
+# Soft warning threshold per title (matches spec: "soft warning at 3, not a hard block")
+SOFT_LIMIT_PER_TITLE = 3
+
+# ── Pull-from-master defaults ────────────────────────────────────────────────
+# Default size of "pull next N" batch. User can override via the input.
+DEFAULT_PULL_SIZE = 50
+# Hard cap on a single pull to avoid a runaway claim of the entire master.
+MAX_PULL_SIZE = 500
+
+# Default per-page size for the master sheet listing (admin + user browse views).
+MASTER_PAGE_SIZE = 100

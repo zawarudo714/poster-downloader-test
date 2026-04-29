@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% from "_macros.html" import info %}
+{% block title %}Review Posters · Admin{% endblock %}
+
+{% block content %}
+<div class="admin-grid">
+
+  <section class="panel">
+    <div class="panel-head"><span>REVIEW POSTERS {{ info("Each title shows all its saved posters side-by-side so you can scan them in one glance. Use ← / → arrow keys to step through titles. Click any poster to enlarge it and flag for changes.") }}</span></div>
+    <div class="panel-body">
+
+      <form class="filter-row" id="ib-filter">
+        <label>USER
+          <select name="worker" id="ib-worker">
+            {% for w in workers %}
+              <option value="{{ w }}" {% if w == selected_worker %}selected{% endif %}>{{ w }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>DATE {{ info("This is the title's original-save-date — the folder a poster lives in. It does NOT change when the file is replaced later.") }}
+          <select name="date" id="ib-date">
+            {% for d in dates %}
+              <option value="{{ d }}" {% if d == selected_date %}selected{% endif %}>{{ d }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button type="button" class="btn btn-ghost" id="ib-load">LOAD</button>
+        <button type="button" class="btn btn-accent" id="ib-zip">ZIP THIS DAY {{ info("Builds a single ZIP of every file under {user}/{date}/ for download.") }}</button>
+        <span class="muted mono" id="ib-zip-status"></span>
+      </form>
+
+      <div class="ib-summary mono muted" id="ib-summary"></div>
+
+      <div class="gallery-controls">
+        <button class="btn btn-ghost" id="ib-prev-title">‹ PREV TITLE</button>
+        <span class="mono" id="ib-title-counter">— / —</span>
+        <button class="btn btn-ghost" id="ib-next-title">NEXT TITLE ›</button>
+        <span class="muted">Use ← / → keys</span>
+        <span class="gallery-controls-spacer"></span>
+        <button class="btn btn-ghost" id="ib-select-mode">☐ SELECT MODE {{ info("Toggle to multi-select posters within a single title. Pick 2+ then 'MARK SELECTED AS SIMILAR' to send the user a side-by-side flag.") }}</button>
+        <button class="btn btn-error" id="ib-mark-similar" disabled>MARK SELECTED AS SIMILAR (0)</button>
+      </div>
+
+      <div id="ib-gallery" class="gallery"></div>
+
+    </div>
+  </section>
+
+</div>
+
+{# Lightbox modal — appears when admin clicks a poster #}
+<div id="ib-lightbox" class="lightbox" hidden>
+  <div class="lightbox-bg" data-lightbox-close></div>
+  <div class="lightbox-card">
+    <button class="lightbox-close" data-lightbox-close aria-label="Close">×</button>
+    <img id="ib-lb-img" alt="">
+    <div class="lightbox-meta mono" id="ib-lb-meta"></div>
+    <div class="lightbox-flag" id="ib-lb-flag" hidden>
+      <strong>CURRENTLY FLAGGED:</strong>
+      <span class="lb-status-pill"></span>
+      <div class="lb-flag-comment"></div>
+      <div class="lb-worker-note muted"></div>
+    </div>
+    <div class="lightbox-controls">
+      <input type="text" id="ib-lb-comment" placeholder="(optional) comment for the user">
+      <button class="btn btn-error" id="ib-lb-flag-btn">FLAG FOR CHANGES</button>
+      <button class="btn btn-ghost" id="ib-lb-unflag-btn" hidden>CLEAR FLAG</button>
+    </div>
+  </div>
+</div>
+
+<template id="tpl-gallery-title">
+  <section class="g-title">
+    <header class="g-title-head">
+      <h3 class="g-title-name"></h3>
+      <span class="g-title-meta mono muted"></span>
+    </header>
+    <div class="g-title-posters"></div>
+  </section>
+</template>
+
+<template id="tpl-gallery-poster">
+  <button class="g-poster" type="button">
+    <img class="g-poster-img" loading="lazy" alt="">
+    <span class="g-poster-name mono"></span>
+    <span class="g-poster-pill"></span>
+  </button>
+</template>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/admin.js"></script>
+{% endblock %}

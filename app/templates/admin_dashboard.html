@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% from "_macros.html" import info, status_pill %}
+{% block title %}Admin · Poster Downloader{% endblock %}
+
+{% block content %}
+<div class="admin-grid">
+
+  <section class="stat-row">
+    <div class="stat-tile">
+      <div class="stat-label">TOTAL TITLES {{ info("All rows in the master list, regardless of status.") }}</div>
+      <div class="stat-value mono">{{ master_total }}</div>
+    </div>
+    <div class="stat-tile">
+      <div class="stat-label">PENDING {{ info("Unclaimed titles still waiting for a user to take them.") }}</div>
+      <div class="stat-value mono">{{ master_pending }}</div>
+    </div>
+    <div class="stat-tile">
+      <div class="stat-label">IN PROGRESS {{ info("Claimed by a user — work has begun or is reserved.") }}</div>
+      <div class="stat-value mono">{{ master_in_progress }}</div>
+    </div>
+    <div class="stat-tile">
+      <div class="stat-label">DONE {{ info("Marked complete by the user that worked them.") }}</div>
+      <div class="stat-value success mono">{{ master_complete }}</div>
+    </div>
+    <div class="stat-tile">
+      <div class="stat-label">SKIPPED {{ info("Marked skipped by users. Click 'Skipped' in the nav to review and send back if needed.") }}</div>
+      <div class="stat-value mono">{{ master_skipped }}</div>
+    </div>
+    <div class="stat-tile">
+      <div class="stat-label">NEEDS CHANGES {{ info("Titles with at least one open or awaiting-approval flag.") }}</div>
+      <div class="stat-value error mono">{{ master_needs_revision }}</div>
+    </div>
+  </section>
+
+  <section class="stat-row">
+    <div class="stat-tile">
+      <div class="stat-label">FLAGS WAITING ON USERS {{ info("You've flagged these; the user hasn't acted yet.") }}</div>
+      <div class="stat-value mono">{{ open_revisions }}</div>
+    </div>
+    <div class="stat-tile">
+      <div class="stat-label">AWAITING YOUR APPROVAL {{ info("User has replaced/fixed; you need to approve or reject.") }}</div>
+      <div class="stat-value error mono">{{ awaiting_revisions }}</div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <span>USERS · TODAY ({{ today }}) {{ info("Live counts based on the activity log + saved-poster table. 'Release' frees a user's titles back to the pool.") }}</span>
+      <a class="btn btn-ghost" href="/admin/users">MANAGE USERS</a>
+    </div>
+    <div class="panel-body">
+      {% if users %}
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>USER</th><th>TODAY</th><th>WEEK</th><th>HOLDING</th><th>STATUS</th><th>RELEASE</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for w in users %}
+          <tr>
+            <td class="mono">{{ w.username }}</td>
+            <td class="mono">{{ w.today }}</td>
+            <td class="mono">{{ w.week }}</td>
+            <td class="mono">{{ w.claims }}</td>
+            <td>{% if w.is_active %}<span class="ok">active</span>{% else %}<span class="muted">disabled</span>{% endif %}</td>
+            <td>
+              <button class="btn btn-ghost btn-tiny"
+                      data-release-user-id="{{ w.id }}"
+                      data-keep-started="1">RETURN UNWORKED</button>
+              <button class="btn btn-error btn-tiny"
+                      data-release-user-id="{{ w.id }}"
+                      data-keep-started="0">RETURN ALL</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="muted">No users yet. <a href="/admin/users">Create one →</a></p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <span>WORKSPACE TREE {{ info("Top-level folders are users; one folder under each is the original-save-date for the title; below that, every per-title folder.") }}</span>
+      <a class="btn btn-ghost" href="/admin/browse">OPEN REVIEW PANEL</a>
+    </div>
+    <div class="panel-body">
+      <div id="fs-tree" class="fs-tree">Loading…</div>
+    </div>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/admin.js"></script>
+{% endblock %}

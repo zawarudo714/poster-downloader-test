@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% from "_macros.html" import info %}
+{% block title %}Title List · Admin{% endblock %}
+
+{% block content %}
+<div class="admin-grid">
+
+  <section class="panel">
+    <div class="panel-head">
+      <span>IMPORT FROM CSV / XLSX {{ info("Import runs in the background — the page polls for progress. Replace mode wipes all existing rows first; otherwise rows append.") }}</span>
+    </div>
+    <div class="panel-body">
+      <form class="inline-form" id="import-form" enctype="multipart/form-data">
+        <input type="file" name="file" accept=".csv,.tsv,.xlsx,.xlsm" required>
+        <label class="toggle-label">
+          <input type="checkbox" name="replace" value="1">
+          Replace all existing titles {{ info("Clears the title list before importing. Already-saved posters keep their files; their immutable folder paths still locate the files on disk.") }}
+        </label>
+        <button class="btn btn-accent" type="submit">START IMPORT</button>
+      </form>
+      <div id="import-progress" class="import-progress" hidden>
+        <div class="import-bar"><div class="import-bar-fill"></div></div>
+        <div class="import-meta mono"></div>
+      </div>
+      <details class="muted">
+        <summary>Or paste a quick list (small batches only)</summary>
+        <form id="paste-master-form" class="paste-master-form">
+          <textarea name="raw" rows="5" placeholder="num\ttitle\tyear (one per line)"></textarea>
+          <button class="btn btn-ghost btn-tiny" type="submit">APPEND</button>
+        </form>
+      </details>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><span>TITLE LIST</span></div>
+    <div class="panel-body">
+
+      <div class="filter-row">
+        <input type="search" id="ms-q" value="{{ q }}" placeholder="Search title…" class="filter-input">
+        <select id="ms-status" class="filter-input">
+          <option value="" {% if not status %}selected{% endif %}>All statuses</option>
+          <option value="pending" {% if status=='pending' %}selected{% endif %}>Pending</option>
+          <option value="in_progress" {% if status=='in_progress' %}selected{% endif %}>In progress</option>
+          <option value="complete" {% if status=='complete' %}selected{% endif %}>Complete</option>
+          <option value="skipped" {% if status=='skipped' %}selected{% endif %}>Skipped</option>
+        </select>
+        <select id="ms-type" class="filter-input">
+          <option value="" {% if not content_type %}selected{% endif %}>All types</option>
+          <option value="movie" {% if content_type=='movie' %}selected{% endif %}>Movie</option>
+          <option value="tvSeries" {% if content_type=='tvSeries' %}selected{% endif %}>TV Series</option>
+        </select>
+        <label class="toggle-label">
+          <input type="checkbox" id="ms-flag" {% if needs_revision %}checked{% endif %}>
+          Needs revision only
+        </label>
+        <input type="number" id="ms-jump" min="1" placeholder="Jump page…" class="filter-input filter-input-narrow">
+        <button class="btn btn-ghost" id="ms-jump-btn">GO</button>
+        <button class="btn btn-error" id="ms-clear-all" title="Remove every title from the list">CLEAR&nbsp;ALL</button>
+      </div>
+
+      <div class="select-bar">
+        <span class="select-count mono"><span id="ms-selected">0</span> selected</span>
+        <select id="ms-bulk-status" class="filter-input">
+          <option value="">Bulk status…</option>
+          <option value="pending">Set pending</option>
+          <option value="complete">Set complete</option>
+          <option value="skipped">Set skipped</option>
+        </select>
+        <button class="btn btn-accent" id="ms-bulk-apply" disabled>APPLY TO SELECTED</button>
+        <button class="btn btn-ghost"  id="ms-clear">Clear selection</button>
+        <span class="muted" id="ms-msg"></span>
+      </div>
+
+      <div class="master-table-wrap">
+        <table class="master-table">
+          <thead>
+            <tr>
+              <th class="col-cb"><input type="checkbox" id="ms-cb-all" title="Select page"></th>
+              <th>#</th><th>Type</th><th>Title</th><th>Year</th>
+              <th>Status</th><th>Claimed</th><th>Started</th><th>Set status</th>
+            </tr>
+          </thead>
+          <tbody id="ms-body"><tr><td colspan="9" class="loading">Loading…</td></tr></tbody>
+        </table>
+      </div>
+
+      <div class="paginator">
+        <button class="btn btn-ghost" id="ms-prev">‹ PREV</button>
+        <span class="mono" id="ms-page-info">page – / –</span>
+        <button class="btn btn-ghost" id="ms-next">NEXT ›</button>
+        <span class="muted mono" id="ms-total"></span>
+      </div>
+
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/admin_master.js"></script>
+{% endblock %}

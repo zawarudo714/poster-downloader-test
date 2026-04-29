@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% from "_macros.html" import info %}
+{% block title %}Changes Requested · Admin{% endblock %}
+
+{% block content %}
+<div class="admin-grid">
+
+  <section class="panel">
+    <div class="panel-head"><span>AWAITING YOUR APPROVAL ({{ awaiting_rows|length }}) {{ info("The user has replaced or marked these as fixed. Review the new image and approve to clear the flag, or reject to send it back with new instructions.") }}</span></div>
+    <div class="panel-body">
+      {% if awaiting_rows %}
+        <div class="rev-cards">
+          {% for rev, sp, mt in awaiting_rows %}
+            <div class="rev-card rev-card-awaiting {% if rev.revision_type == 'similar' %}rev-card-similar{% endif %}" data-revision-id="{{ rev.id }}" data-poster-id="{{ sp.id }}">
+              {% if rev.revision_type == 'similar' %}
+                {# All related posters as equal cards. Cache-bust by submitted_at
+                   so a new replacement always invalidates the prior thumbnail. #}
+                {% set related_ids = (rev.related_poster_ids or '[]') | from_json %}
+                {% set vbust = rev.submitted_at.isoformat() if rev.submitted_at else rev.created_at.isoformat() %}
+                <div class="rev-card-similar-thumbs">
+                  {% for pid in related_ids %}
+                    <a class="rev-similar-mini" href="/admin/file/{{ pid }}?v={{ vbust }}" target="_blank" rel="noopener">
+                      <img src="/admin/file/{{ pid }}?v={{ vbust }}" alt="poster #{{ pid }}" loading="lazy">
+                    </a>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <img class="rev-card-thumb" src="/admin/file/{{ sp.id }}?v={{ sp.file_size or 0 }}" alt="" loading="lazy">
+              {% endif %}
+              <div class="rev-card-body">
+                <div class="rev-card-title">
+                  {{ mt.title if mt else '(unknown)' }} ({{ mt.year if mt else '–' }})
+                  {% if rev.revision_type == 'similar' %}
+                    <span class="status-pill status-similar">SIMILAR PAIR</span>
+                  {% endif %}
+                </div>
+                <div class="rev-card-path mono">{{ sp.username }} / {{ sp.original_save_date.isoformat() }} / {{ sp.title_folder_path }}{% if rev.revision_type != 'similar' %} / {{ sp.filename }}{% endif %}</div>
+                <div class="rev-card-comment"><strong>Original ask:</strong> {{ rev.comment or "(no comment)" }}</div>
+                {% if rev.worker_note %}
+                  <div class="rev-card-worker-note"><strong>{{ sp.username }} says:</strong> {{ rev.worker_note }}</div>
+                {% endif %}
+                <div class="rev-card-meta mono muted">submitted {{ rev.submitted_at.strftime('%Y-%m-%d %H:%M') if rev.submitted_at else '' }}</div>
+                <div class="rev-card-actions">
+                  <input type="text" placeholder="(optional) verdict comment" data-verdict-input>
+                  <button class="btn btn-success btn-tiny" data-action="approve">APPROVE</button>
+                  <button class="btn btn-error btn-tiny" data-action="reject">REJECT &amp; SEND BACK</button>
+                </div>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">Nothing awaiting your approval. ✓</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><span>OPEN — WAITING ON USER ({{ open_rows|length }}) {{ info("You've flagged these and the user hasn't acted yet.") }}</span></div>
+    <div class="panel-body">
+      {% if open_rows %}
+        <div class="rev-cards">
+          {% for rev, sp, mt in open_rows %}
+            <div class="rev-card {% if rev.admin_verdict %}rev-card-rejected{% endif %} {% if rev.revision_type == 'similar' %}rev-card-similar{% endif %}" data-revision-id="{{ rev.id }}" data-poster-id="{{ sp.id }}">
+              {% if rev.revision_type == 'similar' %}
+                {% set related_ids = (rev.related_poster_ids or '[]') | from_json %}
+                {% set vbust = rev.created_at.isoformat() %}
+                <div class="rev-card-similar-thumbs">
+                  {% for pid in related_ids %}
+                    <a class="rev-similar-mini" href="/admin/file/{{ pid }}?v={{ vbust }}" target="_blank" rel="noopener">
+                      <img src="/admin/file/{{ pid }}?v={{ vbust }}" alt="poster #{{ pid }}" loading="lazy">
+                    </a>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <img class="rev-card-thumb" src="/admin/file/{{ sp.id }}?v={{ sp.file_size or 0 }}" alt="" loading="lazy">
+              {% endif %}
+              <div class="rev-card-body">
+                <div class="rev-card-title">
+                  {{ mt.title if mt else '(unknown)' }} ({{ mt.year if mt else '–' }})
+                  {% if rev.admin_verdict %}<span class="status-pill status-rejected">RE-OPENED AFTER REJECT</span>{% endif %}
+                  {% if rev.revision_type == 'similar' %}<span class="status-pill status-similar">SIMILAR PAIR</span>{% endif %}
+                </div>
+                <div class="rev-card-path mono">{{ sp.username }} / {{ sp.original_save_date.isoformat() }} / {{ sp.title_folder_path }}{% if rev.revision_type != 'similar' %} / {{ sp.filename }}{% endif %}</div>
+                <div class="rev-card-comment">{{ rev.comment or "(no comment)" }}</div>
+                {% if rev.admin_verdict %}
+                  <div class="rev-card-verdict"><strong>Your earlier verdict:</strong> {{ rev.admin_verdict }}</div>
+                {% endif %}
+                <div class="rev-card-meta mono muted">flagged by {{ rev.flagged_by }} · {{ rev.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+                <div class="rev-card-actions">
+                  <button class="btn btn-ghost btn-tiny" data-unflag-poster-id="{{ sp.id }}">CLEAR FLAG</button>
+                </div>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">No open flags waiting on users. ✓</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><span>RECENT DELETIONS — REVIEW ({{ deletion_rows|length }}) {{ info("The user deleted a flagged poster instead of replacing it. Review the worker's note. Click ACKNOWLEDGE if you're OK with it; click SEND BACK with a comment to push it back to the worker (the title goes back to in-progress with your note pinned to it).") }}</span></div>
+    <div class="panel-body">
+      {% if deletion_rows %}
+        <div class="rev-cards">
+          {% for rev, sp, mt in deletion_rows %}
+            <div class="rev-card rev-card-deletion" data-revision-id="{{ rev.id }}" data-poster-id="{{ sp.id }}">
+              <div class="rev-card-deletion-marker">
+                <span class="status-pill status-deletion">DELETED</span>
+              </div>
+              <div class="rev-card-body">
+                <div class="rev-card-title">
+                  {{ mt.title if mt else '(unknown)' }} ({{ mt.year if mt else '–' }})
+                </div>
+                <div class="rev-card-path mono">{{ sp.username }} / {{ sp.original_save_date.isoformat() }} / {{ sp.title_folder_path }} / {{ sp.filename }}</div>
+                <div class="rev-card-comment"><strong>Original ask:</strong> {{ rev.comment or "(no comment)" }}</div>
+                {% if rev.worker_note %}
+                  <div class="rev-card-worker-note"><strong>{{ sp.username }} says (deletion reason):</strong> {{ rev.worker_note }}</div>
+                {% else %}
+                  <div class="rev-card-worker-note muted"><em>No deletion reason given.</em></div>
+                {% endif %}
+                <div class="rev-card-meta mono muted">deleted {{ rev.resolved_at.strftime('%Y-%m-%d %H:%M') if rev.resolved_at else '' }}</div>
+                <div class="rev-card-actions">
+                  <input type="text" placeholder="(optional for ACK; required for SEND BACK) note for the user" data-deletion-note>
+                  <button class="btn btn-ghost btn-tiny" data-action="ack-deletion">ACKNOWLEDGE</button>
+                  <button class="btn btn-error btn-tiny" data-action="send-back-deletion">SEND BACK</button>
+                </div>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">No unreviewed deletions. ✓</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><span>RECENTLY RESOLVED (last 50) {{ info("Includes any deletions — the worker's reason for deletion shows under VERDICT.") }}</span></div>
+    <div class="panel-body">
+      {% if resolved_rows %}
+        <table class="data-table">
+          <thead>
+            <tr><th>USER</th><th>DATE</th><th>TITLE</th><th>FILE</th><th>FLAGGED BY</th><th>VERDICT</th><th>RESOLVED</th></tr>
+          </thead>
+          <tbody>
+            {% for rev, sp, mt in resolved_rows %}
+              <tr>
+                <td class="mono">{{ sp.username }}</td>
+                <td class="mono">{{ sp.original_save_date.isoformat() }}</td>
+                <td>{{ mt.title if mt else '–' }}</td>
+                <td class="mono">{{ sp.filename }}</td>
+                <td class="mono">{{ rev.flagged_by }}</td>
+                <td>{{ rev.admin_verdict or '' }}</td>
+                <td class="mono">{{ rev.resolved_at.strftime('%Y-%m-%d %H:%M') if rev.resolved_at else '' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">No resolved revisions yet.</p>
+      {% endif %}
+    </div>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/admin_revisions.js"></script>
+{% endblock %}

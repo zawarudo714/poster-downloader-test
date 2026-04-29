@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% from "_macros.html" import info %}
+{% block title %}Test Environments · Admin{% endblock %}
+
+{% block content %}
+<div class="admin-grid">
+
+  <section class="panel">
+    <div class="panel-head"><span>TEST ENVIRONMENTS {{ info("Sandboxed copies of the site, each with its own database and workspace folder. Anything you do in a test env stays in that env — it never touches live data. All test envs auto-reset every midnight.") }}</span></div>
+    <div class="panel-body">
+
+      <p class="muted">
+        Currently in: {% if current_env == live_env %}
+          <strong>LIVE</strong> (your real data).
+        {% else %}
+          <strong class="env-name">{{ current_env }}</strong> (test sandbox).
+          <a href="#" id="leave-now" class="muted">switch back to live</a>
+        {% endif %}
+      </p>
+
+      <div class="env-create-row">
+        <input type="text" id="env-create-name" maxlength="32"
+               placeholder="new test env name (letters / numbers / _ / -)">
+        <button class="btn btn-accent" id="env-create-btn">CREATE TEST ENV</button>
+        <span class="muted" id="env-create-msg"></span>
+      </div>
+
+      <table class="data-table" id="envs-table">
+        <thead>
+          <tr><th>NAME</th><th>STATUS</th><th>ACTIONS</th></tr>
+        </thead>
+        <tbody>
+          {# Live row — always present, can't be deleted #}
+          <tr>
+            <td class="mono"><strong>{{ live_env }}</strong> (real data)</td>
+            <td>
+              {% if current_env == live_env %}
+                <span class="status-pill status-active">YOU ARE HERE</span>
+              {% else %}
+                <span class="status-pill">live</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if current_env != live_env %}
+                <form action="/admin/envs/leave" method="post" style="display:inline">
+                  <button class="btn btn-accent btn-tiny" type="submit">SWITCH TO LIVE</button>
+                </form>
+              {% else %}
+                <span class="muted">already active</span>
+              {% endif %}
+            </td>
+          </tr>
+
+          {% if envs %}
+            {% for name in envs %}
+              <tr data-env-name="{{ name }}">
+                <td class="mono">{{ name }}</td>
+                <td>
+                  {% if current_env == name %}
+                    <span class="status-pill status-active">YOU ARE HERE</span>
+                  {% else %}
+                    <span class="status-pill">test</span>
+                  {% endif %}
+                </td>
+                <td class="env-actions">
+                  {% if current_env != name %}
+                    <form action="/admin/envs/enter" method="post" style="display:inline">
+                      <input type="hidden" name="name" value="{{ name }}">
+                      <button class="btn btn-accent btn-tiny" type="submit">ENTER</button>
+                    </form>
+                  {% endif %}
+                  <button class="btn btn-ghost btn-tiny" data-action="reset" title="Wipe data inside this env (keeps the env)">RESET NOW</button>
+                  <button class="btn btn-error btn-tiny" data-action="delete" title="Delete the env entirely">DELETE</button>
+                </td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr><td colspan="3" class="muted">No test environments yet. Create one above.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+
+      <p class="muted env-help">
+        Test environments are useful when you want to try something — bulk-importing a list, flagging a bunch of posters,
+        testing a new workflow — without risking the real data. Workers can never enter a test env, even by URL,
+        even with a stale cookie; the middleware kicks them back to live automatically.
+      </p>
+
+    </div>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/admin_envs.js"></script>
+{% endblock %}

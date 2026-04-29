@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% from "_macros.html" import info %}
+{% block title %}Audit Log · Admin{% endblock %}
+
+{% block content %}
+<div class="admin-grid">
+  <section class="panel">
+    <div class="panel-head"><span>AUDIT LOG {{ info("Append-only log of every action: claims, releases, saves, deletes, replaces, flags, status changes, imports. Most recent first.") }}</span></div>
+    <div class="panel-body">
+
+      <div class="filter-row">
+        <input type="text" id="al-user" placeholder="Filter by user…" class="filter-input">
+        <select id="al-action" class="filter-input">
+          <option value="">All actions</option>
+          <option value="claimed">claimed</option>
+          <option value="released">released</option>
+          <option value="locked">locked</option>
+          <option value="unlocked">unlocked</option>
+          <option value="saved">saved</option>
+          <option value="deleted">deleted</option>
+          <option value="replaced">replaced</option>
+          <option value="flagged">flagged</option>
+          <option value="unflagged">unflagged</option>
+          <option value="resolved">resolved</option>
+          <option value="completed">completed</option>
+          <option value="skipped">skipped</option>
+          <option value="reopened">reopened</option>
+          <option value="status_changed">status_changed</option>
+          <option value="bulk_status">bulk_status</option>
+          <option value="imported">imported</option>
+          <option value="user_created">user_created</option>
+          <option value="user_toggled">user_toggled</option>
+          <option value="password_reset">password_reset</option>
+        </select>
+        <button class="btn btn-ghost" id="al-apply">APPLY</button>
+      </div>
+
+      <table class="data-table">
+        <thead>
+          <tr><th>WHEN</th><th>USER</th><th>ACTION</th><th>TARGET</th><th>DETAILS</th></tr>
+        </thead>
+        <tbody id="al-body"><tr><td colspan="5" class="loading">Loading…</td></tr></tbody>
+      </table>
+
+      <div class="paginator">
+        <button class="btn btn-ghost" id="al-prev">‹ PREV</button>
+        <span class="mono" id="al-page-info">page – / –</span>
+        <button class="btn btn-ghost" id="al-next">NEXT ›</button>
+        <span class="muted mono" id="al-total"></span>
+      </div>
+
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/admin_audit.js"></script>
+{% endblock %}

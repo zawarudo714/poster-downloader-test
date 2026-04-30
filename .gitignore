@@ -27,14 +27,3 @@ Thumbs.db
 # Env
 .env
 .env.local
-
-# App data — never commit these
-poster.db
-.first_admin.txt
-workspace/
-backups/
-data/
-
-# OS
-.DS_Store
-Thumbs.db

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Chat with admin · {{ user.username }}{% endblock %}
+
+{% block content %}
+<div class="chat-grid chat-grid-worker">
+  <main class="chat-main">
+    <div class="panel-head chat-main-head">
+      <span>CHAT WITH ADMIN</span>
+    </div>
+    <div class="chat-stream" id="chat-stream"
+         data-worker-id="{{ user.id }}"
+         data-viewer-role="worker">
+      <div class="empty-hint">Loading messages…</div>
+    </div>
+    <form class="chat-composer" id="chat-form">
+      <textarea id="chat-input" placeholder="Type a message…" rows="2" maxlength="2000"></textarea>
+      <button type="submit" class="btn btn-accent">SEND</button>
+    </form>
+  </main>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/chat.js"></script>
+{% endblock %}

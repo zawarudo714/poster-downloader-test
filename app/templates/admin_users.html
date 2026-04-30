@@ -6,7 +6,7 @@
 <div class="admin-grid">
 
   <section class="panel">
-    <div class="panel-head"><span>CREATE USER {{ info("Workers default to the 'live' env. Pick a test env to create a sandbox-only worker — they'll log straight into that env and never see live data. Usernames must be unique across ALL envs.") }}</span></div>
+    <div class="panel-head"><span>CREATE USER {{ info("All new users default to the 'worker' role. Mark someone admin only if they need full management access.") }}</span></div>
     <div class="panel-body">
       <form class="inline-form" method="post" action="/admin/users/create">
         <input type="text" name="username" placeholder="username" required pattern="[A-Za-z0-9_.-]{2,64}">
@@ -15,19 +15,8 @@
           <option value="worker">worker</option>
           <option value="admin">admin</option>
         </select>
-        <select name="env" title="Which environment this user lives in">
-          <option value="{{ live_env }}">{{ live_env }} (real data)</option>
-          {% for e in test_envs %}
-            <option value="{{ e }}">{{ e }} (test sandbox)</option>
-          {% endfor %}
-        </select>
         <button class="btn btn-accent" type="submit">CREATE</button>
       </form>
-      {% if not test_envs %}
-        <p class="muted">
-          No test environments yet — visit <a href="/admin/envs">Test Envs</a> to create one.
-        </p>
-      {% endif %}
     </div>
   </section>
 
@@ -37,7 +26,7 @@
       <table class="data-table">
         <thead>
           <tr>
-            <th>USERNAME</th><th>ROLE</th><th>ENV {{ info("Which env this user is pinned to. Workers cannot escape their env. Admins can switch any time via the env switcher.") }}</th><th>STATUS</th><th>CLAIMS {{ info("Number of master rows currently claimed by this user — summed across all envs they've touched.") }}</th><th>CREATED</th><th>ACTIONS</th>
+            <th>USERNAME</th><th>ROLE</th><th>STATUS</th><th>CLAIMS {{ info("Number of master rows currently claimed by this user.") }}</th><th>CREATED</th><th>ACTIONS</th>
           </tr>
         </thead>
         <tbody>
@@ -45,13 +34,6 @@
           <tr>
             <td class="mono">{{ u.username }}</td>
             <td>{% if u.role == 'admin' %}<span class="role-badge role-admin">ADMIN</span>{% else %}<span class="role-badge">USER</span>{% endif %}</td>
-            <td>
-              {% if u.env == live_env %}
-                <span class="status-pill">{{ live_env }}</span>
-              {% else %}
-                <span class="status-pill status-similar">{{ u.env }}</span>
-              {% endif %}
-            </td>
             <td>{% if u.is_active %}<span class="ok">active</span>{% else %}<span class="muted">disabled</span>{% endif %}</td>
             <td class="mono">{{ claim_counts.get(u.id, 0) }}</td>
             <td class="mono">{{ u.created_at.strftime('%Y-%m-%d') if u.created_at else '' }}</td>

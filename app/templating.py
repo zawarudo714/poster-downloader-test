@@ -24,20 +24,3 @@ def _from_json(value):
 
 
 templates.env.filters["from_json"] = _from_json
-
-
-def _active_env():
-    """Template global: the name of the env this request is operating in."""
-    from .envs import current_env
-    return current_env()
-
-
-def _is_live_env():
-    from .envs import current_env, LIVE_ENV
-    return current_env() == LIVE_ENV
-
-
-# These read the contextvar at template-render time, which is inside the
-# request, so every template gets the right value automatically.
-templates.env.globals["active_env"]  = _active_env
-templates.env.globals["is_live_env"] = _is_live_env

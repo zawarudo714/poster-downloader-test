@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% from "_macros.html" import info %}
+{% block title %}Payments · Admin{% endblock %}
+
+{% block content %}
+<div class="admin-grid">
+
+  <section class="panel">
+    <div class="panel-head"><span>SETTINGS {{ info("Per-poster rate (KES) and the start day of your pay week. Changes don't affect past payment runs — those captured the rate at the time they were created.") }}</span></div>
+    <div class="panel-body">
+      <form class="inline-form" method="post" action="/admin/payments/settings">
+        <label class="filter-label">RATE (KES per poster)
+          <input type="text" name="rate_kes" value="{{ rate_kes }}" pattern="[0-9]+(\.[0-9]+)?" required>
+        </label>
+        <label class="filter-label">WEEK STARTS ON
+          <select name="week_start_day">
+            <option value="0" {% if week_start_day == 0 %}selected{% endif %}>Monday</option>
+            <option value="1" {% if week_start_day == 1 %}selected{% endif %}>Tuesday</option>
+            <option value="2" {% if week_start_day == 2 %}selected{% endif %}>Wednesday</option>
+            <option value="3" {% if week_start_day == 3 %}selected{% endif %}>Thursday</option>
+            <option value="4" {% if week_start_day == 4 %}selected{% endif %}>Friday</option>
+            <option value="5" {% if week_start_day == 5 %}selected{% endif %}>Saturday</option>
+            <option value="6" {% if week_start_day == 6 %}selected{% endif %}>Sunday</option>
+          </select>
+        </label>
+        <button class="btn btn-accent" type="submit">SAVE SETTINGS</button>
+      </form>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><span>EARNINGS BY WORKER {{ info("Numbers update live as you change the date range. The 'eligible' count excludes deleted posters and any poster currently under an open or awaiting-approval revision. Already-paid posters from past runs are also excluded.") }}</span></div>
+    <div class="panel-body">
+
+      <div class="filter-row pay-filter-row">
+        <label class="filter-label">FROM
+          <input type="date" id="pay-start" value="{{ today.isoformat() }}">
+        </label>
+        <label class="filter-label">TO
+          <input type="date" id="pay-end" value="{{ today.isoformat() }}">
+        </label>
+        <button class="btn btn-ghost" id="pay-preset-today">TODAY</button>
+        <button class="btn btn-ghost" id="pay-preset-week">THIS WEEK</button>
+        <button class="btn btn-ghost" id="pay-preset-prevweek">LAST WEEK</button>
+        <span class="muted mono" id="pay-week-info"
+              data-week-start="{{ week_start_day }}"
+              data-rate-kes="{{ rate_kes }}"></span>
+      </div>
+
+      {% if workers %}
+        <table class="data-table pay-table">
+          <thead>
+            <tr>
+              <th>WORKER</th>
+              <th>ELIGIBLE</th>
+              <th>RATE</th>
+              <th>SUBTOTAL (KES)</th>
+              <th>ACTIONS</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for w in workers %}
+              <tr data-worker-id="{{ w.id }}" data-worker-name="{{ w.username }}">
+                <td class="mono">
+                  <strong>{{ w.username }}</strong>
+                </td>
+                <td class="mono pay-cell-count">…</td>
+                <td class="mono pay-cell-rate">{{ rate_kes }}</td>
+                <td class="mono pay-cell-total">…</td>
+                <td>
+                  <button class="btn btn-accent btn-tiny" data-action="pay">MARK PAID…</button>
+                  <button class="btn btn-ghost btn-tiny" data-action="details">PER-DAY ▾</button>
+                </td>
+              </tr>
+              <tr class="pay-details-row" data-details-for="{{ w.id }}" hidden>
+                <td colspan="5" class="pay-details-cell"></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">No workers yet.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><span>PAYMENT HISTORY ({{ runs|length }}) {{ info("Past payment runs. Each row's 'COUNT × RATE' is frozen at the time of payment. PUSH sends a receipt to the worker for acknowledgement; DELETE undoes a run (its posters become eligible again — only use to fix mistakes).") }}</span></div>
+    <div class="panel-body">
+      {% if runs %}
+        <table class="data-table pay-history-table">
+          <thead>
+            <tr>
+              <th>WHEN</th>
+              <th>WORKER</th>
+              <th>PERIOD</th>
+              <th>COUNT × RATE</th>
+              <th>AMOUNT (KES)</th>
+              <th>REF</th>
+              <th>STATUS</th>
+              <th>ACTIONS</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in runs %}
+              <tr data-run-id="{{ r.id }}">
+                <td class="mono">{{ r.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td class="mono">{{ r.worker_username }}</td>
+                <td class="mono">{{ r.period_start.isoformat() }} → {{ r.period_end.isoformat() }}</td>
+                <td class="mono">{{ r.poster_count }} × {{ r.rate_kes }}</td>
+                <td class="mono"><strong>{{ r.amount_kes }}</strong></td>
+                <td class="mono">{{ r.reference or '—' }}</td>
+                <td>
+                  {% if r.ack_at %}
+                    <span class="status-pill status-resolved" title="Acknowledged at {{ r.ack_at.strftime('%Y-%m-%d %H:%M') }}">ACKED</span>
+                  {% elif r.pushed_at %}
+                    <span class="status-pill status-awaiting" title="Pushed at {{ r.pushed_at.strftime('%Y-%m-%d %H:%M') }}">PUSHED</span>
+                  {% else %}
+                    <span class="status-pill">paid</span>
+                  {% endif %}
+                </td>
+                <td class="actions-cell">
+                  {% if not r.pushed_at or r.ack_at %}
+                    <button class="btn btn-accent btn-tiny" data-action="push" title="Send a receipt to the worker for acknowledgement">PUSH</button>
+                  {% else %}
+                    <button class="btn btn-ghost btn-tiny" data-action="push" title="Re-push receipt (clears worker's previous ack if any)">RE-PUSH</button>
+                  {% endif %}
+                  <button class="btn btn-error btn-tiny" data-action="delete" title="Undo this run — its posters become eligible again">DELETE</button>
+                </td>
+              </tr>
+              {% if r.note %}
+              <tr class="pay-note-row"><td colspan="8" class="pay-note">{{ r.note }}</td></tr>
+              {% endif %}
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">No payments yet.</p>
+      {% endif %}
+    </div>
+  </section>
+
+</div>
+
+<!-- Mark-paid dialog -->
+<div id="pay-dialog" class="lightbox" hidden>
+  <div class="lightbox-bg" data-lightbox-close></div>
+  <div class="lightbox-card pay-dialog-card">
+    <h3>MARK PAID</h3>
+    <p class="muted" id="pay-dialog-summary">…</p>
+    <div class="pay-dialog-form">
+      <label class="filter-label">AMOUNT (KES)
+        <input type="text" id="pay-dialog-amount" pattern="[0-9]+(\.[0-9]+)?" required>
+      </label>
+      <label class="filter-label">REFERENCE (M-Pesa code, optional)
+        <input type="text" id="pay-dialog-ref" maxlength="128">
+      </label>
+      <label class="filter-label" style="flex: 1 1 100%;">NOTE (optional)
+        <input type="text" id="pay-dialog-note" maxlength="500">
+      </label>
+      <label class="filter-checkbox">
+        <input type="checkbox" id="pay-dialog-push" checked>
+        <span>Push receipt to worker for acknowledgement</span>
+      </label>
+    </div>
+    <div class="pay-dialog-actions">
+      <button class="btn btn-ghost" data-lightbox-close>CANCEL</button>
+      <button class="btn btn-accent" id="pay-dialog-confirm">CONFIRM PAYMENT</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/admin_payments.js"></script>
+{% endblock %}

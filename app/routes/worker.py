@@ -207,6 +207,26 @@ def _state_payload(db: Session, user: User) -> dict:
             user.locked_master_id = None
             db.commit()
 
+    # Payments transparency: how many of today's saves are awaiting revision.
+    from ..payments import count_pending_revisions_today, pending_receipts_for_worker
+    pending_count = count_pending_revisions_today(db, user.id)
+    # Pushed-but-not-acked receipts from admin.
+    pushed = pending_receipts_for_worker(db, user.id)
+    receipts = [{
+        "id":           r.id,
+        "period_start": r.period_start.isoformat(),
+        "period_end":   r.period_end.isoformat(),
+        "poster_count": r.poster_count,
+        "amount_kes":   r.amount_kes,
+        "rate_kes":     r.rate_kes,
+        "reference":    r.reference or "",
+        "note":         r.note or "",
+        "pushed_at":    r.pushed_at.strftime("%Y-%m-%d %H:%M") if r.pushed_at else None,
+    } for r in pushed]
+    # Chat unread (worker viewing their own thread).
+    from ..chat import unread_count
+    chat_unread = unread_count(db, worker_id=user.id, viewer_id=user.id)
+
     return {
         "username": user.username,
         "role": user.role,
@@ -214,9 +234,12 @@ def _state_payload(db: Session, user: User) -> dict:
         "saved_today":   count_user_saves_for_date(db, user.username, today),
         "saved_week":    count_user_saves_for_week(db, user.username, today),
         "titles_today":  count_titles_worked_today(db, user.id, today),
+        "pending_today": pending_count,    # "X not counted until revised"
         "queue": queue_dicts,
         "locked": locked,
         "revisions": _active_revisions_for_user(db, user),
+        "receipts": receipts,
+        "chat_unread": chat_unread,
         "default_pull_size": user.last_pull_size or DEFAULT_PULL_SIZE,
     }
 
@@ -1032,3 +1055,284 @@ def serve_own_file(
     if not p.is_file():
         raise HTTPException(404, "File missing on disk.")
     return FileResponse(p)
+
+
+# ── Chat (worker side) ─────────────────────────────────────────────────────
+
+@router.get("/api/chat")
+def chat_poll(
+    after: int = Query(0, ge=0),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Worker view: poll the (admin, me) thread.
+    `after` is the highest message id the client already has — server returns
+    only newer ones, plus an unread count summary.
+    """
+    from ..chat import list_messages, serialize_message, unread_count
+    rows = list_messages(db, worker_id=user.id, after_id=(after or None), limit=200)
+    return JSONResponse({
+        "ok": True,
+        "messages": [serialize_message(m) for m in rows],
+        "unread":   unread_count(db, worker_id=user.id, viewer_id=user.id),
+    })
+
+
+@router.post("/api/chat/send")
+def chat_send(
+    body: str = Form(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    from ..chat import send_message, serialize_message
+    try:
+        msg = send_message(db, worker_id=user.id, sender=user, body=body)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    log_activity(db, user=user, action="chat_sent", target_type="chat", target_id=msg.id)
+    db.commit()
+    return JSONResponse({"ok": True, "message": serialize_message(msg)})
+
+
+@router.post("/api/chat/mark_read")
+def chat_mark_read(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Worker marks their own thread as read."""
+    from ..chat import mark_read
+    mark_read(db, worker_id=user.id, viewer_id=user.id)
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
+# ── Payment receipts (worker acknowledge) ──────────────────────────────────
+
+@router.post("/api/receipts/{run_id}/ack")
+def acknowledge_receipt(
+    run_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Worker confirms they saw a pushed receipt. After ack, the receipt
+    disappears from their dashboard and the admin sees the ack timestamp.
+    """
+    from ..models import PaymentRun
+    run = db.query(PaymentRun).filter_by(id=run_id).first()
+    if run is None or run.worker_id != user.id:
+        raise HTTPException(404, "Receipt not found.")
+    if run.pushed_at is None:
+        raise HTTPException(400, "Receipt was never pushed to you.")
+    if run.ack_at is None:
+        run.ack_at = datetime.utcnow()
+        log_activity(db, user=user, action="receipt_ack", target_type="payment_run", target_id=run.id)
+        db.commit()
+    return JSONResponse({"ok": True})
+
+
+@router.get("/chat", response_class=HTMLResponse)
+def chat_view(request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)):
+    """
+    Worker chat page — they only ever see one thread (with admins).
+    Admins hitting this URL get bounced to the admin chat hub.
+    """
+    if user.role == "admin":
+        return RedirectResponse("/admin/chat", status_code=302)
+    return templates.TemplateResponse(
+        request, "user_chat.html",
+        {"user": user, "active_tab": "chat"},
+    )
+
+
+# ── Save history (worker transparency) ────────────────────────────────────
+
+@router.get("/history", response_class=HTMLResponse)
+def history_view(request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)):
+    """
+    Worker-facing save history. Shows one row per day they worked, with the
+    poster count + computed amount based on the current rate. Clicking a day
+    expands to the per-title breakdown (loaded via /api/history/day).
+    """
+    if user.role == "admin":
+        return RedirectResponse("/", status_code=302)
+    return templates.TemplateResponse(
+        request, "user_history.html",
+        {"user": user, "active_tab": "history"},
+    )
+
+
+@router.get("/api/history/days")
+def api_history_days(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Per-day summary for the current worker — one row per save_date that
+    has at least one live poster. Each row breaks the count into:
+       paid       — already in a past PaymentRun
+       eligible   — counts toward future pay (live, no open revision)
+       pending    — has open / awaiting-approval revision (transparency)
+    Plus the computed amount for the eligible bucket at the current rate.
+    Newest day first.
+    """
+    from ..payments import (
+        get_rate_kes, parse_decimal, _already_paid_poster_ids,
+    )
+    rate = get_rate_kes(db)
+    rate_dec = parse_decimal(rate)
+    paid_ids = _already_paid_poster_ids(db, user.id)
+
+    # All this worker's live poster rows: id + save_date.
+    rows = (
+        db.query(SavedPoster.id, SavedPoster.original_save_date)
+          .filter(
+              SavedPoster.user_id == user.id,
+              SavedPoster.deleted_at.is_(None),
+          )
+          .all()
+    )
+    if not rows:
+        return JSONResponse({"ok": True, "days": [], "rate_kes": str(rate_dec)})
+
+    all_ids = {pid for pid, _d in rows}
+
+    # Block list: posters under any open / awaiting-approval revision.
+    blocked = set()
+    blocked_rows = (
+        db.query(Revision.saved_poster_id)
+          .filter(
+              Revision.saved_poster_id.in_(all_ids),
+              Revision.status.in_(("open", "awaiting_approval")),
+          )
+          .all()
+    )
+    for (pid,) in blocked_rows:
+        blocked.add(pid)
+    # Similar-pair related list also counts as blocked.
+    sim_rows = (
+        db.query(Revision.related_poster_ids)
+          .filter(
+              Revision.status.in_(("open", "awaiting_approval")),
+              Revision.revision_type == "similar",
+          )
+          .all()
+    )
+    for (raw,) in sim_rows:
+        if not raw:
+            continue
+        try:
+            for pid in json.loads(raw):
+                if isinstance(pid, int) and pid in all_ids:
+                    blocked.add(pid)
+        except (TypeError, ValueError):
+            pass
+
+    # Bucket by date.
+    by_day: dict[str, dict] = {}
+    for pid, d in rows:
+        key = d.isoformat()
+        b = by_day.setdefault(key, {"date": key, "paid": 0, "eligible": 0, "pending": 0})
+        if pid in paid_ids:
+            b["paid"] += 1
+        elif pid in blocked:
+            b["pending"] += 1
+        else:
+            b["eligible"] += 1
+
+    days = sorted(by_day.values(), key=lambda r: r["date"], reverse=True)
+    # Compute amounts.
+    for d in days:
+        # Eligible amount = eligible_count × rate. Paid amount = paid_count × rate
+        # (assumes rate didn't change — informational only; the actual paid
+        # amount is on the PaymentRun row, which we surface elsewhere).
+        d["eligible_amount_kes"] = str(rate_dec * d["eligible"])
+        d["paid_amount_kes"]     = str(rate_dec * d["paid"])
+
+    return JSONResponse({
+        "ok": True,
+        "days":      days,
+        "rate_kes":  str(rate_dec),
+    })
+
+
+@router.get("/api/history/day/{d}")
+def api_history_day(
+    d: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Per-title breakdown for a single date: each MasterTitle the worker
+    saved on that day with the count of live posters + their state
+    (paid / eligible / pending).
+    """
+    from ..payments import _already_paid_poster_ids
+    try:
+        target_d = date_type.fromisoformat(d)
+    except ValueError:
+        raise HTTPException(400, "Bad date.")
+
+    paid_ids = _already_paid_poster_ids(db, user.id)
+
+    # Posters this worker saved that day, joined to their MasterTitle.
+    rows = (
+        db.query(SavedPoster.id, SavedPoster.master_title_id, MasterTitle.title, MasterTitle.year)
+          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+          .filter(
+              SavedPoster.user_id == user.id,
+              SavedPoster.deleted_at.is_(None),
+              SavedPoster.original_save_date == target_d,
+          )
+          .all()
+    )
+    if not rows:
+        return JSONResponse({"ok": True, "date": d, "titles": []})
+
+    all_ids = {r[0] for r in rows}
+
+    # Block list — same logic as /api/history/days.
+    blocked = set()
+    blocked_rows = (
+        db.query(Revision.saved_poster_id)
+          .filter(
+              Revision.saved_poster_id.in_(all_ids),
+              Revision.status.in_(("open", "awaiting_approval")),
+          )
+          .all()
+    )
+    for (pid,) in blocked_rows:
+        blocked.add(pid)
+    sim_rows = (
+        db.query(Revision.related_poster_ids)
+          .filter(
+              Revision.status.in_(("open", "awaiting_approval")),
+              Revision.revision_type == "similar",
+          )
+          .all()
+    )
+    for (raw,) in sim_rows:
+        if not raw:
+            continue
+        try:
+            for pid in json.loads(raw):
+                if isinstance(pid, int) and pid in all_ids:
+                    blocked.add(pid)
+        except (TypeError, ValueError):
+            pass
+
+    # Aggregate per master title.
+    by_title: dict[int, dict] = {}
+    for pid, mid, title, year in rows:
+        b = by_title.setdefault(mid, {
+            "master_id": mid, "title": title, "year": year,
+            "paid": 0, "eligible": 0, "pending": 0, "total": 0,
+        })
+        b["total"] += 1
+        if pid in paid_ids:    b["paid"] += 1
+        elif pid in blocked:    b["pending"] += 1
+        else:                   b["eligible"] += 1
+
+    titles = sorted(by_title.values(), key=lambda r: r["title"].lower())
+    return JSONResponse({"ok": True, "date": d, "titles": titles})

@@ -244,15 +244,6 @@ def _scheduler_loop():
             wait = _seconds_until_next_midnight()
             time.sleep(wait)
             auto_backup_today()
-            # After backing up the live DB, wipe every test env so the morning
-            # admin starts fresh in any sandbox they were poking at yesterday.
-            try:
-                from .envs import reset_all_test_envs
-                n = reset_all_test_envs()
-                if n:
-                    log.info("Nightly: reset %d test env(s)", n)
-            except Exception:
-                log.exception("Nightly test-env reset failed (continuing)")
         except Exception:
             log.exception("Scheduled backup failed; will retry in 1 hour")
             time.sleep(3600)

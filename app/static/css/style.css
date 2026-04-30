@@ -1733,3 +1733,580 @@ html.theme-light .env-banner-name {
   .g-poster:hover { transform: none; }
   .rev-similar-mini:hover { border-color: var(--border); }
 }
+
+/* ── Nav badge (chat unread) ─────────────────────────────────────────── */
+.navlink.chat-nav {
+  position: relative;
+}
+.nav-badge {
+  display: inline-block;
+  background: var(--error);
+  color: white;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  margin-left: 4px;
+  font-weight: 700;
+  vertical-align: middle;
+  min-width: 14px;
+  text-align: center;
+}
+
+/* ── Activity log v2 ─────────────────────────────────────────────────── */
+.activity-list { display: flex; flex-direction: column; gap: 6px; }
+.activity-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.activity-card-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.al-when { font-size: 11px; color: var(--subtext); flex-shrink: 0; }
+.al-user { font-weight: 600; }
+.al-action-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  background: var(--border);
+  color: var(--text);
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.al-target { color: var(--subtext); font-size: 12px; flex: 1; min-width: 0; word-break: break-word; }
+
+/* Action pill colors */
+.activity-card.act-save  .al-action-pill { background: rgba(80,200,120,0.20); color: #66dd99; }
+.activity-card.act-delete .al-action-pill { background: rgba(255,80,80,0.18); color: #ff7878; }
+.activity-card.act-replace .al-action-pill { background: rgba(120,180,255,0.20); color: #88b8ff; }
+.activity-card.act-flag .al-action-pill { background: rgba(255,140,0,0.20); color: #ffa040; }
+.activity-card.act-resolve .al-action-pill { background: rgba(120,200,180,0.20); color: #80d4b6; }
+.activity-card.act-complete .al-action-pill { background: rgba(80,200,120,0.30); color: #88ee99; font-weight: 700; }
+.activity-card.act-skip .al-action-pill { background: rgba(180,140,120,0.20); color: #cca080; }
+.activity-card.act-await .al-action-pill { background: rgba(200,160,255,0.18); color: #c8a0ff; }
+.activity-card.act-pay .al-action-pill { background: rgba(220,180,80,0.22); color: #ffd060; font-weight: 700; }
+.activity-card.act-chat .al-action-pill { background: rgba(140,140,255,0.20); color: #a8a8ff; }
+.activity-card.act-claim .al-action-pill { background: rgba(140,140,140,0.18); color: var(--subtext); }
+.activity-card.act-admin .al-action-pill { background: rgba(255,200,80,0.18); color: #e8b850; }
+
+/* Comment-bearing rows: amber stripe + dedicated comment line */
+.activity-card.has-comment {
+  border-left-color: #f4b400;
+  background: linear-gradient(to right, rgba(244,180,0,0.08), var(--card) 30%);
+}
+.al-comment-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+  font-size: 12.5px;
+  color: var(--text);
+}
+.al-comment-icon { flex-shrink: 0; }
+.al-comment-text { font-style: italic; word-break: break-word; }
+
+.activity-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.filter-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--subtext);
+  cursor: pointer;
+}
+.filter-checkbox input { margin: 0; }
+
+/* ── Payments page ───────────────────────────────────────────────────── */
+.pay-filter-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 14px; }
+.pay-filter-row .filter-label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--subtext); }
+.pay-filter-row input[type="date"] { font-family: var(--font-mono, monospace); }
+
+.pay-table .pay-cell-count,
+.pay-table .pay-cell-rate,
+.pay-table .pay-cell-total {
+  font-size: 14px;
+  font-weight: 600;
+}
+.pay-table .pay-cell-total { color: var(--accent); }
+.pay-details-row .pay-details-cell {
+  background: rgba(0,0,0,0.15);
+  padding: 8px 14px !important;
+}
+.pay-day-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 6px;
+}
+.pay-day-cell {
+  display: flex;
+  justify-content: space-between;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.pay-day-count { color: var(--accent); font-weight: 600; }
+
+.pay-history-table .pay-note-row td {
+  background: rgba(244,180,0,0.06);
+  border-top: none;
+  font-style: italic;
+  color: var(--subtext);
+  padding: 4px 14px;
+  font-size: 12px;
+}
+
+.pay-dialog-card {
+  max-width: 520px;
+  width: 95%;
+}
+.pay-dialog-card h3 { margin: 0 0 8px 0; }
+.pay-dialog-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 0;
+}
+.pay-dialog-form .filter-label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--subtext);
+  flex: 1 1 45%;
+}
+.pay-dialog-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+/* ── Worker receipt banner ───────────────────────────────────────────── */
+.receipts-banner {
+  background: linear-gradient(to right, rgba(220,180,80,0.16), rgba(220,180,80,0.04));
+  border: 1px solid rgba(220,180,80,0.5);
+  border-left: 4px solid #f4b400;
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin-bottom: 14px;
+}
+.receipts-banner-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.receipts-banner-head strong { color: #ffd060; letter-spacing: 0.04em; }
+.receipts-list { display: flex; flex-direction: column; gap: 8px; }
+.receipt-item {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.receipt-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; flex: 1; min-width: 0; }
+.receipt-amount { font-size: 16px; color: #ffd060; }
+.receipt-period { color: var(--text); }
+.receipt-count, .receipt-meta { font-size: 11px; }
+.receipt-note { flex: 1 1 100%; font-style: italic; color: var(--subtext); font-size: 12px; }
+.receipt-ack-btn { flex-shrink: 0; }
+
+.stat-tile.stat-tile-pending {
+  border-left: 3px solid #f4b400;
+  background: rgba(244,180,0,0.04);
+}
+.stat-tile.stat-tile-pending .stat-value { color: #ffd060; }
+
+/* ── Chat ───────────────────────────────────────────────────────────── */
+.chat-grid {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 14px;
+  height: calc(100vh - 180px);
+  min-height: 500px;
+}
+.chat-grid-worker {
+  grid-template-columns: 1fr;
+}
+.chat-sidebar {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.chat-thread-list {
+  flex: 1;
+  overflow-y: auto;
+}
+.chat-thread-row {
+  display: block;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  text-decoration: none;
+  color: var(--text);
+}
+.chat-thread-row:hover { background: rgba(255,255,255,0.03); }
+.chat-thread-row.active { background: rgba(255,200,80,0.10); border-left: 3px solid var(--accent); padding-left: 11px; }
+.chat-thread-name {
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.chat-unread-badge {
+  background: var(--error);
+  color: white;
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-weight: 700;
+  min-width: 18px;
+  text-align: center;
+}
+.chat-thread-preview {
+  font-size: 11px;
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-thread-sender { font-weight: 600; color: var(--text); margin-right: 4px; }
+.chat-thread-time { font-size: 10px; margin-top: 2px; }
+
+.chat-main {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.chat-main-head {
+  border-bottom: 1px solid var(--border);
+  padding: 10px 14px;
+  flex-shrink: 0;
+}
+.chat-stream {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.chat-msg {
+  display: flex;
+  flex-direction: column;
+  max-width: 70%;
+}
+.chat-msg-mine {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+.chat-msg-theirs {
+  align-self: flex-start;
+  align-items: flex-start;
+}
+.chat-msg-bubble {
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 13.5px;
+  line-height: 1.45;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.chat-msg-mine .chat-msg-bubble {
+  background: var(--accent);
+  color: var(--bg);
+  border-bottom-right-radius: 3px;
+}
+.chat-msg-theirs .chat-msg-bubble {
+  background: rgba(255,255,255,0.06);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 3px;
+}
+.chat-msg-meta {
+  font-size: 10px;
+  margin-top: 2px;
+  padding: 0 4px;
+}
+.chat-composer {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.chat-composer textarea {
+  flex: 1;
+  resize: vertical;
+  min-height: 36px;
+  max-height: 200px;
+  font-family: inherit;
+  font-size: 13px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 8px 10px;
+}
+.chat-composer button { flex-shrink: 0; }
+
+/* ── Mobile rules for new pages ──────────────────────────────────────── */
+@media (max-width: 900px) {
+  .chat-grid {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+  .chat-sidebar {
+    max-height: 240px;
+  }
+  .chat-main {
+    height: calc(100vh - 240px - 200px);
+    min-height: 400px;
+  }
+  .pay-filter-row { gap: 8px; }
+  .pay-filter-row input[type="date"] { min-width: 130px; }
+}
+@media (max-width: 640px) {
+  .activity-card-head { gap: 6px; }
+  .al-when { flex: 1 1 100%; }
+  .al-target { flex: 1 1 100%; font-size: 11px; }
+
+  .pay-table { font-size: 12px; }
+  .pay-table th:nth-child(3), .pay-table td:nth-child(3) { display: none; }  /* hide RATE col on phones */
+  .pay-history-table th:nth-child(6), .pay-history-table td:nth-child(6) { display: none; }  /* hide REF on phones */
+
+  .receipt-item { flex-direction: column; align-items: stretch; }
+  .receipt-ack-btn { width: 100%; }
+
+  .chat-msg { max-width: 88%; }
+  .chat-stream { padding: 10px; }
+  .chat-composer { padding: 8px; }
+}
+
+/* ── Worker queue: search + collapsible done group ───────────────────── */
+.queue-search {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.queue-search-input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.queue-empty-section {
+  padding: 10px;
+  font-size: 12px;
+  color: var(--subtext);
+  font-style: italic;
+  text-align: center;
+}
+.queue-done-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-top: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+}
+.queue-done-header:hover { background: rgba(255, 255, 255, 0.06); }
+.queue-done-arrow { font-size: 11px; color: var(--accent); }
+.queue-done-label { font-weight: 600; flex: 1; }
+.queue-done-hint { font-size: 10px; }
+
+/* ── Worker save history page ────────────────────────────────────────── */
+.history-rate-line {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.history-day {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.history-day-head {
+  display: grid;
+  grid-template-columns: 18px auto 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 14px;
+  cursor: pointer;
+  user-select: none;
+}
+.history-day-head:hover { background: rgba(255, 255, 255, 0.03); }
+.history-day-arrow { color: var(--accent); }
+.history-day-date { font-weight: 600; }
+.history-day-counts {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+.history-day-amount { text-align: right; font-weight: 600; }
+.history-amount-eligible { color: #ffd060; }
+.history-amount-paid { font-weight: 400; margin-left: 8px; font-size: 11px; }
+
+.history-bucket, .history-bucket-mini {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  border: 1px solid;
+}
+.history-bucket.paid,     .history-bucket-mini.paid     { background: rgba(80,200,120,0.15); color: #66dd99; border-color: rgba(80,200,120,0.45); }
+.history-bucket.eligible, .history-bucket-mini.eligible { background: rgba(220,180,80,0.15); color: #ffd060; border-color: rgba(220,180,80,0.45); }
+.history-bucket.pending,  .history-bucket-mini.pending  { background: rgba(244,180,0,0.10); color: #f4b400; border-color: rgba(244,180,0,0.45); }
+.history-bucket.total {
+  background: transparent;
+  color: var(--subtext);
+  border-color: var(--border);
+  font-weight: 600;
+}
+
+.history-day-body {
+  border-top: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.15);
+  padding: 8px 14px;
+}
+.history-titles { display: flex; flex-direction: column; gap: 4px; }
+.history-title-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 3px;
+  font-size: 13px;
+}
+.history-title-row:nth-child(odd) { background: rgba(255,255,255,0.02); }
+.history-title-name { font-weight: 500; word-break: break-word; }
+.history-title-year { font-size: 11px; color: var(--subtext); }
+.history-title-buckets { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.history-title-total { color: var(--accent); font-weight: 600; }
+
+@media (max-width: 640px) {
+  .history-day-head {
+    grid-template-columns: 18px 1fr;
+    grid-template-areas:
+      "arrow date"
+      "arrow amount"
+      "buckets buckets";
+    gap: 6px;
+  }
+  .history-day-arrow { grid-area: arrow; align-self: start; padding-top: 2px; }
+  .history-day-date { grid-area: date; }
+  .history-day-amount { grid-area: amount; text-align: left; font-size: 13px; }
+  .history-day-counts { grid-area: buckets; }
+  .history-title-row {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "name year"
+      "buckets total";
+    gap: 4px 10px;
+  }
+  .history-title-name { grid-area: name; }
+  .history-title-year { grid-area: year; }
+  .history-title-buckets { grid-area: buckets; justify-content: flex-start; }
+  .history-title-total { grid-area: total; text-align: right; }
+}
+
+/* ── Per-day payment breakdown ───────────────────────────────────────── */
+.pay-day-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+.pay-day-list-head,
+.pay-day-list-row {
+  display: grid;
+  grid-template-columns: 130px 90px 90px 1fr;
+  gap: 8px;
+  padding: 5px 8px;
+  align-items: center;
+}
+.pay-day-list-head {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--subtext);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+}
+.pay-day-list-row {
+  background: var(--card);
+  border-radius: 3px;
+}
+.pay-day-list-row:nth-child(odd) { background: rgba(255,255,255,0.03); }
+.pay-day-amount { color: var(--accent); font-weight: 600; }
+.pay-day-list-total {
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px !important;
+  font-weight: 700;
+}
+.pay-day-list-total .pay-day-amount,
+.pay-day-list-total span:last-child { font-size: 13px; color: var(--accent); }
+
+@media (max-width: 640px) {
+  .pay-day-list-head,
+  .pay-day-list-row {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "date count"
+      "rate amount";
+    gap: 4px 10px;
+  }
+  .pay-day-list-head span:nth-child(1), .pay-day-list-row span:nth-child(1) { grid-area: date; }
+  .pay-day-list-head span:nth-child(2), .pay-day-list-row span:nth-child(2) { grid-area: count; text-align: right; }
+  .pay-day-list-head span:nth-child(3), .pay-day-list-row span:nth-child(3) { grid-area: rate; }
+  .pay-day-list-head span:nth-child(4), .pay-day-list-row span:nth-child(4) { grid-area: amount; text-align: right; }
+}

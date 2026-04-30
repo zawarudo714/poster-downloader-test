@@ -23,19 +23,19 @@ from pathlib import Path
 from typing import Optional
 
 from .config import WORKSPACE_DIR  # used as fallback only; live workspace path
-from .envs import current_workspace_dir
+# (env feature removed) — workspace path is now a constant
 from .parsing import IMAGE_EXTS
 
 
 # Resolve the workspace dir at every call so we follow env switches. Calling
-# `current_workspace_dir()` is just a contextvar lookup + small dict hop, so
+# `WORKSPACE_DIR` is just a contextvar lookup + small dict hop, so
 # this is essentially free.
 
 # ── Workspace layout ─────────────────────────────────────────────────────────
 
 def user_root(username: str) -> Path:
     """The user's top-level folder. Created on demand."""
-    p = current_workspace_dir() / username
+    p = WORKSPACE_DIR / username
     p.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -93,17 +93,17 @@ def count_images_recursive(folder: Path) -> int:
 def list_users_with_workspaces() -> list[str]:
     """Top-level folders under /workspace/ — one per user that has any work.
     Excludes private system dirs like _zips."""
-    if not current_workspace_dir().is_dir():
+    if not WORKSPACE_DIR.is_dir():
         return []
     return sorted(
-        [p.name for p in current_workspace_dir().iterdir()
+        [p.name for p in WORKSPACE_DIR.iterdir()
          if p.is_dir() and not p.name.startswith("_")]
     )
 
 
 def list_date_folders(username: str) -> list[str]:
     """Date folder names (YYYY-MM-DD) for a given user, newest first."""
-    root = current_workspace_dir() / username
+    root = WORKSPACE_DIR / username
     if not root.is_dir():
         return []
     out = []
@@ -120,7 +120,7 @@ def list_date_folders(username: str) -> list[str]:
 
 def list_title_folders(username: str, d: date_type) -> list[Path]:
     """All title subfolders inside the user's date folder, sorted by name."""
-    base = current_workspace_dir() / username / d.isoformat()
+    base = WORKSPACE_DIR / username / d.isoformat()
     if not base.is_dir():
         return []
     return sorted([p for p in base.iterdir() if p.is_dir()], key=lambda p: p.name)
@@ -210,7 +210,7 @@ def count_live_posters_for_master(db, master_title_id: int) -> int:
 def saved_poster_path(poster) -> Path:
     """Compute the on-disk Path of a SavedPoster row."""
     return (
-        current_workspace_dir()
+        WORKSPACE_DIR
         / poster.username
         / poster.original_save_date.isoformat()
         / poster.title_folder_path
@@ -221,7 +221,7 @@ def saved_poster_path(poster) -> Path:
 def saved_poster_folder(poster) -> Path:
     """Compute the on-disk folder Path containing a SavedPoster row."""
     return (
-        current_workspace_dir()
+        WORKSPACE_DIR
         / poster.username
         / poster.original_save_date.isoformat()
         / poster.title_folder_path
@@ -234,7 +234,7 @@ def safe_under_workspace(p: Path) -> bool:
     """Guard against path traversal — refuse anything outside WORKSPACE_DIR."""
     try:
         p = p.resolve()
-        return current_workspace_dir().resolve() in p.parents or p == current_workspace_dir().resolve()
+        return WORKSPACE_DIR.resolve() in p.parents or p == WORKSPACE_DIR.resolve()
     except (OSError, RuntimeError):
         return False
 

@@ -41,12 +41,6 @@ class User(Base):
     is_active     = Column(Integer, default=1, nullable=False)
     created_at    = Column(DateTime, default=datetime.utcnow, nullable=False)
 
-    # Which environment this user operates in. "live" = the production env;
-    # any other value is a test-env name. For workers, this is auto-applied
-    # by the middleware on every request — they have no way to switch envs.
-    # For admins, this acts only as a default; admins can switch any time.
-    env           = Column(String(48), nullable=False, default="live")
-
     # Active title for this user — points to a MasterTitle currently locked for work.
     locked_master_id = Column(Integer, ForeignKey("master_titles.id"), nullable=True)
 
@@ -221,3 +215,107 @@ class ImportJob(Base):
     replaced    = Column(Integer, nullable=False, default=0)  # 0/1 — was --replace passed?
     created_at  = Column(DateTime, default=datetime.utcnow, nullable=False)
     finished_at = Column(DateTime, nullable=True)
+
+
+# ── App settings (key-value store for admin-tunable config) ─────────────────
+
+class AppSetting(Base):
+    """
+    Single-row-per-key configuration that admins can tweak via the UI without
+    redeploying. Currently used for the payments feature:
+        pay_rate_kes      → per-poster rate in KES (decimal-ish, stored as string for fidelity)
+        week_start_day    → 0=Mon..6=Sun, default 0 (Mon→Sun week)
+    Generic enough to stash other prefs later. Values are TEXT — the route layer
+    decides how to parse each one.
+    """
+    __tablename__ = "app_settings"
+
+    key        = Column(String(64), primary_key=True)
+    value      = Column(Text, nullable=False, default="")
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    updated_by = Column(String(64), nullable=True)
+
+
+# ── Payment runs (one row per "I paid worker X for these days") ─────────────
+
+class PaymentRun(Base):
+    """
+    Records a payment the admin marks as sent.
+
+    Each run covers a contiguous date range [period_start, period_end] for one
+    worker, with the per-poster rate frozen at the time of payment (so future
+    rate changes don't retroactively rewrite history). The list of saved-poster
+    IDs counted toward this run is stored as JSON for an audit trail.
+
+    Workflow:
+      1. Admin opens Payments page, picks a worker + date range.
+      2. UI shows "X eligible posters × Y KES = Z KES."
+         (Eligible = saved on those days, not deleted, not under any
+          open / awaiting-approval revision at the moment of preview.)
+      3. Admin types the actual amount sent + optional reference (M-Pesa code),
+         clicks "MARK PAID". A PaymentRun row is written; the same days can't
+         be paid for twice (those poster IDs become ineligible for future runs).
+      4. Optional "PUSH TO WORKER" — sets pushed_at, worker sees a receipt
+         banner on next state poll, can click ACKNOWLEDGE which sets ack_at.
+    """
+    __tablename__ = "payment_runs"
+
+    id              = Column(Integer, primary_key=True)
+    worker_id       = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    worker_username = Column(String(64), nullable=False)  # denorm for safety if user is later renamed/deleted
+    period_start    = Column(Date, nullable=False)        # inclusive
+    period_end      = Column(Date, nullable=False)        # inclusive
+    poster_count    = Column(Integer, nullable=False, default=0)
+    rate_kes        = Column(String(32), nullable=False)  # stored as string for decimal fidelity (e.g. "12.50")
+    amount_kes      = Column(String(32), nullable=False)  # final amount admin sent (may differ from count*rate)
+    reference       = Column(String(128), nullable=True)  # M-Pesa code, etc.
+    note            = Column(Text, nullable=True)
+    poster_ids_json = Column(Text, nullable=False, default="[]")  # JSON list of paid saved_poster IDs
+
+    # Push-to-worker (receipt) flow — null until admin pushes.
+    pushed_at       = Column(DateTime, nullable=True)
+    ack_at          = Column(DateTime, nullable=True)
+
+    created_by      = Column(String(64), nullable=False)
+    created_at      = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+# ── Chat messages (admin ↔ worker, simple polling-based) ────────────────────
+
+class ChatMessage(Base):
+    """
+    One row per message. Conversation is implicit between (admin, worker)
+    pairs — `worker_id` identifies the conversation; sender is the user who
+    typed it. Workers only ever see messages with their own worker_id; admins
+    see everything and can switch between worker threads.
+
+    Read state is tracked per-side via two timestamps so we can show unread
+    badges. We don't track per-message read receipts — overkill for this use.
+    Pruning is manual via `note` on the schema; no automatic deletion.
+    """
+    __tablename__ = "chat_messages"
+
+    id            = Column(Integer, primary_key=True)
+    worker_id     = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    sender_id     = Column(Integer, ForeignKey("users.id"), nullable=False)
+    sender_role   = Column(String(16), nullable=False)  # 'admin' | 'worker' (denorm for fast filter)
+    body          = Column(Text, nullable=False)
+    created_at    = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    __table_args__ = (
+        # Common query: all messages for a worker, newest first.
+        Index("ix_chat_worker_time", "worker_id", "created_at"),
+    )
+
+
+class ChatReadState(Base):
+    """
+    Tracks the last-read timestamp per (worker_thread, viewer) — so the unread
+    badge shows the right count for both admin and worker. Composite primary
+    key: (worker_id, viewer_id).
+    """
+    __tablename__ = "chat_read_state"
+
+    worker_id   = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    viewer_id   = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    last_read_at = Column(DateTime, nullable=False, default=datetime.utcnow)

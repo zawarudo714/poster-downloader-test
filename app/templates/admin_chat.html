@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% from "_macros.html" import info %}
+{% block title %}Chat · Admin{% endblock %}
+
+{% block content %}
+<div class="chat-grid"
+     data-selected-worker-id="{{ selected_worker_id or 0 }}">
+
+  <aside class="chat-sidebar">
+    <div class="panel-head"><span>WORKERS {{ info("Pick a worker to chat with. The badge shows unread messages from them.") }}</span></div>
+    <div class="chat-thread-list">
+      {% if threads %}
+        {% for t in threads %}
+          <a href="/admin/chat?worker_id={{ t.worker_id }}"
+             class="chat-thread-row {% if t.worker_id == selected_worker_id %}active{% endif %}">
+            <div class="chat-thread-name">
+              {{ t.username }}
+              {% if t.unread %}<span class="chat-unread-badge">{{ t.unread }}</span>{% endif %}
+            </div>
+            <div class="chat-thread-preview mono muted">
+              {% if t.last_at %}
+                <span class="chat-thread-sender">{% if t.last_sender == 'admin' %}you:{% else %}them:{% endif %}</span>
+                {{ t.last_body }}
+              {% else %}
+                <em>no messages yet</em>
+              {% endif %}
+            </div>
+            {% if t.last_at %}<div class="chat-thread-time mono muted">{{ t.last_at }}</div>{% endif %}
+          </a>
+        {% endfor %}
+      {% else %}
+        <p class="muted" style="padding: 12px;">No active workers.</p>
+      {% endif %}
+    </div>
+  </aside>
+
+  <main class="chat-main">
+    {% if selected_worker_id %}
+      <div class="panel-head chat-main-head">
+        <span>CHAT WITH <strong id="chat-with-name">…</strong></span>
+      </div>
+      <div class="chat-stream" id="chat-stream"
+           data-worker-id="{{ selected_worker_id }}"
+           data-viewer-role="admin">
+        <div class="empty-hint">Loading messages…</div>
+      </div>
+      <form class="chat-composer" id="chat-form">
+        <textarea id="chat-input" placeholder="Type a message…" rows="2" maxlength="2000"></textarea>
+        <button type="submit" class="btn btn-accent">SEND</button>
+      </form>
+    {% else %}
+      <div class="empty-hint" style="padding: 30px;">
+        Pick a worker from the left to start a conversation.
+      </div>
+    {% endif %}
+  </main>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/chat.js"></script>
+{% endblock %}

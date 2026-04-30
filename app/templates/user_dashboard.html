@@ -12,6 +12,10 @@
       <div class="stat-label">SAVED TODAY {{ info("Posters you saved between midnight today and now (server time). Excludes deleted posters.") }}</div>
       <div class="stat-value" data-stat="saved_today">{{ state.saved_today }}</div>
     </div>
+    <div class="stat-tile stat-tile-pending" {% if not state.pending_today %}hidden{% endif %} data-pending-tile>
+      <div class="stat-label">NOT COUNTED YET {{ info("These posters have an open or awaiting-approval revision. They don't count toward pay until the revision is resolved or the poster is replaced.") }}</div>
+      <div class="stat-value" data-stat="pending_today">{{ state.pending_today }}</div>
+    </div>
     <div class="stat-tile">
       <div class="stat-label">SAVED THIS WEEK {{ info("Posters you saved Mon–Sun of the current week. Excludes deleted posters.") }}</div>
       <div class="stat-value" data-stat="saved_week">{{ state.saved_week }}</div>
@@ -24,6 +28,15 @@
       <div class="stat-label">DATE</div>
       <div class="stat-value mono">{{ state.today }}</div>
     </div>
+  </section>
+
+  {# Receipt banner — when admin has pushed a payment receipt that worker hasn't acknowledged #}
+  <section class="receipts-banner" data-receipts-banner hidden>
+    <div class="receipts-banner-head">
+      <strong>💰 PAYMENT RECEIPT FROM ADMIN</strong>
+      <span class="muted" data-receipts-count></span>
+    </div>
+    <div class="receipts-list" data-receipts-list></div>
   </section>
 
   {# Changes-requested banner — only shown when active revisions exist #}

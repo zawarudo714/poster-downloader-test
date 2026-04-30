@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% from "_macros.html" import info %}
+{% block title %}Save History · {{ user.username }}{% endblock %}
+
+{% block content %}
+<div class="admin-grid">
+  <section class="panel">
+    <div class="panel-head">
+      <span>SAVE HISTORY {{ info("Every day you saved at least one poster, with the per-day count broken into paid (already settled), eligible (counts toward your next payment), and pending (waiting on a fix). Click any row to see which titles those posters belong to.") }}</span>
+    </div>
+    <div class="panel-body">
+      <p class="muted history-rate-line">
+        Current rate: <strong class="mono" id="history-rate">…</strong> KES per poster.
+        Amounts on this page are based on this rate. Past payments use the rate that was in effect at the time.
+      </p>
+      <div id="history-list" class="history-list">
+        <div class="empty-hint">Loading…</div>
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/user_history.js"></script>
+{% endblock %}

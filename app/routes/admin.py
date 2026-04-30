@@ -40,7 +40,7 @@ import shutil
 import threading
 import time
 import zipfile
-from datetime import date as date_type, datetime, timedelta
+from datetime import date, date as date_type, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -52,10 +52,11 @@ from sqlalchemy.orm import Session
 from ..audit import log as log_activity
 from ..auth import hash_password, require_admin
 from ..config import MASTER_PAGE_SIZE
-from ..envs import current_workspace_dir
+from ..config import WORKSPACE_DIR
 from ..db import SessionLocal, get_db
 from ..models import (
-    ActivityLog, ImportJob, MasterTitle, Revision, SavedPoster, User,
+    ActivityLog, AppSetting, ChatMessage, ChatReadState,
+    ImportJob, MasterTitle, PaymentRun, Revision, SavedPoster, User,
 )
 from ..templating import templates
 from ..utils import (
@@ -121,53 +122,22 @@ def admin_dashboard(request: Request, admin: User = Depends(require_admin), db: 
 @router.get("/users", response_class=HTMLResponse)
 def users_page(request: Request, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
     """
-    Users live in the LIVE env's users table (it's the global auth source).
-    Claim counts are per-env though — they show how many in-progress titles
-    each user holds *in that user's own env*. Cheap because only workers have
-    claims, and we already know each worker's env.
+    Users live in the live users table — single env, simpler than before.
+    Claim counts come straight from the same DB.
     """
-    from ..auth import _live_users_session
-    from ..envs import LIVE_ENV, list_test_envs, current_session_factory
-
-    live_db = _live_users_session()
-    try:
-        users = live_db.query(User).order_by(User.role.desc(), User.username.asc()).all()
-
-        # Build a per-env claim-count map by inspecting each env's master_titles table.
-        # Each env's users table mirrors the live one (we re-import users on first
-        # session to that env), so user IDs match.
-        envs_seen = sorted({u.env for u in users})
-        claim_counts: dict[int, int] = {}
-        for env_name in envs_seen:
-            from ..envs import _build_engine, _engines, _sessions, _engines_lock
-            if env_name not in _sessions:
-                with _engines_lock:
-                    if env_name not in _sessions:
-                        _build_engine(env_name)
-            EnvSession = _sessions[env_name]
-            sess = EnvSession()
-            try:
-                rows = (
-                    sess.query(MasterTitle.claimed_by_id, func.count(MasterTitle.id))
-                        .filter(MasterTitle.claimed_by_id.isnot(None),
-                                MasterTitle.status == "in_progress")
-                        .group_by(MasterTitle.claimed_by_id)
-                        .all()
-                )
-            finally:
-                sess.close()
-            for uid, n in rows:
-                claim_counts[uid] = claim_counts.get(uid, 0) + n
-    finally:
-        live_db.close()
-
+    users = db.query(User).order_by(User.role.desc(), User.username.asc()).all()
+    claim_counts = dict(
+        db.query(MasterTitle.claimed_by_id, func.count(MasterTitle.id))
+          .filter(MasterTitle.claimed_by_id.isnot(None),
+                  MasterTitle.status == "in_progress")
+          .group_by(MasterTitle.claimed_by_id)
+          .all()
+    )
     return templates.TemplateResponse(
         request,
         "admin_users.html",
         {"user": admin, "admin": admin, "users": users,
          "claim_counts": claim_counts,
-         "live_env": LIVE_ENV,
-         "test_envs": list_test_envs(),
          "active_tab": "users"},
     )
 
@@ -177,69 +147,38 @@ def create_user(
     username: str = Form(...),
     password: str = Form(...),
     role: str = Form("worker"),
-    env: str = Form("live"),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """
-    User accounts always live in the live env's users table (it's the system-
-    wide auth source — see auth._live_users_session). The `env` form field
-    decides which env the new user OPERATES in: workers are pinned to it on
-    every request; admins can still switch around freely.
-    """
-    from ..auth import _live_users_session
-    from ..envs import LIVE_ENV, test_env_exists
-
     username = username.strip()
-    env = env.strip() or LIVE_ENV
     if not re.match(r"^[A-Za-z0-9_.-]{2,64}$", username):
         raise HTTPException(400, "Username must be 2–64 chars, alnum / _ . -")
     if len(password) < 6:
         raise HTTPException(400, "Password must be at least 6 characters.")
     if role not in ("admin", "worker"):
         raise HTTPException(400, "Role must be admin or worker.")
-    if env != LIVE_ENV and not test_env_exists(env):
-        raise HTTPException(400, f"Env {env!r} doesn't exist. Create it first.")
-
-    live_db = _live_users_session()
-    try:
-        if live_db.query(User).filter_by(username=username).first():
-            raise HTTPException(409, "Username already exists (usernames are global across all environments).")
-        u = User(
-            username=username,
-            password_hash=hash_password(password),
-            role=role,
-            env=env,
-        )
-        live_db.add(u)
-        live_db.flush()
-        # Activity log goes into the *current* env's audit (where the admin was when they did this).
-        log_activity(db, user=admin, action="user_created", target_type="user", target_id=u.id,
-                     details={"username": username, "role": role, "env": env})
-        live_db.commit()
-        db.commit()
-    finally:
-        live_db.close()
+    if db.query(User).filter_by(username=username).first():
+        raise HTTPException(409, "Username already exists.")
+    u = User(username=username, password_hash=hash_password(password), role=role)
+    db.add(u)
+    db.flush()
+    log_activity(db, user=admin, action="user_created", target_type="user", target_id=u.id,
+                 details={"username": username, "role": role})
+    db.commit()
     return RedirectResponse("/admin/users", status_code=302)
 
 
 @router.post("/users/{user_id}/toggle")
 def toggle_user(user_id: int, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
-    from ..auth import _live_users_session
-    live_db = _live_users_session()
-    try:
-        u = live_db.query(User).filter_by(id=user_id).first()
-        if not u:
-            raise HTTPException(404, "User not found")
-        if u.id == admin.id:
-            raise HTTPException(400, "Cannot disable your own account.")
-        u.is_active = 0 if u.is_active else 1
-        log_activity(db, user=admin, action="user_toggled", target_type="user", target_id=u.id,
-                     details={"is_active": bool(u.is_active)})
-        live_db.commit()
-        db.commit()
-    finally:
-        live_db.close()
+    u = db.query(User).filter_by(id=user_id).first()
+    if not u:
+        raise HTTPException(404, "User not found")
+    if u.id == admin.id:
+        raise HTTPException(400, "Cannot disable your own account.")
+    u.is_active = 0 if u.is_active else 1
+    log_activity(db, user=admin, action="user_toggled", target_type="user", target_id=u.id,
+                 details={"is_active": bool(u.is_active)})
+    db.commit()
     return RedirectResponse("/admin/users", status_code=302)
 
 
@@ -250,20 +189,14 @@ def reset_password(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    from ..auth import _live_users_session
     if len(new_password) < 6:
         raise HTTPException(400, "Password must be at least 6 characters.")
-    live_db = _live_users_session()
-    try:
-        u = live_db.query(User).filter_by(id=user_id).first()
-        if not u:
-            raise HTTPException(404, "User not found")
-        u.password_hash = hash_password(new_password)
-        log_activity(db, user=admin, action="password_reset", target_type="user", target_id=u.id)
-        live_db.commit()
-        db.commit()
-    finally:
-        live_db.close()
+    u = db.query(User).filter_by(id=user_id).first()
+    if not u:
+        raise HTTPException(404, "User not found")
+    u.password_hash = hash_password(new_password)
+    log_activity(db, user=admin, action="password_reset", target_type="user", target_id=u.id)
+    db.commit()
     return RedirectResponse("/admin/users", status_code=302)
 
 
@@ -279,65 +212,34 @@ def release_user_queue(
     keep_started=1 (default) protects rows where work has begun (started_at set).
     keep_started=0 releases EVERYTHING back to pending, including started rows
     (their saved posters remain on disk; the title returns to the pool for someone else).
-
-    Operates on the *user's* env, not the admin's — so an admin in 'live' can
-    release a worker that's pinned to a test env without first having to switch.
     """
-    from ..auth import _live_users_session
-    from ..envs import _build_engine, _engines, _sessions, _engines_lock
-
-    # Look up the user from the live users table (global auth source).
-    live_db = _live_users_session()
-    try:
-        u = live_db.query(User).filter_by(id=user_id).first()
-        if not u:
-            raise HTTPException(404, "User not found")
-        target_env = u.env
-    finally:
-        live_db.close()
-
-    # Open a session against the user's env.
-    if target_env not in _sessions:
-        with _engines_lock:
-            if target_env not in _sessions:
-                _build_engine(target_env)
-    EnvSession = _sessions[target_env]
-    sess = EnvSession()
-    try:
-        q = sess.query(MasterTitle).filter(
-            MasterTitle.claimed_by_id == user_id,
-            MasterTitle.status == "in_progress",
-        )
-        if keep_started:
-            q = q.filter(MasterTitle.started_at.is_(None))
-        rows = q.all()
-        now = datetime.utcnow()
-        released_ids = []
-        for r in rows:
-            r.claimed_by_id = None
-            r.claimed_by_name = None
-            r.claimed_at = None
-            r.status = "pending"
-            r.updated_at = now
-            released_ids.append(r.id)
-        # Clear the user's lock if it pointed to a released row.
-        # The user row only exists in env's users table if they've touched
-        # that env before (require_user merges them in on first request).
-        u_env = sess.query(User).filter_by(id=user_id).first()
-        if u_env and u_env.locked_master_id in released_ids:
-            u_env.locked_master_id = None
-        sess.commit()
-    finally:
-        sess.close()
-
-    # Audit-log row goes into admin's current env (where they hit the button).
+    u = db.query(User).filter_by(id=user_id).first()
+    if not u:
+        raise HTTPException(404, "User not found")
+    q = db.query(MasterTitle).filter(
+        MasterTitle.claimed_by_id == user_id,
+        MasterTitle.status == "in_progress",
+    )
+    if keep_started:
+        q = q.filter(MasterTitle.started_at.is_(None))
+    rows = q.all()
+    now = datetime.utcnow()
+    released_ids = []
+    for r in rows:
+        r.claimed_by_id = None
+        r.claimed_by_name = None
+        r.claimed_at = None
+        r.status = "pending"
+        r.updated_at = now
+        released_ids.append(r.id)
+    if u.locked_master_id in released_ids:
+        u.locked_master_id = None
     log_activity(
         db, user=admin, action="released", target_type="user", target_id=user_id,
-        details={"count": len(released_ids), "keep_started": bool(keep_started),
-                 "target_env": target_env},
+        details={"count": len(released_ids), "keep_started": bool(keep_started)},
     )
     db.commit()
-    return JSONResponse({"ok": True, "released": len(released_ids), "env": target_env})
+    return JSONResponse({"ok": True, "released": len(released_ids)})
 
 
 # ── Master sheet ─────────────────────────────────────────────────────────────
@@ -1247,32 +1149,18 @@ def restore_from_backup(
 ):
     """
     Replace the live DB with a backup file. Disposes the SQLAlchemy engine
-    pool — both the legacy `db.engine` and the env-cache's live engine — so
-    the next request opens against the restored file.
+    pool so the next request opens against the restored file.
     """
     from ..backups import restore_backup
     from ..db import engine
-    from ..envs import LIVE_ENV, _engines, _sessions, _engines_lock
     # Log first while the old DB is still live.
     log_activity(db, user=admin, action="restore_started", target_type="backup",
                  details={"filename": filename})
     db.commit()
     db.close()
 
-    # Dispose the legacy module-level engine.
+    # Dispose the engine pool so SQLite handles release the file.
     engine.dispose()
-    # Dispose (and drop) the env-cache entry for live, so the next request
-    # rebuilds it against the restored file. Without this, pooled connections
-    # to the *deleted-then-replaced* SQLite file would continue serving stale
-    # data on Linux (where unlink doesn't kill open handles).
-    with _engines_lock:
-        live_eng = _engines.pop(LIVE_ENV, None)
-        _sessions.pop(LIVE_ENV, None)
-    if live_eng is not None:
-        try:
-            live_eng.dispose()
-        except Exception:
-            pass
 
     try:
         safety = restore_backup(filename)
@@ -1302,138 +1190,6 @@ def delete_backup_route(
     log_activity(db, user=admin, action="backup_deleted", target_type="backup",
                  details={"filename": filename})
     db.commit()
-    return JSONResponse({"ok": True})
-
-
-# ── Test environments ───────────────────────────────────────────────────────
-
-@router.get("/envs", response_class=HTMLResponse)
-def envs_page(
-    request: Request,
-    admin: User = Depends(require_admin),
-):
-    from ..envs import list_test_envs, current_env, LIVE_ENV
-    return templates.TemplateResponse(
-        request,
-        "admin_envs.html",
-        {"user": admin, "admin": admin,
-         "envs": list_test_envs(),
-         "live_env": LIVE_ENV,
-         "current_env": current_env(),
-         "active_tab": "envs"},
-    )
-
-
-@router.post("/envs/create")
-def envs_create(
-    name: str = Form(...),
-    admin: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    from ..envs import create_test_env
-    name = name.strip()
-    try:
-        create_test_env(name)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-    log_activity(db, user=admin, action="env_create", target_type="env",
-                 details={"name": name}, commit=True)
-    return JSONResponse({"ok": True, "name": name})
-
-
-@router.post("/envs/enter")
-def envs_enter(
-    request: Request,
-    name: str = Form(...),
-    admin: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    """
-    Set the pd_env cookie so subsequent requests run in this environment.
-    Workers do NOT get this endpoint — they always operate in live.
-
-    Note: the activity-log row written here lands in *the env we're currently
-    in*, not the one we're switching to. That's the right behaviour: the
-    "I left/entered an env" event belongs to the env you departed from.
-
-    Returns a redirect (form submit) or JSON (fetch) based on Accept header.
-    """
-    from ..envs import LIVE_ENV, test_env_exists
-    name = name.strip()
-    if name != LIVE_ENV and not test_env_exists(name):
-        raise HTTPException(404, f"Env {name!r} doesn't exist.")
-    log_activity(db, user=admin, action="env_enter", target_type="env",
-                 details={"name": name}, commit=True)
-    accept = (request.headers.get("accept") or "").lower()
-    if "application/json" in accept:
-        resp = JSONResponse({"ok": True, "active": name})
-    else:
-        resp = RedirectResponse("/admin", status_code=303)
-    # httponly so JS can't peek; samesite=Lax so it follows top-level nav.
-    # Session cookie (no Max-Age) — closing the browser drops you back to live,
-    # which is a sensible safety default.
-    resp.set_cookie("pd_env", name, httponly=True, samesite="lax", path="/")
-    return resp
-
-
-@router.post("/envs/leave")
-def envs_leave(
-    request: Request,
-    admin: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    """
-    Switch back to live by clearing the pd_env cookie. Returns either a
-    redirect (if called as a form submit from the env banner) or JSON
-    (if called from a fetch in JS) — detected via the Accept header.
-    """
-    log_activity(db, user=admin, action="env_leave", target_type="env",
-                 details={}, commit=True)
-    accept = (request.headers.get("accept") or "").lower()
-    if "application/json" in accept:
-        resp = JSONResponse({"ok": True, "active": "live"})
-    else:
-        # Form submit from the banner — redirect back to admin home.
-        resp = RedirectResponse("/admin", status_code=303)
-    resp.delete_cookie("pd_env", path="/")
-    return resp
-
-
-@router.post("/envs/reset")
-def envs_reset(
-    name: str = Form(...),
-    admin: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    from ..envs import reset_test_env, LIVE_ENV
-    name = name.strip()
-    if name == LIVE_ENV:
-        raise HTTPException(400, "Cannot reset the live environment.")
-    try:
-        reset_test_env(name)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-    log_activity(db, user=admin, action="env_reset", target_type="env",
-                 details={"name": name}, commit=True)
-    return JSONResponse({"ok": True})
-
-
-@router.post("/envs/delete")
-def envs_delete(
-    name: str = Form(...),
-    admin: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    from ..envs import delete_test_env, LIVE_ENV
-    name = name.strip()
-    if name == LIVE_ENV:
-        raise HTTPException(400, "Cannot delete the live environment.")
-    try:
-        delete_test_env(name)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-    log_activity(db, user=admin, action="env_delete", target_type="env",
-                 details={"name": name}, commit=True)
     return JSONResponse({"ok": True})
 
 
@@ -1493,7 +1249,7 @@ def filesystem_tree(admin: User = Depends(require_admin)):
     for username in list_users_with_workspaces():
         user_node = {"name": username, "children": []}
         for d in list_date_folders(username):
-            d_path = current_workspace_dir() / username / d
+            d_path = WORKSPACE_DIR / username / d
             d_node = {"name": d, "children": []}
             for tf in sorted([p for p in d_path.iterdir() if p.is_dir()], key=lambda p: p.name):
                 from ..utils import list_images_in
@@ -1536,11 +1292,11 @@ def zip_start(
     date: str = Form(...),
     admin: User = Depends(require_admin),
 ):
-    src = (current_workspace_dir() / worker / date).resolve()
+    src = (WORKSPACE_DIR / worker / date).resolve()
     if not safe_under_workspace(src) or not src.is_dir():
         raise HTTPException(404, "Source folder not found.")
 
-    zip_dir = current_workspace_dir() / "_zips"
+    zip_dir = WORKSPACE_DIR / "_zips"
     zip_dir.mkdir(exist_ok=True)
     ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
     zip_name = f"{worker}_{date}_{ts}.zip"
@@ -1575,3 +1331,353 @@ def zip_download(job_id: str, admin: User = Depends(require_admin)):
     if not p.is_file():
         raise HTTPException(404, "Zip file missing.")
     return FileResponse(p, filename=p.name, media_type="application/zip")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Payments
+# ═══════════════════════════════════════════════════════════════════════════
+
+@router.get("/payments", response_class=HTMLResponse)
+def payments_page(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Admin payments page. Shows:
+      - Settings (rate KES, week start day) — editable.
+      - Worker-by-worker counters for today and current week.
+      - History of past PaymentRuns, with per-run "push to worker" toggle.
+    """
+    from ..payments import get_rate_kes, get_week_start_day, all_runs
+
+    workers = (
+        db.query(User)
+          .filter(User.role == "worker", User.is_active == 1)
+          .order_by(User.username.asc())
+          .all()
+    )
+    rate = get_rate_kes(db)
+    week_start = get_week_start_day(db)
+    runs = all_runs(db, limit=200)
+
+    return templates.TemplateResponse(
+        request, "admin_payments.html",
+        {
+            "user": admin, "admin": admin,
+            "active_tab": "payments",
+            "workers": workers,
+            "rate_kes": rate,
+            "week_start_day": week_start,
+            "runs": runs,
+            "today": date.today(),
+        },
+    )
+
+
+@router.post("/payments/settings")
+def payments_settings(
+    rate_kes: str = Form(...),
+    week_start_day: int = Form(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Save the per-poster rate (KES) + week start day (0=Mon..6=Sun)."""
+    from ..payments import set_setting, parse_decimal
+    try:
+        rate_dec = parse_decimal(rate_kes)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if rate_dec < 0:
+        raise HTTPException(400, "Rate must be non-negative.")
+    if not (0 <= week_start_day <= 6):
+        raise HTTPException(400, "week_start_day must be 0..6.")
+    set_setting(db, "pay_rate_kes",   str(rate_dec), by=admin.username)
+    set_setting(db, "week_start_day", str(week_start_day), by=admin.username)
+    log_activity(db, user=admin, action="payments_settings", target_type="settings",
+                 details={"rate_kes": str(rate_dec), "week_start_day": week_start_day})
+    db.commit()
+    return RedirectResponse("/admin/payments", status_code=302)
+
+
+@router.get("/api/payments/preview")
+def payments_preview(
+    worker_id: int = Query(...),
+    start: str = Query(...),     # YYYY-MM-DD
+    end:   str = Query(...),     # YYYY-MM-DD
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Preview eligible posters and total for a worker over [start, end].
+    Used by the JS to compute the totals as admin picks dates.
+    """
+    from ..payments import eligible_poster_ids, get_rate_kes, parse_decimal
+    try:
+        start_d = date.fromisoformat(start)
+        end_d   = date.fromisoformat(end)
+    except ValueError:
+        raise HTTPException(400, "Bad date.")
+    if end_d < start_d:
+        raise HTTPException(400, "End is before start.")
+    ids = eligible_poster_ids(db, worker_id=worker_id, start=start_d, end=end_d)
+    rate = get_rate_kes(db)
+    rate_dec = parse_decimal(rate)
+    total = rate_dec * len(ids)
+    # Per-day breakdown (saved-on dates) so admin can see distribution.
+    by_day: dict[str, int] = {}
+    if ids:
+        rows = db.query(SavedPoster.id, SavedPoster.original_save_date).filter(SavedPoster.id.in_(ids)).all()
+        for _id, d in rows:
+            by_day[d.isoformat()] = by_day.get(d.isoformat(), 0) + 1
+    return JSONResponse({
+        "ok": True,
+        "worker_id":    worker_id,
+        "start":        start_d.isoformat(),
+        "end":          end_d.isoformat(),
+        "poster_count": len(ids),
+        "rate_kes":     str(rate_dec),
+        "computed_total_kes": str(total),
+        "by_day":       by_day,
+        "poster_ids":   ids,
+    })
+
+
+@router.post("/payments/mark_paid")
+def payments_mark_paid(
+    worker_id: int = Form(...),
+    start: str = Form(...),
+    end:   str = Form(...),
+    amount_kes: str = Form(...),
+    reference: str = Form(""),
+    note: str = Form(""),
+    push_to_worker: int = Form(0),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Write a PaymentRun for [start, end] for `worker_id`. Snapshots eligible
+    poster IDs at this moment so future runs don't double-count them.
+    Optionally pushes a receipt for worker acknowledgement.
+    """
+    from ..payments import eligible_poster_ids, get_rate_kes, parse_decimal
+    try:
+        start_d = date.fromisoformat(start)
+        end_d   = date.fromisoformat(end)
+        amount  = parse_decimal(amount_kes)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if end_d < start_d:
+        raise HTTPException(400, "End is before start.")
+    if amount < 0:
+        raise HTTPException(400, "Amount must be non-negative.")
+
+    worker = db.query(User).filter_by(id=worker_id, role="worker").first()
+    if worker is None:
+        raise HTTPException(404, "Worker not found.")
+    worker_username = worker.username
+
+    ids = eligible_poster_ids(db, worker_id=worker_id, start=start_d, end=end_d)
+    rate = get_rate_kes(db)
+    run = PaymentRun(
+        worker_id       = worker_id,
+        worker_username = worker_username,
+        period_start    = start_d,
+        period_end      = end_d,
+        poster_count    = len(ids),
+        rate_kes        = str(parse_decimal(rate)),
+        amount_kes      = str(amount),
+        reference       = reference.strip() or None,
+        note            = note.strip() or None,
+        poster_ids_json = json.dumps(ids),
+        pushed_at       = datetime.utcnow() if push_to_worker else None,
+        created_by      = admin.username,
+    )
+    db.add(run)
+    db.flush()
+    log_activity(
+        db, user=admin, action="paid", target_type="payment_run", target_id=run.id,
+        details={"worker": worker_username, "start": start, "end": end,
+                 "count": len(ids), "amount": str(amount), "pushed": bool(push_to_worker)},
+    )
+    db.commit()
+    return JSONResponse({"ok": True, "run_id": run.id, "poster_count": len(ids)})
+
+
+@router.post("/payments/{run_id}/push")
+def payments_push_run(
+    run_id: int,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Push (or re-push) a receipt to the worker. Resets ack_at."""
+    run = db.query(PaymentRun).filter_by(id=run_id).first()
+    if run is None:
+        raise HTTPException(404, "Run not found.")
+    run.pushed_at = datetime.utcnow()
+    run.ack_at = None  # clear any prior ack so worker has to confirm again
+    log_activity(db, user=admin, action="receipt_push", target_type="payment_run", target_id=run.id)
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
+@router.post("/payments/{run_id}/delete")
+def payments_delete_run(
+    run_id: int,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Delete a PaymentRun. Use only to fix mistakes — its poster IDs become
+    eligible again. Gives admin a way to undo a wrong "MARK PAID" click.
+    """
+    run = db.query(PaymentRun).filter_by(id=run_id).first()
+    if run is None:
+        raise HTTPException(404, "Run not found.")
+    snap = {"worker": run.worker_username, "amount": run.amount_kes,
+            "count": run.poster_count, "period": f"{run.period_start}..{run.period_end}"}
+    db.delete(run)
+    log_activity(db, user=admin, action="payment_run_deleted",
+                 target_type="payment_run", target_id=run_id, details=snap)
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Chat (admin side)
+# ═══════════════════════════════════════════════════════════════════════════
+
+@router.get("/chat", response_class=HTMLResponse)
+def chat_page(
+    request: Request,
+    worker_id: int = Query(0),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Admin chat hub: list of worker threads + an open thread on the right."""
+    from ..chat import admin_thread_summaries
+    threads = admin_thread_summaries(db, viewer_id=admin.id)
+    # If worker_id not given, default to the first thread (if any).
+    if not worker_id and threads:
+        worker_id = threads[0]["worker_id"]
+    return templates.TemplateResponse(
+        request, "admin_chat.html",
+        {"user": admin, "admin": admin, "active_tab": "chat",
+         "threads": threads, "selected_worker_id": worker_id},
+    )
+
+
+@router.get("/api/chat/{worker_id}")
+def chat_thread(
+    worker_id: int,
+    after: int = Query(0, ge=0),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    from ..chat import list_messages, serialize_message
+    rows = list_messages(db, worker_id=worker_id, after_id=(after or None), limit=200)
+    return JSONResponse({"ok": True, "messages": [serialize_message(m) for m in rows]})
+
+
+@router.post("/api/chat/{worker_id}/send")
+def chat_admin_send(
+    worker_id: int,
+    body: str = Form(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    from ..chat import send_message, serialize_message
+    # Validate recipient exists.
+    if not db.query(User).filter_by(id=worker_id, role="worker").first():
+        raise HTTPException(404, "Worker not found.")
+    try:
+        msg = send_message(db, worker_id=worker_id, sender=admin, body=body)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    log_activity(db, user=admin, action="chat_sent", target_type="chat", target_id=msg.id,
+                 details={"to_worker_id": worker_id})
+    db.commit()
+    return JSONResponse({"ok": True, "message": serialize_message(msg)})
+
+
+@router.post("/api/chat/{worker_id}/mark_read")
+def chat_admin_mark_read(
+    worker_id: int,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    from ..chat import mark_read
+    mark_read(db, worker_id=worker_id, viewer_id=admin.id)
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
+@router.get("/api/chat/_summary")
+def chat_summary(
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Polled by admin pages to render an unread badge in the topbar."""
+    from ..chat import admin_thread_summaries
+    threads = admin_thread_summaries(db, viewer_id=admin.id)
+    total_unread = sum(t["unread"] for t in threads)
+    return JSONResponse({"ok": True, "total_unread": total_unread, "threads": threads})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Activity log v2 — readable, with optional comments-only filter
+# ═══════════════════════════════════════════════════════════════════════════
+
+@router.get("/api/activity")
+def api_activity(
+    since_id: int = Query(0, ge=0),
+    limit: int = Query(200, ge=1, le=500),
+    user_filter: str = Query(""),
+    action_filter: str = Query(""),
+    comments_only: int = Query(0, ge=0, le=1),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    JSON activity log with optional filters. The page uses this to render
+    the new readable list and to power the "Comments only" view.
+    """
+    q = db.query(ActivityLog).order_by(ActivityLog.id.desc())
+    if since_id:
+        q = q.filter(ActivityLog.id < since_id)  # paginate older
+    if user_filter:
+        q = q.filter(ActivityLog.username == user_filter)
+    if action_filter:
+        q = q.filter(ActivityLog.action == action_filter)
+    rows = q.limit(limit).all()
+
+    out = []
+    for r in rows:
+        # Try to extract a "comment" from details JSON. Different actions
+        # use different keys; we look at the most useful ones.
+        comment = ""
+        details = {}
+        if r.details:
+            try:
+                details = json.loads(r.details)
+            except (TypeError, ValueError):
+                details = {}
+        for key in ("comment", "reason", "note", "verdict", "worker_note", "admin_note"):
+            v = details.get(key)
+            if v:
+                comment = str(v)
+                break
+        # Skip if comments_only filter is on and this row has no comment.
+        if comments_only and not comment:
+            continue
+        out.append({
+            "id":          r.id,
+            "created_at":  r.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "username":    r.username or "",
+            "action":      r.action,
+            "target_type": r.target_type or "",
+            "target_id":   r.target_id,
+            "comment":     comment,
+            "details":     details,
+        })
+    return JSONResponse({"ok": True, "rows": out})

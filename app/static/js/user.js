@@ -83,6 +83,14 @@
   }
 
   // ── Queue list ───────────────────────────────────────────────────────────
+  // Persisted UI state for the queue list:
+  //   - whether the "completed" group is collapsed (default: collapsed once
+  //     there are any, since the whole point is to keep them out of the way)
+  //   - the current search filter text
+  // Stored in module scope so 8s polls don't reset them.
+  let queueCollapsedDone = true;
+  let queueSearchText = '';
+
   function renderQueue() {
     if (!titleListEl) return;
     if (!state.queue || state.queue.length === 0) {
@@ -93,32 +101,150 @@
       return;
     }
     const lockedId = state.locked && state.locked.id;
+
+    // Bucket titles by working state. "Active" = anything you might still
+    // touch (pending claims you haven't started + in-progress + flagged);
+    // "Done" = complete + skipped, the ones we want out of the way.
+    const active = [];
+    const done   = [];
+    for (const t of state.queue) {
+      if (t.status === 'complete' || t.status === 'skipped') done.push(t);
+      else active.push(t);
+    }
+
+    // Sort within each bucket. Active: locked title pinned to top, then
+    // in_progress, then pending. Done: most-recently-touched first using
+    // saved_count as a rough proxy when explicit timestamps aren't on the
+    // queue dict.
+    function sortActive(a, b) {
+      if (a.id === lockedId) return -1;
+      if (b.id === lockedId) return 1;
+      const order = { in_progress: 0, pending: 1 };
+      const oa = order[a.status] ?? 9, ob = order[b.status] ?? 9;
+      if (oa !== ob) return oa - ob;
+      return (a.external_id ?? 0) - (b.external_id ?? 0);
+    }
+    active.sort(sortActive);
+    // Done: keep external_id ordering — predictable when admin scrolls back.
+    done.sort((a, b) => (a.external_id ?? 0) - (b.external_id ?? 0));
+
+    // Apply search filter — matches title, year, content_type case-insensitive.
+    const needle = queueSearchText.trim().toLowerCase();
+    function matches(t) {
+      if (!needle) return true;
+      const hay = `${t.external_id ?? ''} ${t.title} ${t.year} ${t.content_type || ''}`.toLowerCase();
+      return hay.includes(needle);
+    }
+    const activeShown = active.filter(matches);
+    const doneShown   = done.filter(matches);
+    const activeHidden = active.length - activeShown.length;
+    const doneHidden   = done.length - doneShown.length;
+
     titleListEl.innerHTML = '';
-    state.queue.forEach((t) => {
-      const item = document.createElement('div');
-      const cls = ['title-item', 'status-' + t.status];
-      if (lockedId === t.id) cls.push('active');
-      if (t.needs_revision) cls.push('flagged');
-      if (t.admin_note) cls.push('has-admin-note');
-      item.className = cls.join(' ');
-      item.dataset.masterId = t.id;
-      item.innerHTML = `
-        <div class="ti-line1">
-          <span class="ti-num mono">${t.external_id ?? '–'}.</span>
-          <span class="ti-title"></span>
-          <span class="ti-year mono">(${t.year})</span>
-          ${t.content_type ? `<span class="ti-type mono">${t.content_type}</span>` : ''}
-        </div>
-        <div class="ti-line2">
-          <span class="ti-count mono">${t.saved_count} saved</span>
-          · <span class="status-pill status-${t.status}">${t.status.replace('_', ' ')}</span>
-          ${t.needs_revision ? '<span class="status-pill status-flag">flag</span>' : ''}
-          ${t.admin_note ? '<span class="status-pill status-admin-note">admin note</span>' : ''}
-        </div>`;
-      item.querySelector('.ti-title').textContent = t.title;
-      item.addEventListener('click', () => lockTitle(t.id));
-      titleListEl.appendChild(item);
+
+    // Search box — kept visually compact; persists value across re-renders.
+    const searchWrap = document.createElement('div');
+    searchWrap.className = 'queue-search';
+    searchWrap.innerHTML = `
+      <input type="search" class="queue-search-input"
+             placeholder="Search your titles…"
+             value="${queueSearchText.replace(/"/g, '&quot;')}">
+      ${needle ? '<button type="button" class="btn btn-ghost btn-tiny queue-search-clear">CLEAR</button>' : ''}
+    `;
+    const searchInput = searchWrap.querySelector('.queue-search-input');
+    searchInput.addEventListener('input', (e) => {
+      queueSearchText = e.target.value;
+      renderQueue();
+      // Re-focus the input after re-render — it was destroyed and rebuilt.
+      requestAnimationFrame(() => {
+        const inp = titleListEl.querySelector('.queue-search-input');
+        if (inp) {
+          inp.focus();
+          // Put cursor at end so typing continues naturally.
+          const v = inp.value;
+          inp.setSelectionRange(v.length, v.length);
+        }
+      });
     });
+    const clearBtn = searchWrap.querySelector('.queue-search-clear');
+    if (clearBtn) clearBtn.addEventListener('click', () => {
+      queueSearchText = '';
+      renderQueue();
+    });
+    titleListEl.appendChild(searchWrap);
+
+    // Active group — always visible, rendered first so unstarted/in-progress
+    // sit at the top regardless of how many completed there are.
+    if (activeShown.length > 0) {
+      activeShown.forEach((t) => titleListEl.appendChild(buildTitleItem(t, lockedId)));
+    } else if (active.length > 0 && needle) {
+      const empty = document.createElement('div');
+      empty.className = 'queue-empty-section';
+      empty.textContent = `No active titles match "${queueSearchText}".`;
+      titleListEl.appendChild(empty);
+    } else if (active.length === 0 && done.length > 0) {
+      const empty = document.createElement('div');
+      empty.className = 'queue-empty-section';
+      empty.textContent = 'No active titles — everything below is finished. Click GET for more.';
+      titleListEl.appendChild(empty);
+    }
+
+    // Done group — collapsible. Hidden by default; toggle in header bar.
+    if (done.length > 0) {
+      const header = document.createElement('div');
+      header.className = 'queue-done-header';
+      const arrow = queueCollapsedDone ? '▸' : '▾';
+      const visibleCount = doneShown.length;
+      const hiddenNote = (needle && doneHidden > 0)
+        ? ` (${doneHidden} hidden by search)` : '';
+      header.innerHTML = `
+        <span class="queue-done-arrow mono">${arrow}</span>
+        <span class="queue-done-label">${visibleCount} finished${hiddenNote}</span>
+        <span class="muted queue-done-hint">${queueCollapsedDone ? 'click to expand' : 'click to collapse'}</span>
+      `;
+      header.addEventListener('click', () => {
+        queueCollapsedDone = !queueCollapsedDone;
+        renderQueue();
+      });
+      titleListEl.appendChild(header);
+
+      if (!queueCollapsedDone) {
+        if (doneShown.length > 0) {
+          doneShown.forEach((t) => titleListEl.appendChild(buildTitleItem(t, lockedId)));
+        } else if (needle) {
+          const empty = document.createElement('div');
+          empty.className = 'queue-empty-section';
+          empty.textContent = `No finished titles match "${queueSearchText}".`;
+          titleListEl.appendChild(empty);
+        }
+      }
+    }
+  }
+
+  function buildTitleItem(t, lockedId) {
+    const item = document.createElement('div');
+    const cls = ['title-item', 'status-' + t.status];
+    if (lockedId === t.id) cls.push('active');
+    if (t.needs_revision) cls.push('flagged');
+    if (t.admin_note) cls.push('has-admin-note');
+    item.className = cls.join(' ');
+    item.dataset.masterId = t.id;
+    item.innerHTML = `
+      <div class="ti-line1">
+        <span class="ti-num mono">${t.external_id ?? '–'}.</span>
+        <span class="ti-title"></span>
+        <span class="ti-year mono">(${t.year})</span>
+        ${t.content_type ? `<span class="ti-type mono">${t.content_type}</span>` : ''}
+      </div>
+      <div class="ti-line2">
+        <span class="ti-count mono">${t.saved_count} saved</span>
+        · <span class="status-pill status-${t.status}">${t.status.replace('_', ' ')}</span>
+        ${t.needs_revision ? '<span class="status-pill status-flag">flag</span>' : ''}
+        ${t.admin_note ? '<span class="status-pill status-admin-note">admin note</span>' : ''}
+      </div>`;
+    item.querySelector('.ti-title').textContent = t.title;
+    item.addEventListener('click', () => lockTitle(t.id));
+    return item;
   }
 
   // ── Active panel: full re-render (only on lock change) ───────────────────
@@ -349,6 +475,58 @@
     setStat('saved_today',  state.saved_today);
     setStat('saved_week',   state.saved_week);
     setStat('titles_today', state.titles_today);
+    setStat('pending_today', state.pending_today || 0);
+    // Hide the "not counted yet" tile when there's nothing pending.
+    const tile = document.querySelector('[data-pending-tile]');
+    if (tile) tile.hidden = !(state.pending_today && state.pending_today > 0);
+  }
+
+  function renderReceipts() {
+    const banner = document.querySelector('[data-receipts-banner]');
+    if (!banner) return;
+    const list = banner.querySelector('[data-receipts-list]');
+    const countEl = banner.querySelector('[data-receipts-count]');
+    const receipts = state.receipts || [];
+    if (!receipts.length) {
+      banner.hidden = true;
+      list.innerHTML = '';
+      return;
+    }
+    banner.hidden = false;
+    countEl.textContent = `${receipts.length} unacknowledged`;
+    list.innerHTML = '';
+    receipts.forEach((r) => {
+      const item = document.createElement('div');
+      item.className = 'receipt-item';
+      item.innerHTML = `
+        <div class="receipt-row">
+          <strong class="mono receipt-amount"></strong>
+          <span class="muted">for</span>
+          <span class="mono receipt-period"></span>
+          <span class="muted receipt-count"></span>
+        </div>
+        <div class="receipt-meta mono muted"></div>
+        <div class="receipt-note"></div>
+        <button class="btn btn-accent btn-tiny receipt-ack-btn" type="button">ACKNOWLEDGE</button>
+      `;
+      item.querySelector('.receipt-amount').textContent = `KES ${r.amount_kes}`;
+      item.querySelector('.receipt-period').textContent =
+        r.period_start === r.period_end ? r.period_start : `${r.period_start} → ${r.period_end}`;
+      item.querySelector('.receipt-count').textContent =
+        `(${r.poster_count} poster${r.poster_count === 1 ? '' : 's'} × ${r.rate_kes} KES)`;
+      item.querySelector('.receipt-meta').textContent =
+        (r.reference ? `Ref: ${r.reference} · ` : '') + `Sent ${r.pushed_at || ''}`;
+      const noteEl = item.querySelector('.receipt-note');
+      if (r.note) noteEl.textContent = r.note; else noteEl.remove();
+      item.querySelector('.receipt-ack-btn').addEventListener('click', async () => {
+        const btn = item.querySelector('.receipt-ack-btn');
+        btn.disabled = true;
+        const rr = await fetch(`/api/receipts/${r.id}/ack`, { method: 'POST' });
+        if (rr.ok) await refreshState();
+        else { btn.disabled = false; alert('Failed.'); }
+      });
+      list.appendChild(item);
+    });
   }
 
   function renderAll({ fullActive }) {
@@ -360,6 +538,7 @@
       passiveUpdateActive();
     }
     renderRevisions();
+    renderReceipts();
   }
 
   async function refreshState() {

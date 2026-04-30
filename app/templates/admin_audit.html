@@ -1,56 +1,75 @@
 {% extends "base.html" %}
 {% from "_macros.html" import info %}
-{% block title %}Audit Log · Admin{% endblock %}
+{% block title %}Activity Log · Admin{% endblock %}
 
 {% block content %}
 <div class="admin-grid">
+
   <section class="panel">
-    <div class="panel-head"><span>AUDIT LOG {{ info("Append-only log of every action: claims, releases, saves, deletes, replaces, flags, status changes, imports. Most recent first.") }}</span></div>
+    <div class="panel-head">
+      <span>ACTIVITY LOG {{ info("Every action recorded: saves, deletes, replaces, flags, completes, skips, payments, chat messages, imports. Most recent first.") }}</span>
+    </div>
     <div class="panel-body">
 
-      <div class="filter-row">
+      <div class="filter-row activity-filter-row">
         <input type="text" id="al-user" placeholder="Filter by user…" class="filter-input">
         <select id="al-action" class="filter-input">
           <option value="">All actions</option>
-          <option value="claimed">claimed</option>
-          <option value="released">released</option>
-          <option value="locked">locked</option>
-          <option value="unlocked">unlocked</option>
-          <option value="saved">saved</option>
-          <option value="deleted">deleted</option>
-          <option value="replaced">replaced</option>
-          <option value="flagged">flagged</option>
-          <option value="unflagged">unflagged</option>
-          <option value="resolved">resolved</option>
-          <option value="completed">completed</option>
-          <option value="skipped">skipped</option>
-          <option value="reopened">reopened</option>
-          <option value="status_changed">status_changed</option>
-          <option value="bulk_status">bulk_status</option>
-          <option value="imported">imported</option>
-          <option value="user_created">user_created</option>
-          <option value="user_toggled">user_toggled</option>
-          <option value="password_reset">password_reset</option>
+          <optgroup label="Worker activity">
+            <option value="saved">saved</option>
+            <option value="deleted">deleted</option>
+            <option value="replaced">replaced</option>
+            <option value="locked">locked</option>
+            <option value="unlocked">unlocked</option>
+            <option value="claimed">claimed</option>
+            <option value="released">released</option>
+            <option value="completed">completed</option>
+            <option value="skipped">skipped</option>
+            <option value="reopened">reopened</option>
+            <option value="submitted_for_approval">submitted_for_approval</option>
+          </optgroup>
+          <optgroup label="Admin actions">
+            <option value="flagged">flagged</option>
+            <option value="flagged_similar">flagged_similar</option>
+            <option value="unflagged">unflagged</option>
+            <option value="resolved">resolved</option>
+            <option value="approved">approved</option>
+            <option value="rejected">rejected</option>
+            <option value="acknowledged">acknowledged</option>
+            <option value="escalated">escalated</option>
+            <option value="paid">paid</option>
+            <option value="receipt_push">receipt_push</option>
+            <option value="payment_run_deleted">payment_run_deleted</option>
+            <option value="user_created">user_created</option>
+            <option value="user_toggled">user_toggled</option>
+            <option value="password_reset">password_reset</option>
+            <option value="imported">imported</option>
+            <option value="bulk_status">bulk_status</option>
+          </optgroup>
+          <optgroup label="Other">
+            <option value="chat_sent">chat_sent</option>
+            <option value="receipt_ack">receipt_ack</option>
+          </optgroup>
         </select>
+        <label class="filter-checkbox">
+          <input type="checkbox" id="al-comments-only">
+          <span>Comments only</span>
+        </label>
         <button class="btn btn-ghost" id="al-apply">APPLY</button>
+        <span class="muted mono" id="al-summary"></span>
       </div>
 
-      <table class="data-table">
-        <thead>
-          <tr><th>WHEN</th><th>USER</th><th>ACTION</th><th>TARGET</th><th>DETAILS</th></tr>
-        </thead>
-        <tbody id="al-body"><tr><td colspan="5" class="loading">Loading…</td></tr></tbody>
-      </table>
+      <div id="al-list" class="activity-list">
+        <div class="empty-hint">Loading…</div>
+      </div>
 
       <div class="paginator">
-        <button class="btn btn-ghost" id="al-prev">‹ PREV</button>
-        <span class="mono" id="al-page-info">page – / –</span>
-        <button class="btn btn-ghost" id="al-next">NEXT ›</button>
-        <span class="muted mono" id="al-total"></span>
+        <button class="btn btn-ghost" id="al-load-more">LOAD OLDER ENTRIES ↓</button>
       </div>
 
     </div>
   </section>
+
 </div>
 {% endblock %}
 

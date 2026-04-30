@@ -19,9 +19,16 @@ console (also stored in `.first_admin.txt`).
 > **Schema note** — if you've upgraded from an earlier build, delete
 > `poster.db` once before starting. Recent additions: `admin_acked_at` on
 > Revision; quality flags + image dims + delete_note on SavedPoster;
-> `revision_type` + `related_poster_ids` on Revision; `env` on User.
+> `revision_type` + `related_poster_ids` on Revision; new tables
+> `app_settings`, `payment_runs`, `chat_messages`, `chat_read_state`.
 > Saved poster files on disk are unaffected; only the metadata DB needs
 > rebuilding.
+>
+> **NOTE for the latest round (queue UX + save history + payments
+> breakdown + env removal)**: the test-environment feature has been
+> removed. The `env` column on `User` is no longer used. SQLAlchemy will
+> ignore the leftover column harmlessly — no manual migration needed.
+> All other changes are pure UI / route additions.
 
 ## What this version adds (latest round)
 

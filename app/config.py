@@ -10,6 +10,13 @@ import secrets
 from pathlib import Path
 
 
+# ── Cache busting ────────────────────────────────────────────────────────────
+# Bumped on every deploy. Templates append `?v={APP_VERSION}` to every
+# <script> and <link rel="stylesheet"> URL, so deploys force browsers to
+# refetch JS/CSS automatically — no Ctrl+Shift+R needed by users.
+APP_VERSION = "7"
+
+
 # ── Paths ────────────────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent.parent
 APP_DIR = Path(__file__).resolve().parent

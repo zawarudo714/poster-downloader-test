@@ -27,6 +27,7 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from .models import AppSetting, PaymentRun, Revision, SavedPoster
+from .timeutil import local_today
 
 
 # ─── Settings helpers ──────────────────────────────────────────────────────
@@ -191,7 +192,7 @@ def count_pending_revisions_today(db: Session, worker_id: int) -> int:
     an open / awaiting-approval revision. Surfaced on the worker's dashboard
     as "X not counted until revised" for transparency.
     """
-    today = date.today()
+    today = local_today()
     base_ids = {
         row[0] for row in db.query(SavedPoster.id).filter(
             SavedPoster.user_id == worker_id,

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Poster Downloader{% endblock %}</title>
-  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="stylesheet" href="/static/css/style.css?v={{ app_version }}">
   <style>
     :root {
       --bg:      {{ palette.BG }};
@@ -70,9 +70,9 @@
 
   <div id="tooltip" role="tooltip" hidden></div>
 
-  <script src="/static/js/tooltip.js"></script>
-  <script src="/static/js/theme.js"></script>
-  {% if user is defined and user %}<script src="/static/js/nav_badges.js"></script>{% endif %}
+  <script src="/static/js/tooltip.js?v={{ app_version }}"></script>
+  <script src="/static/js/theme.js?v={{ app_version }}"></script>
+  {% if user is defined and user %}<script src="/static/js/nav_badges.js?v={{ app_version }}"></script>{% endif %}
   {% block scripts %}{% endblock %}
 </body>
 </html>

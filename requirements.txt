@@ -7,3 +7,6 @@ itsdangerous==2.2.0
 requests==2.32.3
 SQLAlchemy==2.0.35
 openpyxl==3.1.5
+# tzdata bundles the IANA timezone database — required for zoneinfo.ZoneInfo
+# inside Python on slim/alpine images that don't ship system tzdata.
+tzdata==2024.2

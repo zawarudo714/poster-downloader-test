@@ -16,19 +16,21 @@ uvicorn app.main:app --reload
 Open <http://localhost:8000>. First-run admin credentials are printed to the
 console (also stored in `.first_admin.txt`).
 
-> **Schema note** — if you've upgraded from an earlier build, delete
-> `poster.db` once before starting. Recent additions: `admin_acked_at` on
-> Revision; quality flags + image dims + delete_note on SavedPoster;
-> `revision_type` + `related_poster_ids` on Revision; new tables
-> `app_settings`, `payment_runs`, `chat_messages`, `chat_read_state`.
-> Saved poster files on disk are unaffected; only the metadata DB needs
-> rebuilding.
+> **Schema note** — pure additive; no DB migration needed for this round.
 >
-> **NOTE for the latest round (queue UX + save history + payments
-> breakdown + env removal)**: the test-environment feature has been
-> removed. The `env` column on `User` is no longer used. SQLAlchemy will
-> ignore the leftover column harmlessly — no manual migration needed.
-> All other changes are pure UI / route additions.
+> **NOTE for round 7 (cache-busting + timezone fix)**: this round adds
+> `APP_VERSION` to `app/config.py` (used as `?v=N` on every static asset
+> URL — bump it on every deploy to force browsers to refetch JS/CSS), plus
+> a new `app/timeutil.py` that converts stored UTC timestamps to APP_TZ
+> for display. To activate timezones on the server, set `APP_TZ` and `TZ`
+> env vars in `docker-compose.yml`:
+> ```yaml
+>     environment:
+>       - TZ=Africa/Nairobi
+>       - APP_TZ=Africa/Nairobi
+> ```
+> The `tzdata` Python package is now in requirements.txt so the slim
+> Docker image has the timezone database available.
 
 ## What this version adds (latest round)
 

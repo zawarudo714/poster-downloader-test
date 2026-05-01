@@ -36,7 +36,7 @@
             <td>{% if u.role == 'admin' %}<span class="role-badge role-admin">ADMIN</span>{% else %}<span class="role-badge">USER</span>{% endif %}</td>
             <td>{% if u.is_active %}<span class="ok">active</span>{% else %}<span class="muted">disabled</span>{% endif %}</td>
             <td class="mono">{{ claim_counts.get(u.id, 0) }}</td>
-            <td class="mono">{{ u.created_at.strftime('%Y-%m-%d') if u.created_at else '' }}</td>
+            <td class="mono">{{ u.created_at | local_dt('%Y-%m-%d') }}</td>
             <td class="actions-cell">
               <form method="post" action="/admin/users/{{ u.id }}/toggle" class="inline">
                 <button type="submit" class="btn btn-ghost btn-tiny">{% if u.is_active %}DISABLE{% else %}ENABLE{% endif %}</button>
@@ -63,5 +63,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/admin.js"></script>
+<script src="/static/js/admin.js?v={{ app_version }}"></script>
 {% endblock %}

@@ -46,6 +46,7 @@ from ..config import (
 )
 from ..db import get_db
 from ..models import ActivityLog, MasterTitle, Revision, SavedPoster, User
+from ..timeutil import fmt_local, local_today
 from ..parsing import IMAGE_EXT_RE, filename_for, folder_name_for, sanitize
 from ..templating import templates
 from ..utils import (
@@ -111,7 +112,7 @@ def _serialize_poster(p: SavedPoster) -> dict:
         "low_quality_url": bool(p.low_quality_url),
         "image_width": p.image_width,
         "image_height": p.image_height,
-        "created_at": p.created_at.strftime("%Y-%m-%d %H:%M"),
+        "created_at": fmt_local(p.created_at, "%Y-%m-%d %H:%M"),
     }
 
 
@@ -161,8 +162,8 @@ def _active_revisions_for_user(db: Session, user: User):
             "revision_type": rev.revision_type or "simple",
             "comment": rev.comment or "",
             "flagged_by": rev.flagged_by,
-            "created_at": rev.created_at.strftime("%Y-%m-%d %H:%M"),
-            "submitted_at": rev.submitted_at.strftime("%Y-%m-%d %H:%M") if rev.submitted_at else None,
+            "created_at": fmt_local(rev.created_at, "%Y-%m-%d %H:%M"),
+            "submitted_at": fmt_local(rev.submitted_at, "%Y-%m-%d %H:%M") or None,
             "worker_note": rev.worker_note or "",
             "admin_verdict": rev.admin_verdict or "",
             "was_rejected": was_rejected,
@@ -180,7 +181,7 @@ def _active_revisions_for_user(db: Session, user: User):
 
 
 def _state_payload(db: Session, user: User) -> dict:
-    today = date_type.today()
+    today = local_today()
     queue = _my_queue(db, user)
     queue_dicts = [_serialize_master(t, db) for t in queue]
 
@@ -221,7 +222,7 @@ def _state_payload(db: Session, user: User) -> dict:
         "rate_kes":     r.rate_kes,
         "reference":    r.reference or "",
         "note":         r.note or "",
-        "pushed_at":    r.pushed_at.strftime("%Y-%m-%d %H:%M") if r.pushed_at else None,
+        "pushed_at":    fmt_local(r.pushed_at, "%Y-%m-%d %H:%M") or None,
     } for r in pushed]
     # Chat unread (worker viewing their own thread).
     from ..chat import unread_count
@@ -676,7 +677,7 @@ def save_image(
             status_code=409,
         )
 
-    today = date_type.today()
+    today = local_today()
     _ensure_first_save_metadata(t, today)
     db.flush()  # so t.title_folder_path / t.original_save_date are visible to helpers
 

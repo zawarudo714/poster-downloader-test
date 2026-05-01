@@ -39,7 +39,7 @@
                 {% if rev.worker_note %}
                   <div class="rev-card-worker-note"><strong>{{ sp.username }} says:</strong> {{ rev.worker_note }}</div>
                 {% endif %}
-                <div class="rev-card-meta mono muted">submitted {{ rev.submitted_at.strftime('%Y-%m-%d %H:%M') if rev.submitted_at else '' }}</div>
+                <div class="rev-card-meta mono muted">submitted {{ rev.submitted_at | local_dt('%Y-%m-%d %H:%M') }}</div>
                 <div class="rev-card-actions">
                   <input type="text" placeholder="(optional) verdict comment" data-verdict-input>
                   <button class="btn btn-success btn-tiny" data-action="approve">APPROVE</button>
@@ -86,7 +86,7 @@
                 {% if rev.admin_verdict %}
                   <div class="rev-card-verdict"><strong>Your earlier verdict:</strong> {{ rev.admin_verdict }}</div>
                 {% endif %}
-                <div class="rev-card-meta mono muted">flagged by {{ rev.flagged_by }} · {{ rev.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+                <div class="rev-card-meta mono muted">flagged by {{ rev.flagged_by }} · {{ rev.created_at | local_dt('%Y-%m-%d %H:%M') }}</div>
                 <div class="rev-card-actions">
                   <button class="btn btn-ghost btn-tiny" data-unflag-poster-id="{{ sp.id }}">CLEAR FLAG</button>
                 </div>
@@ -121,7 +121,7 @@
                 {% else %}
                   <div class="rev-card-worker-note muted"><em>No deletion reason given.</em></div>
                 {% endif %}
-                <div class="rev-card-meta mono muted">deleted {{ rev.resolved_at.strftime('%Y-%m-%d %H:%M') if rev.resolved_at else '' }}</div>
+                <div class="rev-card-meta mono muted">deleted {{ rev.resolved_at | local_dt('%Y-%m-%d %H:%M') }}</div>
                 <div class="rev-card-actions">
                   <input type="text" placeholder="(optional for ACK; required for SEND BACK) note for the user" data-deletion-note>
                   <button class="btn btn-ghost btn-tiny" data-action="ack-deletion">ACKNOWLEDGE</button>
@@ -154,7 +154,7 @@
                 <td class="mono">{{ sp.filename }}</td>
                 <td class="mono">{{ rev.flagged_by }}</td>
                 <td>{{ rev.admin_verdict or '' }}</td>
-                <td class="mono">{{ rev.resolved_at.strftime('%Y-%m-%d %H:%M') if rev.resolved_at else '' }}</td>
+                <td class="mono">{{ rev.resolved_at | local_dt('%Y-%m-%d %H:%M') }}</td>
               </tr>
             {% endfor %}
           </tbody>
@@ -169,5 +169,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/admin_revisions.js"></script>
+<script src="/static/js/admin_revisions.js?v={{ app_version }}"></script>
 {% endblock %}

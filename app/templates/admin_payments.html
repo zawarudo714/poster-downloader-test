@@ -104,7 +104,7 @@
           <tbody>
             {% for r in runs %}
               <tr data-run-id="{{ r.id }}">
-                <td class="mono">{{ r.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td class="mono">{{ r.created_at | local_dt('%Y-%m-%d %H:%M') }}</td>
                 <td class="mono">{{ r.worker_username }}</td>
                 <td class="mono">{{ r.period_start.isoformat() }} → {{ r.period_end.isoformat() }}</td>
                 <td class="mono">{{ r.poster_count }} × {{ r.rate_kes }}</td>
@@ -112,9 +112,9 @@
                 <td class="mono">{{ r.reference or '—' }}</td>
                 <td>
                   {% if r.ack_at %}
-                    <span class="status-pill status-resolved" title="Acknowledged at {{ r.ack_at.strftime('%Y-%m-%d %H:%M') }}">ACKED</span>
+                    <span class="status-pill status-resolved" title="Acknowledged at {{ r.ack_at | local_dt('%Y-%m-%d %H:%M') }}">ACKED</span>
                   {% elif r.pushed_at %}
-                    <span class="status-pill status-awaiting" title="Pushed at {{ r.pushed_at.strftime('%Y-%m-%d %H:%M') }}">PUSHED</span>
+                    <span class="status-pill status-awaiting" title="Pushed at {{ r.pushed_at | local_dt('%Y-%m-%d %H:%M') }}">PUSHED</span>
                   {% else %}
                     <span class="status-pill">paid</span>
                   {% endif %}
@@ -172,5 +172,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/admin_payments.js"></script>
+<script src="/static/js/admin_payments.js?v={{ app_version }}"></script>
 {% endblock %}

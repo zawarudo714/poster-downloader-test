@@ -20,6 +20,7 @@ from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from .models import ChatMessage, ChatReadState, User
+from .timeutil import fmt_local
 
 
 # ─── Send / list ──────────────────────────────────────────────────────────
@@ -77,7 +78,7 @@ def serialize_message(msg: ChatMessage) -> dict:
         "sender_id":   msg.sender_id,
         "sender_role": msg.sender_role,
         "body":        msg.body,
-        "created_at":  msg.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+        "created_at":  fmt_local(msg.created_at, "%Y-%m-%d %H:%M:%S"),
         "created_at_iso": msg.created_at.isoformat() + "Z",
     }
 
@@ -146,7 +147,7 @@ def admin_thread_summaries(db: Session, *, viewer_id: int) -> list[dict]:
             "worker_id":   w.id,
             "username":    w.username,
             "last_body":   (last.body[:80] + ("…" if len(last.body) > 80 else "")) if last else "",
-            "last_at":     last.created_at.strftime("%Y-%m-%d %H:%M") if last else None,
+            "last_at":     fmt_local(last.created_at, "%Y-%m-%d %H:%M") if last else None,
             "last_sender": last.sender_role if last else None,
             "unread":      unread_count(db, worker_id=w.id, viewer_id=viewer_id),
         })

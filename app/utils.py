@@ -22,14 +22,10 @@ from datetime import date as date_type, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-from .config import WORKSPACE_DIR  # used as fallback only; live workspace path
-# (env feature removed) — workspace path is now a constant
+from .config import WORKSPACE_DIR
 from .parsing import IMAGE_EXTS
+from .timeutil import local_today
 
-
-# Resolve the workspace dir at every call so we follow env switches. Calling
-# `WORKSPACE_DIR` is just a contextvar lookup + small dict hop, so
-# this is essentially free.
 
 # ── Workspace layout ─────────────────────────────────────────────────────────
 
@@ -130,7 +126,7 @@ def list_title_folders(username: str, d: date_type) -> list[Path]:
 
 def week_range(d: Optional[date_type] = None) -> tuple[date_type, date_type]:
     """Return (monday, sunday) of the week containing `d` (default today)."""
-    d = d or date_type.today()
+    d = d or local_today()
     monday = d - timedelta(days=d.weekday())
     sunday = monday + timedelta(days=6)
     return monday, sunday

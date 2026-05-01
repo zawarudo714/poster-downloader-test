@@ -58,6 +58,7 @@ from ..models import (
     ActivityLog, AppSetting, ChatMessage, ChatReadState,
     ImportJob, MasterTitle, PaymentRun, Revision, SavedPoster, User,
 )
+from ..timeutil import fmt_local, local_today
 from ..templating import templates
 from ..utils import (
     count_user_saves_for_date, count_user_saves_for_week,
@@ -74,7 +75,7 @@ router = APIRouter(prefix="/admin")
 @router.get("", response_class=HTMLResponse)
 @router.get("/", response_class=HTMLResponse)
 def admin_dashboard(request: Request, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
-    today = date_type.today()
+    today = local_today()
     users = db.query(User).filter_by(role="worker").order_by(User.username.asc()).all()
     user_stats = []
     for w in users:
@@ -580,7 +581,7 @@ def browse_page(
         workers = [u.username for u in users]
     selected_worker = worker or (workers[0] if workers else "")
     dates = list_date_folders(selected_worker) if selected_worker else []
-    today_iso = date_type.today().isoformat()
+    today_iso = local_today().isoformat()
     if today_iso not in dates and selected_worker:
         dates = [today_iso] + dates
     selected_date = date or (today_iso if today_iso in dates else (dates[0] if dates else today_iso))
@@ -1234,7 +1235,7 @@ def api_audit(
                 "username": r.username, "action": r.action,
                 "target_type": r.target_type, "target_id": r.target_id,
                 "details": (json.loads(r.details) if r.details else None),
-                "created_at": r.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "created_at": fmt_local(r.created_at, "%Y-%m-%d %H:%M:%S"),
             }
             for r in rows
         ],
@@ -1370,7 +1371,7 @@ def payments_page(
             "rate_kes": rate,
             "week_start_day": week_start,
             "runs": runs,
-            "today": date.today(),
+            "today": local_today(),
         },
     )
 
@@ -1672,7 +1673,7 @@ def api_activity(
             continue
         out.append({
             "id":          r.id,
-            "created_at":  r.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "created_at":  fmt_local(r.created_at, "%Y-%m-%d %H:%M:%S"),
             "username":    r.username or "",
             "action":      r.action,
             "target_type": r.target_type or "",

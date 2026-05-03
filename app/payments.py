@@ -247,3 +247,113 @@ def pending_receipts_for_worker(db: Session, worker_id: int):
           .order_by(PaymentRun.pushed_at.desc())
           .all()
     )
+
+
+def unpaid_dates_before(
+    db: Session,
+    *,
+    worker_id: int,
+    today: date,
+) -> list[dict]:
+    """
+    For each PAST day this worker has at least one *currently-eligible*
+    poster (saved that day, not deleted, no active revision, not yet paid),
+    return:
+        {"date": "2026-04-30", "count": 5}
+
+    Used to surface "you forgot to pay these older days" on the Payments
+    UI. Days strictly before `today` only — today's eligible posters are
+    visible by default through the normal preview.
+
+    Backed by a single SQL aggregate so it stays fast even with thousands
+    of posters.
+    """
+    from sqlalchemy import func as sa_func
+
+    # All non-deleted posters this worker has saved before today.
+    rows = (
+        db.query(SavedPoster.id, SavedPoster.original_save_date)
+          .filter(
+              SavedPoster.user_id == worker_id,
+              SavedPoster.deleted_at.is_(None),
+              SavedPoster.original_save_date < today,
+          )
+          .all()
+    )
+    if not rows:
+        return []
+
+    candidate = {pid for pid, _d in rows}
+    candidate -= _already_paid_poster_ids(db, worker_id)
+    if not candidate:
+        return []
+
+    # Subtract any with active revisions.
+    blocked_rows = (
+        db.query(Revision.saved_poster_id)
+          .filter(
+              Revision.saved_poster_id.in_(candidate),
+              Revision.status.in_(("open", "awaiting_approval")),
+          )
+          .all()
+    )
+    blocked = {r[0] for r in blocked_rows}
+    candidate -= blocked
+
+    # Similar-pair revision related list.
+    sim_rows = (
+        db.query(Revision.related_poster_ids)
+          .filter(
+              Revision.status.in_(("open", "awaiting_approval")),
+              Revision.revision_type == "similar",
+          )
+          .all()
+    )
+    for (raw,) in sim_rows:
+        if not raw:
+            continue
+        try:
+            for pid in json.loads(raw):
+                if isinstance(pid, int):
+                    candidate.discard(pid)
+        except (TypeError, ValueError):
+            pass
+
+    if not candidate:
+        return []
+
+    # Bucket survivors back into per-day counts.
+    by_day: dict[date, int] = {}
+    for pid, d in rows:
+        if pid in candidate:
+            by_day[d] = by_day.get(d, 0) + 1
+    return [
+        {"date": d.isoformat(), "count": n}
+        for d, n in sorted(by_day.items(), reverse=True)
+    ]
+
+
+def per_day_breakdown(
+    db: Session,
+    *,
+    poster_ids: list[int],
+) -> dict[str, int]:
+    """
+    Given a list of saved_poster IDs (typically just paid in a run),
+    return {"YYYY-MM-DD": count} of how many fall on each save_date.
+    Used to render the per-day breakdown on receipts.
+    """
+    if not poster_ids:
+        return {}
+    rows = (
+        db.query(SavedPoster.original_save_date)
+          .filter(SavedPoster.id.in_(poster_ids))
+          .all()
+    )
+    by_day: dict[str, int] = {}
+    for (d,) in rows:
+        if d is None:
+            continue
+        key = d.isoformat()
+        by_day[key] = by_day.get(key, 0) + 1
+    return by_day

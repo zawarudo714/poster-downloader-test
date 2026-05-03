@@ -51,6 +51,12 @@
               <button class="btn btn-ghost btn-tiny"
                       data-release-user-id="{{ u.id }}"
                       data-keep-started="1">RELEASE UNSTARTED</button>
+              {% if u.id != admin.id %}
+                <button class="btn btn-error btn-tiny"
+                        data-delete-user-id="{{ u.id }}"
+                        data-delete-username="{{ u.username }}"
+                        data-delete-role="{{ u.role }}">DELETE</button>
+              {% endif %}
             </td>
           </tr>
           {% endfor %}
@@ -59,6 +65,34 @@
     </div>
   </section>
 
+</div>
+
+<!-- Delete user dialog -->
+<div id="delete-user-dialog" class="lightbox" hidden>
+  <div class="lightbox-bg" data-lightbox-close></div>
+  <div class="lightbox-card delete-user-card">
+    <h3>DELETE USER</h3>
+    <p class="muted">
+      This <strong>soft-deletes</strong> the user. They can no longer log in. Their
+      saved posters stay on disk and remain visible in the admin gallery (attributed
+      as "[deleted: <span id="del-username-show"></span>]"). Any titles they had claimed
+      go back to the pool. Chat and payment history are preserved.
+    </p>
+    <p class="muted small">This action is logged but not reversible from the UI.</p>
+    <div class="delete-user-form">
+      <label class="filter-label">Type the username (<span class="mono" id="del-username-echo"></span>) to confirm
+        <input type="text" id="del-confirm-username" autocomplete="off">
+      </label>
+      <label class="filter-label">Re-enter your admin password
+        <input type="password" id="del-admin-password" autocomplete="current-password">
+      </label>
+      <div id="del-error" class="error-text" hidden></div>
+    </div>
+    <div class="delete-user-actions">
+      <button class="btn btn-ghost" data-lightbox-close>CANCEL</button>
+      <button class="btn btn-error" id="del-confirm-btn" disabled>DELETE</button>
+    </div>
+  </div>
 </div>
 {% endblock %}
 

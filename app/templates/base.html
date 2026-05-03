@@ -31,8 +31,19 @@
 <body>
   <header class="topbar">
     <div class="topbar-inner">
-      <div class="brand"><span class="brand-mark">▌</span> POSTER&nbsp;DOWNLOADER</div>
-      <nav class="topnav">
+      <button class="nav-toggle" id="nav-toggle" type="button"
+              aria-label="Open menu" aria-expanded="false" aria-controls="topnav">
+        <span class="nav-toggle-bar"></span>
+        <span class="nav-toggle-bar"></span>
+        <span class="nav-toggle-bar"></span>
+        <span class="nav-toggle-badge" id="nav-toggle-badge" hidden>0</span>
+      </button>
+      <a href="{% if user is defined and user and user.role == 'admin' %}/admin{% else %}/{% endif %}" class="brand">
+        <span class="brand-mark">▌</span>
+        <span class="brand-full">POSTER&nbsp;DOWNLOADER</span>
+        <span class="brand-short" aria-hidden="true">PD</span>
+      </a>
+      <nav class="topnav" id="topnav">
         {% if user is defined and user %}
           {% if user.role == 'admin' %}
             <a href="/admin"           class="navlink {% if active_tab == 'dashboard' %}active{% endif %}">Dashboard</a>
@@ -44,6 +55,7 @@
             <a href="/admin/chat"      class="navlink chat-nav {% if active_tab == 'chat' %}active{% endif %}">Chat<span class="nav-badge" id="nav-chat-badge" hidden>0</span></a>
             <a href="/admin/users"     class="navlink {% if active_tab == 'users' %}active{% endif %}">Users</a>
             <a href="/admin/backups"   class="navlink {% if active_tab == 'backups' %}active{% endif %}">Backups</a>
+            <a href="/admin/email"     class="navlink {% if active_tab == 'email' %}active{% endif %}">Email</a>
             <a href="/admin/audit"     class="navlink {% if active_tab == 'audit' %}active{% endif %}">Activity&nbsp;Log</a>
             <a href="/worker"          class="navlink">Work&nbsp;Mode</a>
           {% else %}
@@ -53,6 +65,7 @@
           {% endif %}
         {% endif %}
       </nav>
+      <div class="nav-scrim" id="nav-scrim" hidden></div>
       <div class="user-pill">
         <button id="theme-toggle" class="theme-toggle" type="button" title="Toggle light/dark mode" aria-label="Toggle theme">☾</button>
         {% if user is defined and user %}

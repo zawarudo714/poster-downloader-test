@@ -72,6 +72,9 @@
                   <button class="btn btn-ghost btn-tiny" data-action="details">PER-DAY ▾</button>
                 </td>
               </tr>
+              <tr class="pay-unpaid-row" data-unpaid-for="{{ w.id }}" hidden>
+                <td colspan="5" class="pay-unpaid-cell"></td>
+              </tr>
               <tr class="pay-details-row" data-details-for="{{ w.id }}" hidden>
                 <td colspan="5" class="pay-details-cell"></td>
               </tr>
@@ -148,6 +151,20 @@
   <div class="lightbox-card pay-dialog-card">
     <h3>MARK PAID</h3>
     <p class="muted" id="pay-dialog-summary">…</p>
+
+    <div class="pay-dialog-backpay" id="pay-dialog-backpay" hidden>
+      <div class="pay-dialog-backpay-head">
+        <strong>⚠ Older unpaid days</strong>
+        <span class="muted">Tick any to include in this payment.</span>
+      </div>
+      <div class="pay-dialog-backpay-list" id="pay-dialog-backpay-list">
+        <!-- filled by JS -->
+      </div>
+      <div class="pay-dialog-backpay-summary muted" id="pay-dialog-backpay-summary">
+        <!-- "+0 back-pay posters · +0 KES" -->
+      </div>
+    </div>
+
     <div class="pay-dialog-form">
       <label class="filter-label">AMOUNT (KES)
         <input type="text" id="pay-dialog-amount" pattern="[0-9]+(\.[0-9]+)?" required>

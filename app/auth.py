@@ -68,18 +68,32 @@ def clear_session(response) -> None:
 # ── FastAPI dependencies ─────────────────────────────────────────────────────
 
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> Optional[User]:
-    """Return the logged-in User or None. Does not raise."""
+    """Return the logged-in User or None. Does not raise.
+
+    Deleted users (`is_deleted=1`) cannot authenticate, even if their
+    session cookie is still valid — the soft-delete check happens here.
+    """
     token = request.cookies.get(SESSION_COOKIE_NAME)
     if not token:
         return None
     username = read_session_cookie(token)
     if not username:
         return None
-    return db.query(User).filter_by(username=username, is_active=1).first()
+    return (
+        db.query(User)
+          .filter_by(username=username, is_active=1, is_deleted=0)
+          .first()
+    )
 
 
 def require_user(request: Request, db: Session = Depends(get_db)) -> User:
-    """Raise 302 redirect to /login if not authenticated."""
+    """Raise 302 redirect to /login if not authenticated.
+
+    Side effect: bumps `last_seen_at` to NOW on every authenticated
+    request. This drives the admin "online / away / offline" indicator.
+    The update is one row per request — cheap on SQLite, and we commit
+    it in a separate transaction so route failures don't lose it.
+    """
     user = get_current_user(request, db)
     if user is None:
         raise HTTPException(
@@ -87,6 +101,15 @@ def require_user(request: Request, db: Session = Depends(get_db)) -> User:
             headers={"Location": "/login"},
             detail="Not authenticated",
         )
+    # Bump last_seen_at on every authenticated request. We do it via a
+    # raw UPDATE so it doesn't get rolled back if the route hits an error
+    # halfway through; SQLAlchemy auto-commits the bare UPDATE.
+    from datetime import datetime
+    user.last_seen_at = datetime.utcnow()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
     return user
 
 

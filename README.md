@@ -31,6 +31,26 @@ console (also stored in `.first_admin.txt`).
 > ```
 > The `tzdata` Python package is now in requirements.txt so the slim
 > Docker image has the timezone database available.
+>
+> **NOTE for round 9 (bug fixes + transparency + admin UX)**: this round
+> adds two new columns to `payment_runs`: `by_day_json` and
+> `back_pay_dates_json`. `Base.metadata.create_all()` does NOT add columns
+> to existing tables, so on existing installs you need to either delete
+> `data/poster.db` (loses data) or run a one-time ALTER TABLE inside the
+> container *before* restarting the new image:
+> ```bash
+> docker exec poster-downloader-web-1 python -c "
+> import sqlite3
+> c = sqlite3.connect('/app/poster.db')
+> c.execute('ALTER TABLE payment_runs ADD COLUMN by_day_json TEXT')
+> c.execute('ALTER TABLE payment_runs ADD COLUMN back_pay_dates_json TEXT')
+> c.commit()
+> print('OK')
+> "
+> ```
+> Other additions: nothing else needs migration — `is_deleted`/`deleted_at`
+> on User, `last_seen_at` on User, and email config keys in `app_settings`
+> were all added in previous rounds.
 
 ## What this version adds (latest round)
 

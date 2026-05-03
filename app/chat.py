@@ -131,7 +131,7 @@ def admin_thread_summaries(db: Session, *, viewer_id: int) -> list[dict]:
     # All workers, in alpha order. Admin can chat with any of them.
     workers = (
         db.query(User)
-          .filter(User.role == "worker", User.is_active == 1)
+          .filter(User.role == "worker", User.is_active == 1, User.is_deleted == 0)
           .order_by(User.username.asc())
           .all()
     )

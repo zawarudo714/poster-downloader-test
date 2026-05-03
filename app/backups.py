@@ -231,9 +231,20 @@ def _seconds_until_next_midnight() -> float:
 
 
 def _scheduler_loop():
-    """Run forever: backup at startup if missing, then sleep until midnight + 5s."""
-    # Catch-up: if no backup exists for today (because the server was offline at
-    # midnight), make one now.
+    """
+    Run forever. Wake once per minute. On each tick:
+      - If today's auto-backup is missing, run one (also covers the
+        startup catch-up case when the server was off at midnight).
+      - If the configured email send_time has passed today AND we haven't
+        already sent today's summary, send it.
+
+    Both checks are idempotent — they look at filesystem (backup file
+    existence) and a small marker setting (last email send date), so a
+    restart mid-day doesn't double-fire either action.
+    """
+    from .timeutil import local_today, local_now
+
+    # Initial catch-up backup (if today's missing).
     try:
         auto_backup_today()
     except Exception:
@@ -241,12 +252,78 @@ def _scheduler_loop():
 
     while True:
         try:
-            wait = _seconds_until_next_midnight()
-            time.sleep(wait)
-            auto_backup_today()
+            now = local_now()
+            today_local = local_today()
+
+            # ── Backup check ─────────────────────────────────────────────
+            today_backup = BACKUPS_DIR / f"auto-{today_local.isoformat()}.db"
+            if not today_backup.exists():
+                try:
+                    auto_backup_today()
+                except Exception:
+                    log.exception("Auto-backup attempt failed")
+
+            # ── Daily email check ────────────────────────────────────────
+            try:
+                _maybe_send_daily_email(now=now, today_local=today_local)
+            except Exception:
+                log.exception("Daily email send attempt failed")
+
+            # Sleep one minute (60s) — fine-grained enough that admin
+            # changing send_time takes effect within a minute.
+            time.sleep(60)
         except Exception:
-            log.exception("Scheduled backup failed; will retry in 1 hour")
-            time.sleep(3600)
+            log.exception("Scheduler loop iteration failed; pausing 5 minutes")
+            time.sleep(300)
+
+
+def _maybe_send_daily_email(*, now: datetime, today_local) -> None:
+    """
+    Per-tick email check. Reads config + last-sent marker from app_settings
+    and decides whether to send. Updates the marker on success.
+    """
+    from .db import SessionLocal
+    from .email_summary import get_email_config, send_daily_summary
+    from .models import AppSetting
+
+    db = SessionLocal()
+    try:
+        cfg = get_email_config(db)
+        if not cfg["enabled"]:
+            return
+
+        # Parse the configured send_time (HH:MM, defaults to 23:55).
+        try:
+            hh, mm = (cfg.get("send_time") or "23:55").split(":")
+            send_h, send_m = int(hh), int(mm)
+        except Exception:
+            send_h, send_m = 23, 55
+
+        # Has the time-of-day passed yet, today?
+        if (now.hour, now.minute) < (send_h, send_m):
+            return
+
+        # Already sent today? Marker key stores ISO date of last send.
+        marker = db.query(AppSetting).filter_by(key="email_last_sent_date").first()
+        last_sent_iso = marker.value if marker else ""
+        if last_sent_iso == today_local.isoformat():
+            return
+
+        # Send and record. If sending fails, don't update the marker — we'll
+        # retry on the next tick (1 minute later).
+        sent = send_daily_summary(db, target_day=today_local)
+        if sent:
+            if marker is None:
+                marker = AppSetting(key="email_last_sent_date", value=today_local.isoformat(),
+                                    updated_by="scheduler")
+                db.add(marker)
+            else:
+                marker.value = today_local.isoformat()
+                marker.updated_by = "scheduler"
+                marker.updated_at = datetime.utcnow()
+            db.commit()
+    finally:
+        db.close()
 
 
 _scheduler_thread: Optional[threading.Thread] = None

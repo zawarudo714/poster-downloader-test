@@ -47,6 +47,21 @@ class User(Base):
     # Last "pull next N" size remembered between sessions.
     last_pull_size   = Column(Integer, nullable=True)
 
+    # Last time we saw a request from this user. Set on every authenticated
+    # request (cheap one-row update). Drives the admin's "online / away /
+    # offline" indicator on the Users page.
+    last_seen_at     = Column(DateTime, nullable=True, index=True)
+
+    # Soft-delete flag. `is_deleted=1` users:
+    #   - cannot log in (auth check rejects them)
+    #   - don't appear in the active worker list
+    #   - their saved_posters rows + chat history + payment runs are PRESERVED
+    #     (deletion just hides them from active use; old data stays intact for
+    #     audit + admin gallery viewing)
+    # Username deletion is enforced via double-confirm in the admin UI.
+    is_deleted       = Column(Integer, default=0, nullable=False, index=True)
+    deleted_at       = Column(DateTime, nullable=True)
+
 
 # ── Master title sheet ───────────────────────────────────────────────────────
 
@@ -271,6 +286,15 @@ class PaymentRun(Base):
     reference       = Column(String(128), nullable=True)  # M-Pesa code, etc.
     note            = Column(Text, nullable=True)
     poster_ids_json = Column(Text, nullable=False, default="[]")  # JSON list of paid saved_poster IDs
+
+    # Per-day breakdown captured at run creation time, for receipt
+    # transparency. Format: {"2026-04-30": 5, "2026-04-29": 2, ...}
+    by_day_json     = Column(Text, nullable=True)
+    # Subset of dates in by_day_json that are OUTSIDE [period_start, period_end]
+    # — i.e. older "back-pay" posters admin manually included in this run
+    # because they became eligible after the original period was paid.
+    # JSON list of date strings: ["2026-04-23", "2026-04-22"]
+    back_pay_dates_json = Column(Text, nullable=True)
 
     # Push-to-worker (receipt) flow — null until admin pushes.
     pushed_at       = Column(DateTime, nullable=True)

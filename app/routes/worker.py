@@ -213,17 +213,35 @@ def _state_payload(db: Session, user: User) -> dict:
     pending_count = count_pending_revisions_today(db, user.id)
     # Pushed-but-not-acked receipts from admin.
     pushed = pending_receipts_for_worker(db, user.id)
-    receipts = [{
-        "id":           r.id,
-        "period_start": r.period_start.isoformat(),
-        "period_end":   r.period_end.isoformat(),
-        "poster_count": r.poster_count,
-        "amount_kes":   r.amount_kes,
-        "rate_kes":     r.rate_kes,
-        "reference":    r.reference or "",
-        "note":         r.note or "",
-        "pushed_at":    fmt_local(r.pushed_at, "%Y-%m-%d %H:%M") or None,
-    } for r in pushed]
+    receipts = []
+    for r in pushed:
+        # Per-day breakdown for transparency. Frozen at run creation time.
+        by_day_raw = r.by_day_json
+        by_day = {}
+        if by_day_raw:
+            try:
+                by_day = json.loads(by_day_raw)
+            except (TypeError, ValueError):
+                pass
+        back_pay_dates = []
+        if r.back_pay_dates_json:
+            try:
+                back_pay_dates = json.loads(r.back_pay_dates_json)
+            except (TypeError, ValueError):
+                pass
+        receipts.append({
+            "id":           r.id,
+            "period_start": r.period_start.isoformat(),
+            "period_end":   r.period_end.isoformat(),
+            "poster_count": r.poster_count,
+            "amount_kes":   r.amount_kes,
+            "rate_kes":     r.rate_kes,
+            "reference":    r.reference or "",
+            "note":         r.note or "",
+            "pushed_at":    fmt_local(r.pushed_at, "%Y-%m-%d %H:%M") or None,
+            "by_day":       by_day,           # {"2026-04-30": 5, ...}
+            "back_pay_dates": back_pay_dates, # ["2026-04-23", ...] subset of by_day
+        })
     # Chat unread (worker viewing their own thread).
     from ..chat import unread_count
     chat_unread = unread_count(db, worker_id=user.id, viewer_id=user.id)
@@ -807,7 +825,10 @@ def delete_poster(
             suffix = (": " + note.strip()) if note.strip() else ""
             r.admin_verdict = "auto-resolved: similar-pair file deleted" + suffix
 
-    # Recompute needs_revision flag on the master title
+    # Recompute needs_revision flag on the master title.
+    # Defensive: filter out soft-deleted posters from the JOIN. Under normal
+    # flow their revisions are already resolved (loops above), but if anything
+    # ever wedged this prevents a stuck flag.
     mt = db.query(MasterTitle).filter_by(id=sp.master_title_id).first()
     if mt:
         any_active = (
@@ -815,6 +836,7 @@ def delete_poster(
               .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
               .filter(
                   SavedPoster.master_title_id == mt.id,
+                  SavedPoster.deleted_at.is_(None),
                   Revision.status.in_(("open", "awaiting_approval")),
               )
               .count()
@@ -961,10 +983,41 @@ def _load_my_master(db: Session, user: User, master_id: int) -> MasterTitle:
 def title_complete(
     master_id: int,
     comment: str = Form(""),
+    force: int = Form(0),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
+    """
+    Mark this title done. If there are open or awaiting-approval revisions
+    against this master's posters, return 409 with a count so the worker
+    side can show a confirm dialog. Worker re-submits with force=1 to
+    proceed anyway.
+    """
     t = _load_my_master(db, user, master_id)
+
+    if not force:
+        active_revs = (
+            db.query(Revision)
+              .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
+              .filter(
+                  SavedPoster.master_title_id == t.id,
+                  SavedPoster.deleted_at.is_(None),
+                  Revision.status.in_(("open", "awaiting_approval")),
+              )
+              .count()
+        )
+        if active_revs > 0:
+            return JSONResponse(
+                {"ok": False, "reason": "open_revisions",
+                 "open_count": active_revs,
+                 "message": (
+                     f"This title still has {active_revs} unresolved "
+                     f"flag{'s' if active_revs != 1 else ''}. "
+                     "Mark complete anyway?"
+                 )},
+                status_code=409,
+            )
+
     t.status = "complete"
     t.completed_at = datetime.utcnow()
     t.complete_comment = comment.strip() or None
@@ -973,7 +1026,7 @@ def title_complete(
         user.locked_master_id = None
     log_activity(
         db, user=user, action="completed", target_type="master_title", target_id=t.id,
-        details={"comment": comment.strip() or None},
+        details={"comment": comment.strip() or None, "forced": bool(force)},
     )
     db.commit()
     return JSONResponse({"ok": True})

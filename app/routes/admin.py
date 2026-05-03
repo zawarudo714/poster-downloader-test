@@ -76,7 +76,7 @@ router = APIRouter(prefix="/admin")
 @router.get("/", response_class=HTMLResponse)
 def admin_dashboard(request: Request, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
     today = local_today()
-    users = db.query(User).filter_by(role="worker").order_by(User.username.asc()).all()
+    users = db.query(User).filter_by(role="worker", is_deleted=0).order_by(User.username.asc()).all()
     user_stats = []
     for w in users:
         claims = (
@@ -91,6 +91,7 @@ def admin_dashboard(request: Request, admin: User = Depends(require_admin), db: 
             "week":   count_user_saves_for_week(db, w.username, today),
             "claims": claims,
             "is_active": bool(w.is_active),
+            "presence": _presence_label(w.last_seen_at),
         })
     open_revs = db.query(Revision).filter_by(status="open").count()
     awaiting_revs = db.query(Revision).filter_by(status="awaiting_approval").count()
@@ -103,19 +104,77 @@ def admin_dashboard(request: Request, admin: User = Depends(require_admin), db: 
     revision_master  = db.query(MasterTitle).filter(MasterTitle.needs_revision == 1).count()
     total_master     = db.query(MasterTitle).count()
 
+    # ── "Needs your attention" digest counts ────────────────────────────────
+    # Deletion review = revision auto-resolved by worker delete that admin
+    # hasn't yet acknowledged or escalated. Same logic as the revisions page.
+    pending_deletions = (
+        db.query(Revision)
+          .filter(
+              Revision.status == "resolved",
+              Revision.admin_verdict.like("auto-resolved: %file deleted%"),
+              Revision.admin_acked_at.is_(None),
+          )
+          .count()
+    )
+
+    # Unread chats for this admin viewer.
+    from ..chat import admin_thread_summaries
+    threads = admin_thread_summaries(db, viewer_id=admin.id)
+    unread_chats = sum(t["unread"] for t in threads)
+
+    # Owed since last payment per worker — sum eligible posters across
+    # all workers using current rate (matches what /admin/payments would show
+    # if you hit "this week" preset). Cap query: we only care about a count.
+    from ..payments import eligible_poster_ids, get_rate_kes, parse_decimal, week_bounds_containing, get_week_start_day
+    week_start_day = get_week_start_day(db)
+    week_start, _ = week_bounds_containing(today, week_start_day)
+    rate_dec = parse_decimal(get_rate_kes(db))
+    eligible_total = 0
+    workers_with_eligible = 0
+    for w in users:
+        n = len(eligible_poster_ids(db, worker_id=w.id, start=week_start, end=today))
+        eligible_total += n
+        if n > 0:
+            workers_with_eligible += 1
+    eligible_amount = str(rate_dec * eligible_total)
+    if "." in eligible_amount:
+        eligible_amount = eligible_amount.rstrip("0").rstrip(".") or "0"
+
+    digest = {
+        "awaiting_approval": awaiting_revs,
+        "pending_deletions": pending_deletions,
+        "unread_chats":      unread_chats,
+        "owed_amount_kes":   eligible_amount,
+        "owed_count":        eligible_total,
+        "owed_worker_count": workers_with_eligible,
+        "week_start":        week_start.isoformat(),
+        "week_end":          today.isoformat(),
+    }
+
     return templates.TemplateResponse(
         request,
         "admin_dashboard.html",
         {"user": admin, "admin": admin, "today": today.isoformat(),
             "users": user_stats, "open_revisions": open_revs,
             "awaiting_revisions": awaiting_revs,
-            "awaiting_revisions": awaiting_revs,
             "master_pending": pending_master, "master_in_progress": in_progress,
             "master_complete": complete_master, "master_skipped": skipped_master,
             "master_needs_revision": revision_master, "master_total": total_master,
+            "digest": digest,
             "active_tab": "dashboard",
         },
     )
+
+
+def _presence_label(last_seen_at) -> str:
+    """Convert last_seen_at (UTC datetime) → 'online' | 'away' | 'offline' | 'never'."""
+    if last_seen_at is None:
+        return "never"
+    delta = datetime.utcnow() - last_seen_at
+    secs = delta.total_seconds()
+    if secs < 60:    return "online"
+    if secs < 600:   return "away"        # 1–10 min
+    return "offline"
 
 
 # ── User management ─────────────────────────────────────────────────────────
@@ -124,9 +183,15 @@ def admin_dashboard(request: Request, admin: User = Depends(require_admin), db: 
 def users_page(request: Request, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
     """
     Users live in the live users table — single env, simpler than before.
-    Claim counts come straight from the same DB.
+    Claim counts come straight from the same DB. Soft-deleted users
+    (is_deleted=1) are hidden by default.
     """
-    users = db.query(User).order_by(User.role.desc(), User.username.asc()).all()
+    users = (
+        db.query(User)
+          .filter(User.is_deleted == 0)
+          .order_by(User.role.desc(), User.username.asc())
+          .all()
+    )
     claim_counts = dict(
         db.query(MasterTitle.claimed_by_id, func.count(MasterTitle.id))
           .filter(MasterTitle.claimed_by_id.isnot(None),
@@ -199,6 +264,100 @@ def reset_password(
     log_activity(db, user=admin, action="password_reset", target_type="user", target_id=u.id)
     db.commit()
     return RedirectResponse("/admin/users", status_code=302)
+
+
+@router.post("/users/{user_id}/delete")
+def delete_user(
+    user_id: int,
+    confirm_username: str = Form(...),
+    admin_password:   str = Form(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Soft-delete a user. Required confirmations: caller types the target
+    user's username AND re-enters their own admin password.
+
+    What this does:
+      - Sets is_deleted=1, deleted_at=now on the User row. The user can no
+        longer log in (auth filters is_deleted=0).
+      - Reattributes the user's saved_posters.username to "[deleted: X]"
+        so the admin gallery still shows them but no future query treats
+        the original name as live.
+      - Releases any titles the user had claimed (status → pending).
+      - Keeps chat history and payment history intact (they reference the
+        user's id, which still exists).
+
+    Guards:
+      - Cannot delete yourself.
+      - Cannot delete the only remaining admin.
+    """
+    from ..auth import verify_password
+    if not verify_password(admin_password, admin.password_hash):
+        raise HTTPException(400, "Admin password is incorrect.")
+
+    target = db.query(User).filter_by(id=user_id).first()
+    if not target:
+        raise HTTPException(404, "User not found.")
+    if target.is_deleted:
+        raise HTTPException(400, "User is already deleted.")
+    if target.id == admin.id:
+        raise HTTPException(400, "You can't delete your own account.")
+    if confirm_username.strip() != target.username:
+        raise HTTPException(
+            400,
+            f"Username confirmation didn't match. Expected: {target.username!r}",
+        )
+    if target.role == "admin":
+        # Don't allow deleting the only remaining (active+non-deleted) admin.
+        remaining_admins = (
+            db.query(User)
+              .filter(User.role == "admin",
+                      User.is_active == 1,
+                      User.is_deleted == 0,
+                      User.id != target.id)
+              .count()
+        )
+        if remaining_admins == 0:
+            raise HTTPException(400, "Cannot delete the only remaining admin.")
+
+    placeholder = f"[deleted: {target.username}]"
+    now = datetime.utcnow()
+
+    # Soft-delete the user row.
+    target.is_deleted  = 1
+    target.deleted_at  = now
+    target.is_active   = 0
+    target.locked_master_id = None
+
+    # Reattribute saved-poster username for visual clarity. The user_id FK
+    # remains correct so existing queries still join.
+    db.query(SavedPoster).filter(SavedPoster.user_id == target.id) \
+      .update({SavedPoster.username: placeholder}, synchronize_session=False)
+
+    # Release any titles claimed by this user — pending for someone else.
+    claims = (
+        db.query(MasterTitle)
+          .filter(MasterTitle.claimed_by_id == target.id,
+                  MasterTitle.status == "in_progress")
+          .all()
+    )
+    released = 0
+    for t in claims:
+        t.claimed_by_id   = None
+        t.claimed_by_name = None
+        t.claimed_at      = None
+        t.status          = "pending"
+        t.updated_at      = now
+        released += 1
+
+    log_activity(
+        db, user=admin, action="user_deleted", target_type="user", target_id=target.id,
+        details={"username": target.username, "released_claims": released,
+                 "role": target.role},
+    )
+    db.commit()
+    return JSONResponse({"ok": True, "released_claims": released})
 
 
 @router.post("/users/{user_id}/release_queue")
@@ -333,6 +492,20 @@ def master_set_status(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    """
+    Admin override: set a master's status directly.
+
+    When admin sets status to 'complete', this also:
+      - Resolves any open / awaiting-approval revisions on this master's
+        posters (so the FLAG pill goes away).
+      - Preserves the existing claim attribution (claimed_by stays as the
+        last worker who actually did the work — admin doesn't take credit).
+      - Clears any pending admin_note (the issue is being closed).
+      - Clears the claiming user's locked_master_id if this was their lock.
+
+    Going to 'pending' clears the claim. Other transitions leave the claim
+    intact.
+    """
     if status not in ("pending", "in_progress", "complete", "skipped"):
         raise HTTPException(400, "Bad status.")
     t = db.query(MasterTitle).filter_by(id=title_id).first()
@@ -340,18 +513,47 @@ def master_set_status(
         raise HTTPException(404, "Title not found.")
     old = t.status
     t.status = status
+    resolved_revs = 0
+
     if status == "complete":
+        # Resolve all active revisions on posters of this master.
+        active = (
+            db.query(Revision)
+              .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
+              .filter(
+                  SavedPoster.master_title_id == t.id,
+                  SavedPoster.deleted_at.is_(None),
+                  Revision.status.in_(("open", "awaiting_approval")),
+              )
+              .all()
+        )
+        for r in active:
+            r.status = "resolved"
+            r.resolved_by = admin.username
+            r.resolved_at = datetime.utcnow()
+            r.admin_verdict = "force-completed by admin"
+            resolved_revs += 1
+        t.needs_revision = 0
         t.completed_at = datetime.utcnow()
+        t.admin_note = None
+        # Free the claiming user's lock if it pointed here.
+        if t.claimed_by_id:
+            u = db.query(User).filter_by(id=t.claimed_by_id).first()
+            if u and u.locked_master_id == t.id:
+                u.locked_master_id = None
+
     elif status == "pending":
         t.claimed_by_id = None
         t.claimed_by_name = None
         t.claimed_at = None
+
     log_activity(
         db, user=admin, action="status_changed", target_type="master_title", target_id=t.id,
-        details={"from": old, "to": status, "by_admin": True},
+        details={"from": old, "to": status, "by_admin": True,
+                 "resolved_revs": resolved_revs},
     )
     db.commit()
-    return JSONResponse({"ok": True})
+    return JSONResponse({"ok": True, "resolved_revs": resolved_revs})
 
 
 @router.post("/master/bulk_status")
@@ -372,6 +574,7 @@ def master_bulk_status(
 
     rows = db.query(MasterTitle).filter(MasterTitle.id.in_(id_list)).all()
     now = datetime.utcnow()
+    total_resolved_revs = 0
     for r in rows:
         r.status = status
         r.updated_at = now
@@ -381,13 +584,38 @@ def master_bulk_status(
             r.claimed_at = None
         elif status == "complete":
             r.completed_at = now
+            # Resolve active flags so FLAG pill clears (same as single-row path).
+            active = (
+                db.query(Revision)
+                  .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
+                  .filter(
+                      SavedPoster.master_title_id == r.id,
+                      SavedPoster.deleted_at.is_(None),
+                      Revision.status.in_(("open", "awaiting_approval")),
+                  )
+                  .all()
+            )
+            for rev in active:
+                rev.status = "resolved"
+                rev.resolved_by = admin.username
+                rev.resolved_at = now
+                rev.admin_verdict = "force-completed by admin (bulk)"
+                total_resolved_revs += 1
+            r.needs_revision = 0
+            r.admin_note = None
+            if r.claimed_by_id:
+                u = db.query(User).filter_by(id=r.claimed_by_id).first()
+                if u and u.locked_master_id == r.id:
+                    u.locked_master_id = None
     log_activity(
         db, user=admin, action="bulk_status", target_type="bulk", details={
             "count": len(rows), "ids": [r.id for r in rows], "status": status,
+            "resolved_revs": total_resolved_revs,
         },
     )
     db.commit()
-    return JSONResponse({"ok": True, "updated": len(rows)})
+    return JSONResponse({"ok": True, "updated": len(rows),
+                         "resolved_revs": total_resolved_revs})
 
 
 @router.post("/master/clear")
@@ -743,10 +971,29 @@ def unflag_poster(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    """
+    Clear all flags from a single poster. Three cases to handle:
+
+      1. Simple revision where saved_poster_id = sp.id  → delete it.
+      2. Similar revision where saved_poster_id = sp.id (i.e. sp is the
+         primary participant) → delete it. The whole comparison goes away
+         since the primary is no longer flagged.
+      3. Similar revision where sp.id is in `related_poster_ids` JSON but
+         NOT the primary → remove sp from the list. If the list shrinks
+         to <2 entries (a "similar pair" of one is meaningless), delete
+         the whole revision.
+
+    Without case 3, clicking CLEAR FLAG on a non-primary participant of a
+    similar revision would leave the revision active, the master flagged,
+    and the worker stuck (they could only clear by acting on the primary).
+    """
+    import json as _json
     sp = db.query(SavedPoster).filter_by(id=poster_id).first()
     if not sp:
         raise HTTPException(404, "Poster not found.")
-    active = (
+
+    # Cases 1+2 — direct revisions on this poster.
+    direct = (
         db.query(Revision)
           .filter(
               Revision.saved_poster_id == sp.id,
@@ -755,9 +1002,41 @@ def unflag_poster(
           .all()
     )
     cleared = 0
-    for r in active:
+    for r in direct:
         db.delete(r)
         cleared += 1
+
+    # Case 3 — similar revisions where sp is in related_poster_ids but
+    # not the primary. We have to scan all open similar revisions because
+    # related_poster_ids is JSON-encoded text, not a relational column.
+    sim_others = (
+        db.query(Revision)
+          .filter(
+              Revision.status.in_(("open", "awaiting_approval")),
+              Revision.revision_type == "similar",
+              Revision.saved_poster_id != sp.id,  # primaries already handled above
+          )
+          .all()
+    )
+    for r in sim_others:
+        try:
+            related = _json.loads(r.related_poster_ids or "[]")
+        except (TypeError, ValueError):
+            related = []
+        if sp.id not in related:
+            continue
+        new_related = [pid for pid in related if pid != sp.id]
+        if len(new_related) < 2:
+            # A similar revision needs ≥2 participants to make sense.
+            db.delete(r)
+        else:
+            r.related_poster_ids = _json.dumps(new_related)
+        cleared += 1
+
+    # Recompute master.needs_revision: any active simple/similar revisions
+    # tied to this master? Filter out soft-deleted posters from the JOIN
+    # defensively (A3) — under normal flow their revisions would already
+    # be resolved, but if anything ever wedged this prevents a stuck flag.
     mt = db.query(MasterTitle).filter_by(id=sp.master_title_id).first()
     if mt:
         any_active = (
@@ -765,11 +1044,13 @@ def unflag_poster(
               .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
               .filter(
                   SavedPoster.master_title_id == mt.id,
+                  SavedPoster.deleted_at.is_(None),
                   Revision.status.in_(("open", "awaiting_approval")),
               )
               .count()
         )
         mt.needs_revision = 1 if any_active else 0
+
     log_activity(db, user=admin, action="unflagged", target_type="saved_poster", target_id=sp.id,
                  details={"cleared": cleared})
     db.commit()
@@ -873,6 +1154,7 @@ def approve_revision(
                   .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
                   .filter(
                       SavedPoster.master_title_id == mt.id,
+                      SavedPoster.deleted_at.is_(None),
                       Revision.status.in_(("open", "awaiting_approval")),
                       Revision.id != rev.id,
                   )
@@ -1097,6 +1379,10 @@ def escalate_deletion(
     if not mt:
         raise HTTPException(404, "Underlying title row missing.")
     mt.admin_note = note
+    # Re-flag the master so it shows up in master-list views and counters.
+    # The escalation is an open issue from admin's POV until the worker
+    # responds (re-saves something or admin manually clears).
+    mt.needs_revision = 1
     if mt.status == "complete":
         mt.status = "in_progress"
         mt.completed_at = None
@@ -1107,6 +1393,122 @@ def escalate_deletion(
     )
     db.commit()
     return JSONResponse({"ok": True})
+
+
+# ── Email summary (config + send test) ─────────────────────────────────────
+
+@router.get("/email", response_class=HTMLResponse)
+def email_page(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Admin page for the daily-summary email feature. Reads current config
+    from app_settings and renders an editable form. SMTP password is shown
+    masked — admin types a new value to overwrite, leaves blank to keep
+    the existing one.
+    """
+    from ..email_summary import get_email_config
+    cfg = get_email_config(db)
+    has_password = bool(cfg.get("smtp_password"))
+    cfg_for_template = dict(cfg)
+    # Don't leak the stored password to HTML — caller can type a new one.
+    cfg_for_template["smtp_password"] = ""
+    return templates.TemplateResponse(
+        request,
+        "admin_email.html",
+        {
+            "user": admin, "admin": admin,
+            "active_tab": "email",
+            "cfg": cfg_for_template,
+            "has_password": has_password,
+        },
+    )
+
+
+@router.post("/email/save")
+def email_save(
+    enabled:        int  = Form(0),
+    recipient:      str  = Form(""),
+    smtp_host:      str  = Form(""),
+    smtp_port:      str  = Form("587"),
+    smtp_username:  str  = Form(""),
+    smtp_password:  str  = Form(""),       # blank = keep existing
+    smtp_use_tls:   int  = Form(1),
+    from_addr:      str  = Form(""),
+    send_time:      str  = Form("23:55"),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Save email config. Validates lightly (port numeric, send_time HH:MM)
+    and, if smtp_password is left blank, preserves whatever was already
+    stored (so admins don't have to retype it on every save).
+    """
+    from ..email_summary import save_email_config, get_email_config
+    # Validate port.
+    try:
+        port = int(smtp_port)
+        if not (1 <= port <= 65535):
+            raise ValueError("port out of range")
+    except ValueError:
+        raise HTTPException(400, "SMTP port must be a number between 1 and 65535.")
+    # Validate send_time HH:MM.
+    import re
+    if not re.match(r"^[0-2]?\d:[0-5]\d$", send_time.strip()):
+        raise HTTPException(400, "Send time must be HH:MM (24-hour).")
+
+    payload = {
+        "enabled":       bool(enabled),
+        "recipient":     recipient.strip(),
+        "smtp_host":     smtp_host.strip(),
+        "smtp_port":     port,
+        "smtp_username": smtp_username.strip(),
+        "smtp_use_tls":  bool(smtp_use_tls),
+        "from_addr":     from_addr.strip(),
+        "send_time":     send_time.strip(),
+    }
+    # Only update password if a new one was typed in.
+    if smtp_password.strip():
+        payload["smtp_password"] = smtp_password
+    save_email_config(db, by=admin.username, data=payload)
+    log_activity(
+        db, user=admin, action="email_config_saved", target_type="settings",
+        details={"enabled": payload["enabled"],
+                 "recipient": payload["recipient"],
+                 "send_time": payload["send_time"],
+                 "smtp_host": payload["smtp_host"]},
+    )
+    db.commit()
+    return RedirectResponse("/admin/email?saved=1", status_code=302)
+
+
+@router.post("/email/send_test")
+def email_send_test(
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Send a non-content test email to the configured recipient using the
+    *current* config. Surfaces SMTP errors back to the admin so they can
+    iterate on credentials without waiting for midnight.
+    """
+    from ..email_summary import get_email_config, send_test_email
+    cfg = get_email_config(db)
+    if not cfg.get("recipient"):
+        raise HTTPException(400, "Set a recipient first.")
+    if not cfg.get("smtp_host"):
+        raise HTTPException(400, "Set SMTP host first.")
+    try:
+        send_test_email(cfg)
+    except Exception as e:
+        # Bubble up the actual SMTP error so it's visible (e.g. auth failure).
+        raise HTTPException(400, f"SMTP error: {type(e).__name__}: {e}")
+    log_activity(db, user=admin, action="email_test_sent", target_type="settings",
+                 details={"recipient": cfg["recipient"]})
+    db.commit()
+    return JSONResponse({"ok": True, "sent_to": cfg["recipient"]})
 
 
 # ── Backups + restore ───────────────────────────────────────────────────────
@@ -1354,7 +1756,7 @@ def payments_page(
 
     workers = (
         db.query(User)
-          .filter(User.role == "worker", User.is_active == 1)
+          .filter(User.role == "worker", User.is_active == 1, User.is_deleted == 0)
           .order_by(User.username.asc())
           .all()
     )
@@ -1412,8 +1814,16 @@ def payments_preview(
     """
     Preview eligible posters and total for a worker over [start, end].
     Used by the JS to compute the totals as admin picks dates.
+
+    Also returns `unpaid_dates_before` — a list of {"date", "count"} for
+    PAST days where this worker has eligible-but-unpaid posters. The UI
+    surfaces these as a "you forgot these days" indicator so admin doesn't
+    accidentally skip past-day backlog (P1).
     """
-    from ..payments import eligible_poster_ids, get_rate_kes, parse_decimal
+    from ..payments import (
+        eligible_poster_ids, get_rate_kes, parse_decimal,
+        unpaid_dates_before, local_today,
+    )
     try:
         start_d = date.fromisoformat(start)
         end_d   = date.fromisoformat(end)
@@ -1431,6 +1841,17 @@ def payments_preview(
         rows = db.query(SavedPoster.id, SavedPoster.original_save_date).filter(SavedPoster.id.in_(ids)).all()
         for _id, d in rows:
             by_day[d.isoformat()] = by_day.get(d.isoformat(), 0) + 1
+
+    # Unpaid-but-eligible from past days that aren't in the current preview range.
+    today = local_today()
+    unpaid_before = unpaid_dates_before(db, worker_id=worker_id, today=today)
+    # Filter out days already inside [start_d, end_d] — those are visible
+    # in `by_day` already; we want days OUTSIDE the picker's current view.
+    unpaid_outside = [
+        u for u in unpaid_before
+        if not (start_d.isoformat() <= u["date"] <= end_d.isoformat())
+    ]
+
     return JSONResponse({
         "ok": True,
         "worker_id":    worker_id,
@@ -1441,6 +1862,7 @@ def payments_preview(
         "computed_total_kes": str(total),
         "by_day":       by_day,
         "poster_ids":   ids,
+        "unpaid_before_outside_range": unpaid_outside,
     })
 
 
@@ -1453,6 +1875,7 @@ def payments_mark_paid(
     reference: str = Form(""),
     note: str = Form(""),
     push_to_worker: int = Form(0),
+    include_back_pay_dates: str = Form(""),  # comma-separated YYYY-MM-DD list
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -1460,8 +1883,15 @@ def payments_mark_paid(
     Write a PaymentRun for [start, end] for `worker_id`. Snapshots eligible
     poster IDs at this moment so future runs don't double-count them.
     Optionally pushes a receipt for worker acknowledgement.
+
+    `include_back_pay_dates` lets admin pull in older days that have
+    eligible-but-unpaid posters (e.g. "I paid Mon–Sun last week before
+    realising Tuesday had a flagged poster that resolved later — include
+    that Tuesday's posters in this run").
     """
-    from ..payments import eligible_poster_ids, get_rate_kes, parse_decimal
+    from ..payments import (
+        eligible_poster_ids, get_rate_kes, parse_decimal, per_day_breakdown,
+    )
     try:
         start_d = date.fromisoformat(start)
         end_d   = date.fromisoformat(end)
@@ -1478,31 +1908,60 @@ def payments_mark_paid(
         raise HTTPException(404, "Worker not found.")
     worker_username = worker.username
 
+    # Primary eligible IDs from the chosen [start, end] range.
     ids = eligible_poster_ids(db, worker_id=worker_id, start=start_d, end=end_d)
+
+    # Optionally fold in older "back-pay" days admin explicitly included.
+    back_pay_dates: list[str] = []
+    if include_back_pay_dates.strip():
+        for raw in include_back_pay_dates.split(","):
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                bp_d = date.fromisoformat(raw)
+            except ValueError:
+                raise HTTPException(400, f"Bad back-pay date: {raw}")
+            # Each back-pay day is a separate one-day eligibility query.
+            bp_ids = eligible_poster_ids(db, worker_id=worker_id, start=bp_d, end=bp_d)
+            ids.extend(bp_ids)
+            if bp_ids:
+                back_pay_dates.append(bp_d.isoformat())
+
+    # Dedup defensively (shouldn't have duplicates but safer).
+    ids = sorted(set(ids))
     rate = get_rate_kes(db)
+
+    # Per-day breakdown for receipt transparency.
+    by_day = per_day_breakdown(db, poster_ids=ids)
+
     run = PaymentRun(
-        worker_id       = worker_id,
-        worker_username = worker_username,
-        period_start    = start_d,
-        period_end      = end_d,
-        poster_count    = len(ids),
-        rate_kes        = str(parse_decimal(rate)),
-        amount_kes      = str(amount),
-        reference       = reference.strip() or None,
-        note            = note.strip() or None,
-        poster_ids_json = json.dumps(ids),
-        pushed_at       = datetime.utcnow() if push_to_worker else None,
-        created_by      = admin.username,
+        worker_id           = worker_id,
+        worker_username     = worker_username,
+        period_start        = start_d,
+        period_end          = end_d,
+        poster_count        = len(ids),
+        rate_kes            = str(parse_decimal(rate)),
+        amount_kes          = str(amount),
+        reference           = reference.strip() or None,
+        note                = note.strip() or None,
+        poster_ids_json     = json.dumps(ids),
+        by_day_json         = json.dumps(by_day),
+        back_pay_dates_json = json.dumps(back_pay_dates) if back_pay_dates else None,
+        pushed_at           = datetime.utcnow() if push_to_worker else None,
+        created_by          = admin.username,
     )
     db.add(run)
     db.flush()
     log_activity(
         db, user=admin, action="paid", target_type="payment_run", target_id=run.id,
         details={"worker": worker_username, "start": start, "end": end,
-                 "count": len(ids), "amount": str(amount), "pushed": bool(push_to_worker)},
+                 "count": len(ids), "amount": str(amount), "pushed": bool(push_to_worker),
+                 "back_pay_dates": back_pay_dates},
     )
     db.commit()
-    return JSONResponse({"ok": True, "run_id": run.id, "poster_count": len(ids)})
+    return JSONResponse({"ok": True, "run_id": run.id, "poster_count": len(ids),
+                         "back_pay_dates": back_pay_dates})
 
 
 @router.post("/payments/{run_id}/push")

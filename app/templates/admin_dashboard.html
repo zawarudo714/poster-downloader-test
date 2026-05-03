@@ -6,41 +6,41 @@
 <div class="admin-grid">
 
   <section class="stat-row">
-    <div class="stat-tile">
-      <div class="stat-label">TOTAL TITLES {{ info("All rows in the master list, regardless of status.") }}</div>
+    <a href="/admin/master" class="stat-tile stat-tile-link">
+      <div class="stat-label">TOTAL TITLES {{ info("All rows in the master list, regardless of status. Click to open the title list.") }}</div>
       <div class="stat-value mono">{{ master_total }}</div>
-    </div>
-    <div class="stat-tile">
-      <div class="stat-label">PENDING {{ info("Unclaimed titles still waiting for a user to take them.") }}</div>
+    </a>
+    <a href="/admin/master?status=pending" class="stat-tile stat-tile-link">
+      <div class="stat-label">PENDING {{ info("Unclaimed titles still waiting for a user to take them. Click to filter.") }}</div>
       <div class="stat-value mono">{{ master_pending }}</div>
-    </div>
-    <div class="stat-tile">
-      <div class="stat-label">IN PROGRESS {{ info("Claimed by a user — work has begun or is reserved.") }}</div>
+    </a>
+    <a href="/admin/master?status=in_progress" class="stat-tile stat-tile-link">
+      <div class="stat-label">IN PROGRESS {{ info("Claimed by a user — work has begun or is reserved. Click to filter.") }}</div>
       <div class="stat-value mono">{{ master_in_progress }}</div>
-    </div>
-    <div class="stat-tile">
-      <div class="stat-label">DONE {{ info("Marked complete by the user that worked them.") }}</div>
+    </a>
+    <a href="/admin/master?status=complete" class="stat-tile stat-tile-link">
+      <div class="stat-label">DONE {{ info("Marked complete by the user that worked them. Click to filter.") }}</div>
       <div class="stat-value success mono">{{ master_complete }}</div>
-    </div>
-    <div class="stat-tile">
-      <div class="stat-label">SKIPPED {{ info("Marked skipped by users. Click 'Skipped' in the nav to review and send back if needed.") }}</div>
+    </a>
+    <a href="/admin/skipped" class="stat-tile stat-tile-link">
+      <div class="stat-label">SKIPPED {{ info("Marked skipped by users. Click to review and send back if needed.") }}</div>
       <div class="stat-value mono">{{ master_skipped }}</div>
-    </div>
-    <div class="stat-tile">
-      <div class="stat-label">NEEDS CHANGES {{ info("Titles with at least one open or awaiting-approval flag.") }}</div>
+    </a>
+    <a href="/admin/master?needs_revision=1" class="stat-tile stat-tile-link">
+      <div class="stat-label">NEEDS CHANGES {{ info("Titles with at least one open or awaiting-approval flag. Click to filter.") }}</div>
       <div class="stat-value error mono">{{ master_needs_revision }}</div>
-    </div>
+    </a>
   </section>
 
   <section class="stat-row">
-    <div class="stat-tile">
-      <div class="stat-label">FLAGS WAITING ON USERS {{ info("You've flagged these; the user hasn't acted yet.") }}</div>
+    <a href="/admin/revisions" class="stat-tile stat-tile-link">
+      <div class="stat-label">FLAGS WAITING ON USERS {{ info("You've flagged these; the user hasn't acted yet. Click to review.") }}</div>
       <div class="stat-value mono">{{ open_revisions }}</div>
-    </div>
-    <div class="stat-tile">
-      <div class="stat-label">AWAITING YOUR APPROVAL {{ info("User has replaced/fixed; you need to approve or reject.") }}</div>
+    </a>
+    <a href="/admin/revisions" class="stat-tile stat-tile-link">
+      <div class="stat-label">AWAITING YOUR APPROVAL {{ info("User has replaced/fixed; you need to approve or reject. Click to review.") }}</div>
       <div class="stat-value error mono">{{ awaiting_revisions }}</div>
-    </div>
+    </a>
   </section>
 
   <section class="panel">
@@ -53,13 +53,19 @@
       <table class="data-table">
         <thead>
           <tr>
-            <th>USER</th><th>TODAY</th><th>WEEK</th><th>HOLDING</th><th>STATUS</th><th>RELEASE</th>
+            <th>USER</th><th>PRESENCE {{ info("How recently this user's browser polled the server. online = within 60s; away = up to 10min; offline = beyond.") }}</th><th>TODAY</th><th>WEEK</th><th>HOLDING</th><th>STATUS</th><th>RELEASE</th>
           </tr>
         </thead>
         <tbody>
           {% for w in users %}
           <tr>
             <td class="mono">{{ w.username }}</td>
+            <td>
+              {% set p = w.presence or 'offline' %}
+              <span class="presence presence-{{ p }}">
+                <span class="presence-dot"></span>{{ p }}
+              </span>
+            </td>
             <td class="mono">{{ w.today }}</td>
             <td class="mono">{{ w.week }}</td>
             <td class="mono">{{ w.claims }}</td>

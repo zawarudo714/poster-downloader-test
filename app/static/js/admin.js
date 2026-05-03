@@ -55,6 +55,71 @@
     });
   });
 
+  // ── Delete-user modal ─────────────────────────────────────────────────
+  const delDialog = document.getElementById('delete-user-dialog');
+  if (delDialog) {
+    const usernameEcho = document.getElementById('del-username-echo');
+    const usernameShow = document.getElementById('del-username-show');
+    const confirmInput = document.getElementById('del-confirm-username');
+    const passwordInput = document.getElementById('del-admin-password');
+    const confirmBtn   = document.getElementById('del-confirm-btn');
+    const errorEl      = document.getElementById('del-error');
+    let activeId = null;
+    let activeUsername = null;
+
+    function closeDel() {
+      delDialog.hidden = true;
+      confirmInput.value = '';
+      passwordInput.value = '';
+      errorEl.hidden = true;
+      errorEl.textContent = '';
+      confirmBtn.disabled = true;
+      activeId = null;
+    }
+    delDialog.querySelectorAll('[data-lightbox-close]').forEach((el) => {
+      el.addEventListener('click', closeDel);
+    });
+
+    function recheck() {
+      const okUser = confirmInput.value.trim() === activeUsername;
+      const okPw   = (passwordInput.value || '').length >= 1;
+      confirmBtn.disabled = !(okUser && okPw);
+    }
+    confirmInput.addEventListener('input', recheck);
+    passwordInput.addEventListener('input', recheck);
+
+    document.querySelectorAll('[data-delete-user-id]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        activeId = btn.getAttribute('data-delete-user-id');
+        activeUsername = btn.getAttribute('data-delete-username');
+        usernameEcho.textContent = activeUsername;
+        usernameShow.textContent = activeUsername;
+        delDialog.hidden = false;
+        confirmInput.focus();
+      });
+    });
+
+    confirmBtn.addEventListener('click', async () => {
+      errorEl.hidden = true;
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = 'DELETING…';
+      const fd = new FormData();
+      fd.append('confirm_username', confirmInput.value.trim());
+      fd.append('admin_password',   passwordInput.value);
+      const r = await fetch(`/admin/users/${activeId}/delete`, { method: 'POST', body: fd });
+      const data = await r.json().catch(() => ({}));
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = 'DELETE';
+      if (r.ok) {
+        alert(`User deleted. ${data.released_claims || 0} title claim(s) released.`);
+        location.reload();
+      } else {
+        errorEl.hidden = false;
+        errorEl.textContent = data.detail || `Failed (${r.status})`;
+      }
+    });
+  }
+
   // ── Gallery image browser ────────────────────────────────────────────────
   const gallery = document.getElementById('ib-gallery');
   if (!gallery) return;

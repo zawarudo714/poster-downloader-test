@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% from "_macros.html" import info %}
+{% block title %}Email Summary · Admin{% endblock %}
+
+{% block content %}
+<div class="admin-grid">
+
+  <section class="panel">
+    <div class="panel-head">
+      <span>DAILY SUMMARY EMAIL {{ info("Once per day at the configured send time, the server emails you a recap: today's poster counts per worker, plus a running tally for the current pay week (Mon–Sun by default, or whatever week-start-day you picked on the Payments page). Useful so you don't have to log in just to know how the day went.") }}</span>
+    </div>
+    <div class="panel-body">
+
+      {% if request.query_params.get('saved') %}
+        <div class="ok-banner">Settings saved.</div>
+      {% endif %}
+
+      <form method="post" action="/admin/email/save" class="email-form" id="email-form">
+        <label class="filter-checkbox">
+          <input type="checkbox" name="enabled" value="1" {% if cfg.enabled %}checked{% endif %}>
+          <span><strong>Enable daily email</strong> — when off, no emails go out even if config is filled in.</span>
+        </label>
+
+        <div class="form-grid">
+          <label class="filter-label">RECIPIENT EMAIL
+            <input type="email" name="recipient" value="{{ cfg.recipient }}"
+                   placeholder="you@example.com" required>
+          </label>
+          <label class="filter-label">FROM ADDRESS {{ info("What appears in the email's 'From' header. Should match your SMTP username for most providers — Gmail, in particular, requires this.") }}
+            <input type="text" name="from_addr" value="{{ cfg.from_addr }}"
+                   placeholder="Poster Downloader &lt;you@example.com&gt;">
+          </label>
+          <label class="filter-label">SEND TIME (HH:MM, server timezone) {{ info("24-hour clock in the server's APP_TZ — Africa/Nairobi for you. Defaults to 23:55. The scheduler checks once per minute past midnight; if your send time has passed and today's email hasn't gone out yet, it's queued.") }}
+            <input type="text" name="send_time" value="{{ cfg.send_time }}"
+                   pattern="[0-2]?\d:[0-5]\d" placeholder="23:55" required>
+          </label>
+        </div>
+
+        <h4 class="form-section-header">SMTP CREDENTIALS</h4>
+
+        <div class="form-grid">
+          <label class="filter-label">SMTP HOST
+            <input type="text" name="smtp_host" value="{{ cfg.smtp_host }}"
+                   placeholder="smtp.gmail.com">
+          </label>
+          <label class="filter-label">SMTP PORT
+            <input type="number" name="smtp_port" value="{{ cfg.smtp_port }}"
+                   min="1" max="65535" placeholder="587" required>
+          </label>
+          <label class="filter-label">SMTP USERNAME
+            <input type="text" name="smtp_username" value="{{ cfg.smtp_username }}"
+                   placeholder="you@gmail.com" autocomplete="off">
+          </label>
+          <label class="filter-label">
+            SMTP PASSWORD
+            {% if has_password %}
+              <span class="muted small">(leave blank to keep existing)</span>
+            {% endif %}
+            <input type="password" name="smtp_password" value=""
+                   placeholder="{% if has_password %}••••••••{% else %}app password{% endif %}"
+                   autocomplete="new-password">
+          </label>
+          <label class="filter-checkbox" style="grid-column: 1 / -1;">
+            <input type="checkbox" name="smtp_use_tls" value="1" {% if cfg.smtp_use_tls %}checked{% endif %}>
+            <span>Use STARTTLS (recommended for port 587). Turn off for SMTPS on port 465 — the connection becomes implicit-TLS instead.</span>
+          </label>
+        </div>
+
+        <div class="email-form-actions">
+          <button type="submit" class="btn btn-accent">SAVE SETTINGS</button>
+          <button type="button" class="btn btn-ghost" id="email-test-btn"
+                  data-tooltip="Send a one-line test email to the recipient using the saved settings. Save first if you've made changes.">SEND TEST EMAIL</button>
+          <span class="muted mono" id="email-test-status"></span>
+        </div>
+      </form>
+
+      <details class="email-help">
+        <summary>SMTP setup tips</summary>
+        <div class="email-help-body">
+          <p><strong>Gmail:</strong> host <code>smtp.gmail.com</code>, port <code>587</code>, STARTTLS on. You must use an <em>app password</em> (not your account password) — generate one at <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">myaccount.google.com/apppasswords</a> after enabling 2FA. The "From" address must match the username.</p>
+          <p><strong>SendGrid:</strong> host <code>smtp.sendgrid.net</code>, port <code>587</code>, username literally <code>apikey</code>, password is your API key.</p>
+          <p><strong>Mailgun:</strong> host <code>smtp.mailgun.org</code>, port <code>587</code>, username from your domain's SMTP credentials in the dashboard.</p>
+          <p><strong>SMTP2GO:</strong> host <code>mail.smtp2go.com</code>, port <code>2525</code> or <code>587</code>, credentials from the dashboard.</p>
+        </div>
+      </details>
+    </div>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/admin_email.js?v={{ app_version }}"></script>
+{% endblock %}

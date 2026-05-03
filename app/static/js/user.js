@@ -351,12 +351,49 @@
     const img = node.querySelector('.poster-img');
     img.src = fileUrl(p.id, p.size);
     img.alt = p.filename;
+    img.style.cursor = 'zoom-in';
+    img.title = 'Click to enlarge';
+    img.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openLightbox(fileUrl(p.id, p.size), p.filename);
+    });
     node.querySelector('.poster-name').textContent = p.filename;
     node.querySelector('.poster-size').textContent = humanSize(p.size || 0);
     const replaceUrl = node.querySelector('.poster-replace-url');
     node.querySelector('[data-action="replace"]').addEventListener('click', () => replacePoster(p.id, replaceUrl));
     node.querySelector('[data-action="delete"]').addEventListener('click', () => deletePoster(p.id, { fromRevision: false }));
     return node;
+  }
+
+  // ── Lightbox (90% screen) ────────────────────────────────────────────────
+  function openLightbox(src, caption) {
+    let lb = document.getElementById('worker-lightbox');
+    if (!lb) {
+      lb = document.createElement('div');
+      lb.id = 'worker-lightbox';
+      lb.className = 'lightbox worker-lightbox';
+      lb.innerHTML = `
+        <div class="lightbox-bg" data-lb-close></div>
+        <div class="lightbox-card worker-lightbox-card">
+          <button type="button" class="worker-lightbox-close" data-lb-close aria-label="Close">×</button>
+          <img class="worker-lightbox-img" alt="">
+          <div class="worker-lightbox-caption mono"></div>
+        </div>
+      `;
+      document.body.appendChild(lb);
+      lb.querySelectorAll('[data-lb-close]').forEach((el) => el.addEventListener('click', closeLightbox));
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !lb.hidden) closeLightbox();
+      });
+    }
+    lb.querySelector('.worker-lightbox-img').src = src;
+    lb.querySelector('.worker-lightbox-img').alt = caption || '';
+    lb.querySelector('.worker-lightbox-caption').textContent = caption || '';
+    lb.hidden = false;
+  }
+  function closeLightbox() {
+    const lb = document.getElementById('worker-lightbox');
+    if (lb) lb.hidden = true;
   }
 
   // ── Revisions banner ─────────────────────────────────────────────────────
@@ -498,6 +535,8 @@
     receipts.forEach((r) => {
       const item = document.createElement('div');
       item.className = 'receipt-item';
+      const hasBackPay = (r.back_pay_dates && r.back_pay_dates.length > 0);
+      const byDayDates = Object.keys(r.by_day || {}).sort();
       item.innerHTML = `
         <div class="receipt-row">
           <strong class="mono receipt-amount"></strong>
@@ -507,6 +546,13 @@
         </div>
         <div class="receipt-meta mono muted"></div>
         <div class="receipt-note"></div>
+        ${byDayDates.length > 0 ? `
+          <details class="receipt-breakdown">
+            <summary class="muted">▸ See per-day breakdown</summary>
+            <div class="receipt-day-list"></div>
+          </details>
+        ` : ''}
+        ${hasBackPay ? `<div class="receipt-backpay">includes back-pay from <span class="receipt-backpay-dates"></span></div>` : ''}
         <button class="btn btn-accent btn-tiny receipt-ack-btn" type="button">ACKNOWLEDGE</button>
       `;
       item.querySelector('.receipt-amount').textContent = `KES ${r.amount_kes}`;
@@ -518,6 +564,32 @@
         (r.reference ? `Ref: ${r.reference} · ` : '') + `Sent ${r.pushed_at || ''}`;
       const noteEl = item.querySelector('.receipt-note');
       if (r.note) noteEl.textContent = r.note; else noteEl.remove();
+
+      // Per-day breakdown.
+      if (byDayDates.length > 0) {
+        const dayList = item.querySelector('.receipt-day-list');
+        const rate = parseFloat(r.rate_kes) || 0;
+        const backPaySet = new Set(r.back_pay_dates || []);
+        let html = '';
+        byDayDates.forEach((d) => {
+          const c = r.by_day[d];
+          const sub = (c * rate);
+          const isBack = backPaySet.has(d);
+          html += `
+            <div class="receipt-day-row${isBack ? ' is-back-pay' : ''}">
+              <span class="mono">${d}${isBack ? ' <span class="bp-tag">back-pay</span>' : ''}</span>
+              <span class="mono">${c} × ${r.rate_kes}</span>
+              <span class="mono">${formatKes(sub)} KES</span>
+            </div>`;
+        });
+        dayList.innerHTML = html;
+      }
+
+      // Back-pay summary line.
+      if (hasBackPay) {
+        item.querySelector('.receipt-backpay-dates').textContent = r.back_pay_dates.join(', ');
+      }
+
       item.querySelector('.receipt-ack-btn').addEventListener('click', async () => {
         const btn = item.querySelector('.receipt-ack-btn');
         btn.disabled = true;
@@ -527,6 +599,11 @@
       });
       list.appendChild(item);
     });
+  }
+
+  function formatKes(n) {
+    if (Number.isInteger(n)) return String(n);
+    return n.toFixed(2).replace(/\.?0+$/, '');
   }
 
   function renderAll({ fullActive }) {
@@ -691,9 +768,25 @@
       if (ans === null) return;
       comment = ans.trim();
     }
-    const r = await postForm(`/title/${masterId}/complete`, { comment });
-    if (r.ok) await refreshState();
-    else alert('Failed: ' + (r.data && r.data.detail || r.status));
+    return submitComplete(masterId, comment, /*force*/ 0);
+  }
+
+  async function submitComplete(masterId, comment, force) {
+    const r = await postForm(`/title/${masterId}/complete`,
+                             { comment, force: force ? 1 : 0 });
+    if (r.ok) {
+      await refreshState();
+      return;
+    }
+    if (r.status === 409 && r.data && r.data.reason === 'open_revisions') {
+      // Server says there are unresolved flags. Confirm and retry with force=1.
+      if (confirm(r.data.message + '\n\n' +
+                  'Click OK to mark complete anyway. Cancel to go back and resolve the flags first.')) {
+        return submitComplete(masterId, comment, /*force*/ 1);
+      }
+      return;
+    }
+    alert('Failed: ' + (r.data && r.data.detail || r.status));
   }
 
   async function skipTitle(id, reason) {

@@ -1,15 +1,25 @@
 /* Worker save-history page.
    - Loads /api/history/days for the per-day summary.
-   - Each row expands on click to show titles for that day (lazy-loaded
-     via /api/history/day/{date}). */
+   - Each row expands on click to show titles for that day.
+   - Search box filters the list as you type. To make matching usefully
+     shallow we proactively prefetch each day's titles when search is
+     active (we want to know which DAYS contain a matching TITLE), but
+     this is throttled by the cache so a single search pass is one fetch
+     per day, max. */
 
 (function () {
-  const listEl = document.getElementById('history-list');
-  const rateEl = document.getElementById('history-rate');
+  const listEl    = document.getElementById('history-list');
+  const rateEl    = document.getElementById('history-rate');
+  const searchInp = document.getElementById('history-search');
+  const clearBtn  = document.getElementById('history-search-clear');
+  const hintEl    = document.getElementById('history-search-hint');
   if (!listEl) return;
 
-  // Cache per-day title fetches so re-collapsing then re-expanding is instant.
+  // Cache per-day title fetches keyed by date.
   const dayCache = {};
+  // Cache built day-row DOM elements so search re-renders are cheap.
+  let allDays = [];   // server-returned day summaries
+  let dayElements = new Map();   // date → wrapper element
 
   async function load() {
     const r = await fetch('/api/history/days', { cache: 'no-store' });
@@ -23,8 +33,14 @@
       listEl.innerHTML = '<div class="empty-hint">No saved posters yet — your history will show up here once you start saving.</div>';
       return;
     }
+    allDays = data.days;
     listEl.innerHTML = '';
-    data.days.forEach((d) => listEl.appendChild(buildDayRow(d)));
+    dayElements.clear();
+    data.days.forEach((d) => {
+      const el = buildDayRow(d);
+      dayElements.set(d.date, el);
+      listEl.appendChild(el);
+    });
   }
 
   function buildDayRow(d) {
@@ -62,10 +78,13 @@
     return wrap;
   }
 
-  async function toggleDay(wrap, body, dateStr) {
+  async function toggleDay(wrap, body, dateStr, opts = {}) {
+    const force = opts.force; // 'open' | 'close' | undefined
     const arrow = wrap.querySelector('.history-day-arrow');
-    const isOpen = !body.hidden;
-    if (isOpen) {
+    const wantOpen = force === 'open' ? true
+                   : force === 'close' ? false
+                   : body.hidden;
+    if (!wantOpen) {
       body.hidden = true;
       arrow.textContent = '▸';
       return;
@@ -86,7 +105,7 @@
     renderDayBody(body, data);
   }
 
-  function renderDayBody(body, data) {
+  function renderDayBody(body, data, highlight) {
     if (!data.titles || data.titles.length === 0) {
       body.innerHTML = '<div class="empty-hint">(no titles)</div>';
       return;
@@ -107,11 +126,84 @@
     });
     html += '</div>';
     body.innerHTML = html;
-    // Set text content safely (avoid HTML-injection from titles)
     const rows = body.querySelectorAll('.history-title-row');
     rows.forEach((row, i) => {
       row.querySelector('.history-title-name').textContent = data.titles[i].title;
       row.querySelector('.history-title-year').textContent = '(' + data.titles[i].year + ')';
+      // Highlight matching titles in search mode.
+      if (highlight && data.titles[i].title.toLowerCase().includes(highlight)) {
+        row.classList.add('history-match');
+      }
+    });
+  }
+
+  // ── Search ───────────────────────────────────────────────────────────────
+  let searchToken = 0;
+  async function applySearch() {
+    const q = (searchInp.value || '').trim().toLowerCase();
+    clearBtn.hidden = !q;
+    if (!q) {
+      // Reset everything to its default collapsed/clean state.
+      hintEl.textContent = '';
+      for (const [date, el] of dayElements) {
+        el.classList.remove('history-day-dimmed');
+        const body = el.querySelector('.history-day-body');
+        const arrow = el.querySelector('.history-day-arrow');
+        body.hidden = true;
+        arrow.textContent = '▸';
+      }
+      return;
+    }
+    const myToken = ++searchToken;
+    hintEl.textContent = 'Searching…';
+
+    // Fetch any uncached day so we can scan its titles. Sequential to keep
+    // the server happy. Bail if user typed more during the loop.
+    let matchedDays = 0;
+    let totalMatches = 0;
+    for (const day of allDays) {
+      if (myToken !== searchToken) return; // user kept typing
+      if (!dayCache[day.date]) {
+        try {
+          const r = await fetch(`/api/history/day/${day.date}`, { cache: 'no-store' });
+          if (!r.ok) continue;
+          dayCache[day.date] = await r.json();
+        } catch { continue; }
+      }
+      const titles = dayCache[day.date].titles || [];
+      const dayMatches = titles.filter(t => t.title.toLowerCase().includes(q));
+      const el = dayElements.get(day.date);
+      if (!el) continue;
+      const body = el.querySelector('.history-day-body');
+      const arrow = el.querySelector('.history-day-arrow');
+      if (dayMatches.length > 0) {
+        el.classList.remove('history-day-dimmed');
+        body.hidden = false;
+        arrow.textContent = '▾';
+        renderDayBody(body, dayCache[day.date], q);
+        matchedDays += 1;
+        totalMatches += dayMatches.length;
+      } else {
+        el.classList.add('history-day-dimmed');
+        body.hidden = true;
+        arrow.textContent = '▸';
+      }
+    }
+    hintEl.textContent = `${totalMatches} title${totalMatches === 1 ? '' : 's'} across ${matchedDays} day${matchedDays === 1 ? '' : 's'}`;
+  }
+
+  let typingTimer = null;
+  if (searchInp) {
+    searchInp.addEventListener('input', () => {
+      clearTimeout(typingTimer);
+      typingTimer = setTimeout(applySearch, 220);
+    });
+  }
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      searchInp.value = '';
+      applySearch();
+      searchInp.focus();
     });
   }
 

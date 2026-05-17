@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% from "_macros.html" import info %}
+{% block title %}Stats · {{ user.username }}{% endblock %}
+
+{% block content %}
+<div class="stats-page">
+
+  <section class="stats-hero" id="stats-hero">
+    <div class="stats-hero-loading muted">Loading your stats…</div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <span>RECENT ACTIVITY {{ info("Your save activity for the last 30 days. Switch between poster counts and KES earned.") }}</span>
+      <div class="stats-chart-toggle">
+        <button type="button" class="btn btn-ghost btn-tiny stats-toggle-btn active" data-metric="count">POSTERS</button>
+        <button type="button" class="btn btn-ghost btn-tiny stats-toggle-btn" data-metric="kes">KES</button>
+      </div>
+    </div>
+    <div class="panel-body">
+      <div class="stats-chart-wrap">
+        <canvas id="stats-chart" height="220"></canvas>
+      </div>
+    </div>
+  </section>
+
+  <div class="stats-row">
+    <section class="panel stats-records-panel">
+      <div class="panel-head"><span>RECORDS {{ info("Your personal bests since you joined.") }}</span></div>
+      <div class="panel-body" id="stats-records">
+        <div class="muted">Loading…</div>
+      </div>
+    </section>
+
+    <section class="panel stats-pace-panel">
+      <div class="panel-head"><span>PACE {{ info("How you're doing now versus your previous week and month.") }}</span></div>
+      <div class="panel-body" id="stats-pace">
+        <div class="muted">Loading…</div>
+      </div>
+    </section>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="/static/js/_stats_common.js?v={{ app_version }}"></script>
+<script src="/static/js/user_stats.js?v={{ app_version }}"></script>
+{% endblock %}

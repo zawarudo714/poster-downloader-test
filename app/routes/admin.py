@@ -2014,12 +2014,17 @@ def chat_page(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Admin chat hub: list of worker threads + an open thread on the right."""
+    """
+    Admin chat hub: list of worker threads + an open thread on the right.
+
+    We DON'T auto-select the first thread anymore. Auto-selecting + the
+    chat.js auto-mark-read combo meant landing on this page from a badge
+    notification immediately cleared the unread state before admin had a
+    chance to actually read the message. Now admin must explicitly click
+    a thread to open it.
+    """
     from ..chat import admin_thread_summaries
     threads = admin_thread_summaries(db, viewer_id=admin.id)
-    # If worker_id not given, default to the first thread (if any).
-    if not worker_id and threads:
-        worker_id = threads[0]["worker_id"]
     return templates.TemplateResponse(
         request, "admin_chat.html",
         {"user": admin, "admin": admin, "active_tab": "chat",
@@ -2141,3 +2146,46 @@ def api_activity(
             "details":     details,
         })
     return JSONResponse({"ok": True, "rows": out})
+
+
+# ── Per-worker stats panel ──────────────────────────────────────────────────
+
+@router.get("/stats", response_class=HTMLResponse)
+def admin_stats_page(
+    request: Request,
+    worker_id: int = Query(0),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Admin's view of worker performance. Sidebar lists workers; clicking
+    one shows their full stats panel with the same chart + records the
+    worker sees, plus admin-only flag rate + turnaround.
+    """
+    workers = (
+        db.query(User)
+          .filter(User.role == "worker", User.is_deleted == 0)
+          .order_by(User.username.asc())
+          .all()
+    )
+    if not worker_id and workers:
+        worker_id = workers[0].id
+    return templates.TemplateResponse(
+        request, "admin_stats.html",
+        {"user": admin, "admin": admin,
+         "active_tab": "stats",
+         "workers": workers,
+         "selected_worker_id": worker_id},
+    )
+
+
+@router.get("/api/stats/{worker_id}")
+def api_admin_stats(
+    worker_id: int,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """JSON stats for one worker — admin view (includes admin_only block)."""
+    from ..stats import compute_worker_stats
+    data = compute_worker_stats(db, worker_id=worker_id, is_admin_view=True)
+    return JSONResponse(data)

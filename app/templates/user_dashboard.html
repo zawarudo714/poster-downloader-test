@@ -112,6 +112,10 @@
     <div class="att-skip-note" hidden>
       <strong>PREVIOUSLY SKIPPED:</strong> <span class="att-skip-note-text"></span>
     </div>
+    <div class="att-active-flags-banner" hidden>
+      <strong>⚠ <span class="att-active-flags-count">0</span> unresolved flag<span class="att-active-flags-plural">s</span></strong>
+      on this title. Scroll up to the CHANGES REQUESTED panel to act on them, or just delete/replace below — flags resolve automatically when you fix the underlying poster.
+    </div>
     <div class="att-actions">
       <a class="btn btn-accent att-tmdb" target="_blank" rel="noopener">↗ Open TMDB</a>
       <button class="btn btn-ghost" data-action="unlock">CLOSE</button>
@@ -173,6 +177,8 @@
       <span class="rev-file mono"></span>
       <span class="rev-status-pill"></span>
       <a class="btn btn-ghost btn-tiny rev-tmdb" target="_blank" rel="noopener">↗ Open TMDB</a>
+      <button type="button" class="btn btn-ghost btn-tiny rev-view-catalog">VIEW ALL POSTERS</button>
+      <button type="button" class="btn btn-accent btn-tiny rev-go-to-title">GO TO TITLE</button>
     </div>
     <div class="rev-rejected-banner" hidden>
       <strong>⚠ ADMIN REJECTED YOUR FIX — please look again.</strong>
@@ -206,6 +212,50 @@
     </div>
   </div>
 </template>
+
+<!-- Catalog modal: read-only grid of all posters on a title -->
+<div id="catalog-modal" class="lightbox" hidden>
+  <div class="lightbox-bg" data-catalog-close></div>
+  <div class="lightbox-card catalog-card">
+    <div class="catalog-head">
+      <div>
+        <h3 class="catalog-title" id="catalog-title">…</h3>
+        <p class="muted catalog-sub" id="catalog-sub"></p>
+      </div>
+      <button type="button" class="catalog-close" data-catalog-close aria-label="Close">×</button>
+    </div>
+    <div class="catalog-grid" id="catalog-grid">
+      <div class="empty-hint">Loading…</div>
+    </div>
+    <div class="catalog-actions">
+      <button type="button" class="btn btn-ghost" data-catalog-close>CLOSE</button>
+      <button type="button" class="btn btn-accent" id="catalog-go-to-title">GO TO TITLE</button>
+    </div>
+  </div>
+</div>
+
+<!-- Reason-picker modal: complete-with-few-posters / skip preset reasons -->
+<div id="reason-modal" class="lightbox" hidden>
+  <div class="lightbox-bg" data-reason-close></div>
+  <div class="lightbox-card reason-card">
+    <h3 id="reason-title">Reason needed</h3>
+    <p class="muted" id="reason-sub"></p>
+    <div class="reason-preset-list" id="reason-preset-list">
+      <!-- filled by JS based on context -->
+    </div>
+    <div class="reason-manual" id="reason-manual" hidden>
+      <label class="filter-label" style="display:block;">
+        Type your own reason
+        <input type="text" id="reason-manual-input" maxlength="500" autocomplete="off">
+      </label>
+    </div>
+    <div class="reason-actions">
+      <button type="button" class="btn btn-ghost" data-reason-close>CANCEL</button>
+      <button type="button" class="btn btn-ghost" id="reason-toggle-manual">TYPE OWN REASON</button>
+      <button type="button" class="btn btn-accent" id="reason-confirm" disabled>CONFIRM</button>
+    </div>
+  </div>
+</div>
 
 {% endblock %}
 

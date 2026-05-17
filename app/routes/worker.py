@@ -542,6 +542,136 @@ def unlock(user: User = Depends(require_user), db: Session = Depends(get_db)):
     return JSONResponse({"ok": True})
 
 
+@router.get("/api/title/{master_id}/catalog")
+def title_catalog(
+    master_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Read-only list of all saved posters on this title. Used by the worker
+    flag-banner "VIEW ALL POSTERS" button so they can spot duplicates and
+    pick a different angle when replacing.
+
+    Authorization: the worker can see catalogs for any title they have
+    saved at least one poster on, OR any title currently claimed by them.
+    This covers the flagged-but-completed case where the title is no
+    longer "claimed" but the worker should still see what they did.
+    """
+    t = db.query(MasterTitle).filter_by(id=master_id).first()
+    if not t:
+        raise HTTPException(404, "Title not found.")
+    # Permission check — the worker must have some link to this title.
+    if t.claimed_by_id != user.id:
+        saved_any = (
+            db.query(SavedPoster.id)
+              .filter(SavedPoster.master_title_id == t.id,
+                      SavedPoster.user_id == user.id,
+                      SavedPoster.deleted_at.is_(None))
+              .first()
+        )
+        if not saved_any:
+            raise HTTPException(403, "You haven't worked on this title.")
+    posters = (
+        db.query(SavedPoster)
+          .filter(SavedPoster.master_title_id == t.id,
+                  SavedPoster.deleted_at.is_(None))
+          .order_by(SavedPoster.id.asc())
+          .all()
+    )
+    return JSONResponse({
+        "ok": True,
+        "title": t.title,
+        "year": t.year,
+        "content_type": t.content_type,
+        "status": t.status,
+        "posters": [
+            {
+                "id":       p.id,
+                "filename": p.filename,
+                "size":     p.file_size or 0,
+                "width":    p.image_width or 0,
+                "height":   p.image_height or 0,
+                "saved_by": p.username,
+                "saved_on": p.original_save_date.isoformat() if p.original_save_date else "",
+                "url":      f"/file_own/{p.id}",
+            }
+            for p in posters
+        ],
+    })
+
+
+@router.post("/title/{master_id}/go_to")
+def go_to_title(
+    master_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """
+    "Go to Title" from a flag card — reopens a completed/skipped title
+    (if needed), locks it to the current worker, and returns the same
+    payload as lock_title so the UI can immediately switch to the active
+    panel.
+
+    Three states for the source title:
+      - already in_progress + claimed by this worker → just lock (cheap).
+      - complete/skipped + (claim was this worker OR unclaimed) → flip
+        status back to in_progress, lock to this worker.
+      - claimed by SOMEONE ELSE → reject, even if status is complete.
+
+    We never auto-resolve any active revisions here — the worker is
+    explicitly going there to look at/fix them. Their actions on posters
+    (replace/delete) take care of revision lifecycle as today.
+    """
+    t = db.query(MasterTitle).filter_by(id=master_id).first()
+    if not t:
+        raise HTTPException(404, "Title not found.")
+    # If the title is currently claimed by another worker, block.
+    if t.claimed_by_id and t.claimed_by_id != user.id:
+        raise HTTPException(
+            409,
+            f"This title is currently being worked on by {t.claimed_by_name}.",
+        )
+
+    reopened = False
+    if t.status in ("complete", "skipped"):
+        t.status = "in_progress"
+        t.completed_at = None
+        t.skip_reason  = None
+        reopened = True
+        # Make sure they own the claim now (in case it was an unclaimed
+        # leftover or attribution was theirs but record had no live claim).
+        if t.claimed_by_id is None:
+            t.claimed_by_id   = user.id
+            t.claimed_by_name = user.username
+            t.claimed_at      = datetime.utcnow()
+        log_activity(db, user=user, action="reopened", target_type="master_title",
+                     target_id=t.id, details={"via": "go_to_title"})
+    elif t.claimed_by_id is None:
+        # Pending unclaimed — just claim it.
+        t.claimed_by_id   = user.id
+        t.claimed_by_name = user.username
+        t.claimed_at      = datetime.utcnow()
+        t.status          = "in_progress"
+        log_activity(db, user=user, action="claimed", target_type="master_title",
+                     target_id=t.id, details={"via": "go_to_title"})
+
+    user.locked_master_id = t.id
+    log_activity(db, user=user, action="locked", target_type="master_title",
+                 target_id=t.id, details={"via": "go_to_title"})
+    db.commit()
+    return JSONResponse({
+        "ok": True,
+        "id":           t.id,
+        "title":        t.title,
+        "year":         t.year,
+        "content_type": t.content_type,
+        "description":  (t.description or "")[:600],
+        "tmdb_search":  _tmdb_search_url(t.title, t.content_type),
+        "reopened":     reopened,
+    })
+
+
 # ── Save image ───────────────────────────────────────────────────────────────
 
 def _validate_image_url(url: str) -> tuple[bool, str]:
@@ -984,6 +1114,7 @@ def title_complete(
     master_id: int,
     comment: str = Form(""),
     force: int = Form(0),
+    reason_source: str = Form(""),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -992,6 +1123,11 @@ def title_complete(
     against this master's posters, return 409 with a count so the worker
     side can show a confirm dialog. Worker re-submits with force=1 to
     proceed anyway.
+
+    `reason_source` is a hint about HOW the comment was produced — 'preset'
+    if the worker clicked a preset reason button, 'manual' if they typed
+    it. Surfaced in the activity log so admin can see at a glance whether
+    the comment is a stock answer or a thoughtful note.
     """
     t = _load_my_master(db, user, master_id)
 
@@ -1024,9 +1160,14 @@ def title_complete(
     t.admin_note = None  # auto-clear admin's send-back note when title is finished
     if user.locked_master_id == master_id:
         user.locked_master_id = None
+    # Sanitize reason_source — only allow known values; default to empty.
+    if reason_source not in ("preset", "manual"):
+        reason_source = ""
     log_activity(
         db, user=user, action="completed", target_type="master_title", target_id=t.id,
-        details={"comment": comment.strip() or None, "forced": bool(force)},
+        details={"comment": comment.strip() or None,
+                 "forced": bool(force),
+                 "reason_source": reason_source or None},
     )
     db.commit()
     return JSONResponse({"ok": True})
@@ -1036,6 +1177,7 @@ def title_complete(
 def title_skip(
     master_id: int,
     reason: str = Form(""),
+    reason_source: str = Form(""),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -1045,9 +1187,12 @@ def title_skip(
     t.admin_note = None  # clear admin's prior send-back note
     if user.locked_master_id == master_id:
         user.locked_master_id = None
+    if reason_source not in ("preset", "manual"):
+        reason_source = ""
     log_activity(
         db, user=user, action="skipped", target_type="master_title", target_id=t.id,
-        details={"reason": reason.strip() or None},
+        details={"reason": reason.strip() or None,
+                 "reason_source": reason_source or None},
     )
     db.commit()
     return JSONResponse({"ok": True})
@@ -1390,3 +1535,31 @@ def api_history_day(
 
     titles = sorted(by_title.values(), key=lambda r: r["title"].lower())
     return JSONResponse({"ok": True, "date": d, "titles": titles})
+
+
+# ── Worker performance stats ────────────────────────────────────────────────
+
+@router.get("/stats", response_class=HTMLResponse)
+def stats_page(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Worker's own stats page — chart + totals + records + pace deltas."""
+    if user.role == "admin":
+        return RedirectResponse("/", status_code=302)
+    return templates.TemplateResponse(
+        request, "user_stats.html",
+        {"user": user, "active_tab": "stats"},
+    )
+
+
+@router.get("/api/stats/me")
+def api_stats_me(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """JSON stats for the current worker. Drives the /stats page."""
+    from ..stats import compute_worker_stats
+    data = compute_worker_stats(db, worker_id=user.id, is_admin_view=False)
+    return JSONResponse(data)

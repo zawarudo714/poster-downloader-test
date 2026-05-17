@@ -57,10 +57,12 @@
             <a href="/admin/backups"   class="navlink {% if active_tab == 'backups' %}active{% endif %}">Backups</a>
             <a href="/admin/email"     class="navlink {% if active_tab == 'email' %}active{% endif %}">Email</a>
             <a href="/admin/audit"     class="navlink {% if active_tab == 'audit' %}active{% endif %}">Activity&nbsp;Log</a>
+            <a href="/admin/stats"     class="navlink {% if active_tab == 'stats' %}active{% endif %}">Stats</a>
             <a href="/worker"          class="navlink">Work&nbsp;Mode</a>
           {% else %}
             <a href="/"                class="navlink {% if active_tab == 'dashboard' %}active{% endif %}">Dashboard</a>
             <a href="/history"         class="navlink {% if active_tab == 'history' %}active{% endif %}">Save&nbsp;History</a>
+            <a href="/stats"           class="navlink {% if active_tab == 'stats' %}active{% endif %}">Stats</a>
             <a href="/chat"            class="navlink chat-nav {% if active_tab == 'chat' %}active{% endif %}">Chat<span class="nav-badge" id="nav-chat-badge" hidden>0</span></a>
           {% endif %}
         {% endif %}

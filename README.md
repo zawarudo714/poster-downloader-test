@@ -51,6 +51,20 @@ console (also stored in `.first_admin.txt`).
 > Other additions: nothing else needs migration — `is_deleted`/`deleted_at`
 > on User, `last_seen_at` on User, and email config keys in `app_settings`
 > were all added in previous rounds.
+>
+> **NOTE for round 10 (workflow QoL — catalog, reasons, stats, bulk bar)**:
+> No schema changes this round. All additive — just deploy:
+> ```
+> git pull && docker compose up -d --build
+> ```
+> Stats pages use Chart.js loaded from a public CDN
+> (`cdn.jsdelivr.net`). If your server has restricted egress, you'll need
+> to allow that host, or download `chart.umd.min.js` from
+> https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js
+> and drop it into `app/static/vendor/`, then edit
+> `app/templates/user_stats.html` and `app/templates/admin_stats.html`
+> to point the script tag at `/static/vendor/chart.umd.min.js?v={{ app_version }}`
+> instead.
 
 ## What this version adds (latest round)
 

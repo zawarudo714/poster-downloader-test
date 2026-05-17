@@ -276,6 +276,18 @@
       sn.hidden = false;
       sn.querySelector('.att-skip-note-text').textContent = t.skip_reason;
     }
+    // Count of unresolved flags ON THIS title — surfaces inside the
+    // workplace so workers fixing posters in-place don't lose sight
+    // of related flags they should also resolve.
+    const myRevs = (state.revisions || []).filter(
+      (r) => r.master_id === t.id && r.status === 'open'
+    );
+    if (myRevs.length > 0) {
+      const fb = node.querySelector('.att-active-flags-banner');
+      fb.hidden = false;
+      fb.querySelector('.att-active-flags-count').textContent = String(myRevs.length);
+      fb.querySelector('.att-active-flags-plural').textContent = myRevs.length === 1 ? '' : 's';
+    }
 
     const tmdb = node.querySelector('.att-tmdb');
     tmdb.href = t.tmdb_search;
@@ -396,6 +408,202 @@
     if (lb) lb.hidden = true;
   }
 
+  // ── Reason picker modal ─────────────────────────────────────────────────
+  // Generic modal for "give a reason" flows (complete with <3 posters,
+  // skip a title). Returns a Promise<{ text, source } | null>. `source`
+  // is 'preset' if user clicked a preset, 'manual' if they typed.
+  // Returns null if cancelled.
+  function pickReason(opts) {
+    return new Promise((resolve) => {
+      const modal      = document.getElementById('reason-modal');
+      const titleEl    = document.getElementById('reason-title');
+      const subEl      = document.getElementById('reason-sub');
+      const presetWrap = document.getElementById('reason-preset-list');
+      const manualWrap = document.getElementById('reason-manual');
+      const manualInp  = document.getElementById('reason-manual-input');
+      const confirmBtn = document.getElementById('reason-confirm');
+      const toggleBtn  = document.getElementById('reason-toggle-manual');
+
+      titleEl.textContent = opts.title || 'Reason needed';
+      subEl.textContent   = opts.sub   || '';
+      presetWrap.innerHTML = '';
+      manualWrap.hidden = true;
+      manualInp.value = '';
+      confirmBtn.disabled = true;
+      toggleBtn.textContent = 'TYPE OWN REASON';
+
+      let chosen = null;  // { text, source }
+
+      // Render presets.
+      (opts.presets || []).forEach((text) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'reason-preset-btn';
+        b.textContent = text;
+        b.addEventListener('click', () => {
+          // Mark this preset as selected; clear others.
+          presetWrap.querySelectorAll('.reason-preset-btn').forEach((x) => x.classList.remove('selected'));
+          b.classList.add('selected');
+          chosen = { text, source: 'preset' };
+          confirmBtn.disabled = false;
+        });
+        presetWrap.appendChild(b);
+      });
+      // If opts.allowEmpty (e.g. complete-with-comment is optional),
+      // include a "no reason" preset so worker can confirm without typing.
+      if (opts.allowEmpty) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'reason-preset-btn reason-preset-empty';
+        b.textContent = opts.emptyLabel || 'No reason — just confirm';
+        b.addEventListener('click', () => {
+          presetWrap.querySelectorAll('.reason-preset-btn').forEach((x) => x.classList.remove('selected'));
+          b.classList.add('selected');
+          chosen = { text: '', source: 'preset' };
+          confirmBtn.disabled = false;
+        });
+        presetWrap.appendChild(b);
+      }
+
+      function close(result) {
+        modal.hidden = true;
+        // Disconnect listeners so they don't leak across opens.
+        modal.querySelectorAll('[data-reason-close]').forEach((el) => el.onclick = null);
+        toggleBtn.onclick = null;
+        confirmBtn.onclick = null;
+        manualInp.oninput = null;
+        document.removeEventListener('keydown', onKey);
+        resolve(result);
+      }
+
+      function onKey(e) {
+        if (e.key === 'Escape') close(null);
+      }
+
+      modal.querySelectorAll('[data-reason-close]').forEach((el) => {
+        el.onclick = () => close(null);
+      });
+      toggleBtn.onclick = () => {
+        manualWrap.hidden = !manualWrap.hidden;
+        if (!manualWrap.hidden) {
+          manualInp.focus();
+          // Clear any preset selection — they're switching to manual.
+          presetWrap.querySelectorAll('.reason-preset-btn').forEach((x) => x.classList.remove('selected'));
+          chosen = null;
+          confirmBtn.disabled = true;
+        }
+      };
+      manualInp.oninput = () => {
+        const v = manualInp.value.trim();
+        if (v) {
+          chosen = { text: v, source: 'manual' };
+          confirmBtn.disabled = false;
+        } else if (opts.allowEmpty) {
+          chosen = { text: '', source: 'manual' };
+          confirmBtn.disabled = false;
+        } else {
+          chosen = null;
+          confirmBtn.disabled = true;
+        }
+      };
+      confirmBtn.onclick = () => close(chosen);
+
+      document.addEventListener('keydown', onKey);
+      modal.hidden = false;
+    });
+  }
+  // Shows every live poster currently saved on a master title. Read-only —
+  // for awareness of what's already there before replacing/saving. The
+  // "GO TO TITLE" button delegates to goToTitle() which opens the workplace.
+  let catalogActiveMasterId = null;
+
+  function openCatalog(masterId, opts = {}) {
+    const modal = document.getElementById('catalog-modal');
+    if (!modal) return;
+    catalogActiveMasterId = masterId;
+    document.getElementById('catalog-title').textContent = opts.titleHint || '…';
+    document.getElementById('catalog-sub').textContent = '';
+    document.getElementById('catalog-grid').innerHTML =
+      '<div class="empty-hint">Loading…</div>';
+    modal.hidden = false;
+    // Wire close handlers once. We re-attach safely since they're idempotent.
+    modal.querySelectorAll('[data-catalog-close]').forEach((el) => {
+      el.onclick = closeCatalog;
+    });
+    document.getElementById('catalog-go-to-title').onclick = () => {
+      const mid = catalogActiveMasterId;
+      closeCatalog();
+      if (mid != null) goToTitle(mid);
+    };
+    fetch(`/api/title/${masterId}/catalog`, { cache: 'no-store' })
+      .then((r) => r.json().then((data) => ({ ok: r.ok, data, status: r.status })))
+      .then(({ ok, data, status }) => {
+        if (!ok) {
+          document.getElementById('catalog-grid').innerHTML =
+            `<div class="empty-hint">${data.detail || ('Failed (' + status + ')')}</div>`;
+          return;
+        }
+        document.getElementById('catalog-title').textContent =
+          `${data.title} (${data.year})`;
+        document.getElementById('catalog-sub').textContent =
+          `${data.posters.length} poster${data.posters.length === 1 ? '' : 's'} on this title · status: ${data.status.replace('_', ' ')}`;
+        const grid = document.getElementById('catalog-grid');
+        if (data.posters.length === 0) {
+          grid.innerHTML = '<div class="empty-hint">No posters saved on this title.</div>';
+          return;
+        }
+        grid.innerHTML = '';
+        data.posters.forEach((p) => {
+          const card = document.createElement('div');
+          card.className = 'catalog-poster';
+          card.innerHTML = `
+            <img class="catalog-poster-img" loading="lazy" alt="">
+            <div class="catalog-poster-name mono"></div>
+            <div class="catalog-poster-meta mono muted"></div>
+          `;
+          const img = card.querySelector('.catalog-poster-img');
+          img.src = p.url + '?v=' + (p.size || 0);
+          img.alt = p.filename;
+          img.style.cursor = 'zoom-in';
+          img.title = 'Click to enlarge';
+          img.addEventListener('click', () => openLightbox(img.src, p.filename));
+          card.querySelector('.catalog-poster-name').textContent = p.filename;
+          const dims = (p.width && p.height) ? `${p.width}×${p.height}` : '';
+          card.querySelector('.catalog-poster-meta').textContent =
+            [humanSize(p.size), dims, p.saved_on].filter(Boolean).join(' · ');
+          grid.appendChild(card);
+        });
+      })
+      .catch(() => {
+        document.getElementById('catalog-grid').innerHTML =
+          '<div class="empty-hint">Network error.</div>';
+      });
+  }
+
+  function closeCatalog() {
+    const modal = document.getElementById('catalog-modal');
+    if (modal) modal.hidden = true;
+    catalogActiveMasterId = null;
+  }
+
+  // ── Go to title ─────────────────────────────────────────────────────────
+  // Server-side reopen + lock, then refresh state. The active panel will
+  // auto-render the now-locked title; we scroll to it for clarity.
+  async function goToTitle(masterId) {
+    const r = await fetch(`/title/${masterId}/go_to`, { method: 'POST' });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      alert('Failed: ' + (data.detail || r.status));
+      return;
+    }
+    await refreshState();
+    // Scroll the active panel into view. Mobile: also collapse drawer if open.
+    requestAnimationFrame(() => {
+      const panel = document.querySelector('[data-active-panel]');
+      if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+
   // ── Revisions banner ─────────────────────────────────────────────────────
   function renderRevisions() {
     const revs = state.revisions || [];
@@ -435,6 +643,17 @@
     // TMDB link for this title
     const tmdbA = wrap.querySelector('.rev-tmdb');
     tmdbA.href = r.tmdb_search || '#';
+
+    // VIEW ALL POSTERS — opens the catalog modal so the worker can see
+    // the rest of their saves on this title without leaving the flag list.
+    wrap.querySelector('.rev-view-catalog').addEventListener('click', () => {
+      openCatalog(r.master_id, { titleHint: titleStr });
+    });
+    // GO TO TITLE — reopens (if needed) + locks + scrolls the worker into
+    // the active title workplace for hands-on edits.
+    wrap.querySelector('.rev-go-to-title').addEventListener('click', () => {
+      goToTitle(r.master_id);
+    });
 
     // Status pill
     const pill = wrap.querySelector('.rev-status-pill');
@@ -758,22 +977,31 @@
       return;
     }
     let comment = (doneCommentEl.value || '').trim();
+    let reason_source = comment ? 'manual' : '';
     const liveCount = (live.posters || []).length;
     if (liveCount < 3 && !comment) {
-      const ans = prompt(
-        `This title only has ${liveCount} poster${liveCount === 1 ? '' : 's'} saved.\n` +
-        `If that's intentional (e.g. "only 2 HD posters available"), type a brief reason — or leave blank to confirm.\n\n` +
-        `Reason (optional):`
-      );
-      if (ans === null) return;
-      comment = ans.trim();
+      const result = await pickReason({
+        title: 'Confirm completion',
+        sub: `This title only has ${liveCount} poster${liveCount === 1 ? '' : 's'} saved. ` +
+             `If that's intentional, pick a reason — or click "no reason" if 1–2 is just fine here.`,
+        presets: [
+          `Only ${liveCount} poster${liveCount === 1 ? '' : 's'} available`,
+          'Only HD posters were considered',
+        ],
+        allowEmpty: true,
+        emptyLabel: 'No reason — confirm anyway',
+      });
+      if (result === null) return;
+      comment = result.text;
+      reason_source = result.source;
     }
-    return submitComplete(masterId, comment, /*force*/ 0);
+    return submitComplete(masterId, comment, /*force*/ 0, reason_source);
   }
 
-  async function submitComplete(masterId, comment, force) {
+  async function submitComplete(masterId, comment, force, reason_source) {
     const r = await postForm(`/title/${masterId}/complete`,
-                             { comment, force: force ? 1 : 0 });
+                             { comment, force: force ? 1 : 0,
+                               reason_source: reason_source || '' });
     if (r.ok) {
       await refreshState();
       return;
@@ -782,7 +1010,7 @@
       // Server says there are unresolved flags. Confirm and retry with force=1.
       if (confirm(r.data.message + '\n\n' +
                   'Click OK to mark complete anyway. Cancel to go back and resolve the flags first.')) {
-        return submitComplete(masterId, comment, /*force*/ 1);
+        return submitComplete(masterId, comment, /*force*/ 1, reason_source);
       }
       return;
     }
@@ -790,8 +1018,24 @@
   }
 
   async function skipTitle(id, reason) {
-    if (!reason && !confirm('Skip this title without giving a reason?')) return;
-    const r = await postForm(`/title/${id}/skip`, { reason: reason || '' });
+    let reason_source = reason ? 'manual' : '';
+    if (!reason) {
+      const result = await pickReason({
+        title: 'Why are you skipping this title?',
+        sub:   'Pick a common reason or type your own. Skipped titles go to the admin for review.',
+        presets: [
+          'No suitable posters available',
+          'Wrong title — can\'t find it on TMDB',
+        ],
+        allowEmpty: false,
+      });
+      if (result === null) return;
+      reason = result.text;
+      reason_source = result.source;
+    }
+    const r = await postForm(`/title/${id}/skip`,
+                             { reason: reason || '',
+                               reason_source: reason_source || '' });
     if (r.ok) await refreshState();
     else alert('Failed: ' + (r.data && r.data.detail || r.status));
   }

@@ -130,9 +130,9 @@
   let titles = [];
   let titleIdx = 0;
   let currentLightbox = null;
-  // Multi-select state for "mark similar". Set of poster IDs.
+  // Multi-select state for "mark similar". Set of poster IDs. Selection
+  // is single-title — moving between titles prompts to clear.
   const selected = new Set();
-  let selectMode = false;
 
   const $ = (id) => document.getElementById(id);
   const tplTitle  = document.getElementById('tpl-gallery-title');
@@ -153,8 +153,7 @@
     const data = await r.json();
     titles = data.titles || [];
     titleIdx = 0;
-    selected.clear();
-    updateSimilarBtn();
+    clearSelection();
     $('ib-summary').textContent = `${data.title_count} title(s) · ${data.poster_count} poster(s) total`;
     renderGallery();
   }
@@ -236,32 +235,84 @@
 
     if (selected.has(p.poster_id)) btn.classList.add('p-selected');
 
-    btn.addEventListener('click', () => {
-      if (selectMode) {
-        toggleSelected(p.poster_id, btn);
-      } else {
-        openLightbox(t, p);
-      }
+    // Per-poster checkbox for similar-mark. Visible always; clicking it
+    // toggles selection and auto-reveals the floating bulk-action bar.
+    // Clicking the image (NOT the checkbox) still opens the lightbox.
+    const check = document.createElement('button');
+    check.type = 'button';
+    check.className = 'g-poster-check';
+    check.setAttribute('aria-label', 'Select for similar-mark');
+    check.title = 'Tick 2+ to mark as similar';
+    check.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleSelected(p.poster_id, btn, t.master_id, t.title);
+    });
+    btn.appendChild(check);
+
+    btn.addEventListener('click', (e) => {
+      // Only count as a checkbox click if the click target IS the checkbox.
+      // Everything else opens the lightbox.
+      if (e.target === check) return;
+      openLightbox(t, p);
     });
     return node;
   }
 
-  function toggleSelected(id, btn) {
+  // Track which master_id all current selections belong to. Clearing the
+  // selection (or clicking a poster from a different title) resets this.
+  let selectionMasterId = null;
+  let selectionTitleName = '';
+
+  function toggleSelected(id, btn, masterId, titleName) {
     if (selected.has(id)) {
       selected.delete(id);
       btn.classList.remove('p-selected');
+      if (selected.size === 0) {
+        selectionMasterId = null;
+        selectionTitleName = '';
+      }
     } else {
+      // Enforce single-title rule. If admin starts a new title's selection,
+      // confirm whether they want to clear the previous one.
+      if (selectionMasterId !== null && selectionMasterId !== masterId) {
+        if (!confirm(
+          `You already have ${selected.size} poster${selected.size === 1 ? '' : 's'} selected from "${selectionTitleName}". ` +
+          `Switch to selecting from "${titleName}" instead? (Current selection will clear.)`
+        )) return;
+        selected.clear();
+        document.querySelectorAll('.g-poster.p-selected').forEach((b) => b.classList.remove('p-selected'));
+        selectionMasterId = null;
+      }
       selected.add(id);
       btn.classList.add('p-selected');
+      selectionMasterId = masterId;
+      selectionTitleName = titleName;
     }
-    updateSimilarBtn();
+    updateBulkBar();
   }
 
-  function updateSimilarBtn() {
-    const btn = $('ib-mark-similar');
-    if (!btn) return;
-    btn.textContent = `MARK SELECTED AS SIMILAR (${selected.size})`;
-    btn.disabled = (selected.size < 2);
+  function updateBulkBar() {
+    const bar = $('ib-bulk-bar');
+    if (!bar) return;
+    const n = selected.size;
+    if (n === 0) {
+      bar.hidden = true;
+      return;
+    }
+    bar.hidden = false;
+    $('ib-bulk-count-n').textContent = String(n);
+    $('ib-bulk-title-name').textContent = selectionTitleName ? `(from "${selectionTitleName}")` : '';
+    const btn = $('ib-bulk-mark-similar');
+    btn.textContent = n < 2 ? `MARK SIMILAR (need ${2 - n} more)` : `MARK SIMILAR (${n})`;
+    btn.disabled = (n < 2);
+  }
+
+  function clearSelection() {
+    selected.clear();
+    selectionMasterId = null;
+    selectionTitleName = '';
+    document.querySelectorAll('.g-poster.p-selected').forEach((b) => b.classList.remove('p-selected'));
+    updateBulkBar();
   }
 
   function navTitle(d) {
@@ -361,54 +412,72 @@
   $('ib-prev-title').addEventListener('click', () => navTitle(-1));
   $('ib-next-title').addEventListener('click', () => navTitle(1));
 
-  // ── Select mode + Mark Similar ───────────────────────────────────────────
-  const selectToggle = $('ib-select-mode');
-  const markSimilar  = $('ib-mark-similar');
-  if (selectToggle) {
-    selectToggle.addEventListener('click', () => {
-      selectMode = !selectMode;
-      selectToggle.classList.toggle('on', selectMode);
-      selectToggle.textContent = selectMode ? '✕ EXIT SELECT MODE' : '☐ SELECT MODE';
-      if (!selectMode) {
-        selected.clear();
-        document.querySelectorAll('.g-poster.p-selected').forEach((b) => b.classList.remove('p-selected'));
-        updateSimilarBtn();
-      }
-      gallery.classList.toggle('select-mode', selectMode);
+  // ── Density toggle (1-up vs 2-up gallery layout) ────────────────────────
+  const densityBtn = $('ib-density-toggle');
+  const DENSITY_KEY = 'pd-browse-density';
+  function applyDensity(mode) {
+    const isTwoUp = (mode === '2up');
+    gallery.classList.toggle('density-2up', isTwoUp);
+    if (densityBtn) densityBtn.textContent = isTwoUp ? '☷ 2-UP' : '⊞ 1-UP';
+  }
+  let densityMode = '1up';
+  try {
+    const saved = localStorage.getItem(DENSITY_KEY);
+    if (saved === '2up' || saved === '1up') densityMode = saved;
+  } catch (e) {}
+  applyDensity(densityMode);
+  if (densityBtn) {
+    densityBtn.addEventListener('click', () => {
+      densityMode = (densityMode === '2up') ? '1up' : '2up';
+      try { localStorage.setItem(DENSITY_KEY, densityMode); } catch (e) {}
+      applyDensity(densityMode);
     });
   }
-  if (markSimilar) {
-    markSimilar.addEventListener('click', async () => {
+
+  // ── Bulk action bar (sticky bottom, auto-reveals at 2+ selections) ──────
+  const bulkBtn    = $('ib-bulk-mark-similar');
+  const bulkCancel = $('ib-bulk-cancel');
+  const bulkComment = $('ib-bulk-comment');
+  if (bulkBtn) {
+    bulkBtn.addEventListener('click', async () => {
       if (selected.size < 2) return;
-      // Verify all picks belong to one title (the API also checks).
-      const picksByTitle = {};
-      titles.forEach((t) => t.posters.forEach((p) => {
-        if (selected.has(p.poster_id)) picksByTitle[t.master_id] = (picksByTitle[t.master_id] || 0) + 1;
-      }));
-      if (Object.keys(picksByTitle).length !== 1) {
-        alert('All selected posters must belong to the same title.');
-        return;
-      }
-      const note = prompt(
-        `Mark these ${selected.size} posters as too similar?\n\n` +
-        `Optional note for the user (e.g. "Both are alternate covers — pick one"):`
-      );
-      if (note === null) return;
+      const note = (bulkComment.value || '').trim();
       const fd = new FormData();
       fd.append('poster_ids', Array.from(selected).join(','));
-      fd.append('comment', note || '');
+      fd.append('comment', note);
+      bulkBtn.disabled = true;
+      bulkBtn.textContent = 'SAVING…';
       const r = await fetch('/admin/posters/mark_similar', { method: 'POST', body: fd });
       const data = await r.json().catch(() => ({}));
+      bulkBtn.disabled = false;
       if (r.ok) {
-        alert('Flagged as similar. The user will be notified.');
-        selected.clear();
-        if (selectMode) selectToggle.click();
+        clearSelection();
+        bulkComment.value = '';
         loadList();
       } else {
         alert('Failed: ' + (data.detail || r.status));
+        updateBulkBar();  // restore correct label
       }
     });
   }
+  if (bulkCancel) {
+    bulkCancel.addEventListener('click', () => {
+      clearSelection();
+      bulkComment.value = '';
+    });
+  }
+  // Esc clears selection if bar is open.
+  document.addEventListener('keydown', (e) => {
+    const bar = $('ib-bulk-bar');
+    if (e.key === 'Escape' && bar && !bar.hidden) {
+      // But only if no lightbox is open (lightbox owns Esc when visible).
+      const lb = $('ib-lightbox');
+      if (!lb || lb.hidden) {
+        clearSelection();
+        bulkComment.value = '';
+      }
+    }
+  });
 
   // ── ZIP day ──────────────────────────────────────────────────────────────
   $('ib-zip').addEventListener('click', async () => {

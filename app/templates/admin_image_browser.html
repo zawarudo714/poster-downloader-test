@@ -37,8 +37,9 @@
         <button class="btn btn-ghost" id="ib-next-title">NEXT TITLE ›</button>
         <span class="muted">Use ← / → keys</span>
         <span class="gallery-controls-spacer"></span>
-        <button class="btn btn-ghost" id="ib-select-mode">☐ SELECT MODE {{ info("Toggle to multi-select posters within a single title. Pick 2+ then 'MARK SELECTED AS SIMILAR' to send the user a side-by-side flag.") }}</button>
-        <button class="btn btn-error" id="ib-mark-similar" disabled>MARK SELECTED AS SIMILAR (0)</button>
+        <button class="btn btn-ghost" id="ib-density-toggle"
+                data-tooltip="Switch between 1-column and 2-column title layout. Preference is saved locally.">⊞ 1-UP</button>
+        <span class="muted small ib-help">Tick 2 or more posters to mark them similar — the action bar appears at the bottom.</span>
       </div>
 
       <div id="ib-gallery" class="gallery"></div>
@@ -46,6 +47,18 @@
     </div>
   </section>
 
+</div>
+
+<!-- Sticky bulk-action bar — auto-appears when 2+ posters checked -->
+<div id="ib-bulk-bar" class="ib-bulk-bar" hidden>
+  <div class="ib-bulk-bar-inner">
+    <span class="ib-bulk-count mono"><strong id="ib-bulk-count-n">0</strong> selected</span>
+    <span class="ib-bulk-title muted mono" id="ib-bulk-title-name"></span>
+    <span class="ib-bulk-bar-spacer"></span>
+    <input type="text" id="ib-bulk-comment" placeholder="(optional) comment for the worker" maxlength="500">
+    <button class="btn btn-error" id="ib-bulk-mark-similar" disabled>MARK SIMILAR</button>
+    <button class="btn btn-ghost" id="ib-bulk-cancel">CANCEL</button>
+  </div>
 </div>
 
 {# Lightbox modal — appears when admin clicks a poster #}

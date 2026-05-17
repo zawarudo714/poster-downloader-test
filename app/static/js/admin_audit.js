@@ -102,6 +102,14 @@
       const meta = actionMeta(row.action);
       const card = document.createElement('div');
       card.className = 'activity-card ' + meta.cls + (row.comment ? ' has-comment' : '');
+      // reason_source is a hint from the server about HOW a comment was
+      // produced — "preset" if the worker tapped a preset reason button,
+      // "manual" if they typed it. Surface this as a small pill so admin
+      // can scan and see who's giving thoughtful notes vs stock answers.
+      const reasonSource = (row.details && row.details.reason_source) || '';
+      const sourcePill = reasonSource
+        ? `<span class="al-source-pill al-source-${reasonSource}">${reasonSource}</span>`
+        : '';
       card.innerHTML = `
         <div class="activity-card-head">
           <span class="al-when mono"></span>
@@ -109,7 +117,7 @@
           <span class="al-action-pill"></span>
           <span class="al-target"></span>
         </div>
-        ${row.comment ? '<div class="al-comment-line"><span class="al-comment-icon">💬</span><span class="al-comment-text"></span></div>' : ''}
+        ${row.comment ? `<div class="al-comment-line"><span class="al-comment-icon">💬</span><span class="al-comment-text"></span>${sourcePill}</div>` : ''}
       `;
       card.querySelector('.al-when').textContent = row.created_at;
       card.querySelector('.al-user').textContent = row.username || '(system)';

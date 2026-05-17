@@ -25,20 +25,28 @@
   async function tickBadges() {
     if (!inlineBadge && !toggleBadge) return;
     try {
-      let n = 0;
+      let n = null;
       if (isAdmin) {
-        const r = await fetch('/admin/api/chat/_summary', { cache: 'no-store' });
-        if (!r.ok) return;
-        const data = await r.json();
-        n = data.total_unread || 0;
+        // Admin endpoint. If it fails, leave the badge alone — we don't
+        // want to overwrite with a misleading 0 from the wrong endpoint.
+        try {
+          const r = await fetch('/admin/api/chat/_summary', { cache: 'no-store' });
+          if (r.ok) {
+            const data = await r.json();
+            n = data.total_unread || 0;
+          }
+        } catch (e) { /* network blip */ }
       } else {
+        // Worker view: count of unread in their own thread.
         const r = await fetch('/api/chat?after=0', { cache: 'no-store' });
         if (!r.ok) return;
         const data = await r.json();
         n = data.unread || 0;
       }
-      setBadge(inlineBadge, n);
-      setBadge(toggleBadge, n);
+      if (n !== null) {
+        setBadge(inlineBadge, n);
+        setBadge(toggleBadge, n);
+      }
     } catch (e) { /* ignore */ }
   }
 

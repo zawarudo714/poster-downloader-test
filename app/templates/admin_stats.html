@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% from "_macros.html" import info %}
+{% block title %}Worker Stats · Admin{% endblock %}
+
+{% block content %}
+<div class="stats-admin-grid"
+     data-selected-worker-id="{{ selected_worker_id or 0 }}">
+
+  <aside class="stats-admin-sidebar">
+    <div class="panel-head"><span>WORKERS {{ info("Pick a worker to see their performance dashboard.") }}</span></div>
+    <div class="stats-admin-worker-list">
+      {% if workers %}
+        {% for w in workers %}
+          <a href="/admin/stats?worker_id={{ w.id }}"
+             class="stats-admin-worker-row {% if w.id == selected_worker_id %}active{% endif %}">
+            <span class="stats-admin-worker-name mono">{{ w.username }}</span>
+          </a>
+        {% endfor %}
+      {% else %}
+        <p class="muted" style="padding: 12px;">No active workers.</p>
+      {% endif %}
+    </div>
+  </aside>
+
+  <main class="stats-admin-main">
+    {% if selected_worker_id %}
+      <section class="stats-hero" id="stats-hero">
+        <div class="stats-hero-loading muted">Loading…</div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <span>RECENT ACTIVITY {{ info("Last 30 days of saves.") }}</span>
+          <div class="stats-chart-toggle">
+            <button type="button" class="btn btn-ghost btn-tiny stats-toggle-btn active" data-metric="count">POSTERS</button>
+            <button type="button" class="btn btn-ghost btn-tiny stats-toggle-btn" data-metric="kes">KES</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="stats-chart-wrap">
+            <canvas id="stats-chart" height="220"></canvas>
+          </div>
+        </div>
+      </section>
+
+      <div class="stats-row">
+        <section class="panel stats-records-panel">
+          <div class="panel-head"><span>RECORDS</span></div>
+          <div class="panel-body" id="stats-records">
+            <div class="muted">Loading…</div>
+          </div>
+        </section>
+
+        <section class="panel stats-pace-panel">
+          <div class="panel-head"><span>PACE</span></div>
+          <div class="panel-body" id="stats-pace">
+            <div class="muted">Loading…</div>
+          </div>
+        </section>
+      </div>
+
+      <section class="panel">
+        <div class="panel-head">
+          <span>QUALITY {{ info("Admin-only: how often this worker's saves get flagged, and how fast they turn around fixes.") }}</span>
+        </div>
+        <div class="panel-body" id="stats-quality">
+          <div class="muted">Loading…</div>
+        </div>
+      </section>
+    {% else %}
+      <div class="empty-hint" style="padding: 30px;">
+        Pick a worker on the left to view their stats.
+      </div>
+    {% endif %}
+  </main>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="/static/js/_stats_common.js?v={{ app_version }}"></script>
+<script src="/static/js/admin_stats.js?v={{ app_version }}"></script>
+{% endblock %}

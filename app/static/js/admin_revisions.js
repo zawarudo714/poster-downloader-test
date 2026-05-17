@@ -88,4 +88,44 @@
       alert('Failed: ' + msg);
     }
   }
+  // Pending-completion cards — APPROVE COMPLETION / REJECT & SEND BACK
+  document.querySelectorAll('.pending-complete-card').forEach((card) => {
+    const masterId = card.getAttribute('data-master-id');
+    const verdictInp = card.querySelector('[data-pcc-verdict]');
+    const approveBtn = card.querySelector('[data-action="approve-complete"]');
+    const rejectBtn  = card.querySelector('[data-action="reject-complete"]');
+
+    if (approveBtn) approveBtn.addEventListener('click', async () => {
+      if (!confirm('Approve this completion? All flags on this title will be resolved and the title becomes COMPLETE.')) return;
+      const fd = new FormData();
+      fd.append('verdict', verdictInp.value || '');
+      const r = await fetch(`/admin/title/${masterId}/approve_complete`, { method: 'POST', body: fd });
+      if (r.ok) location.reload();
+      else {
+        let msg = r.status;
+        try { const d = await r.json(); msg = d.detail || msg; } catch (e) {}
+        alert('Failed: ' + msg);
+      }
+    });
+
+    if (rejectBtn) rejectBtn.addEventListener('click', async () => {
+      const v = (verdictInp.value || '').trim();
+      if (!v) {
+        alert('Please type what you want changed before rejecting — the worker will see this on every reopened flag.');
+        verdictInp.focus();
+        return;
+      }
+      if (!confirm('Reject this completion?\nThe title returns to in-progress, all flags re-open, and your note pins to the title + each flag.')) return;
+      const fd = new FormData();
+      fd.append('verdict', v);
+      const r = await fetch(`/admin/title/${masterId}/reject_complete`, { method: 'POST', body: fd });
+      if (r.ok) location.reload();
+      else {
+        let msg = r.status;
+        try { const d = await r.json(); msg = d.detail || msg; } catch (e) {}
+        alert('Failed: ' + msg);
+      }
+    });
+  });
+
 })();

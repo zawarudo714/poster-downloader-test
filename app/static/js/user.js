@@ -418,6 +418,7 @@
       const modal      = document.getElementById('reason-modal');
       const titleEl    = document.getElementById('reason-title');
       const subEl      = document.getElementById('reason-sub');
+      const hintEl     = document.getElementById('reason-hint');
       const presetWrap = document.getElementById('reason-preset-list');
       const manualWrap = document.getElementById('reason-manual');
       const manualInp  = document.getElementById('reason-manual-input');
@@ -426,6 +427,17 @@
 
       titleEl.textContent = opts.title || 'Reason needed';
       subEl.textContent   = opts.sub   || '';
+      // Optional secondary hint, used e.g. on delete to suggest REPLACE
+      // for accidentally-saved-wrong-image cases.
+      if (hintEl) {
+        if (opts.hint) {
+          hintEl.textContent = opts.hint;
+          hintEl.hidden = false;
+        } else {
+          hintEl.textContent = '';
+          hintEl.hidden = true;
+        }
+      }
       presetWrap.innerHTML = '';
       manualWrap.hidden = true;
       manualInp.value = '';
@@ -682,7 +694,12 @@
     wrap.querySelector('.rev-comment').textContent = r.comment || '(no comment)';
     const flagged = wrap.querySelector('.rev-flagged');
     if (r.status === 'awaiting_approval') {
-      flagged.textContent = `awaiting admin approval since ${r.submitted_at || ''}`;
+      // Distinguish what the worker did so they know what kind of approval is pending.
+      let actionLabel;
+      if (r.worker_action === 'deleted') actionLabel = 'your deletion is awaiting admin approval';
+      else if (r.worker_action === 'replaced') actionLabel = 'your replacement is awaiting admin approval';
+      else                                     actionLabel = 'awaiting admin approval';
+      flagged.textContent = `${actionLabel} since ${r.submitted_at || ''}`;
     } else {
       flagged.textContent = `flagged by ${r.flagged_by} · ${r.created_at}`;
     }
@@ -697,21 +714,66 @@
     if (r.revision_type === 'similar' && r.related && r.related.length >= 2) {
       simpleControls.remove();
       r.related.forEach((p) => similarControls.appendChild(buildSimilarCard(r, p)));
+    } else if (r.revision_type === 'similar' && r.poster_deleted) {
+      // Edge case: a similar-pair revision where the primary poster was
+      // deleted AND the remaining related list dropped below 2. We still
+      // need to show a card so the worker knows admin is reviewing. Use
+      // the simple-mode template with the placeholder thumb.
+      similarControls.remove();
+      _renderDeletedRow(wrap, r);
     } else {
       similarControls.remove();
-      // Simple single-poster row
-      const thumb  = wrap.querySelector('.rev-thumb');
-      thumb.src    = fileUrl(r.poster_id, r.filename);
-      const urlInp = wrap.querySelector('[data-replace-url]');
-      const replaceBtn = wrap.querySelector('[data-action="replace"]');
-      const deleteBtn  = wrap.querySelector('[data-action="delete-revision"]');
-      const resolveBtn = wrap.querySelector('[data-action="resolve"]');
-      if (r.status === 'awaiting_approval') resolveBtn.hidden = true;
-      replaceBtn.addEventListener('click', () => replacePoster(r.poster_id, urlInp));
-      deleteBtn.addEventListener('click',  () => deletePoster(r.poster_id, { fromRevision: true }));
-      resolveBtn.addEventListener('click', () => resolveRevision(r.revision_id));
+      if (r.poster_deleted) {
+        _renderDeletedRow(wrap, r);
+      } else {
+        // Simple single-poster row, live file.
+        const thumb  = wrap.querySelector('.rev-thumb');
+        thumb.src    = fileUrl(r.poster_id, r.filename);
+        const urlInp = wrap.querySelector('[data-replace-url]');
+        const replaceBtn = wrap.querySelector('[data-action="replace"]');
+        const deleteBtn  = wrap.querySelector('[data-action="delete-revision"]');
+        const resolveBtn = wrap.querySelector('[data-action="resolve"]');
+        if (r.status === 'awaiting_approval') resolveBtn.hidden = true;
+        replaceBtn.addEventListener('click', () => replacePoster(r.poster_id, urlInp));
+        deleteBtn.addEventListener('click',  () => deletePoster(r.poster_id, { fromRevision: true }));
+        resolveBtn.addEventListener('click', () => resolveRevision(r.revision_id));
+      }
     }
     return node;
+  }
+
+  // When the underlying poster is gone (worker deleted it), we still want
+  // the revision card to appear in the worker's flag panel so they know
+  // admin is reviewing the deletion. Swap the thumb to the placeholder,
+  // strip the action buttons, and add a minimal status note.
+  function _renderDeletedRow(wrap, r) {
+    const thumb = wrap.querySelector('.rev-thumb');
+    if (thumb) {
+      thumb.src = '/static/img/deleted-poster.svg';
+      thumb.alt = 'poster deleted';
+      thumb.classList.add('rev-thumb-placeholder');
+    }
+    // Remove the URL input + action buttons row entirely — there's nothing
+    // to replace or re-delete; the worker just waits.
+    const urlRow = wrap.querySelector('.rev-actions');
+    if (urlRow) urlRow.remove();
+    // Add a minimal "info-only" status line in place of the controls so the
+    // worker has something to read.
+    const simpleControls = wrap.querySelector('[data-mode="simple"]');
+    if (simpleControls) {
+      const info = document.createElement('div');
+      info.className = 'rev-deleted-info muted';
+      if (r.status === 'awaiting_approval') {
+        info.textContent =
+          'You deleted this poster. Admin will review the deletion and approve or send it back.';
+      } else if (r.was_rejected) {
+        info.textContent =
+          'Admin sent back your deletion. Read the note above — you may need to upload a new poster on this title.';
+      } else {
+        info.textContent = 'Poster deleted — admin reviewing.';
+      }
+      simpleControls.appendChild(info);
+    }
   }
 
   function buildSimilarCard(rev, p) {
@@ -834,7 +896,38 @@
       passiveUpdateActive();
     }
     renderRevisions();
+    renderPendingComplete();
     renderReceipts();
+  }
+
+  function renderPendingComplete() {
+    const banner = document.querySelector('[data-pending-complete-banner]');
+    if (!banner) return;
+    const list = banner.querySelector('[data-pending-complete-list]');
+    const countEl = banner.querySelector('[data-pending-complete-count]');
+    const items = state.pending_complete_titles || [];
+    if (!items.length) {
+      banner.hidden = true;
+      list.innerHTML = '';
+      return;
+    }
+    banner.hidden = false;
+    countEl.textContent =
+      `${items.length} title${items.length === 1 ? '' : 's'} awaiting review`;
+    list.innerHTML = '';
+    items.forEach((t) => {
+      const row = document.createElement('div');
+      row.className = 'pending-complete-item';
+      row.innerHTML = `
+        <div class="pci-title"></div>
+        <div class="pci-meta mono muted"></div>
+        ${t.comment ? '<div class="pci-comment"></div>' : ''}
+      `;
+      row.querySelector('.pci-title').textContent = `${t.title} (${t.year})`;
+      row.querySelector('.pci-meta').textContent = `submitted ${t.submitted_at}`;
+      if (t.comment) row.querySelector('.pci-comment').textContent = `Your note: ${t.comment}`;
+      list.appendChild(row);
+    });
   }
 
   async function refreshState() {
@@ -922,17 +1015,137 @@
   }
 
   async function deletePoster(posterId, { fromRevision }) {
-    let note = '';
-    if (fromRevision) {
-      const ans = prompt('Why are you deleting this file? (the admin will see this)\n\nLeave blank to skip.');
-      if (ans === null) return;  // cancelled
-      note = ans;
+    // Find the poster to figure out how many other live posters exist on
+    // the same title — needed for the dynamic "Only N usable poster(s)
+    // available" preset. We look in state.locked.posters since deletion
+    // can only happen from the active title.
+    const live = state.locked;
+    const livePosters = (live && live.posters) || [];
+    // Count POSTERS BESIDES the one being deleted; that's the worker's
+    // post-delete view of the title.
+    const remaining = Math.max(0, livePosters.filter((p) => p.id !== posterId).length);
+
+    // Presets differ by context. From a flag card the only meaningful reason
+    // is "this poster is bad/similar"; the N-usable preset is meaningless
+    // (zero context for what N would mean). From the title panel both
+    // presets are relevant, plus a quick-confirm escape since first-time
+    // mistake deletes are common ("I downloaded the wrong image").
+    const presets = [];
+    if (!fromRevision) {
+      // Title-panel delete: include the dynamic count preset.
+      presets.push(`Only ${remaining} usable poster${remaining === 1 ? '' : 's'} available`);
+      presets.push('All the posters available are similar');
+      presets.push('Other posters not usable');
     } else {
-      if (!confirm('Delete this poster file?')) return;
+      // Flag-panel delete: focus on quality reasons.
+      presets.push('All the posters available are similar');
+      presets.push('Other posters not usable');
     }
-    const r = await postForm(`/poster/${posterId}/delete`, { note });
+
+    const hint = fromRevision
+      ? null
+      : '💡 Downloaded by mistake? Use REPLACE instead — paste a new URL above.';
+
+    const result = await pickReason({
+      title: 'Delete this poster?',
+      sub:   fromRevision
+        ? 'The admin flagged this poster. Pick a reason for deletion (admin will be notified).'
+        : 'This will permanently remove the file. Pick a reason or type your own.',
+      hint:  hint,
+      presets,
+      allowEmpty: false,
+    });
+    if (result === null) return;
+
+    const r = await postForm(`/poster/${posterId}/delete`,
+                             { note: result.text || '',
+                               reason_source: result.source || '' });
+    if (r.ok) {
+      await refreshState();
+      // If the delete was on a flagged poster, the server responds with
+      // submitted_for_approval:true so we can tell the worker their action
+      // is pending (not silently complete). UI-wise the flag card will now
+      // render in awaiting-approval state too, so this toast is a nudge.
+      if (r.data && r.data.submitted_for_approval) {
+        showToast('Deletion sent to admin for approval.', 'ok', 5000);
+      }
+      return;
+    }
+    alert('Delete failed: ' + (r.data && r.data.detail || r.status));
+  }
+
+  async function completeTitle(masterId, doneCommentEl) {
+    // Force a fresh state read first — this defeats both browser caching
+    // and any race where parallel saves resolved out of order.
+    await refreshState();
+    const live = state.locked;
+    if (!live || live.id !== masterId) {
+      alert('The active title changed in the background — please reopen it.');
+      return;
+    }
+    let comment = (doneCommentEl.value || '').trim();
+    let reason_source = comment ? 'manual' : '';
+    const liveCount = (live.posters || []).length;
+    if (liveCount < 3 && !comment) {
+      const result = await pickReason({
+        title: 'Confirm completion',
+        sub: `This title only has ${liveCount} poster${liveCount === 1 ? '' : 's'} saved. ` +
+             `Pick a reason — or click "no reason" if 1–2 is just fine here.`,
+        presets: [
+          `Only ${liveCount} usable poster${liveCount === 1 ? '' : 's'} available`,
+          'All the posters available are similar',
+        ],
+        allowEmpty: true,
+        emptyLabel: 'No reason — confirm anyway',
+      });
+      if (result === null) return;
+      comment = result.text;
+      reason_source = result.source;
+    }
+    return submitComplete(masterId, comment, reason_source);
+  }
+
+  async function submitComplete(masterId, comment, reason_source) {
+    const r = await postForm(`/title/${masterId}/complete`,
+                             { comment, reason_source: reason_source || '' });
+    if (r.ok) {
+      // Two possible "ok" responses now:
+      //  - {pending_approval: true} → title routed to complete_pending state
+      //    because the worker made changes on a flagged title. Admin must
+      //    approve the whole batch.
+      //  - default ok → title went straight to complete (no pending state).
+      await refreshState();
+      if (r.data && r.data.pending_approval) {
+        showToast(
+          'Sent to admin for approval. The title will show "awaiting approval" until they review your changes.',
+          'ok', 6000,
+        );
+      }
+      return;
+    }
+    alert('Failed: ' + (r.data && r.data.detail || r.status));
+  }
+
+  async function skipTitle(id, reason) {
+    let reason_source = reason ? 'manual' : '';
+    if (!reason) {
+      const result = await pickReason({
+        title: 'Why are you skipping this title?',
+        sub:   'Pick a common reason or type your own. Skipped titles go to the admin for review.',
+        presets: [
+          'No appropriate posters available',
+        ],
+        allowEmpty: false,
+      });
+      if (result === null) return;
+      reason = result.text;
+      reason_source = result.source;
+    }
+    const r = await postForm(`/title/${id}/skip`,
+                             { reason: reason || '',
+                               reason_source: reason_source || '' });
     if (r.ok) await refreshState();
-    else alert('Delete failed: ' + (r.data && r.data.detail || r.status));
+    else alert('Failed: ' + (r.data && r.data.detail || r.status));
   }
 
   async function replacePoster(posterId, urlInput, opts = {}) {
@@ -967,79 +1180,6 @@
     alert(msg);
   }
 
-  async function completeTitle(masterId, doneCommentEl) {
-    // Force a fresh state read first — this defeats both browser caching
-    // and any race where parallel saves resolved out of order.
-    await refreshState();
-    const live = state.locked;
-    if (!live || live.id !== masterId) {
-      alert('The active title changed in the background — please reopen it.');
-      return;
-    }
-    let comment = (doneCommentEl.value || '').trim();
-    let reason_source = comment ? 'manual' : '';
-    const liveCount = (live.posters || []).length;
-    if (liveCount < 3 && !comment) {
-      const result = await pickReason({
-        title: 'Confirm completion',
-        sub: `This title only has ${liveCount} poster${liveCount === 1 ? '' : 's'} saved. ` +
-             `If that's intentional, pick a reason — or click "no reason" if 1–2 is just fine here.`,
-        presets: [
-          `Only ${liveCount} poster${liveCount === 1 ? '' : 's'} available`,
-          'Only HD posters were considered',
-        ],
-        allowEmpty: true,
-        emptyLabel: 'No reason — confirm anyway',
-      });
-      if (result === null) return;
-      comment = result.text;
-      reason_source = result.source;
-    }
-    return submitComplete(masterId, comment, /*force*/ 0, reason_source);
-  }
-
-  async function submitComplete(masterId, comment, force, reason_source) {
-    const r = await postForm(`/title/${masterId}/complete`,
-                             { comment, force: force ? 1 : 0,
-                               reason_source: reason_source || '' });
-    if (r.ok) {
-      await refreshState();
-      return;
-    }
-    if (r.status === 409 && r.data && r.data.reason === 'open_revisions') {
-      // Server says there are unresolved flags. Confirm and retry with force=1.
-      if (confirm(r.data.message + '\n\n' +
-                  'Click OK to mark complete anyway. Cancel to go back and resolve the flags first.')) {
-        return submitComplete(masterId, comment, /*force*/ 1, reason_source);
-      }
-      return;
-    }
-    alert('Failed: ' + (r.data && r.data.detail || r.status));
-  }
-
-  async function skipTitle(id, reason) {
-    let reason_source = reason ? 'manual' : '';
-    if (!reason) {
-      const result = await pickReason({
-        title: 'Why are you skipping this title?',
-        sub:   'Pick a common reason or type your own. Skipped titles go to the admin for review.',
-        presets: [
-          'No suitable posters available',
-          'Wrong title — can\'t find it on TMDB',
-        ],
-        allowEmpty: false,
-      });
-      if (result === null) return;
-      reason = result.text;
-      reason_source = result.source;
-    }
-    const r = await postForm(`/title/${id}/skip`,
-                             { reason: reason || '',
-                               reason_source: reason_source || '' });
-    if (r.ok) await refreshState();
-    else alert('Failed: ' + (r.data && r.data.detail || r.status));
-  }
-
   async function reopenTitle(id) {
     const r = await postForm(`/title/${id}/reopen`);
     if (r.ok) await refreshState();
@@ -1059,6 +1199,54 @@
   const releaseBtn = document.getElementById('btn-release');
   if (pullBtn)    pullBtn.addEventListener('click', pullNext);
   if (releaseBtn) releaseBtn.addEventListener('click', release);
+
+  // ── Paste-URL buttons (delegated) ────────────────────────────────────────
+  // Workers prefer phones. Long-pressing a textbox to get the Paste menu is
+  // fiddly on mobile, so each URL input has a "📋 PASTE URL" button next to
+  // it. We use a single delegated listener on the document so dynamically
+  // added inputs (poster cards, revision cards, similar-pair cards) work
+  // without per-card wiring.
+  document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.paste-url-btn');
+    if (!btn) return;
+    e.preventDefault();
+    // Selector to find the input: prefer data-paste-target, else look up the
+    // sibling input.
+    const sel = btn.getAttribute('data-paste-target');
+    let input = null;
+    if (sel) {
+      // Search ancestors for the closest container holding both the button
+      // and a matching input. Use the closest .save-row / .poster-actions /
+      // .rev-actions / .rev-similar-card / .rev-similar-input-row as scope.
+      const scope = btn.closest(
+        '.save-row, .poster-actions, .rev-actions, .rev-similar-card, .rev-similar-input-row'
+      ) || document;
+      input = scope.querySelector(sel);
+    }
+    if (!input) return;
+    btn.classList.add('is-busy');
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.readText) {
+        throw new Error('clipboard-unsupported');
+      }
+      const text = await navigator.clipboard.readText();
+      input.value = (text || '').trim();
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.focus();
+      btn.classList.add('is-ok');
+      setTimeout(() => btn.classList.remove('is-ok'), 700);
+    } catch (err) {
+      // Permission denied, or unsupported (older Safari etc).
+      // Focus the input and let the worker fall back to long-press paste.
+      input.focus();
+      showToast(
+        'Couldn\'t read clipboard automatically — tap & hold the field to paste manually.',
+        'warn', 3500,
+      );
+    } finally {
+      btn.classList.remove('is-busy');
+    }
+  });
 
   renderAll({ fullActive: true });
   setInterval(refreshState, 8000);

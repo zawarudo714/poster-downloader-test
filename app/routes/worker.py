@@ -117,7 +117,17 @@ def _serialize_poster(p: SavedPoster) -> dict:
 
 
 def _active_revisions_for_user(db: Session, user: User):
-    """Open + awaiting-approval revisions on this user's live posters."""
+    """
+    Open + awaiting-approval revisions on this user's posters.
+
+    IMPORTANT: we no longer filter out soft-deleted posters here. After the
+    round-11 rework, deleting a flagged poster sends the revision to
+    awaiting_approval (not auto-resolved), so the worker must still see
+    it — otherwise their flag panel goes blank and they lose all signal
+    that admin needs to acknowledge. Each row carries a `poster_deleted`
+    flag and a `worker_action` so the UI can render a placeholder card
+    instead of a broken image.
+    """
     import json as _json
     rows = (
         db.query(Revision, SavedPoster, MasterTitle)
@@ -126,7 +136,6 @@ def _active_revisions_for_user(db: Session, user: User):
           .filter(
               Revision.status.in_(("open", "awaiting_approval")),
               SavedPoster.user_id == user.id,
-              SavedPoster.deleted_at.is_(None),
           )
           .order_by(Revision.created_at.desc())
           .all()
@@ -134,6 +143,8 @@ def _active_revisions_for_user(db: Session, user: User):
     out = []
     for (rev, sp, mt) in rows:
         # Hydrate the related-poster details for 'similar'-type revisions.
+        # Filter related to live posters only — deleted ones shouldn't take
+        # up a card slot in the similar grid; admin sees them differently.
         related = []
         if rev.revision_type == "similar" and rev.related_poster_ids:
             try:
@@ -165,10 +176,12 @@ def _active_revisions_for_user(db: Session, user: User):
             "created_at": fmt_local(rev.created_at, "%Y-%m-%d %H:%M"),
             "submitted_at": fmt_local(rev.submitted_at, "%Y-%m-%d %H:%M") or None,
             "worker_note": rev.worker_note or "",
+            "worker_action": rev.worker_action or "",       # "deleted" | "replaced" | "no_action" | ""
             "admin_verdict": rev.admin_verdict or "",
             "was_rejected": was_rejected,
             "poster_id": sp.id,
             "filename": sp.filename,
+            "poster_deleted": sp.deleted_at is not None,
             "related": related,                       # [{poster_id, filename, size}, ...]
             "title": mt.title,
             "year": mt.year,
@@ -246,6 +259,28 @@ def _state_payload(db: Session, user: User) -> dict:
     from ..chat import unread_count
     chat_unread = unread_count(db, worker_id=user.id, viewer_id=user.id)
 
+    # Titles this worker has submitted for completion approval but admin
+    # hasn't reviewed yet. We surface them so the worker has visible
+    # confirmation their DONE click was received (instead of the title
+    # silently vanishing from the queue while it's complete_pending).
+    pending_complete_titles = (
+        db.query(MasterTitle)
+          .filter(MasterTitle.status == "complete_pending",
+                  MasterTitle.claimed_by_id == user.id)
+          .order_by(MasterTitle.updated_at.desc().nullslast())
+          .all()
+    )
+    pending_complete_for_worker = [
+        {
+            "id":       t.id,
+            "title":    t.title,
+            "year":     t.year,
+            "comment":  t.complete_comment or "",
+            "submitted_at": fmt_local(t.updated_at, "%Y-%m-%d %H:%M") or "",
+        }
+        for t in pending_complete_titles
+    ]
+
     return {
         "username": user.username,
         "role": user.role,
@@ -259,6 +294,7 @@ def _state_payload(db: Session, user: User) -> dict:
         "revisions": _active_revisions_for_user(db, user),
         "receipts": receipts,
         "chat_unread": chat_unread,
+        "pending_complete_titles": pending_complete_for_worker,
         "default_pull_size": user.last_pull_size or DEFAULT_PULL_SIZE,
     }
 
@@ -321,7 +357,7 @@ def api_master(
     """
     query = db.query(MasterTitle)
 
-    if status in ("pending", "in_progress", "complete", "skipped"):
+    if status in ("pending", "in_progress", "complete", "complete_pending", "skipped"):
         query = query.filter(MasterTitle.status == status)
     if content_type:
         query = query.filter(MasterTitle.content_type == content_type)
@@ -903,9 +939,30 @@ def _load_my_poster(db: Session, user: User, poster_id: int) -> SavedPoster:
 def delete_poster(
     poster_id: int,
     note: str = Form(""),
+    reason_source: str = Form(""),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
+    """
+    Soft-delete a saved poster file.
+
+    Two cases:
+      (a) The poster has NO active revisions. Plain deletion — soft-delete
+          the row, unlink the file. No admin involvement.
+      (b) The poster HAS active revisions (open or awaiting_approval), OR
+          is a participant in a similar-pair revision. We do NOT auto-
+          resolve those revisions anymore — instead each such revision is
+          set to (or stays at) `awaiting_approval` with the worker's note,
+          so admin must explicitly approve the deletion. This is a change
+          from round 9 (which auto-resolved on delete). The motivation:
+          a silent auto-resolve let workers accidentally bypass admin
+          review of intentional deletions of flagged content.
+
+    Response:
+      {ok: true}                         — plain delete (case a)
+      {ok: true, submitted_for_approval: true,
+       revision_ids: [...]}              — admin approval needed (case b)
+    """
     sp = _load_my_poster(db, user, poster_id)
     fs_path = saved_poster_path(sp)
     fs_path.unlink(missing_ok=True)
@@ -913,9 +970,11 @@ def delete_poster(
     sp.deleted_at = datetime.utcnow()
     sp.delete_note = note.strip() or None
 
-    # If there are open OR awaiting_approval revisions on this poster, mark them
-    # resolved — the file is gone, nothing to approve. Stash the worker's note
-    # on each resolved revision so admin can see why it was deleted.
+    if reason_source not in ("preset", "manual"):
+        reason_source = ""
+    submitted_revision_ids: list[int] = []
+
+    # Direct revisions on this poster (simple or similar-where-primary).
     revs = (
         db.query(Revision)
           .filter(
@@ -925,20 +984,26 @@ def delete_poster(
           .all()
     )
     for r in revs:
-        r.status = "resolved"
-        r.resolved_by = user.username
-        r.resolved_at = datetime.utcnow()
-        r.worker_note = note.strip() or r.worker_note
-        suffix = (": " + note.strip()) if note.strip() else ""
-        r.admin_verdict = "auto-resolved: file deleted" + suffix
+        # Push to awaiting_approval regardless of current state. If it was
+        # already awaiting_approval (e.g. they replaced then deleted), we
+        # refresh the submitted_at and worker_note so admin sees the latest.
+        r.status = "awaiting_approval"
+        r.submitted_at = datetime.utcnow()
+        r.worker_note = (note.strip() or r.worker_note or "")
+        # Mark this revision as resolved-via-delete so admin UI can show
+        # the right action label ("Approve deletion" vs "Approve fix").
+        r.worker_action = "deleted"
+        submitted_revision_ids.append(r.id)
 
-    # Also resolve any 'similar'-type revisions where this poster was a participant.
+    # Similar-pair revisions where this poster is in related_poster_ids
+    # but is NOT the primary saved_poster_id. Same treatment — escalate.
     import json as _json
     sim_revs = (
         db.query(Revision)
           .filter(
               Revision.status.in_(("open", "awaiting_approval")),
               Revision.revision_type == "similar",
+              Revision.saved_poster_id != sp.id,
           )
           .all()
     )
@@ -947,18 +1012,19 @@ def delete_poster(
             related = _json.loads(r.related_poster_ids or "[]")
         except Exception:
             related = []
-        if sp.id in related and r.saved_poster_id != sp.id:
-            r.status = "resolved"
-            r.resolved_by = user.username
-            r.resolved_at = datetime.utcnow()
-            r.worker_note = note.strip() or r.worker_note
-            suffix = (": " + note.strip()) if note.strip() else ""
-            r.admin_verdict = "auto-resolved: similar-pair file deleted" + suffix
+        if sp.id in related and r.id not in submitted_revision_ids:
+            r.status = "awaiting_approval"
+            r.submitted_at = datetime.utcnow()
+            r.worker_note = (note.strip() or r.worker_note or "")
+            r.worker_action = "deleted"
+            submitted_revision_ids.append(r.id)
 
-    # Recompute needs_revision flag on the master title.
-    # Defensive: filter out soft-deleted posters from the JOIN. Under normal
-    # flow their revisions are already resolved (loops above), but if anything
-    # ever wedged this prevents a stuck flag.
+    # `needs_revision` on the master title — recompute counting any active
+    # revisions (open OR awaiting_approval) on ANY of the master's posters,
+    # INCLUDING the just-deleted one. We intentionally drop the
+    # `SavedPoster.deleted_at.is_(None)` filter here: now that deletes can
+    # be pending review, a soft-deleted poster with an awaiting_approval
+    # revision still counts as "flagged".
     mt = db.query(MasterTitle).filter_by(id=sp.master_title_id).first()
     if mt:
         any_active = (
@@ -966,7 +1032,6 @@ def delete_poster(
               .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
               .filter(
                   SavedPoster.master_title_id == mt.id,
-                  SavedPoster.deleted_at.is_(None),
                   Revision.status.in_(("open", "awaiting_approval")),
               )
               .count()
@@ -976,10 +1041,17 @@ def delete_poster(
     log_activity(
         db, user=user, action="deleted", target_type="saved_poster", target_id=sp.id,
         details={"filename": sp.filename, "master_id": sp.master_title_id,
-                 "note": note.strip() or None},
+                 "note": note.strip() or None,
+                 "reason_source": reason_source or None,
+                 "submitted_revisions": submitted_revision_ids},
     )
     db.commit()
-    return JSONResponse({"ok": True})
+
+    payload = {"ok": True}
+    if submitted_revision_ids:
+        payload["submitted_for_approval"] = True
+        payload["revision_ids"] = submitted_revision_ids
+    return JSONResponse(payload)
 
 
 @router.post("/poster/{poster_id}/replace")
@@ -1062,6 +1134,7 @@ def replace_poster(
         r.status = "awaiting_approval"
         r.submitted_at = datetime.utcnow()
         r.worker_note = worker_note.strip() or None
+        r.worker_action = "replaced"
         submitted_ids.append(r.id)
 
     # Also handle 'similar'-type revisions where this poster appears in
@@ -1082,6 +1155,7 @@ def replace_poster(
             r.status = "awaiting_approval"
             r.submitted_at = datetime.utcnow()
             r.worker_note = worker_note.strip() or None
+            r.worker_action = "replaced"
             submitted_ids.append(r.id)
 
     log_activity(
@@ -1113,60 +1187,103 @@ def _load_my_master(db: Session, user: User, master_id: int) -> MasterTitle:
 def title_complete(
     master_id: int,
     comment: str = Form(""),
-    force: int = Form(0),
     reason_source: str = Form(""),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """
-    Mark this title done. If there are open or awaiting-approval revisions
-    against this master's posters, return 409 with a count so the worker
-    side can show a confirm dialog. Worker re-submits with force=1 to
-    proceed anyway.
+    Worker clicks DONE on a title.
+
+    Routing depends on whether there are pending changes:
+
+      No active revisions on this title → go straight to 'complete'.
+        Normal first-time completion.
+
+      Active revisions exist (open OR awaiting_approval) → route to
+        'complete_pending'. All open revisions on the title are escalated
+        to awaiting_approval (treated as if the worker actioned them by
+        clicking DONE). Admin must explicitly approve the completion via
+        the PENDING COMPLETIONS section of /admin/revisions.
+
+    The old force=1 bypass is gone. There is no "mark complete anyway"
+    escape hatch — once admin has flagged or once a deletion is pending,
+    admin always reviews the final state.
 
     `reason_source` is a hint about HOW the comment was produced — 'preset'
-    if the worker clicked a preset reason button, 'manual' if they typed
-    it. Surfaced in the activity log so admin can see at a glance whether
-    the comment is a stock answer or a thoughtful note.
+    if a preset button was clicked, 'manual' if typed. Logged for activity
+    log differentiation.
     """
     t = _load_my_master(db, user, master_id)
 
-    if not force:
-        active_revs = (
-            db.query(Revision)
-              .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
-              .filter(
-                  SavedPoster.master_title_id == t.id,
-                  SavedPoster.deleted_at.is_(None),
-                  Revision.status.in_(("open", "awaiting_approval")),
-              )
-              .count()
-        )
-        if active_revs > 0:
-            return JSONResponse(
-                {"ok": False, "reason": "open_revisions",
-                 "open_count": active_revs,
-                 "message": (
-                     f"This title still has {active_revs} unresolved "
-                     f"flag{'s' if active_revs != 1 else ''}. "
-                     "Mark complete anyway?"
-                 )},
-                status_code=409,
-            )
+    # IMPORTANT: do NOT filter by SavedPoster.deleted_at here. A poster
+    # deleted while it had a flag now carries an awaiting_approval revision
+    # that admin still needs to see — that absolutely counts toward
+    # "should this be complete_pending?".
+    active_revs = (
+        db.query(Revision)
+          .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
+          .filter(
+              SavedPoster.master_title_id == t.id,
+              Revision.status.in_(("open", "awaiting_approval")),
+          )
+          .all()
+    )
 
+    if reason_source not in ("preset", "manual"):
+        reason_source = ""
+
+    if active_revs:
+        # Hold the title for admin review. Escalate any still-open revisions
+        # to awaiting_approval — clicking DONE counts as "I'm done acting on
+        # these, please review". Already-awaiting revisions are left as-is.
+        escalated_ids: list[int] = []
+        for r in active_revs:
+            if r.status == "open":
+                r.status = "awaiting_approval"
+                r.submitted_at = datetime.utcnow()
+                r.worker_note = comment.strip() or r.worker_note or "(none)"
+                # If the underlying poster has been soft-deleted but no
+                # explicit worker_action was set, treat this as a passive
+                # "no-op" submission (worker chose to leave the flag as-is
+                # and just submit the title). Admin can decide.
+                if r.worker_action is None:
+                    sp = db.query(SavedPoster).filter_by(id=r.saved_poster_id).first()
+                    r.worker_action = "deleted" if (sp and sp.deleted_at) else "no_action"
+                escalated_ids.append(r.id)
+
+        t.status = "complete_pending"
+        # We DO NOT set completed_at here — that's the final-approval
+        # timestamp. Use updated_at for "when was it submitted".
+        t.updated_at = datetime.utcnow()
+        t.complete_comment = comment.strip() or None
+        # Don't clear admin_note here — admin may have left notes during
+        # the flag stage; preserve them for context until approval.
+        if user.locked_master_id == master_id:
+            user.locked_master_id = None
+        log_activity(
+            db, user=user, action="submitted_for_completion",
+            target_type="master_title", target_id=t.id,
+            details={"comment": comment.strip() or None,
+                     "reason_source": reason_source or None,
+                     "escalated_revisions": escalated_ids},
+        )
+        db.commit()
+        return JSONResponse({
+            "ok": True,
+            "pending_approval": True,
+            "message": "Submitted for admin approval — title will show 'awaiting approval' until reviewed.",
+        })
+
+    # No active revisions — straight to complete.
     t.status = "complete"
     t.completed_at = datetime.utcnow()
     t.complete_comment = comment.strip() or None
     t.admin_note = None  # auto-clear admin's send-back note when title is finished
     if user.locked_master_id == master_id:
         user.locked_master_id = None
-    # Sanitize reason_source — only allow known values; default to empty.
-    if reason_source not in ("preset", "manual"):
-        reason_source = ""
     log_activity(
         db, user=user, action="completed", target_type="master_title", target_id=t.id,
         details={"comment": comment.strip() or None,
-                 "forced": bool(force),
                  "reason_source": reason_source or None},
     )
     db.commit()

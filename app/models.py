@@ -84,7 +84,11 @@ class MasterTitle(Base):
 
     # Workflow state
     status            = Column(String(32), nullable=False, default="pending", index=True)
-    # 'pending' | 'in_progress' | 'complete' | 'skipped'
+    # 'pending' | 'in_progress' | 'complete_pending' | 'complete' | 'skipped'
+    # 'complete_pending' = worker clicked DONE while flags/changes existed;
+    #                      title is held for admin approval. Admin approves
+    #                      → 'complete', or rejects → back to 'in_progress'
+    #                      with all revisions reopened.
     needs_revision    = Column(Integer, nullable=False, default=0, index=True)  # 0/1
     skip_reason       = Column(Text, nullable=True)
     complete_comment  = Column(Text, nullable=True)   # optional note from worker on complete
@@ -181,6 +185,14 @@ class Revision(Base):
     related_poster_ids   = Column(Text, nullable=True)
     worker_note     = Column(Text, nullable=True)         # worker's note when sending for approval
     admin_verdict   = Column(Text, nullable=True)         # admin's note when approving/rejecting
+    # What the worker DID to send this for approval. NULL for "open" status
+    # (worker hasn't acted yet). Set when status flips to awaiting_approval:
+    #   "replaced"  — worker replaced the file with a new URL
+    #   "deleted"   — worker soft-deleted the file
+    # Drives admin UI labelling (e.g. "Approve deletion" vs "Approve fix")
+    # and lets the worker see a sensible placeholder card for deleted posters
+    # instead of a broken image.
+    worker_action   = Column(String(16), nullable=True)
     submitted_at    = Column(DateTime, nullable=True)     # when worker sent for approval
     resolved_by     = Column(String(64), nullable=True)
     # When admin has reviewed a deletion (clicked Acknowledge or Send Back).

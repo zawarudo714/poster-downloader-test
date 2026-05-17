@@ -65,6 +65,33 @@ console (also stored in `.first_admin.txt`).
 > `app/templates/user_stats.html` and `app/templates/admin_stats.html`
 > to point the script tag at `/static/vendor/chart.umd.min.js?v={{ app_version }}`
 > instead.
+>
+> **NOTE for round 11 (complete_pending workflow + workflow QoL polish)**:
+> This round adds a `worker_action` column to `revisions` to track what
+> the worker did to send a flag back for approval (replaced / deleted /
+> no_action). It also introduces a new `complete_pending` value for
+> `master_titles.status`. SQLite doesn't enforce check constraints on the
+> string status column, so the only schema migration needed is the new
+> column. **Run BEFORE rebuilding:**
+> ```bash
+> docker exec poster-downloader-web-1 python -c "
+> import sqlite3
+> c = sqlite3.connect('/app/poster.db')
+> c.execute('ALTER TABLE revisions ADD COLUMN worker_action TEXT')
+> c.commit()
+> print('OK')
+> "
+> ```
+> If it errors with `duplicate column name`, you've already run it — safe
+> to ignore and proceed.
+>
+> Behaviour change worth flagging for any future builder: deleting a
+> FLAGGED poster no longer auto-resolves the revision. It moves to
+> `awaiting_approval` so admin reviews intentional deletions of flagged
+> content. Clicking DONE on a title with any active revisions routes the
+> title to `complete_pending` (not `complete`); admin approves the whole
+> batch via the new PENDING COMPLETIONS section on /admin/revisions. The
+> old `force=1` bypass on `/title/{id}/complete` is removed.
 
 ## What this version adds (latest round)
 

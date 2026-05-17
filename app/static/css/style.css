@@ -791,7 +791,20 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 .rev-comment { margin-top: 6px; color: var(--text); }
 .rev-flagged { font-size: 11px; color: var(--subtext); margin-top: 4px; }
 .rev-actions { display: flex; gap: 6px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
-.rev-thumb { width: 60px; height: 90px; object-fit: cover; border: 1px solid var(--border); border-radius: 2px; }
+.rev-thumb {
+  width: 200px; height: 280px; object-fit: cover;
+  border: 1px solid var(--border); border-radius: 2px;
+}
+.rev-thumb-placeholder {
+  /* Deleted-poster placeholder is already an SVG with its own bg/pattern.
+     Just give it the same outer frame so it sits in the grid cleanly. */
+  border-style: dashed;
+  border-color: rgba(255, 80, 80, 0.4);
+  opacity: 0.85;
+}
+@media (max-width: 700px) {
+  .rev-thumb { width: 100%; max-width: 100%; height: auto; max-height: 260px; }
+}
 .rev-actions input[type="url"] {
   flex: 1; min-width: 200px; padding: 6px 8px;
   background: var(--bg); color: var(--text);
@@ -3129,3 +3142,238 @@ body:has(#ib-bulk-bar:not([hidden])) { padding-bottom: 88px; }
   color: var(--accent, #f4b400);
 }
 .stats-admin-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+/* ────────────────────────────────────────────────────────────────────────
+   Round 11: complete_pending workflow + paste-url button + reason hint
+   ──────────────────────────────────────────────────────────────────────── */
+
+/* ── Worker-side: pending-completion banner ─────────────────────────── */
+.pending-complete-banner {
+  background: rgba(244, 180, 0, 0.08);
+  border: 1px solid rgba(244, 180, 0, 0.45);
+  border-left: 4px solid #f4b400;
+  border-radius: 4px;
+  padding: 12px 14px;
+  margin: 12px 0;
+}
+.pending-complete-banner-head {
+  display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.pending-complete-banner-head strong { color: #f4b400; letter-spacing: 0.04em; }
+.pending-complete-list {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.pending-complete-item {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.pci-title { font-weight: 600; }
+.pci-meta { font-size: 10px; margin-top: 2px; }
+.pci-comment { font-size: 11px; color: var(--subtext); font-style: italic; margin-top: 4px; }
+
+/* ── Admin-side: pending-completion cards ───────────────────────────── */
+.panel-pending-complete {
+  border-top: 3px solid #f4b400;
+}
+.panel-pending-complete .panel-head { background: rgba(244, 180, 0, 0.06); }
+
+.pending-complete-card {
+  background: var(--bg);
+  border: 1px solid rgba(244, 180, 0, 0.40);
+  border-radius: 6px;
+  padding: 14px;
+  margin-bottom: 14px;
+}
+.pcc-head {
+  display: flex; gap: 12px; justify-content: space-between;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.pcc-title { font-size: 15px; font-weight: 700; color: var(--text); }
+.pcc-meta { font-size: 11px; margin-top: 4px; }
+.pcc-section-head {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--subtext);
+  margin: 4px 0 6px;
+  text-transform: uppercase;
+}
+.pcc-revisions {
+  display: flex; flex-direction: column; gap: 10px;
+  margin-bottom: 12px;
+}
+.pcc-rev {
+  display: flex; gap: 12px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px;
+}
+.pcc-rev-deleted { background: rgba(255, 80, 80, 0.04); border-color: rgba(255, 80, 80, 0.25); }
+.pcc-rev-thumb {
+  width: 110px; height: 154px;
+  object-fit: cover;
+  border-radius: 3px;
+  background: var(--card);
+  flex-shrink: 0;
+}
+.pcc-rev-thumb-placeholder {
+  border: 1px dashed rgba(255, 80, 80, 0.4);
+  opacity: 0.85;
+}
+.pcc-rev-body { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.pcc-rev-action { font-size: 12px; word-break: break-word; }
+.pcc-rev-flag, .pcc-rev-note { font-size: 11px; line-height: 1.4; }
+.pcc-rev-flag { color: var(--subtext); }
+.pcc-rev-note {
+  background: rgba(100, 180, 255, 0.06);
+  border-left: 2px solid rgba(100, 180, 255, 0.4);
+  padding: 4px 8px;
+  border-radius: 2px;
+}
+.pcc-actions {
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.pcc-actions input[type="text"] {
+  flex: 1 1 240px;
+  min-width: 200px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.pcc-actions input[type="text"]:focus { outline: none; border-color: var(--accent, #f4b400); }
+
+@media (max-width: 700px) {
+  .pcc-head { flex-direction: column; }
+  .pcc-rev { flex-direction: column; }
+  .pcc-rev-thumb { width: 100%; max-width: 220px; height: auto; }
+  .pcc-actions input[type="text"] { flex-basis: 100%; }
+}
+
+/* ── Action pills (DELETED / REPLACED / etc.) ────────────────────────── */
+.action-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin: 0 4px;
+  vertical-align: middle;
+}
+.action-deleted {
+  background: rgba(255, 80, 80, 0.15);
+  color: #ff8080;
+  border: 1px solid rgba(255, 80, 80, 0.40);
+}
+.action-replaced {
+  background: rgba(244, 180, 0, 0.15);
+  color: #ffd060;
+  border: 1px solid rgba(244, 180, 0, 0.40);
+}
+.action-open {
+  background: rgba(140, 140, 140, 0.18);
+  color: var(--subtext);
+  border: 1px solid var(--border);
+}
+.action-noop {
+  background: rgba(100, 180, 255, 0.10);
+  color: #66b3ff;
+  border: 1px solid rgba(100, 180, 255, 0.30);
+}
+
+/* ── Reason-modal hint (blue info box) ──────────────────────────────── */
+.reason-hint {
+  background: rgba(100, 180, 255, 0.08);
+  border: 1px solid rgba(100, 180, 255, 0.30);
+  border-left: 3px solid #66b3ff;
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin: 10px 0;
+  font-size: 12px;
+  color: #b3d9ff;
+  line-height: 1.5;
+}
+
+/* ── Worker deleted-row info text in flag panel ─────────────────────── */
+.rev-deleted-info {
+  font-size: 12px;
+  font-style: italic;
+  padding: 8px 12px;
+  background: rgba(255, 80, 80, 0.04);
+  border: 1px solid rgba(255, 80, 80, 0.20);
+  border-radius: 4px;
+  margin-top: 6px;
+}
+
+/* ── Paste-URL button (mobile-friendly) ─────────────────────────────── */
+/* Full-width version next to the main save URL input. */
+.paste-url-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(100, 180, 255, 0.16);
+  color: #b3d9ff;
+  border: 1px solid rgba(100, 180, 255, 0.45);
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  min-height: 38px;
+  transition: background 0.12s, transform 0.05s;
+}
+.paste-url-btn:hover { background: rgba(100, 180, 255, 0.28); }
+.paste-url-btn:active { transform: scale(0.97); }
+.paste-url-btn.is-busy { opacity: 0.6; cursor: wait; }
+.paste-url-btn.is-ok {
+  background: rgba(80, 200, 120, 0.30);
+  border-color: rgba(80, 200, 120, 0.55);
+  color: #66dd99;
+}
+.paste-url-icon { font-size: 14px; line-height: 1; }
+.paste-url-label { font-family: var(--font-mono, monospace); }
+
+/* Compact icon-only version for the inline replace inputs. */
+.paste-url-btn-tiny {
+  padding: 6px 10px;
+  min-height: 32px;
+  font-size: 13px;
+}
+.paste-url-btn-tiny .paste-url-label { display: none; }
+
+/* Save row layout — make space for the paste button. */
+.save-row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+.save-row .paste-url-btn { flex: 0 0 auto; }
+.save-row .save-url      { flex: 1 1 240px; min-width: 200px; }
+.save-row > .btn-accent  { flex: 0 0 auto; }
+
+@media (max-width: 700px) {
+  .save-row .paste-url-btn { flex-basis: 100%; justify-content: center; }
+  .save-row .save-url      { flex-basis: 100%; }
+  .save-row > .btn-accent  { flex-basis: 100%; }
+}
+
+/* Similar-pair input row */
+.rev-similar-input-row {
+  display: flex; gap: 4px; align-items: center;
+}
+.rev-similar-input-row input[type="url"] { flex: 1; min-width: 0; }

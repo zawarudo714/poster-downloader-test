@@ -5,6 +5,86 @@
 {% block content %}
 <div class="admin-grid">
 
+  {# PENDING COMPLETIONS — titles in complete_pending status; admin approves
+     or rejects the whole title-level batch. Each title's awaiting revisions
+     are rendered inline so admin can review the diff in one place. #}
+  {% if pending_complete_blocks %}
+  <section class="panel panel-pending-complete">
+    <div class="panel-head">
+      <span>PENDING COMPLETIONS ({{ pending_complete_blocks|length }})
+        {{ info("The worker clicked DONE on a title that still had open flags or pending deletions. Each card here shows the full title diff: what they added, replaced, and deleted. Approve to mark the title complete (resolves all flags). Reject to send it back with a note — the title returns to in-progress, flags re-open, your note pins to the title and to each flag.") }}
+      </span>
+    </div>
+    <div class="panel-body">
+      {% for blk in pending_complete_blocks %}
+        {% set t = blk.title %}
+        <div class="pending-complete-card" data-master-id="{{ t.id }}">
+          <div class="pcc-head">
+            <div>
+              <div class="pcc-title">{{ t.title }} ({{ t.year }})</div>
+              <div class="pcc-meta mono muted">
+                claimed by {{ t.claimed_by_name }} · submitted {{ t.updated_at | local_dt('%Y-%m-%d %H:%M') }}
+                {% if t.complete_comment %}
+                  · worker note: <em>"{{ t.complete_comment }}"</em>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+
+          {% if blk.revisions %}
+          <div class="pcc-section-head">CHANGES IN THIS COMPLETION</div>
+          <div class="pcc-revisions">
+            {% for rev, sp in blk.revisions %}
+              {% set is_deleted = sp.deleted_at is not none %}
+              {% set vbust = sp.file_size or 0 %}
+              <div class="pcc-rev {% if is_deleted %}pcc-rev-deleted{% endif %}">
+                {% if is_deleted %}
+                  <img class="pcc-rev-thumb pcc-rev-thumb-placeholder"
+                       src="/static/img/deleted-poster.svg" alt="deleted">
+                {% else %}
+                  <img class="pcc-rev-thumb"
+                       src="/admin/file/{{ sp.id }}?v={{ vbust }}" alt="" loading="lazy">
+                {% endif %}
+                <div class="pcc-rev-body">
+                  <div class="pcc-rev-action mono">
+                    {% if rev.worker_action == 'deleted' %}
+                      <span class="action-pill action-deleted">DELETED</span>
+                    {% elif rev.worker_action == 'replaced' %}
+                      <span class="action-pill action-replaced">REPLACED</span>
+                    {% elif rev.status == 'open' %}
+                      <span class="action-pill action-open">NO ACTION — still open</span>
+                    {% else %}
+                      <span class="action-pill action-noop">SUBMITTED AS-IS</span>
+                    {% endif %}
+                    {{ sp.filename }}
+                  </div>
+                  <div class="pcc-rev-flag muted">
+                    <strong>Original flag:</strong> {{ rev.comment or '(no comment)' }}
+                  </div>
+                  {% if rev.worker_note %}
+                  <div class="pcc-rev-note">
+                    <strong>{{ sp.username }} note:</strong> {{ rev.worker_note }}
+                  </div>
+                  {% endif %}
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+
+          <div class="pcc-actions">
+            <input type="text" placeholder="(verdict — required for REJECT)" data-pcc-verdict>
+            <button class="btn btn-success" data-action="approve-complete"
+                    data-master-id="{{ t.id }}">APPROVE COMPLETION</button>
+            <button class="btn btn-error" data-action="reject-complete"
+                    data-master-id="{{ t.id }}">REJECT &amp; SEND BACK</button>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
   <section class="panel">
     <div class="panel-head"><span>AWAITING YOUR APPROVAL ({{ awaiting_rows|length }}) {{ info("The user has replaced or marked these as fixed. Review the new image and approve to clear the flag, or reject to send it back with new instructions.") }}</span></div>
     <div class="panel-body">
@@ -25,13 +105,22 @@
                   {% endfor %}
                 </div>
               {% else %}
-                <img class="rev-card-thumb" src="/admin/file/{{ sp.id }}?v={{ sp.file_size or 0 }}" alt="" loading="lazy">
+                {% if sp.deleted_at %}
+                  <img class="rev-card-thumb rev-card-thumb-placeholder" src="/static/img/deleted-poster.svg" alt="deleted">
+                {% else %}
+                  <img class="rev-card-thumb" src="/admin/file/{{ sp.id }}?v={{ sp.file_size or 0 }}" alt="" loading="lazy">
+                {% endif %}
               {% endif %}
               <div class="rev-card-body">
                 <div class="rev-card-title">
                   {{ mt.title if mt else '(unknown)' }} ({{ mt.year if mt else '–' }})
                   {% if rev.revision_type == 'similar' %}
                     <span class="status-pill status-similar">SIMILAR PAIR</span>
+                  {% endif %}
+                  {% if rev.worker_action == 'deleted' %}
+                    <span class="action-pill action-deleted">DELETED</span>
+                  {% elif rev.worker_action == 'replaced' %}
+                    <span class="action-pill action-replaced">REPLACED</span>
                   {% endif %}
                 </div>
                 <div class="rev-card-path mono">{{ sp.username }} / {{ sp.original_save_date.isoformat() }} / {{ sp.title_folder_path }}{% if rev.revision_type != 'similar' %} / {{ sp.filename }}{% endif %}</div>

@@ -41,6 +41,10 @@
       <div class="stat-label">AWAITING YOUR APPROVAL {{ info("User has replaced/fixed; you need to approve or reject. Click to review.") }}</div>
       <div class="stat-value error mono">{{ awaiting_revisions }}</div>
     </a>
+    <a href="/admin/revisions" class="stat-tile stat-tile-link">
+      <div class="stat-label">PENDING COMPLETIONS {{ info("Worker clicked DONE on a title while it still had open flags or pending changes. Admin reviews the full title diff and approves or sends it back.") }}</div>
+      <div class="stat-value error mono">{{ master_complete_pending }}</div>
+    </a>
   </section>
 
   <section class="panel">

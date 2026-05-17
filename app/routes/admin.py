@@ -100,6 +100,7 @@ def admin_dashboard(request: Request, admin: User = Depends(require_admin), db: 
     pending_master   = db.query(MasterTitle).filter_by(status="pending").count()
     in_progress      = db.query(MasterTitle).filter_by(status="in_progress").count()
     complete_master  = db.query(MasterTitle).filter_by(status="complete").count()
+    complete_pending = db.query(MasterTitle).filter_by(status="complete_pending").count()
     skipped_master   = db.query(MasterTitle).filter_by(status="skipped").count()
     revision_master  = db.query(MasterTitle).filter(MasterTitle.needs_revision == 1).count()
     total_master     = db.query(MasterTitle).count()
@@ -142,6 +143,7 @@ def admin_dashboard(request: Request, admin: User = Depends(require_admin), db: 
 
     digest = {
         "awaiting_approval": awaiting_revs,
+        "pending_completions": complete_pending,
         "pending_deletions": pending_deletions,
         "unread_chats":      unread_chats,
         "owed_amount_kes":   eligible_amount,
@@ -158,7 +160,9 @@ def admin_dashboard(request: Request, admin: User = Depends(require_admin), db: 
             "users": user_stats, "open_revisions": open_revs,
             "awaiting_revisions": awaiting_revs,
             "master_pending": pending_master, "master_in_progress": in_progress,
-            "master_complete": complete_master, "master_skipped": skipped_master,
+            "master_complete": complete_master,
+            "master_complete_pending": complete_pending,
+            "master_skipped": skipped_master,
             "master_needs_revision": revision_master, "master_total": total_master,
             "digest": digest,
             "active_tab": "dashboard",
@@ -430,7 +434,7 @@ def master_page(
 
 def _master_query(db: Session, q: str, status: str, content_type: str, needs_revision: int):
     query = db.query(MasterTitle)
-    if status in ("pending", "in_progress", "complete", "skipped"):
+    if status in ("pending", "in_progress", "complete", "complete_pending", "skipped"):
         query = query.filter(MasterTitle.status == status)
     if content_type:
         query = query.filter(MasterTitle.content_type == content_type)
@@ -516,13 +520,16 @@ def master_set_status(
     resolved_revs = 0
 
     if status == "complete":
-        # Resolve all active revisions on posters of this master.
+        # Resolve all active revisions on posters of this master, INCLUDING
+        # revisions on soft-deleted posters (pending deletions count). The
+        # old deleted_at filter was a defensive guard from when delete
+        # auto-resolved; with the round-11 rework, delete leaves revisions
+        # in awaiting_approval state.
         active = (
             db.query(Revision)
               .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
               .filter(
                   SavedPoster.master_title_id == t.id,
-                  SavedPoster.deleted_at.is_(None),
                   Revision.status.in_(("open", "awaiting_approval")),
               )
               .all()
@@ -585,12 +592,14 @@ def master_bulk_status(
         elif status == "complete":
             r.completed_at = now
             # Resolve active flags so FLAG pill clears (same as single-row path).
+            # We INCLUDE revisions on soft-deleted posters now — the round-11
+            # rework changed delete-on-flagged from auto-resolve to admin-
+            # pending, so deleted posters can carry awaiting_approval revisions.
             active = (
                 db.query(Revision)
                   .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
                   .filter(
                       SavedPoster.master_title_id == r.id,
-                      SavedPoster.deleted_at.is_(None),
                       Revision.status.in_(("open", "awaiting_approval")),
                   )
                   .all()
@@ -1195,6 +1204,136 @@ def reject_revision(
     return JSONResponse({"ok": True})
 
 
+# ── Approval / rejection of complete_pending titles ────────────────────────
+
+@router.post("/title/{master_id}/approve_complete")
+def approve_complete(
+    master_id: int,
+    verdict: str = Form(""),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Admin approves a complete_pending title. The title becomes 'complete'
+    and every active revision on its posters (open or awaiting_approval)
+    is resolved with the admin's verdict.
+
+    This is the round-11 path when worker clicks DONE on a title that had
+    flags or pending deletions. Replaces the round-9 force=1 bypass.
+    """
+    t = db.query(MasterTitle).filter_by(id=master_id).first()
+    if not t:
+        raise HTTPException(404, "Title not found.")
+    if t.status != "complete_pending":
+        raise HTTPException(400, f"Title is not pending — status is '{t.status}'.")
+
+    now = datetime.utcnow()
+    # Resolve ALL revisions on this title's posters (including deletes).
+    revs = (
+        db.query(Revision)
+          .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
+          .filter(
+              SavedPoster.master_title_id == t.id,
+              Revision.status.in_(("open", "awaiting_approval")),
+          )
+          .all()
+    )
+    resolved_ids = []
+    suffix = (": " + verdict.strip()) if verdict.strip() else ""
+    for r in revs:
+        r.status = "resolved"
+        r.resolved_by = admin.username
+        r.resolved_at = now
+        r.admin_verdict = "approved via title completion" + suffix
+        resolved_ids.append(r.id)
+
+    t.status = "complete"
+    t.completed_at = now
+    t.needs_revision = 0
+    t.admin_note = None
+    # Free the claiming user's lock if it pointed here (defensive — the
+    # worker route already cleared it on submit, but a re-submission path
+    # could leave one stale).
+    if t.claimed_by_id:
+        u = db.query(User).filter_by(id=t.claimed_by_id).first()
+        if u and u.locked_master_id == t.id:
+            u.locked_master_id = None
+
+    log_activity(
+        db, user=admin, action="approved_completion",
+        target_type="master_title", target_id=t.id,
+        details={"verdict": verdict.strip() or None,
+                 "resolved_revisions": resolved_ids},
+    )
+    db.commit()
+    return JSONResponse({"ok": True, "resolved": len(resolved_ids)})
+
+
+@router.post("/title/{master_id}/reject_complete")
+def reject_complete(
+    master_id: int,
+    verdict: str = Form(""),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Admin rejects a complete_pending title. The title goes back to
+    'in_progress', all its awaiting_approval revisions revert to 'open'
+    with the admin's verdict pinned (so worker sees what's wrong), and
+    the admin's verdict is also pinned as an admin_note on the master
+    title so the worker sees a top-level summary.
+
+    A rejection requires a verdict — otherwise the worker has no idea
+    what to do differently.
+    """
+    verdict = (verdict or "").strip()
+    if not verdict:
+        raise HTTPException(400, "A verdict / note is required when rejecting.")
+    t = db.query(MasterTitle).filter_by(id=master_id).first()
+    if not t:
+        raise HTTPException(404, "Title not found.")
+    if t.status != "complete_pending":
+        raise HTTPException(400, f"Title is not pending — status is '{t.status}'.")
+
+    now = datetime.utcnow()
+    revs = (
+        db.query(Revision)
+          .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
+          .filter(
+              SavedPoster.master_title_id == t.id,
+              Revision.status == "awaiting_approval",
+          )
+          .all()
+    )
+    reopened_ids = []
+    for r in revs:
+        r.status = "open"
+        r.admin_verdict = verdict  # pin on the revision so worker sees per-flag context
+        r.submitted_at = None
+        # Keep worker_action set — it tells the worker what they did
+        # previously (so the rejection card can say "your deletion was
+        # rejected" or "your replacement was rejected").
+        reopened_ids.append(r.id)
+
+    t.status = "in_progress"
+    t.completed_at = None
+    t.admin_note = verdict
+    t.needs_revision = 1 if reopened_ids else t.needs_revision
+    # Re-lock the title to the worker so they can pick up where they were.
+    if t.claimed_by_id:
+        u = db.query(User).filter_by(id=t.claimed_by_id).first()
+        if u and not u.locked_master_id:
+            u.locked_master_id = t.id
+
+    log_activity(
+        db, user=admin, action="rejected_completion",
+        target_type="master_title", target_id=t.id,
+        details={"verdict": verdict, "reopened_revisions": reopened_ids},
+    )
+    db.commit()
+    return JSONResponse({"ok": True, "reopened": len(reopened_ids)})
+
+
 # ── Skip-revise: admin sends a skipped title back to the worker with a note ──
 
 @router.post("/title/{master_id}/skip_revise")
@@ -1255,6 +1394,92 @@ def revisions_page(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    """
+    Admin's central place to handle worker pushback.
+
+    Round-11 layout (top → bottom):
+
+      1. PENDING COMPLETIONS — titles in 'complete_pending'. Worker
+         clicked DONE while there were changes; admin must approve the
+         whole title at once. Each card shows the title's diff (all
+         awaiting_approval revisions inline) so admin sees what changed.
+
+      2. AWAITING YOUR APPROVAL — revisions in 'awaiting_approval' whose
+         title is NOT in 'complete_pending' (deduped). These are
+         standalone "worker fixed the flag but didn't try to complete
+         the title yet" cases.
+
+      3. OPEN — WAITING ON USER — revisions in 'open'. Admin flagged,
+         worker hasn't acted. Unchanged from before.
+
+      4. RECENT MISTAKE DELETIONS — auto-resolved deletions on
+         non-flagged posters. After the round-11 rework, this section
+         only catches "worker downloaded the wrong image and deleted it"
+         cases. (Flagged-poster deletions now go through pending
+         completions or awaiting approval instead.)
+
+      5. RESOLVED — history.
+    """
+    # ── Pending completions: titles in complete_pending ─────────────────────
+    pending_titles = (
+        db.query(MasterTitle)
+          .filter(MasterTitle.status == "complete_pending")
+          .order_by(MasterTitle.updated_at.desc().nullslast())
+          .all()
+    )
+    pending_complete_blocks = []
+    pending_title_ids = set()
+    for t in pending_titles:
+        # All active revisions on this title's posters (open or awaiting).
+        revs_for_title = (
+            db.query(Revision, SavedPoster)
+              .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
+              .filter(
+                  SavedPoster.master_title_id == t.id,
+                  Revision.status.in_(("open", "awaiting_approval")),
+              )
+              .order_by(Revision.created_at.asc())
+              .all()
+        )
+        # Activity log entries that show what the worker did since the title
+        # was last in 'pending' or 'in_progress' — additions, deletions,
+        # replacements. Used by admin to scan a diff before approving.
+        title_changes = (
+            db.query(ActivityLog)
+              .join(SavedPoster, ActivityLog.target_id == SavedPoster.id, isouter=True)
+              .filter(
+                  ActivityLog.target_type == "saved_poster",
+                  ActivityLog.action.in_(("saved", "deleted", "replaced")),
+                  SavedPoster.master_title_id == t.id,
+              )
+              .order_by(ActivityLog.created_at.desc())
+              .limit(50)
+              .all()
+        )
+        pending_complete_blocks.append({
+            "title": t,
+            "revisions": revs_for_title,
+            "changes": title_changes,
+        })
+        pending_title_ids.add(t.id)
+
+    # ── Awaiting approval (standalone — NOT inside a pending completion) ────
+    awaiting_q = (
+        db.query(Revision, SavedPoster, MasterTitle)
+          .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
+          .outerjoin(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+          .filter(Revision.status == "awaiting_approval")
+          .order_by(Revision.submitted_at.desc().nullslast())
+    )
+    if pending_title_ids:
+        # Hide any awaiting revision whose title is in a pending-completion
+        # block — those are already rendered there.
+        awaiting_q = awaiting_q.filter(
+            ~MasterTitle.id.in_(pending_title_ids)
+        )
+    awaiting_rows = awaiting_q.all()
+
+    # ── Open (waiting on user) ──────────────────────────────────────────────
     open_rows = (
         db.query(Revision, SavedPoster, MasterTitle)
           .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
@@ -1263,17 +1488,11 @@ def revisions_page(
           .order_by(Revision.created_at.desc())
           .all()
     )
-    awaiting_rows = (
-        db.query(Revision, SavedPoster, MasterTitle)
-          .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
-          .outerjoin(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
-          .filter(Revision.status == "awaiting_approval")
-          .order_by(Revision.submitted_at.desc().nullslast())
-          .all()
-    )
-    # Recent deletions (auto-resolved revisions where the worker deleted the file).
-    # Filter: status=resolved, admin_verdict starts with 'auto-resolved: file deleted',
-    # AND admin hasn't yet acknowledged.
+
+    # ── Recent mistake-deletions (legacy round-9 round-trip path) ────────────
+    # After round 11 these only catch deletions on NON-flagged posters
+    # (worker accidentally saved wrong image and deleted it). The
+    # auto-resolve admin_verdict pattern is preserved for these.
     deletion_rows = (
         db.query(Revision, SavedPoster, MasterTitle)
           .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
@@ -1287,6 +1506,8 @@ def revisions_page(
           .limit(50)
           .all()
     )
+
+    # ── Resolved history ────────────────────────────────────────────────────
     resolved_rows = (
         db.query(Revision, SavedPoster, MasterTitle)
           .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
@@ -1300,6 +1521,7 @@ def revisions_page(
         request,
         "admin_revisions.html",
         {"user": admin, "admin": admin,
+            "pending_complete_blocks": pending_complete_blocks,
             "open_rows": open_rows, "awaiting_rows": awaiting_rows,
             "deletion_rows": deletion_rows,
             "resolved_rows": resolved_rows,

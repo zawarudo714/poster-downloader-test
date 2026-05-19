@@ -942,6 +942,82 @@ def serve_poster_file(
     return FileResponse(p)
 
 
+# ── Admin poster management (browse page delete/upload) ──────────────────────
+
+@router.post("/poster/{poster_id}/delete")
+def admin_delete_poster(
+    poster_id: int,
+    note: str = Form(""),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Admin hard-deletes a poster. Does NOT count against the worker.
+    Used for cleanup — e.g. removing a poster that causes inconsistency,
+    or cleaning up test data. Resolves any active revisions on it.
+    """
+    sp = db.query(SavedPoster).filter_by(id=poster_id).first()
+    if not sp:
+        raise HTTPException(404, "Poster not found.")
+    # Remove file from disk
+    fs_path = saved_poster_path(sp)
+    fs_path.unlink(missing_ok=True)
+    # Resolve any active revisions
+    revs = (
+        db.query(Revision)
+          .filter(Revision.saved_poster_id == sp.id,
+                  Revision.status.in_(("open", "awaiting_approval")))
+          .all()
+    )
+    for r in revs:
+        r.status = "resolved"
+        r.resolved_by = admin.username
+        r.resolved_at = datetime.utcnow()
+        r.admin_verdict = "admin-deleted" + (f": {note.strip()}" if note.strip() else "")
+    # Soft-delete the poster
+    sp.deleted_at = datetime.utcnow()
+    sp.delete_note = f"[admin] {note.strip()}" if note.strip() else "[admin] deleted by admin"
+    # Recompute title state
+    mt = db.query(MasterTitle).filter_by(id=sp.master_title_id).first()
+    if mt:
+        remaining = (
+            db.query(SavedPoster)
+              .filter_by(master_title_id=mt.id)
+              .filter(SavedPoster.deleted_at.is_(None))
+              .count()
+        )
+        any_active = (
+            db.query(Revision)
+              .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
+              .filter(SavedPoster.master_title_id == mt.id,
+                      Revision.status.in_(("open", "awaiting_approval")))
+              .count()
+        )
+        mt.needs_revision = 1 if any_active else 0
+        if remaining == 0 and mt.status in ("in_progress", "complete_pending", "complete", "skipped"):
+            mt.status = "pending"
+            mt.needs_revision = 0
+            mt.completed_at = None
+            if mt.claimed_by_id:
+                u = db.query(User).filter_by(id=mt.claimed_by_id).first()
+                if u and u.locked_master_id == mt.id:
+                    u.locked_master_id = None
+                mt.claimed_by_id = None
+            # Clean up empty folder
+            title_dir = fs_path.parent
+            if title_dir.is_dir() and not list(title_dir.iterdir()):
+                import shutil
+                shutil.rmtree(title_dir, ignore_errors=True)
+
+    log_activity(
+        db, user=admin, action="admin_deleted", target_type="saved_poster", target_id=sp.id,
+        details={"filename": sp.filename, "master_id": sp.master_title_id,
+                 "note": note.strip() or None},
+    )
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
 # ── Revisions ────────────────────────────────────────────────────────────────
 
 @router.post("/poster/{poster_id}/flag")
@@ -2390,9 +2466,15 @@ def api_activity(
     rows = q.limit(limit).all()
 
     out = []
+    # Batch-fetch title names for master_title targets so the activity log
+    # can show "Dogma (1999)" instead of "master#1190".
+    mt_ids = {r.target_id for r in rows if r.target_type == "master_title" and r.target_id}
+    mt_names = {}
+    if mt_ids:
+        for mt in db.query(MasterTitle).filter(MasterTitle.id.in_(mt_ids)).all():
+            mt_names[mt.id] = f"{mt.title} ({mt.year})" if mt.year else mt.title
+
     for r in rows:
-        # Try to extract a "comment" from details JSON. Different actions
-        # use different keys; we look at the most useful ones.
         comment = ""
         details = {}
         if r.details:
@@ -2405,9 +2487,11 @@ def api_activity(
             if v:
                 comment = str(v)
                 break
-        # Skip if comments_only filter is on and this row has no comment.
         if comments_only and not comment:
             continue
+        # Inject the title name for master_title targets if available.
+        if r.target_type == "master_title" and r.target_id in mt_names:
+            details["title"] = mt_names[r.target_id]
         out.append({
             "id":          r.id,
             "created_at":  fmt_local(r.created_at, "%Y-%m-%d %H:%M:%S"),

@@ -251,10 +251,26 @@
     });
     btn.appendChild(check);
 
+    // Admin delete button — small ✕ in top-right corner.
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'g-poster-delete';
+    delBtn.setAttribute('aria-label', 'Delete poster');
+    delBtn.title = 'Admin delete (does not count against worker)';
+    delBtn.textContent = '✕';
+    delBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm(`Delete ${p.filename}? This removes the file and doesn't count against the worker.`)) return;
+      const fd = new FormData();
+      fd.append('note', 'admin delete from browse');
+      const r = await fetch(`/admin/poster/${p.poster_id}/delete`, { method: 'POST', body: fd });
+      if (r.ok) loadList();
+      else alert('Delete failed.');
+    });
+    btn.appendChild(delBtn);
+
     btn.addEventListener('click', (e) => {
-      // Only count as a checkbox click if the click target IS the checkbox.
-      // Everything else opens the lightbox.
-      if (e.target === check) return;
+      if (e.target === check || e.target === delBtn) return;
       openLightbox(t, p);
     });
     return node;

@@ -1038,6 +1038,40 @@ def delete_poster(
         )
         mt.needs_revision = 1 if any_active else 0
 
+    # If ALL posters on this title are now deleted, reset the title to
+    # "pending" so it returns to the pool. Also clean up the empty
+    # workspace folder. This prevents ghost titles that show as
+    # in_progress with zero posters.
+    if mt:
+        remaining = (
+            db.query(SavedPoster)
+              .filter_by(master_title_id=mt.id)
+              .filter(SavedPoster.deleted_at.is_(None))
+              .count()
+        )
+        if remaining == 0 and mt.status in ("in_progress", "complete_pending"):
+            mt.status = "pending"
+            mt.needs_revision = 0
+            mt.completed_at = None
+            mt.admin_note = None
+            # Unclaim from the worker
+            if mt.claimed_by_id:
+                u = db.query(User).filter_by(id=mt.claimed_by_id).first()
+                if u and u.locked_master_id == mt.id:
+                    u.locked_master_id = None
+            mt.claimed_by_id = None
+            # Clean up empty date/title folder on disk
+            import shutil
+            title_dir = saved_poster_path(sp).parent
+            if title_dir.is_dir():
+                try:
+                    # Remove the title subfolder if it's empty (or only has deleted files)
+                    remaining_files = list(title_dir.iterdir())
+                    if not remaining_files:
+                        shutil.rmtree(title_dir, ignore_errors=True)
+                except Exception:
+                    pass
+
     log_activity(
         db, user=user, action="deleted", target_type="saved_poster", target_id=sp.id,
         details={"filename": sp.filename, "master_id": sp.master_title_id,
@@ -1306,10 +1340,28 @@ def title_skip(
         user.locked_master_id = None
     if reason_source not in ("preset", "manual"):
         reason_source = ""
+    # Resolve any active revisions on this title — skip overrides flags.
+    # Admin can review in the Skipped panel and send it back if needed.
+    active_revs = (
+        db.query(Revision)
+          .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
+          .filter(
+              SavedPoster.master_title_id == t.id,
+              Revision.status.in_(("open", "awaiting_approval")),
+          )
+          .all()
+    )
+    for r in active_revs:
+        r.status = "resolved"
+        r.resolved_by = user.username
+        r.resolved_at = datetime.utcnow()
+        r.admin_verdict = "auto-resolved: title skipped"
+    t.needs_revision = 0
     log_activity(
         db, user=user, action="skipped", target_type="master_title", target_id=t.id,
         details={"reason": reason.strip() or None,
-                 "reason_source": reason_source or None},
+                 "reason_source": reason_source or None,
+                 "resolved_flags": len(active_revs)},
     )
     db.commit()
     return JSONResponse({"ok": True})

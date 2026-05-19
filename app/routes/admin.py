@@ -816,7 +816,28 @@ def browse_page(
     if not workers:
         users = db.query(User).filter_by(role="worker").order_by(User.username.asc()).all()
         workers = [u.username for u in users]
-    selected_worker = worker or (workers[0] if workers else "")
+
+    # Sticky default: if worker param given, save it as default for this admin.
+    # If no param, read the saved default. Fallback to alphabetical first.
+    settings_key = f"admin.{admin.id}.browse_default_worker"
+    if worker:
+        # Save this selection as the new default.
+        setting = db.query(AppSetting).filter_by(key=settings_key).first()
+        if setting:
+            setting.value = worker
+        else:
+            db.add(AppSetting(key=settings_key, value=worker))
+        db.commit()
+        selected_worker = worker
+    else:
+        setting = db.query(AppSetting).filter_by(key=settings_key).first()
+        saved = setting.value if setting else None
+        # Only use the saved default if that worker still has a workspace.
+        if saved and saved in workers:
+            selected_worker = saved
+        else:
+            selected_worker = workers[0] if workers else ""
+
     dates = list_date_folders(selected_worker) if selected_worker else []
     today_iso = local_today().isoformat()
     if today_iso not in dates and selected_worker:
@@ -1891,16 +1912,24 @@ ZIP_JOBS: dict[str, dict] = {}
 ZIP_LOCK = threading.Lock()
 
 
-def _zip_worker(job_id: str, src: Path, zip_path: Path):
+def _zip_worker(job_id: str, sources: list[tuple[str, Path]], zip_path: Path):
+    """
+    Build a zip from one or more (date_label, src_dir) pairs.
+    Files are written into per-date subfolders: `2026-05-15/title/file.jpg`.
+    """
     try:
-        all_files = []
-        for root, _dirs, files in os.walk(src):
-            for f in files:
-                all_files.append(Path(root) / f)
+        all_files: list[tuple[Path, str]] = []  # (abs_path, arcname)
+        for date_label, src in sources:
+            for root, _dirs, files in os.walk(src):
+                for f in files:
+                    fp = Path(root) / f
+                    # arcname = date/title/file.jpg
+                    rel = fp.relative_to(src)
+                    arcname = f"{date_label}/{rel}"
+                    all_files.append((fp, arcname))
         total = max(len(all_files), 1)
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            for i, fp in enumerate(all_files):
-                arcname = fp.relative_to(src.parent)
+            for i, (fp, arcname) in enumerate(all_files):
                 zf.write(fp, arcname)
                 with ZIP_LOCK:
                     ZIP_JOBS[job_id].update(done=i + 1, total=total)
@@ -1914,26 +1943,48 @@ def _zip_worker(job_id: str, src: Path, zip_path: Path):
 @router.post("/zip/start")
 def zip_start(
     worker: str = Form(...),
-    date: str = Form(...),
+    dates: str = Form(""),
+    date: str = Form(""),
     admin: User = Depends(require_admin),
 ):
-    src = (WORKSPACE_DIR / worker / date).resolve()
-    if not safe_under_workspace(src) or not src.is_dir():
-        raise HTTPException(404, "Source folder not found.")
+    """
+    Start a background zip job for one or more dates.
+
+    Accepts `dates` as a comma-separated string (e.g. "2026-05-15,2026-05-16").
+    Also accepts legacy `date` (single value) for backwards compatibility.
+    Files are written into per-date subfolders inside the zip.
+    """
+    # Merge both params: JS now sends `dates`, but keep `date` for any old callers.
+    raw = dates or date or ""
+    date_list = [d.strip() for d in raw.split(",") if d.strip()]
+    if not date_list:
+        raise HTTPException(400, "No dates specified.")
+
+    sources: list[tuple[str, Path]] = []
+    for d in date_list:
+        src = (WORKSPACE_DIR / worker / d).resolve()
+        if not safe_under_workspace(src) or not src.is_dir():
+            continue  # skip missing folders silently
+        sources.append((d, src))
+    if not sources:
+        raise HTTPException(404, "No matching date folders found on disk.")
 
     zip_dir = WORKSPACE_DIR / "_zips"
     zip_dir.mkdir(exist_ok=True)
     ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-    zip_name = f"{worker}_{date}_{ts}.zip"
+    if len(sources) == 1:
+        zip_name = f"{worker}_{date_list[0]}_{ts}.zip"
+    else:
+        zip_name = f"{worker}_{date_list[0]}_to_{date_list[-1]}_{ts}.zip"
     zip_path = zip_dir / zip_name
 
-    job_id = f"{worker}-{date}-{ts}"
+    job_id = f"{worker}-zip-{ts}"
     with ZIP_LOCK:
         ZIP_JOBS[job_id] = {
             "state": "running", "done": 0, "total": 0,
             "path": "", "error": "", "name": zip_name,
         }
-    threading.Thread(target=_zip_worker, args=(job_id, src, zip_path), daemon=True).start()
+    threading.Thread(target=_zip_worker, args=(job_id, sources, zip_path), daemon=True).start()
     return JSONResponse({"ok": True, "job_id": job_id, "name": zip_name})
 
 

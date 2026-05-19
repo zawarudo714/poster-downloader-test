@@ -240,6 +240,7 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 .login-form input { padding: 9px 12px; }
 .login-form button { margin-top: 4px; padding: 10px; font-size: 13px; }
 .login-error { color: var(--error); font-size: 12px; padding: 8px 10px; border-left: 3px solid var(--error); background: rgba(232,85,75,0.08); }
+.login-maintenance { color: #f4b400; font-size: 13px; padding: 12px 14px; border-left: 3px solid #f4b400; background: rgba(244,180,0,0.08); border-radius: 4px; line-height: 1.5; text-align: center; }
 
 /* ── Worker dashboard ────────────────────────────────────────────────────── */
 .worker-grid { display: block; }
@@ -792,7 +793,7 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 .rev-flagged { font-size: 11px; color: var(--subtext); margin-top: 4px; }
 .rev-actions { display: flex; gap: 6px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
 .rev-thumb {
-  width: 200px; height: 280px; object-fit: cover;
+  width: 60px; height: 90px; object-fit: cover;
   border: 1px solid var(--border); border-radius: 2px;
 }
 .rev-thumb-placeholder {
@@ -801,9 +802,6 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
   border-style: dashed;
   border-color: rgba(255, 80, 80, 0.4);
   opacity: 0.85;
-}
-@media (max-width: 700px) {
-  .rev-thumb { width: 100%; max-width: 100%; height: auto; max-height: 260px; }
 }
 .rev-actions input[type="url"] {
   flex: 1; min-width: 200px; padding: 6px 8px;
@@ -3318,62 +3316,83 @@ body:has(#ib-bulk-bar:not([hidden])) { padding-bottom: 88px; }
   margin-top: 6px;
 }
 
-/* ── Paste-URL button (mobile-friendly) ─────────────────────────────── */
-/* Full-width version next to the main save URL input. */
-.paste-url-btn {
+/* (paste-url buttons removed in round 12 — HTTP doesn't support clipboard API) */
+
+/* ── Round 12: date navigation + grid modal ─────────────────────────── */
+.date-nav {
   display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.date-nav-current {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text);
+  padding: 4px 8px;
+  background: rgba(244, 180, 0, 0.14);
+  border: 1px solid rgba(244, 180, 0, 0.45);
+  border-radius: 4px;
+  min-width: 100px;
+  text-align: center;
+}
+
+.date-grid-card {
+  max-width: 500px;
+  width: 92vw;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+.date-grid-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 10px;
+}
+.date-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.date-chip {
+  display: flex;
   align-items: center;
   gap: 6px;
-  background: rgba(100, 180, 255, 0.16);
-  color: #b3d9ff;
-  border: 1px solid rgba(100, 180, 255, 0.45);
+  padding: 8px 10px;
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 4px;
-  padding: 8px 12px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
   cursor: pointer;
-  min-height: 38px;
-  transition: background 0.12s, transform 0.05s;
+  transition: border-color 0.12s, background 0.12s;
+  font-size: 12px;
 }
-.paste-url-btn:hover { background: rgba(100, 180, 255, 0.28); }
-.paste-url-btn:active { transform: scale(0.97); }
-.paste-url-btn.is-busy { opacity: 0.6; cursor: wait; }
-.paste-url-btn.is-ok {
-  background: rgba(80, 200, 120, 0.30);
-  border-color: rgba(80, 200, 120, 0.55);
-  color: #66dd99;
+.date-chip:hover { border-color: var(--accent, #f4b400); }
+.date-chip-active {
+  border-color: #f4b400;
+  background: rgba(244, 180, 0, 0.12);
 }
-.paste-url-icon { font-size: 14px; line-height: 1; }
-.paste-url-label { font-family: var(--font-mono, monospace); }
-
-/* Compact icon-only version for the inline replace inputs. */
-.paste-url-btn-tiny {
-  padding: 6px 10px;
-  min-height: 32px;
-  font-size: 13px;
+.date-chip input[type="checkbox"] {
+  accent-color: #f4b400;
+  margin: 0;
+  cursor: pointer;
 }
-.paste-url-btn-tiny .paste-url-label { display: none; }
-
-/* Save row layout — make space for the paste button. */
-.save-row {
+.date-chip-label {
+  cursor: pointer;
+  font-family: var(--font-mono, monospace);
+}
+.date-grid-actions {
   display: flex;
-  gap: 6px;
-  align-items: stretch;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
   flex-wrap: wrap;
 }
-.save-row .paste-url-btn { flex: 0 0 auto; }
-.save-row .save-url      { flex: 1 1 240px; min-width: 200px; }
-.save-row > .btn-accent  { flex: 0 0 auto; }
-
 @media (max-width: 700px) {
-  .save-row .paste-url-btn { flex-basis: 100%; justify-content: center; }
-  .save-row .save-url      { flex-basis: 100%; }
-  .save-row > .btn-accent  { flex-basis: 100%; }
+  .date-grid {
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 6px;
+  }
+  .date-nav { flex-wrap: wrap; }
 }
-
-/* Similar-pair input row */
-.rev-similar-input-row {
-  display: flex; gap: 4px; align-items: center;
-}
-.rev-similar-input-row input[type="url"] { flex: 1; min-width: 0; }

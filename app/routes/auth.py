@@ -30,13 +30,31 @@ def login_submit(
     password: str = Form(...),
     db: Session = Depends(get_db),
 ):
-    user = db.query(User).filter_by(username=username.strip(), is_active=1).first()
+    # Query WITHOUT is_active filter so we can distinguish "wrong password"
+    # from "correct password but account disabled". Disabled workers see a
+    # friendly maintenance message instead of a confusing credentials error.
+    user = db.query(User).filter_by(username=username.strip()).first()
     if not user or not verify_password(password, user.password_hash):
         return templates.TemplateResponse(
             request,
             "login.html",
             {"error": "Invalid username or password."},
             status_code=401,
+        )
+    # Credentials match. Check if the account is disabled or soft-deleted.
+    if not user.is_active or user.is_deleted:
+        # Show a friendly "under maintenance" message instead of revealing
+        # that the account was disabled. Admin can customize the message
+        # via app_settings (key: disabled_login_message).
+        from ..models import AppSetting
+        setting = db.query(AppSetting).filter_by(key="disabled_login_message").first()
+        msg = (setting.value if setting else None) or \
+              "This site is currently undergoing an update. Please try again later."
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {"error": msg, "error_kind": "maintenance"},
+            status_code=200,  # 200, not 401 — it's not a credentials error
         )
     redirect_to = "/admin" if user.role == "admin" else "/"
     response = RedirectResponse(redirect_to, status_code=302)

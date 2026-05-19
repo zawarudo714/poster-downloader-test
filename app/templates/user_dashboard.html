@@ -138,10 +138,6 @@
     </div>
     <div class="flash-bar"></div>
     <div class="save-row">
-      <button type="button" class="paste-url-btn" data-paste-target=".save-url" aria-label="Paste from clipboard">
-        <span class="paste-url-icon" aria-hidden="true">📋</span>
-        <span class="paste-url-label">PASTE URL</span>
-      </button>
       <input type="url" class="save-url" placeholder="https://image.tmdb.org/t/p/original/...jpg" autocomplete="off">
       <button class="btn btn-accent" data-action="save">SAVE POSTER</button>
     </div>
@@ -177,9 +173,6 @@
       <span class="poster-size mono"></span>
     </div>
     <div class="poster-actions">
-      <button type="button" class="paste-url-btn paste-url-btn-tiny" data-paste-target=".poster-replace-url" aria-label="Paste from clipboard">
-        <span class="paste-url-icon" aria-hidden="true">📋</span>
-      </button>
       <input type="url" class="poster-replace-url" placeholder="Paste replacement URL">
       <button class="btn btn-ghost btn-tiny" data-action="replace">REPLACE</button>
       <button class="btn btn-error btn-tiny" data-action="delete">DELETE</button>
@@ -207,9 +200,6 @@
     <!-- 'simple' single-poster controls -->
     <div class="rev-actions" data-mode="simple">
       <img class="rev-thumb" alt="" loading="lazy">
-      <button type="button" class="paste-url-btn paste-url-btn-tiny" data-paste-target="[data-replace-url]" aria-label="Paste from clipboard">
-        <span class="paste-url-icon" aria-hidden="true">📋</span>
-      </button>
       <input type="url" placeholder="Paste replacement image URL" data-replace-url>
       <button class="btn btn-accent" data-action="replace">REPLACE FILE</button>
       <button class="btn btn-error"  data-action="delete-revision">DELETE FILE</button>
@@ -225,12 +215,7 @@
   <div class="rev-similar-card">
     <img class="rev-similar-thumb" alt="" loading="lazy">
     <div class="rev-similar-name mono"></div>
-    <div class="rev-similar-input-row">
-      <button type="button" class="paste-url-btn paste-url-btn-tiny" data-paste-target="[data-replace-url]" aria-label="Paste from clipboard">
-        <span class="paste-url-icon" aria-hidden="true">📋</span>
-      </button>
-      <input type="url" placeholder="Paste replacement URL for this one" data-replace-url>
-    </div>
+    <input type="url" placeholder="Paste replacement URL for this one" data-replace-url>
     <div class="rev-similar-btns">
       <button class="btn btn-accent btn-tiny" data-action="replace">REPLACE THIS</button>
       <button class="btn btn-error btn-tiny" data-action="delete-revision">DELETE THIS</button>

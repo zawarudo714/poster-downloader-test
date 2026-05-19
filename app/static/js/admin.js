@@ -407,10 +407,103 @@
   });
 
   $('ib-load').addEventListener('click', loadList);
-  $('ib-worker').addEventListener('change', loadList);
-  $('ib-date').addEventListener('change', loadList);
+  $('ib-worker').addEventListener('change', () => {
+    // When worker changes, reload the page so the server returns fresh dates.
+    const url = new URL(window.location.href);
+    url.searchParams.set('worker', $('ib-worker').value);
+    url.searchParams.delete('date');
+    window.location.href = url.toString();
+  });
   $('ib-prev-title').addEventListener('click', () => navTitle(-1));
   $('ib-next-title').addEventListener('click', () => navTitle(1));
+
+  // ── Date navigation (prev/next + grid modal) ───────────────────────────
+  const dates = window.__dates || [];
+  const dateInput = $('ib-date');
+  const dateLabel = $('ib-date-label');
+
+  function setDate(d) {
+    dateInput.value = d;
+    dateLabel.textContent = d;
+    loadList();
+  }
+
+  $('ib-date-prev').addEventListener('click', () => {
+    const idx = dates.indexOf(dateInput.value);
+    // dates is newest-first, so "prev" = next index (older)
+    if (idx >= 0 && idx < dates.length - 1) setDate(dates[idx + 1]);
+  });
+  $('ib-date-next').addEventListener('click', () => {
+    const idx = dates.indexOf(dateInput.value);
+    // "next" = previous index (newer)
+    if (idx > 0) setDate(dates[idx - 1]);
+  });
+
+  // Grid modal
+  const gridModal = $('date-grid-modal');
+  const gridEl    = $('date-grid');
+  const gridZip   = $('date-grid-zip');
+  let gridChecked = new Set();
+
+  function openDateGrid() {
+    gridChecked.clear();
+    gridEl.innerHTML = '';
+    dates.forEach((d) => {
+      const chip = document.createElement('label');
+      chip.className = 'date-chip';
+      if (d === dateInput.value) chip.classList.add('date-chip-active');
+      chip.innerHTML = `<input type="checkbox" value="${d}"><span class="date-chip-label">${d}</span>`;
+      const cb = chip.querySelector('input');
+      cb.addEventListener('change', () => {
+        if (cb.checked) gridChecked.add(d); else gridChecked.delete(d);
+        updateGridZipBtn();
+      });
+      chip.querySelector('.date-chip-label').addEventListener('click', (e) => {
+        // Clicking the label text (not checkbox) = navigate to that date
+        if (e.target === chip.querySelector('.date-chip-label')) {
+          setDate(d);
+          gridModal.hidden = true;
+        }
+      });
+      gridEl.appendChild(chip);
+    });
+    updateGridZipBtn();
+    gridModal.hidden = false;
+  }
+
+  function updateGridZipBtn() {
+    const n = gridChecked.size;
+    gridZip.textContent = `ZIP SELECTED (${n})`;
+    gridZip.disabled = n === 0;
+  }
+
+  $('ib-date-grid-btn').addEventListener('click', openDateGrid);
+  gridModal.querySelectorAll('[data-date-grid-close]').forEach((el) =>
+    el.addEventListener('click', () => { gridModal.hidden = true; })
+  );
+  // Esc closes date grid
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !gridModal.hidden) { gridModal.hidden = true; e.stopPropagation(); }
+  });
+
+  // Multi-day zip from grid
+  gridZip.addEventListener('click', async () => {
+    if (gridChecked.size === 0) return;
+    const worker = $('ib-worker').value;
+    if (!worker) return;
+    const fd = new FormData();
+    fd.append('worker', worker);
+    fd.append('dates', Array.from(gridChecked).sort().join(','));
+    gridZip.disabled = true;
+    gridZip.textContent = 'STARTING…';
+    const r = await fetch('/admin/zip/start', { method: 'POST', body: fd });
+    const data = await r.json().catch(() => ({}));
+    gridZip.disabled = false;
+    updateGridZipBtn();
+    if (!r.ok) { alert('Zip start failed.'); return; }
+    gridModal.hidden = true;
+    pollZip(data.job_id);
+  });
 
   // ── Density toggle (1-up vs 2-up gallery layout) ────────────────────────
   const densityBtn = $('ib-density-toggle');
@@ -486,7 +579,7 @@
     if (!worker || !date) return;
     const fd = new FormData();
     fd.append('worker', worker);
-    fd.append('date', date);
+    fd.append('dates', date);  // single date, but same endpoint
     const r = await fetch('/admin/zip/start', { method: 'POST', body: fd });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) { alert('Zip start failed.'); return; }

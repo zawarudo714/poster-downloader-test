@@ -29,7 +29,13 @@
       <label>PASSWORD
         <input type="password" name="password" autocomplete="current-password" required>
       </label>
-      {% if error %}<div class="login-error">{{ error }}</div>{% endif %}
+      {% if error %}
+        {% if error_kind == 'maintenance' %}
+          <div class="login-maintenance">⏳ {{ error }}</div>
+        {% else %}
+          <div class="login-error">{{ error }}</div>
+        {% endif %}
+      {% endif %}
       <button type="submit" class="btn btn-accent btn-wide">SIGN IN</button>
     </form>
   </div>

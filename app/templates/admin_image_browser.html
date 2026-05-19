@@ -17,17 +17,34 @@
             {% endfor %}
           </select>
         </label>
-        <label>DATE {{ info("This is the title's original-save-date — the folder a poster lives in. It does NOT change when the file is replaced later.") }}
-          <select name="date" id="ib-date">
-            {% for d in dates %}
-              <option value="{{ d }}" {% if d == selected_date %}selected{% endif %}>{{ d }}</option>
-            {% endfor %}
-          </select>
-        </label>
+        <input type="hidden" id="ib-date" value="{{ selected_date }}">
+        <div class="date-nav">
+          <span class="muted">DATE {{ info("This is the title's original-save-date — the folder a poster lives in. It does NOT change when the file is replaced later.") }}</span>
+          <button type="button" class="btn btn-ghost btn-tiny" id="ib-date-prev" title="Previous date">‹</button>
+          <span class="date-nav-current mono" id="ib-date-label">{{ selected_date }}</span>
+          <button type="button" class="btn btn-ghost btn-tiny" id="ib-date-next" title="Next date">›</button>
+          <button type="button" class="btn btn-ghost btn-tiny" id="ib-date-grid-btn" title="All dates">📅 ALL DATES</button>
+        </div>
         <button type="button" class="btn btn-ghost" id="ib-load">LOAD</button>
         <button type="button" class="btn btn-accent" id="ib-zip">ZIP THIS DAY {{ info("Builds a single ZIP of every file under {user}/{date}/ for download.") }}</button>
         <span class="muted mono" id="ib-zip-status"></span>
       </form>
+
+      {# Date grid modal — tappable grid of all dates with checkboxes for multi-zip #}
+      <div id="date-grid-modal" class="lightbox" hidden>
+        <div class="lightbox-bg" data-date-grid-close></div>
+        <div class="lightbox-card date-grid-card">
+          <div class="date-grid-head">
+            <strong>ALL DATES</strong>
+            <button class="btn btn-ghost btn-tiny" data-date-grid-close>✕</button>
+          </div>
+          <div class="date-grid" id="date-grid"></div>
+          <div class="date-grid-actions">
+            <button class="btn btn-accent" id="date-grid-zip" disabled>ZIP SELECTED (0)</button>
+            <button class="btn btn-ghost" data-date-grid-close>CLOSE</button>
+          </div>
+        </div>
+      </div>
 
       <div class="ib-summary mono muted" id="ib-summary"></div>
 
@@ -102,5 +119,9 @@
 {% endblock %}
 
 {% block scripts %}
+<script>
+  // Server-rendered date list for the current worker.
+  window.__dates = [{% for d in dates %}"{{ d }}"{% if not loop.last %},{% endif %}{% endfor %}];
+</script>
 <script src="/static/js/admin.js?v={{ app_version }}"></script>
 {% endblock %}

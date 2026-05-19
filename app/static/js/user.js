@@ -1200,54 +1200,6 @@
   if (pullBtn)    pullBtn.addEventListener('click', pullNext);
   if (releaseBtn) releaseBtn.addEventListener('click', release);
 
-  // ── Paste-URL buttons (delegated) ────────────────────────────────────────
-  // Workers prefer phones. Long-pressing a textbox to get the Paste menu is
-  // fiddly on mobile, so each URL input has a "📋 PASTE URL" button next to
-  // it. We use a single delegated listener on the document so dynamically
-  // added inputs (poster cards, revision cards, similar-pair cards) work
-  // without per-card wiring.
-  document.addEventListener('click', async (e) => {
-    const btn = e.target.closest('.paste-url-btn');
-    if (!btn) return;
-    e.preventDefault();
-    // Selector to find the input: prefer data-paste-target, else look up the
-    // sibling input.
-    const sel = btn.getAttribute('data-paste-target');
-    let input = null;
-    if (sel) {
-      // Search ancestors for the closest container holding both the button
-      // and a matching input. Use the closest .save-row / .poster-actions /
-      // .rev-actions / .rev-similar-card / .rev-similar-input-row as scope.
-      const scope = btn.closest(
-        '.save-row, .poster-actions, .rev-actions, .rev-similar-card, .rev-similar-input-row'
-      ) || document;
-      input = scope.querySelector(sel);
-    }
-    if (!input) return;
-    btn.classList.add('is-busy');
-    try {
-      if (!navigator.clipboard || !navigator.clipboard.readText) {
-        throw new Error('clipboard-unsupported');
-      }
-      const text = await navigator.clipboard.readText();
-      input.value = (text || '').trim();
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      input.focus();
-      btn.classList.add('is-ok');
-      setTimeout(() => btn.classList.remove('is-ok'), 700);
-    } catch (err) {
-      // Permission denied, or unsupported (older Safari etc).
-      // Focus the input and let the worker fall back to long-press paste.
-      input.focus();
-      showToast(
-        'Couldn\'t read clipboard automatically — tap & hold the field to paste manually.',
-        'warn', 3500,
-      );
-    } finally {
-      btn.classList.remove('is-busy');
-    }
-  });
-
   renderAll({ fullActive: true });
   setInterval(refreshState, 8000);
 })();

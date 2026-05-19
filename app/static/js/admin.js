@@ -152,10 +152,12 @@
     if (!r.ok) { gallery.innerHTML = '<div class="empty-hint">Load failed.</div>'; return; }
     const data = await r.json();
     titles = data.titles || [];
-    titleIdx = 0;
+    // Restore title index from URL if available and valid, else 0.
+    titleIdx = (restoredIdx > 0 && restoredIdx < titles.length) ? restoredIdx : 0;
     clearSelection();
     $('ib-summary').textContent = `${data.title_count} title(s) · ${data.poster_count} poster(s) total`;
     renderGallery();
+    saveStateToUrl();
   }
 
   function renderGallery() {
@@ -318,7 +320,6 @@
   function navTitle(d) {
     if (titles.length === 0) return;
     titleIdx = Math.max(0, Math.min(titles.length - 1, titleIdx + d));
-    // Re-render with the new current highlighted (no full reload — preserves selection).
     document.querySelectorAll('.g-title.current').forEach((el) => el.classList.remove('current'));
     const cur = document.getElementById(`g-title-${titleIdx}`);
     if (cur) {
@@ -326,6 +327,7 @@
       cur.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
     $('ib-title-counter').textContent = `${titleIdx + 1} / ${titles.length}`;
+    saveStateToUrl();
   }
 
   // ── Lightbox ─────────────────────────────────────────────────────────────
@@ -408,100 +410,181 @@
 
   $('ib-load').addEventListener('click', loadList);
   $('ib-worker').addEventListener('change', () => {
-    // When worker changes, reload the page so the server returns fresh dates.
     const url = new URL(window.location.href);
     url.searchParams.set('worker', $('ib-worker').value);
     url.searchParams.delete('date');
+    url.searchParams.delete('idx');
     window.location.href = url.toString();
   });
   $('ib-prev-title').addEventListener('click', () => navTitle(-1));
   $('ib-next-title').addEventListener('click', () => navTitle(1));
 
-  // ── Date navigation (prev/next + grid modal) ───────────────────────────
+  // ── Date data (must come before saved-state restore) ────────────────────
   const dates = window.__dates || [];
+  const dateSet = new Set(dates);
   const dateInput = $('ib-date');
   const dateLabel = $('ib-date-label');
+
+  // ── Saved state helpers ─────────────────────────────────────────────────
+  const BROWSE_STATE_KEY = 'pd-browse-state';
+  function saveStateToUrl() {
+    const url = new URL(window.location.href);
+    url.searchParams.set('worker', $('ib-worker').value);
+    url.searchParams.set('date', dateInput.value);
+    url.searchParams.set('idx', String(titleIdx));
+    history.replaceState(null, '', url.toString());
+    try {
+      localStorage.setItem(BROWSE_STATE_KEY, JSON.stringify({
+        worker: $('ib-worker').value,
+        date: dateInput.value,
+        idx: titleIdx,
+      }));
+    } catch (e) {}
+  }
+  const urlParams = new URLSearchParams(window.location.search);
+  if (!urlParams.has('date') && !urlParams.has('idx')) {
+    try {
+      const saved = JSON.parse(localStorage.getItem(BROWSE_STATE_KEY) || 'null');
+      if (saved && saved.date && dates.indexOf(saved.date) >= 0) {
+        if (saved.date !== dateInput.value) {
+          dateInput.value = saved.date;
+          dateLabel.textContent = saved.date;
+        }
+      }
+    } catch (e) {}
+  }
+  const restoredIdx = parseInt(urlParams.get('idx'), 10) || (function() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(BROWSE_STATE_KEY) || 'null');
+      return (saved && saved.idx) || 0;
+    } catch (e) { return 0; }
+  })();
+
+  // ── Date navigation (prev/next + calendar modal) ────────────────────────
 
   function setDate(d) {
     dateInput.value = d;
     dateLabel.textContent = d;
     loadList();
+    saveStateToUrl();
   }
 
   $('ib-date-prev').addEventListener('click', () => {
     const idx = dates.indexOf(dateInput.value);
-    // dates is newest-first, so "prev" = next index (older)
     if (idx >= 0 && idx < dates.length - 1) setDate(dates[idx + 1]);
   });
   $('ib-date-next').addEventListener('click', () => {
     const idx = dates.indexOf(dateInput.value);
-    // "next" = previous index (newer)
     if (idx > 0) setDate(dates[idx - 1]);
   });
 
-  // Grid modal
-  const gridModal = $('date-grid-modal');
-  const gridEl    = $('date-grid');
-  const gridZip   = $('date-grid-zip');
-  let gridChecked = new Set();
+  // Calendar modal
+  const calModal   = $('date-grid-modal');
+  const calGrid    = $('cal-grid');
+  const calLabel   = $('cal-month-label');
+  const calZip     = $('date-grid-zip');
+  let calYear, calMonth;
+  let calChecked = new Set();
 
-  function openDateGrid() {
-    gridChecked.clear();
-    gridEl.innerHTML = '';
-    dates.forEach((d) => {
-      const chip = document.createElement('label');
-      chip.className = 'date-chip';
-      if (d === dateInput.value) chip.classList.add('date-chip-active');
-      chip.innerHTML = `<input type="checkbox" value="${d}"><span class="date-chip-label">${d}</span>`;
-      const cb = chip.querySelector('input');
-      cb.addEventListener('change', () => {
-        if (cb.checked) gridChecked.add(d); else gridChecked.delete(d);
-        updateGridZipBtn();
-      });
-      chip.querySelector('.date-chip-label').addEventListener('click', (e) => {
-        // Clicking the label text (not checkbox) = navigate to that date
-        if (e.target === chip.querySelector('.date-chip-label')) {
-          setDate(d);
-          gridModal.hidden = true;
-        }
-      });
-      gridEl.appendChild(chip);
-    });
-    updateGridZipBtn();
-    gridModal.hidden = false;
+  function renderCalendar() {
+    calLabel.textContent = `${['January','February','March','April','May','June','July','August','September','October','November','December'][calMonth]} ${calYear}`;
+    calGrid.innerHTML = '';
+    // First day of month (0=Sun..6=Sat) → convert to Mon-based (0=Mon..6=Sun)
+    const firstDow = new Date(calYear, calMonth, 1).getDay();
+    const monBased = (firstDow + 6) % 7; // 0=Mon
+    const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+    // Empty cells before first day
+    for (let i = 0; i < monBased; i++) {
+      const e = document.createElement('div');
+      e.className = 'cal-day cal-day-empty';
+      calGrid.appendChild(e);
+    }
+    for (let d = 1; d <= daysInMonth; d++) {
+      const iso = `${calYear}-${String(calMonth + 1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const hasData = dateSet.has(iso);
+      const isActive = iso === dateInput.value;
+      const el = document.createElement('div');
+      el.className = 'cal-day' +
+        (hasData ? ' cal-day-has' : ' cal-day-none') +
+        (isActive ? ' cal-day-active' : '') +
+        (calChecked.has(iso) ? ' cal-day-checked' : '');
+      el.textContent = d;
+      if (hasData) {
+        // Checkbox for multi-zip
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'cal-day-cb';
+        cb.checked = calChecked.has(iso);
+        cb.addEventListener('change', (e) => {
+          e.stopPropagation();
+          if (cb.checked) calChecked.add(iso); else calChecked.delete(iso);
+          el.classList.toggle('cal-day-checked', cb.checked);
+          updateCalZip();
+        });
+        el.appendChild(cb);
+        // Click the day number to navigate
+        el.addEventListener('click', (e) => {
+          if (e.target === cb) return; // let checkbox handle itself
+          setDate(iso);
+          calModal.hidden = true;
+        });
+      }
+      calGrid.appendChild(el);
+    }
+    updateCalZip();
   }
 
-  function updateGridZipBtn() {
-    const n = gridChecked.size;
-    gridZip.textContent = `ZIP SELECTED (${n})`;
-    gridZip.disabled = n === 0;
+  function updateCalZip() {
+    const n = calChecked.size;
+    calZip.textContent = `ZIP SELECTED (${n})`;
+    calZip.disabled = n === 0;
   }
 
-  $('ib-date-grid-btn').addEventListener('click', openDateGrid);
-  gridModal.querySelectorAll('[data-date-grid-close]').forEach((el) =>
-    el.addEventListener('click', () => { gridModal.hidden = true; })
+  function openCalendar() {
+    // Start on the month of the currently selected date
+    const cur = dateInput.value || dates[0] || new Date().toISOString().slice(0, 10);
+    const parts = cur.split('-');
+    calYear = parseInt(parts[0], 10);
+    calMonth = parseInt(parts[1], 10) - 1;
+    calChecked.clear();
+    renderCalendar();
+    calModal.hidden = false;
+  }
+
+  $('ib-date-grid-btn').addEventListener('click', openCalendar);
+  $('cal-prev-month').addEventListener('click', () => {
+    calMonth--;
+    if (calMonth < 0) { calMonth = 11; calYear--; }
+    renderCalendar();
+  });
+  $('cal-next-month').addEventListener('click', () => {
+    calMonth++;
+    if (calMonth > 11) { calMonth = 0; calYear++; }
+    renderCalendar();
+  });
+  calModal.querySelectorAll('[data-date-grid-close]').forEach((el) =>
+    el.addEventListener('click', () => { calModal.hidden = true; })
   );
-  // Esc closes date grid
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !gridModal.hidden) { gridModal.hidden = true; e.stopPropagation(); }
+    if (e.key === 'Escape' && !calModal.hidden) { calModal.hidden = true; e.stopPropagation(); }
   });
 
-  // Multi-day zip from grid
-  gridZip.addEventListener('click', async () => {
-    if (gridChecked.size === 0) return;
+  // Multi-day zip from calendar
+  calZip.addEventListener('click', async () => {
+    if (calChecked.size === 0) return;
     const worker = $('ib-worker').value;
     if (!worker) return;
     const fd = new FormData();
     fd.append('worker', worker);
-    fd.append('dates', Array.from(gridChecked).sort().join(','));
-    gridZip.disabled = true;
-    gridZip.textContent = 'STARTING…';
+    fd.append('dates', Array.from(calChecked).sort().join(','));
+    calZip.disabled = true;
+    calZip.textContent = 'STARTING…';
     const r = await fetch('/admin/zip/start', { method: 'POST', body: fd });
     const data = await r.json().catch(() => ({}));
-    gridZip.disabled = false;
-    updateGridZipBtn();
+    calZip.disabled = false;
+    updateCalZip();
     if (!r.ok) { alert('Zip start failed.'); return; }
-    gridModal.hidden = true;
+    calModal.hidden = true;
     pollZip(data.job_id);
   });
 

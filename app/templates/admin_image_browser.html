@@ -30,16 +30,27 @@
         <span class="muted mono" id="ib-zip-status"></span>
       </form>
 
-      {# Date grid modal — tappable grid of all dates with checkboxes for multi-zip #}
+      {# Calendar date modal — month-by-month grid with multi-zip checkboxes #}
       <div id="date-grid-modal" class="lightbox" hidden>
         <div class="lightbox-bg" data-date-grid-close></div>
-        <div class="lightbox-card date-grid-card">
-          <div class="date-grid-head">
-            <strong>ALL DATES</strong>
+        <div class="lightbox-card date-cal-card">
+          <div class="date-cal-head">
+            <button class="btn btn-ghost btn-tiny" id="cal-prev-month">‹</button>
+            <strong id="cal-month-label" class="mono"></strong>
+            <button class="btn btn-ghost btn-tiny" id="cal-next-month">›</button>
+            <span style="flex:1"></span>
             <button class="btn btn-ghost btn-tiny" data-date-grid-close>✕</button>
           </div>
-          <div class="date-grid" id="date-grid"></div>
-          <div class="date-grid-actions">
+          <div class="date-cal-weekdays">
+            <span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span><span>Su</span>
+          </div>
+          <div class="date-cal-grid" id="cal-grid"></div>
+          <div class="date-cal-legend">
+            <span class="cal-legend-item"><span class="cal-swatch cal-swatch-data"></span> has data</span>
+            <span class="cal-legend-item"><span class="cal-swatch cal-swatch-active"></span> current</span>
+            <span class="cal-legend-item cal-legend-muted">gray = no data</span>
+          </div>
+          <div class="date-cal-actions">
             <button class="btn btn-accent" id="date-grid-zip" disabled>ZIP SELECTED (0)</button>
             <button class="btn btn-ghost" data-date-grid-close>CLOSE</button>
           </div>

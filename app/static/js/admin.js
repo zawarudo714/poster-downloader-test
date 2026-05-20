@@ -181,11 +181,43 @@
         const btn = buildPosterCell(t, p);
         grid.appendChild(btn);
       });
+      // Wire up admin add-poster button
+      const addUrl = node.querySelector('.g-add-url');
+      const addBtn = node.querySelector('.g-add-btn');
+      addBtn.addEventListener('click', async () => {
+        const u = (addUrl.value || '').trim();
+        if (!u) { addUrl.focus(); return; }
+        addBtn.disabled = true;
+        addBtn.textContent = '…';
+        const fd = new FormData();
+        fd.append('master_id', t.master_id);
+        fd.append('url', u);
+        const r = await fetch('/admin/poster/add', { method: 'POST', body: fd });
+        addBtn.disabled = false;
+        addBtn.textContent = '+ ADD';
+        if (r.ok) { addUrl.value = ''; loadList(); }
+        else {
+          let msg = r.status;
+          try { const d = await r.json(); msg = d.detail || msg; } catch (e) {}
+          alert('Add failed: ' + msg);
+        }
+      });
       gallery.appendChild(node);
     });
     $('ib-title-counter').textContent = `${titleIdx + 1} / ${titles.length}`;
-    const cur = document.getElementById(`g-title-${titleIdx}`);
-    if (cur) cur.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // Restore scroll position if we have one saved, otherwise scroll to current title.
+    const savedScroll = (function() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(BROWSE_STATE_KEY) || 'null');
+        return saved && saved.scrollY != null ? saved.scrollY : null;
+      } catch (e) { return null; }
+    })();
+    if (savedScroll != null) {
+      requestAnimationFrame(() => window.scrollTo(0, savedScroll));
+    } else {
+      const cur = document.getElementById(`g-title-${titleIdx}`);
+      if (cur) cur.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   }
 
   function buildPosterCell(t, p) {
@@ -454,6 +486,7 @@
         worker: $('ib-worker').value,
         date: dateInput.value,
         idx: titleIdx,
+        scrollY: window.scrollY,
       }));
     } catch (e) {}
   }

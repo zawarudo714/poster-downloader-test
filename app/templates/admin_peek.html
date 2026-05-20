@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% from "_macros.html" import info %}
+{% block title %}Peek · Admin{% endblock %}
+
+{% block content %}
+<div class="admin-grid">
+
+{% if not peek_worker %}
+  {# Worker picker #}
+  <section class="panel">
+    <div class="panel-head"><span>PEEK AT WORKER DASHBOARD</span></div>
+    <div class="panel-body">
+      <p class="muted" style="margin-bottom:12px">
+        Read-only view of a worker's dashboard — see their queue, active title, saved posters, and flags exactly as they see it. No actions can be taken.
+      </p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        {% for w in workers %}
+          <a href="/admin/peek/{{ w.username }}" class="btn btn-info">{{ w.username }}</a>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+
+{% else %}
+  {# Peek at specific worker #}
+  <div class="peek-header">
+    <strong>👁 PEEKING AT: {{ peek_worker.username }}</strong>
+    <a href="/admin/peek" class="btn btn-ghost btn-tiny">← back to list</a>
+    <span class="muted" style="font-size:12px">Read-only — you cannot click any buttons</span>
+  </div>
+
+  <div id="peek-container">
+    <div class="empty-hint">Loading worker state…</div>
+  </div>
+
+  <script>
+  (function() {
+    const username = "{{ peek_worker.username }}";
+    const container = document.getElementById('peek-container');
+
+    async function load() {
+      const r = await fetch(`/admin/api/peek/${encodeURIComponent(username)}`);
+      if (!r.ok) { container.innerHTML = '<div class="empty-hint">Failed to load.</div>'; return; }
+      const s = await r.json();
+      render(s);
+    }
+
+    function fileUrl(id, bust) { return `/file_own/${id}?v=${bust || 0}`; }
+    // Use admin file endpoint instead
+    function adminFileUrl(id, bust) { return `/admin/file/${id}?v=${bust || 0}`; }
+
+    function render(s) {
+      let html = '';
+
+      // Stats bar
+      html += '<div class="peek-stats">';
+      html += `<div class="peek-stat"><div class="peek-stat-val">${s.saved_today}</div><div class="peek-stat-label">today</div></div>`;
+      html += `<div class="peek-stat"><div class="peek-stat-val">${s.saved_week}</div><div class="peek-stat-label">this week</div></div>`;
+      html += `<div class="peek-stat"><div class="peek-stat-val">${s.titles_today}</div><div class="peek-stat-label">titles today</div></div>`;
+      if (s.pending_today > 0) {
+        html += `<div class="peek-stat peek-stat-warn"><div class="peek-stat-val">${s.pending_today}</div><div class="peek-stat-label">pending revision</div></div>`;
+      }
+      html += '</div>';
+
+      // Active title
+      if (s.locked) {
+        const t = s.locked;
+        html += '<div class="peek-section">';
+        html += `<div class="peek-section-head">ACTIVE TITLE</div>`;
+        html += `<div class="peek-title">${t.title} (${t.year}) <span class="muted">· ${t.posters ? t.posters.length : 0} posters</span></div>`;
+        if (t.admin_note) {
+          html += `<div class="peek-admin-note">Admin note: ${esc(t.admin_note)}</div>`;
+        }
+        if (t.posters && t.posters.length) {
+          html += '<div class="peek-posters">';
+          t.posters.forEach(p => {
+            html += `<div class="peek-poster">`;
+            html += `<img src="${adminFileUrl(p.id, p.file_size)}" alt="${esc(p.filename)}" loading="lazy">`;
+            html += `<div class="peek-poster-name mono">${esc(p.filename)}</div>`;
+            html += `</div>`;
+          });
+          html += '</div>';
+        }
+        html += '</div>';
+      } else {
+        html += '<div class="peek-section"><div class="peek-section-head">ACTIVE TITLE</div><div class="muted">No title active</div></div>';
+      }
+
+      // Revisions/flags
+      if (s.revisions && s.revisions.length) {
+        html += '<div class="peek-section">';
+        html += `<div class="peek-section-head">CHANGES REQUESTED (${s.revisions.length})</div>`;
+        s.revisions.forEach(r => {
+          html += `<div class="peek-rev">`;
+          if (r.poster_deleted) {
+            html += `<img class="peek-rev-thumb" src="/static/img/deleted-poster.svg" alt="deleted">`;
+          } else {
+            html += `<img class="peek-rev-thumb" src="${adminFileUrl(r.poster_id, r.filename)}" alt="" loading="lazy">`;
+          }
+          html += `<div class="peek-rev-body">`;
+          html += `<div><strong>${esc(r.title)} (${r.year})</strong></div>`;
+          html += `<div class="muted">${esc(r.comment || '(no comment)')}</div>`;
+          html += `<div class="mono" style="font-size:11px">status: ${r.status}${r.worker_action ? ' · action: ' + r.worker_action : ''}</div>`;
+          if (r.was_rejected) html += `<div style="color:#ff8080">Admin rejected: ${esc(r.admin_verdict)}</div>`;
+          html += `</div></div>`;
+        });
+        html += '</div>';
+      }
+
+      // Pending completions
+      if (s.pending_complete_titles && s.pending_complete_titles.length) {
+        html += '<div class="peek-section">';
+        html += `<div class="peek-section-head">⏳ AWAITING ADMIN APPROVAL (${s.pending_complete_titles.length})</div>`;
+        s.pending_complete_titles.forEach(t => {
+          html += `<div class="peek-item">${esc(t.title)} (${t.year}) — submitted ${t.submitted_at}</div>`;
+        });
+        html += '</div>';
+      }
+
+      // Queue
+      if (s.queue && s.queue.length) {
+        html += '<div class="peek-section">';
+        html += `<div class="peek-section-head">QUEUE (${s.queue.length} titles)</div>`;
+        s.queue.forEach(q => {
+          html += `<div class="peek-item">${esc(q.title)} (${q.year}) <span class="muted">· ${q.status}</span></div>`;
+        });
+        html += '</div>';
+      }
+
+      container.innerHTML = html;
+    }
+
+    function esc(s) {
+      if (!s) return '';
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    load();
+    setInterval(load, 15000); // Auto-refresh every 15s
+  })();
+  </script>
+
+{% endif %}
+
+</div>
+{% endblock %}

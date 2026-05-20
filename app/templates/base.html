@@ -58,6 +58,7 @@
             <a href="/admin/email"     class="navlink {% if active_tab == 'email' %}active{% endif %}">Email</a>
             <a href="/admin/audit"     class="navlink {% if active_tab == 'audit' %}active{% endif %}">Activity&nbsp;Log</a>
             <a href="/admin/stats"     class="navlink {% if active_tab == 'stats' %}active{% endif %}">Stats</a>
+            <a href="/admin/peek"      class="navlink {% if active_tab == 'peek' %}active{% endif %}">Peek</a>
             <a href="/worker"          class="navlink">Work&nbsp;Mode</a>
           {% else %}
             <a href="/"                class="navlink {% if active_tab == 'dashboard' %}active{% endif %}">Dashboard</a>
@@ -89,5 +90,30 @@
   <script src="/static/js/theme.js?v={{ app_version }}"></script>
   {% if user is defined and user %}<script src="/static/js/nav_badges.js?v={{ app_version }}"></script>{% endif %}
   {% block scripts %}{% endblock %}
+  <script>
+    // Global scroll-position persistence. Saves scrollY per page path
+    // so navigating away and back restores position. Uses sessionStorage
+    // (cleared when the tab closes — not cross-session).
+    (function() {
+      var key = 'pd-scroll-' + location.pathname;
+      // Restore on load
+      try {
+        var saved = sessionStorage.getItem(key);
+        if (saved != null) {
+          requestAnimationFrame(function() { window.scrollTo(0, parseInt(saved, 10) || 0); });
+        }
+      } catch(e) {}
+      // Save before leaving
+      window.addEventListener('beforeunload', function() {
+        try { sessionStorage.setItem(key, String(window.scrollY)); } catch(e) {}
+      });
+      // Also save when clicking any nav link (beforeunload doesn't always fire on SPA-style nav)
+      document.querySelectorAll('.navlink, a[href]').forEach(function(a) {
+        a.addEventListener('click', function() {
+          try { sessionStorage.setItem(key, String(window.scrollY)); } catch(e) {}
+        });
+      });
+    })();
+  </script>
 </body>
 </html>

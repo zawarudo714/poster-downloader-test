@@ -1018,6 +1018,97 @@ def admin_delete_poster(
     return JSONResponse({"ok": True})
 
 
+@router.post("/poster/add")
+def admin_add_poster(
+    master_id: int = Form(...),
+    url: str = Form(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Admin adds a poster to a title by URL. The poster is saved under the
+    title's existing worker (claimed_by), or under 'admin' if unclaimed.
+    Does NOT count toward the worker's save stats or payment — admin's
+    responsibility to manage. Useful for fixing titles that need a poster
+    the worker missed.
+    """
+    from .worker import (
+        _validate_image_url, _download_to, _ensure_first_save_metadata,
+        _is_low_quality_url,
+    )
+    from ..utils import (
+        title_folder_for, filename_for, count_live_posters_for_master,
+    )
+    from ..imghdr_lite import read_file_dimensions
+
+    t = db.query(MasterTitle).filter_by(id=master_id).first()
+    if not t:
+        raise HTTPException(404, "Title not found.")
+
+    ok, reason = _validate_image_url(url.strip())
+    if not ok:
+        raise HTTPException(400, reason)
+    src_url = url.strip()
+
+    # Determine the worker username for folder placement.
+    worker_username = "admin"
+    worker_id = admin.id
+    if t.claimed_by_id:
+        claimer = db.query(User).filter_by(id=t.claimed_by_id).first()
+        if claimer:
+            worker_username = claimer.username
+            worker_id = claimer.id
+
+    today = local_today()
+    _ensure_first_save_metadata(t, today)
+    db.flush()
+
+    folder = title_folder_for(worker_username, t.original_save_date, t.title_folder_path)
+
+    base = count_live_posters_for_master(db, t.id)
+    count = base + 1
+    target_name = filename_for(t.title, count, src_url)
+    target_path = folder / target_name
+    while target_path.exists():
+        count += 1
+        target_name = filename_for(t.title, count, src_url)
+        target_path = folder / target_name
+
+    written = _download_to(src_url, target_path)
+    dims = read_file_dimensions(target_path)
+    img_w, img_h = (dims if dims else (None, None))
+
+    sp = SavedPoster(
+        master_title_id    = t.id,
+        user_id            = worker_id,
+        username           = worker_username,
+        original_save_date = t.original_save_date,
+        title_folder_path  = t.title_folder_path,
+        filename           = target_name,
+        source_url         = src_url,
+        file_size          = written,
+        low_quality_url    = 0,
+        image_width        = img_w,
+        image_height       = img_h,
+    )
+    db.add(sp)
+
+    # If title was pending/skipped, move to in_progress.
+    if t.status in ("pending", "skipped"):
+        t.status = "in_progress"
+        t.skip_reason = None
+        if not t.claimed_by_id:
+            t.claimed_by_id = admin.id
+
+    log_activity(
+        db, user=admin, action="admin_added", target_type="saved_poster", target_id=0,
+        details={"filename": target_name, "master_id": t.id,
+                 "url": src_url, "title": f"{t.title} ({t.year})"},
+    )
+    db.commit()
+    return JSONResponse({"ok": True, "filename": target_name, "poster_id": sp.id})
+
+
 # ── Revisions ────────────────────────────────────────────────────────────────
 
 @router.post("/poster/{poster_id}/flag")
@@ -2503,6 +2594,60 @@ def api_activity(
             "details":     details,
         })
     return JSONResponse({"ok": True, "rows": out})
+
+
+# ── Admin peek mode (read-only view of worker's dashboard) ─────────────────
+
+@router.get("/peek", response_class=HTMLResponse)
+def peek_list(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """List of workers the admin can peek at."""
+    workers = (
+        db.query(User)
+          .filter(User.role == "worker", User.is_deleted == 0)
+          .order_by(User.username.asc())
+          .all()
+    )
+    return templates.TemplateResponse(
+        request,
+        "admin_peek.html",
+        {"user": admin, "admin": admin, "workers": workers, "active_tab": "peek"},
+    )
+
+
+@router.get("/peek/{username}", response_class=HTMLResponse)
+def peek_worker(
+    request: Request,
+    username: str,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Read-only mirror of a worker's dashboard."""
+    worker = db.query(User).filter_by(username=username, role="worker").first()
+    if not worker:
+        raise HTTPException(404, "Worker not found.")
+    return templates.TemplateResponse(
+        request,
+        "admin_peek.html",
+        {"user": admin, "admin": admin, "peek_worker": worker, "active_tab": "peek"},
+    )
+
+
+@router.get("/api/peek/{username}")
+def api_peek_worker(
+    username: str,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """JSON state for a worker — same shape as /api/state but fetched by admin."""
+    worker = db.query(User).filter_by(username=username, role="worker").first()
+    if not worker:
+        raise HTTPException(404, "Worker not found.")
+    from .worker import _state_payload
+    return JSONResponse(_state_payload(db, worker))
 
 
 # ── Per-worker stats panel ──────────────────────────────────────────────────

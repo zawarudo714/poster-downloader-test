@@ -1036,9 +1036,8 @@ def admin_add_poster(
         _validate_image_url, _download_to, _ensure_first_save_metadata,
         _is_low_quality_url,
     )
-    from ..utils import (
-        title_folder_for, filename_for, count_live_posters_for_master,
-    )
+    from ..utils import title_folder_for, count_live_posters_for_master
+    from ..parsing import filename_for
     from ..imghdr_lite import read_file_dimensions
 
     t = db.query(MasterTitle).filter_by(id=master_id).first()
@@ -1092,6 +1091,7 @@ def admin_add_poster(
         image_height       = img_h,
     )
     db.add(sp)
+    db.flush()  # assign sp.id before logging
 
     # If title was pending/skipped, move to in_progress.
     if t.status in ("pending", "skipped"):
@@ -1101,7 +1101,7 @@ def admin_add_poster(
             t.claimed_by_id = admin.id
 
     log_activity(
-        db, user=admin, action="admin_added", target_type="saved_poster", target_id=0,
+        db, user=admin, action="admin_added", target_type="saved_poster", target_id=sp.id,
         details={"filename": target_name, "master_id": t.id,
                  "url": src_url, "title": f"{t.title} ({t.year})"},
     )

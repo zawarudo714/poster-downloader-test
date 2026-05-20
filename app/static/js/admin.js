@@ -205,19 +205,22 @@
       gallery.appendChild(node);
     });
     $('ib-title-counter').textContent = `${titleIdx + 1} / ${titles.length}`;
-    // Restore scroll position if we have one saved, otherwise scroll to current title.
+    // Restore scroll position after DOM settles. Use setTimeout to let the
+    // browser lay out the gallery content before scrolling.
     const savedScroll = (function() {
       try {
         const saved = JSON.parse(localStorage.getItem(BROWSE_STATE_KEY) || 'null');
         return saved && saved.scrollY != null ? saved.scrollY : null;
       } catch (e) { return null; }
     })();
-    if (savedScroll != null) {
-      requestAnimationFrame(() => window.scrollTo(0, savedScroll));
-    } else {
-      const cur = document.getElementById(`g-title-${titleIdx}`);
-      if (cur) cur.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
+    setTimeout(() => {
+      if (savedScroll != null && savedScroll > 0) {
+        window.scrollTo(0, savedScroll);
+      } else {
+        const cur = document.getElementById(`g-title-${titleIdx}`);
+        if (cur) cur.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 100);
   }
 
   function buildPosterCell(t, p) {

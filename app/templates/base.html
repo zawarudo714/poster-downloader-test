@@ -91,23 +91,24 @@
   {% if user is defined and user %}<script src="/static/js/nav_badges.js?v={{ app_version }}"></script>{% endif %}
   {% block scripts %}{% endblock %}
   <script>
-    // Global scroll-position persistence. Saves scrollY per page path
-    // so navigating away and back restores position. Uses sessionStorage
-    // (cleared when the tab closes — not cross-session).
+    // Global scroll-position persistence. Saves scrollY per page path.
+    // Pages with data-no-global-scroll handle their own restoration (e.g.
+    // browse page where content loads async and the global restore fires
+    // before the DOM is tall enough to scroll).
     (function() {
       var key = 'pd-scroll-' + location.pathname;
-      // Restore on load
-      try {
-        var saved = sessionStorage.getItem(key);
-        if (saved != null) {
-          requestAnimationFrame(function() { window.scrollTo(0, parseInt(saved, 10) || 0); });
-        }
-      } catch(e) {}
-      // Save before leaving
+      var skip = document.querySelector('[data-no-global-scroll]');
+      if (!skip) {
+        try {
+          var saved = sessionStorage.getItem(key);
+          if (saved != null) {
+            requestAnimationFrame(function() { window.scrollTo(0, parseInt(saved, 10) || 0); });
+          }
+        } catch(e) {}
+      }
       window.addEventListener('beforeunload', function() {
         try { sessionStorage.setItem(key, String(window.scrollY)); } catch(e) {}
       });
-      // Also save when clicking any nav link (beforeunload doesn't always fire on SPA-style nav)
       document.querySelectorAll('.navlink, a[href]').forEach(function(a) {
         a.addEventListener('click', function() {
           try { sessionStorage.setItem(key, String(window.scrollY)); } catch(e) {}

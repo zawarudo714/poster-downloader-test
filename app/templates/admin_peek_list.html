@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% from "_macros.html" import info %}
+{% block title %}Peek · Admin{% endblock %}
+
+{% block content %}
+<div class="admin-grid">
+  <section class="panel">
+    <div class="panel-head"><span>PEEK AT WORKER DASHBOARD {{ info("See exactly what the worker sees — same layout, poster sizes, flag cards. Read-only: all buttons are disabled.") }}</span></div>
+    <div class="panel-body">
+      <p class="muted" style="margin-bottom:12px">
+        Pick a worker to view their dashboard as they see it.
+      </p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        {% for w in workers %}
+          <a href="/admin/peek/{{ w.username }}" class="btn btn-info">{{ w.username }}</a>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}

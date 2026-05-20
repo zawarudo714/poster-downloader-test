@@ -3591,3 +3591,35 @@ body:has(#ib-bulk-bar:not([hidden])) { padding-bottom: 88px; }
   border: 1px solid rgba(100, 180, 255, 0.40);
 }
 .g-poster.p-admin-added { border-color: rgba(100, 180, 255, 0.35); border-width: 2px; }
+
+/* ── Peek mode: read-only overlay on worker dashboard ───────────────── */
+.peek-banner {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 14px;
+  background: rgba(100, 180, 255, 0.10);
+  border: 1px solid rgba(100, 180, 255, 0.35);
+  border-left: 4px solid #66b3ff;
+  border-radius: 4px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: #b3d9ff;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+/* Disable all interactions inside peek-mode dashboard */
+.user-grid.peek-mode button,
+.user-grid.peek-mode input,
+.user-grid.peek-mode select,
+.user-grid.peek-mode textarea,
+.user-grid.peek-mode a.btn,
+.user-grid.peek-mode [data-action] {
+  pointer-events: none;
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+/* But keep scroll and image viewing working */
+.user-grid.peek-mode { pointer-events: auto; }
+.user-grid.peek-mode img { pointer-events: auto; cursor: default; }

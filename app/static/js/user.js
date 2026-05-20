@@ -14,6 +14,18 @@
   const root = document.querySelector('.user-grid');
   if (!root) return;
 
+  // ── Peek mode: admin viewing worker's dashboard read-only ───────────────
+  const peekUsername = root.dataset.peekUsername || null;
+  const isPeek = !!peekUsername;
+  // Override API URL in peek mode to use admin's peek endpoint.
+  const stateUrl = isPeek ? `/admin/api/peek/${encodeURIComponent(peekUsername)}` : '/api/state';
+  // In peek mode, file URLs go through admin endpoint (admin doesn't have
+  // /file_own access for another user's files).
+  function fileUrl(posterId, sizeOrFilename) {
+    if (isPeek) return `/admin/file/${posterId}?v=${encodeURIComponent(sizeOrFilename || 0)}`;
+    return `/file_own/${posterId}?v=${encodeURIComponent(sizeOrFilename || 0)}`;
+  }
+
   let state;
   try { state = JSON.parse(root.getAttribute('data-state') || '{}'); } catch (e) { state = {}; }
 
@@ -35,10 +47,6 @@
   function setStat(name, value) {
     const el = root.querySelector(`[data-stat="${name}"]`);
     if (el) el.textContent = value;
-  }
-
-  function fileUrl(posterId, sizeOrFilename) {
-    return `/file_own/${posterId}?v=${encodeURIComponent(sizeOrFilename || 0)}`;
   }
 
   async function postForm(url, body = {}) {
@@ -931,7 +939,7 @@
   }
 
   async function refreshState() {
-    const data = await getJSON('/api/state');
+    const data = await getJSON(stateUrl);
     if (!data) return;
     const newLockedId = data.locked && data.locked.id;
     const lockChanged = (newLockedId !== renderedLockedId);

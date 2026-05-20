@@ -2623,7 +2623,7 @@ def peek_list(
     )
     return templates.TemplateResponse(
         request,
-        "admin_peek.html",
+        "admin_peek_list.html",
         {"user": admin, "admin": admin, "workers": workers, "active_tab": "peek"},
     )
 
@@ -2635,14 +2635,23 @@ def peek_worker(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Read-only mirror of a worker's dashboard."""
+    """
+    Render the actual worker dashboard template (user_dashboard.html) in
+    read-only peek mode. The admin sees exactly what the worker sees —
+    same layout, same poster sizes, same flag cards — but all buttons and
+    inputs are disabled via a CSS overlay. The JS fetches state from the
+    admin peek API instead of /api/state.
+    """
     worker = db.query(User).filter_by(username=username, role="worker").first()
     if not worker:
         raise HTTPException(404, "Worker not found.")
+    from .worker import _state_payload
+    state = _state_payload(db, worker)
     return templates.TemplateResponse(
         request,
-        "admin_peek.html",
-        {"user": admin, "admin": admin, "peek_worker": worker, "active_tab": "peek"},
+        "user_dashboard.html",
+        {"user": admin, "admin": admin, "state": state,
+         "peek_username": worker.username, "active_tab": "peek"},
     )
 
 

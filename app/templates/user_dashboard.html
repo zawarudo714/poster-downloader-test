@@ -3,8 +3,15 @@
 {% block title %}Dashboard · Poster Downloader{% endblock %}
 
 {% block content %}
-<div class="user-grid"
-     data-state='{{ state | tojson | safe }}'>
+{% if peek_username %}
+<div class="peek-banner">
+  👁 PEEKING AT <strong>{{ peek_username }}</strong> — read-only
+  <a href="/admin/peek" class="btn btn-ghost btn-tiny" style="margin-left:auto">← back</a>
+</div>
+{% endif %}
+<div class="user-grid {% if peek_username %}peek-mode{% endif %}"
+     data-state='{{ state | tojson | safe }}'
+     {% if peek_username %}data-peek-username="{{ peek_username }}"{% endif %}>
 
   {# Stat row #}
   <section class="stat-row">

@@ -130,12 +130,13 @@ def eligible_poster_ids(
     Used by both the preview endpoint (admin browsing what they'd pay for)
     and mark_paid (the actual payment run write).
     """
-    # Posters saved by this worker in [start, end], not deleted.
+    # Posters saved by this worker in [start, end], not deleted, not admin-added.
     base_q = (
         db.query(SavedPoster.id)
           .filter(
               SavedPoster.user_id == worker_id,
               SavedPoster.deleted_at.is_(None),
+              SavedPoster.added_by.is_(None),
               SavedPoster.original_save_date >= start,
               SavedPoster.original_save_date <= end,
           )

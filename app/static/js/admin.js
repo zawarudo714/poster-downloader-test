@@ -205,22 +205,8 @@
       gallery.appendChild(node);
     });
     $('ib-title-counter').textContent = `${titleIdx + 1} / ${titles.length}`;
-    // Restore scroll position after DOM settles. Use setTimeout to let the
-    // browser lay out the gallery content before scrolling.
-    const savedScroll = (function() {
-      try {
-        const saved = JSON.parse(localStorage.getItem(BROWSE_STATE_KEY) || 'null');
-        return saved && saved.scrollY != null ? saved.scrollY : null;
-      } catch (e) { return null; }
-    })();
-    setTimeout(() => {
-      if (savedScroll != null && savedScroll > 0) {
-        window.scrollTo(0, savedScroll);
-      } else {
-        const cur = document.getElementById(`g-title-${titleIdx}`);
-        if (cur) cur.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-    }, 100);
+    const cur = document.getElementById(`g-title-${titleIdx}`);
+    if (cur) cur.scrollIntoView({ block: 'nearest' });
   }
 
   function buildPosterCell(t, p) {
@@ -250,6 +236,14 @@
       pill.className = 'status-pill status-lq-bypass';
       pill.textContent = 'LQ URL bypassed';
       pillsHost.appendChild(pill);
+    }
+    if (p.added_by) {
+      const pill = document.createElement('span');
+      pill.className = 'status-pill status-admin-added';
+      pill.textContent = 'ADMIN';
+      pill.title = `Added by ${p.added_by} (not worker)`;
+      pillsHost.appendChild(pill);
+      btn.classList.add('p-admin-added');
     }
     if (p.flagged) {
       const pill = document.createElement('span');
@@ -489,7 +483,6 @@
         worker: $('ib-worker').value,
         date: dateInput.value,
         idx: titleIdx,
-        scrollY: window.scrollY,
       }));
     } catch (e) {}
   }

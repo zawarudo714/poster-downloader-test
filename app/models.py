@@ -145,6 +145,11 @@ class SavedPoster(Base):
     image_height       = Column(Integer, nullable=True)
     # Worker's reason if this poster was deleted from a revision context.
     delete_note        = Column(Text, nullable=True)
+    # If this poster was added by an admin (not the worker), stores the
+    # admin's username. NULL = worker-added (normal). Non-NULL = admin
+    # added it via the browse page. Admin-added posters cannot be flagged
+    # and don't count toward worker payment stats.
+    added_by           = Column(String(64), nullable=True)
     created_at         = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
     deleted_at         = Column(DateTime, nullable=True, index=True)
 

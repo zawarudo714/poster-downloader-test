@@ -911,6 +911,7 @@ def api_browse(
             "low_quality_url": bool(sp.low_quality_url),
             "image_width":  sp.image_width,
             "image_height": sp.image_height,
+            "added_by":     sp.added_by or None,
             "flagged": rev is not None,
             "revision_id": rev.id if rev else None,
             "revision_status": rev.status if rev else None,
@@ -1089,6 +1090,7 @@ def admin_add_poster(
         low_quality_url    = 0,
         image_width        = img_w,
         image_height       = img_h,
+        added_by           = admin.username,
     )
     db.add(sp)
     db.flush()  # assign sp.id before logging
@@ -1121,6 +1123,8 @@ def flag_poster(
     sp = db.query(SavedPoster).filter_by(id=poster_id).first()
     if not sp or sp.deleted_at is not None:
         raise HTTPException(404, "Poster not found.")
+    if sp.added_by:
+        raise HTTPException(400, "This poster was added by admin — it cannot be flagged for worker revision.")
 
     # If there's already an active revision (open OR awaiting_approval), update it
     # back to 'open' with the new comment instead of stacking another row.
@@ -1284,6 +1288,12 @@ def mark_similar(
     )
     if len(posters) < 2:
         raise HTTPException(404, "Some selected posters no longer exist.")
+
+    # Admin-added posters cannot be flagged for worker action.
+    admin_added = [p for p in posters if p.added_by]
+    if admin_added:
+        names = ", ".join(p.filename for p in admin_added)
+        raise HTTPException(400, f"Cannot include admin-added posters in similar marking: {names}")
 
     # All must belong to the same master title — comparing across titles is meaningless.
     master_ids = {p.master_title_id for p in posters}

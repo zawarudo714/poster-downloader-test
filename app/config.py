@@ -14,7 +14,7 @@ from pathlib import Path
 # Bumped on every deploy. Templates append `?v={APP_VERSION}` to every
 # <script> and <link rel="stylesheet"> URL, so deploys force browsers to
 # refetch JS/CSS automatically — no Ctrl+Shift+R needed by users.
-APP_VERSION = "14.1"
+APP_VERSION = "14.2"
 
 
 # ── Paths ────────────────────────────────────────────────────────────────────

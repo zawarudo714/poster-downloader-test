@@ -3583,3 +3583,11 @@ body:has(#ib-bulk-bar:not([hidden])) { padding-bottom: 88px; }
   border-bottom: 1px solid var(--border);
 }
 .peek-item:last-child { border-bottom: none; }
+
+/* ── Admin-added poster badge ───────────────────────────────────────── */
+.status-admin-added {
+  background: rgba(100, 180, 255, 0.18) !important;
+  color: #b3d9ff !important;
+  border: 1px solid rgba(100, 180, 255, 0.40);
+}
+.g-poster.p-admin-added { border-color: rgba(100, 180, 255, 0.35); border-width: 2px; }

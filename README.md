@@ -96,41 +96,49 @@ console (also stored in `.first_admin.txt`).
 > - ZIP supports multiple dates in one archive.
 > - Disabled workers see "site undergoing update" instead of a login error.
 
-## What this version adds (latest round)
+## What this version adds (v15)
 
-- **Closure bug on DONE button** is fixed. Previously, saving posters then
-  clicking DONE without refreshing showed the wrong count (the click handler
-  closed over a stale `t` from the initial render). The handler now reads
-  `state.locked` at click time, so the count always reflects what's actually
-  saved.
-- **Replace toast** is now a soft hint ("if the image doesn't update, try
-  refreshing") rather than a mandatory instruction. Cache-busting via
-  `?v=size` usually shows the new image immediately.
-- **Similar-pair revision UI**: the redundant top section (broken thumb +
-  generic Replace/Delete) is gone. Only the per-poster cards remain — each
-  with its own URL field and REPLACE THIS / DELETE THIS buttons.
-- **Worker deletions are now visible to admin.** A new "RECENT DELETIONS —
-  REVIEW" section on *Changes Requested* lists every deletion of a flagged
-  poster. Each entry shows the worker's deletion reason. Two actions:
-    - **ACKNOWLEDGE** — fine with it; dismiss from the panel.
-    - **SEND BACK** — pushes the title back to the worker (reverts to
-      in-progress if it was complete) with your note as a pinned admin-note
-      banner; worker fixes by adding a replacement poster.
-- **Daily auto-backup of `poster.db`** at 00:00:05 server time. Uses SQLite's
-  online backup API (no service interruption). Auto-backups go to
-  `backups/auto-YYYY-MM-DD.db` and are pruned after 14 days. If the server
-  was offline at midnight, a catch-up backup runs at startup.
-- **Manual named snapshots + restore** under the new *Backups* admin page:
-    - "SAVE SNAPSHOT" — copy current DB with an optional friendly name
-      (e.g. "before-csv-reimport"). Manual snapshots are never auto-pruned.
-    - Per-row "RESTORE" — replaces the live `poster.db` with the chosen
-      backup. A pre-restore safety snapshot is auto-created so you can
-      undo the restore by restoring *that*. The SQLAlchemy connection pool
-      is recycled automatically; users may need to refresh once.
-    - Per-row "DELETE" — for cleanup.
-- **Light mode toggle** in the top-right of the header (☾/☀ button).
-  Persists in `localStorage`. Default is dark; the saved choice is applied
-  synchronously in `<head>` to avoid a flash-of-wrong-theme on page load.
+> **NOTE for v15**: This round adds a `not_received_at` column to
+> `payment_runs`. **Run the migration BEFORE rebuilding:**
+> ```bash
+> docker compose exec web python -c "
+> import sqlite3
+> c = sqlite3.connect('/app/poster.db')
+> c.execute('ALTER TABLE payment_runs ADD COLUMN not_received_at DATETIME')
+> c.commit()
+> print('OK')
+> "
+> ```
+> If it errors with `duplicate column name`, you've already run it — safe
+> to ignore. Then rebuild:
+> ```
+> git pull && docker compose up -d --build
+> ```
+
+- **Skip deletes posters**: When a worker saves posters under a title and
+  then clicks Skip instead of Done, all live posters on that title are now
+  auto-deleted (soft-delete + file removal). Skipped titles should not have
+  posters counting towards pay.
+- **Complete requires at least 1 poster**: A title can only be marked
+  "complete" if it has ≥1 live poster. Both the worker Done button and admin
+  Approve Completion enforce this. Zero-poster titles must be skipped.
+- **Cross-title duplicate image URL warning**: Tracks image URLs saved today
+  across all titles. If a URL was already used on a different title the same
+  day, a warning (not a block) tells the worker which title already has it.
+  Catches mobile clipboard-didn't-update issues.
+- **Payment "NOT RECEIVED" button**: Pushed receipts now show both ACKNOWLEDGE
+  and NOT RECEIVED buttons on the worker panel. If the worker hasn't seen the
+  payment, they click NOT RECEIVED — admin sees a red status pill on Payments.
+  Re-pushing clears the dispute flag.
+
+### Previous round highlights
+
+- Closure bug fix on DONE button (stale count).
+- Replace toast is now a soft hint.
+- Similar-pair revision UI simplified to per-poster cards only.
+- Worker deletions visible to admin (RECENT DELETIONS — REVIEW section).
+- Daily auto-backup + manual snapshots + restore.
+- Light mode toggle.
 
 ### Test environments
 

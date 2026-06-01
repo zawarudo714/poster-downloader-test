@@ -114,7 +114,9 @@
                 <td class="mono"><strong>{{ r.amount_kes }}</strong></td>
                 <td class="mono">{{ r.reference or '—' }}</td>
                 <td>
-                  {% if r.ack_at %}
+                  {% if r.not_received_at %}
+                    <span class="status-pill status-error" title="Worker reported NOT RECEIVED at {{ r.not_received_at | local_dt('%Y-%m-%d %H:%M') }}">NOT RECEIVED</span>
+                  {% elif r.ack_at %}
                     <span class="status-pill status-resolved" title="Acknowledged at {{ r.ack_at | local_dt('%Y-%m-%d %H:%M') }}">ACKED</span>
                   {% elif r.pushed_at %}
                     <span class="status-pill status-awaiting" title="Pushed at {{ r.pushed_at | local_dt('%Y-%m-%d %H:%M') }}">PUSHED</span>

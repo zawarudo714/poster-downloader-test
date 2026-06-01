@@ -61,6 +61,7 @@ from ..models import (
 from ..timeutil import fmt_local, local_today
 from ..templating import templates
 from ..utils import (
+    count_live_posters_for_master,
     count_user_saves_for_date, count_user_saves_for_week,
     list_date_folders, list_users_with_workspaces, safe_under_workspace,
     saved_poster_folder, saved_poster_path,
@@ -1425,6 +1426,15 @@ def approve_complete(
     if t.status != "complete_pending":
         raise HTTPException(400, f"Title is not pending — status is '{t.status}'.")
 
+    # ── v15: Guard — cannot approve completion with zero live posters ──
+    live_count = count_live_posters_for_master(db, t.id)
+    if live_count == 0:
+        raise HTTPException(
+            400,
+            "Cannot approve — this title has no live posters. "
+            "Reject it back to the worker, or send it to Skipped."
+        )
+
     now = datetime.utcnow()
     # Resolve ALL revisions on this title's posters (including deletes).
     revs = (
@@ -2425,7 +2435,8 @@ def payments_push_run(
     if run is None:
         raise HTTPException(404, "Run not found.")
     run.pushed_at = datetime.utcnow()
-    run.ack_at = None  # clear any prior ack so worker has to confirm again
+    run.ack_at = None           # clear any prior ack so worker has to confirm again
+    run.not_received_at = None  # v15: also clear dispute flag on re-push
     log_activity(db, user=admin, action="receipt_push", target_type="payment_run", target_id=run.id)
     db.commit()
     return JSONResponse({"ok": True})

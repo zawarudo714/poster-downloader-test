@@ -237,13 +237,14 @@ def all_runs(db: Session, *, limit: int = 200):
 
 
 def pending_receipts_for_worker(db: Session, worker_id: int):
-    """Pushed but not yet acknowledged receipts the worker should see."""
+    """Pushed but not yet acknowledged/disputed receipts the worker should see."""
     return (
         db.query(PaymentRun)
           .filter(
               PaymentRun.worker_id == worker_id,
               PaymentRun.pushed_at.isnot(None),
               PaymentRun.ack_at.is_(None),
+              PaymentRun.not_received_at.is_(None),
           )
           .order_by(PaymentRun.pushed_at.desc())
           .all()

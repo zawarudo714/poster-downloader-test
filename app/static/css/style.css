@@ -1952,7 +1952,16 @@ html.theme-light .env-banner-name {
 .receipt-period { color: var(--text); }
 .receipt-count, .receipt-meta { font-size: 11px; }
 .receipt-note { flex: 1 1 100%; font-style: italic; color: var(--subtext); font-size: 12px; }
+.receipt-actions { display: flex; gap: 8px; flex-shrink: 0; }
 .receipt-ack-btn { flex-shrink: 0; }
+.receipt-nr-btn  { flex-shrink: 0; }
+.btn-danger { background: var(--error); color: var(--bg); }
+.btn-danger:hover { filter: brightness(0.9); }
+.status-pill.status-error {
+  background: rgba(255,80,80,0.18);
+  color: #ff5050;
+  border: 1px solid rgba(255,80,80,0.45);
+}
 
 .stat-tile.stat-tile-pending {
   border-left: 3px solid #f4b400;
@@ -2124,7 +2133,8 @@ html.theme-light .env-banner-name {
   .pay-history-table th:nth-child(6), .pay-history-table td:nth-child(6) { display: none; }  /* hide REF on phones */
 
   .receipt-item { flex-direction: column; align-items: stretch; }
-  .receipt-ack-btn { width: 100%; }
+  .receipt-actions { flex-direction: column; }
+  .receipt-ack-btn, .receipt-nr-btn { width: 100%; }
 
   .chat-msg { max-width: 88%; }
   .chat-stream { padding: 10px; }

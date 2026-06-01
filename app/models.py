@@ -316,6 +316,9 @@ class PaymentRun(Base):
     # Push-to-worker (receipt) flow — null until admin pushes.
     pushed_at       = Column(DateTime, nullable=True)
     ack_at          = Column(DateTime, nullable=True)
+    # v15: Worker clicked "NOT RECEIVED" instead of "ACKNOWLEDGE".
+    # Non-null = worker disputes; admin sees the timestamp + can follow up.
+    not_received_at = Column(DateTime, nullable=True)
 
     created_by      = Column(String(64), nullable=False)
     created_at      = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)

@@ -842,7 +842,10 @@
           </details>
         ` : ''}
         ${hasBackPay ? `<div class="receipt-backpay">includes back-pay from <span class="receipt-backpay-dates"></span></div>` : ''}
-        <button class="btn btn-accent btn-tiny receipt-ack-btn" type="button">ACKNOWLEDGE</button>
+        <div class="receipt-actions">
+          <button class="btn btn-accent btn-tiny receipt-ack-btn" type="button">ACKNOWLEDGE</button>
+          <button class="btn btn-danger btn-tiny receipt-nr-btn" type="button">NOT RECEIVED</button>
+        </div>
       `;
       item.querySelector('.receipt-amount').textContent = `KES ${r.amount_kes}`;
       item.querySelector('.receipt-period').textContent =
@@ -885,6 +888,17 @@
         const rr = await fetch(`/api/receipts/${r.id}/ack`, { method: 'POST' });
         if (rr.ok) await refreshState();
         else { btn.disabled = false; alert('Failed.'); }
+      });
+
+      item.querySelector('.receipt-nr-btn').addEventListener('click', async () => {
+        if (!confirm('Are you sure you have NOT received this payment? The admin will be notified.')) return;
+        const btn = item.querySelector('.receipt-nr-btn');
+        btn.disabled = true;
+        const rr = await fetch(`/api/receipts/${r.id}/not_received`, { method: 'POST' });
+        if (rr.ok) {
+          showToast('Marked as not received — admin has been notified.', 'ok', 4000);
+          await refreshState();
+        } else { btn.disabled = false; alert('Failed.'); }
       });
       list.appendChild(item);
     });
@@ -984,9 +998,10 @@
     msgEl.textContent = 'Saving…'; msgEl.className = 'save-msg';
     const r = await postForm('/save_image', {
       url,
-      confirm_duplicate:   opts.confirm_duplicate ? 1 : 0,
-      confirm_soft_limit:  opts.confirm_soft_limit ? 1 : 0,
-      confirm_low_quality: opts.confirm_low_quality ? 1 : 0,
+      confirm_duplicate:    opts.confirm_duplicate ? 1 : 0,
+      confirm_cross_title:  opts.confirm_cross_title ? 1 : 0,
+      confirm_soft_limit:   opts.confirm_soft_limit ? 1 : 0,
+      confirm_low_quality:  opts.confirm_low_quality ? 1 : 0,
     });
     if (r.ok) {
       msgEl.textContent = `Saved ${r.data.filename} (${r.data.saved_count_for_title} on this title).`;
@@ -1009,6 +1024,13 @@
         return doSave(urlInput, msgEl, flashEl, { ...opts, confirm_duplicate: true });
       }
       msgEl.textContent = 'Cancelled.'; msgEl.className = 'save-msg';
+      return;
+    }
+    if (r.status === 409 && r.data && r.data.reason === 'cross_title_duplicate') {
+      if (confirm(r.data.message)) {
+        return doSave(urlInput, msgEl, flashEl, { ...opts, confirm_cross_title: true });
+      }
+      msgEl.textContent = 'Cancelled — same image was on another title.'; msgEl.className = 'save-msg';
       return;
     }
     if (r.status === 409 && r.data && r.data.reason === 'soft_limit') {

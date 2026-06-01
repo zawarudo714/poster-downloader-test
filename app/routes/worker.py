@@ -799,6 +799,7 @@ def _ensure_first_save_metadata(t: MasterTitle, today: date_type) -> None:
 def save_image(
     url: str = Form(...),
     confirm_duplicate: int = Form(0),
+    confirm_cross_title: int = Form(0),
     confirm_soft_limit: int = Form(0),
     confirm_low_quality: int = Form(0),
     user: User = Depends(require_user),
@@ -850,6 +851,39 @@ def save_image(
              "filename": dup.filename},
             status_code=409,
         )
+
+    # ── v15: Cross-title duplicate URL warning ────────────────────────
+    # Check if this exact URL was already saved today on a DIFFERENT title
+    # by this worker. Common on mobile when the clipboard doesn't update.
+    # Soft warning only — not a hard block.
+    if not confirm_cross_title:
+        today_check = local_today()
+        cross_dup = (
+            db.query(SavedPoster, MasterTitle)
+              .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+              .filter(
+                  SavedPoster.user_id == user.id,
+                  SavedPoster.source_url == src_url,
+                  SavedPoster.deleted_at.is_(None),
+                  SavedPoster.original_save_date == today_check,
+                  SavedPoster.master_title_id != t.id,
+              )
+              .first()
+        )
+        if cross_dup:
+            other_poster, other_title = cross_dup
+            return JSONResponse(
+                {"ok": False, "reason": "cross_title_duplicate",
+                 "message": (
+                     f"You already used this exact image URL on "
+                     f"\"{other_title.title} ({other_title.year})\". "
+                     f"This often happens when the clipboard didn't update. "
+                     f"Save it here anyway?"
+                 ),
+                 "other_title": other_title.title,
+                 "other_title_id": other_title.id},
+                status_code=409,
+            )
 
     # Soft warning at >= SOFT_LIMIT_PER_TITLE.
     live = count_live_posters_for_master(db, t.id)
@@ -1249,6 +1283,19 @@ def title_complete(
     """
     t = _load_my_master(db, user, master_id)
 
+    # ── v15: Guard — cannot complete a title with zero live posters ────
+    # A title is "complete" only when it has at least one poster. If all
+    # posters were deleted (e.g. admin flagged the only poster, worker
+    # deleted it, admin approved the deletion), completing with 0 posters
+    # makes no sense. The worker should skip instead.
+    live_count = count_live_posters_for_master(db, t.id)
+    if live_count == 0:
+        raise HTTPException(
+            400,
+            "Cannot mark this title as done — it has no posters. "
+            "Add at least one poster, or skip the title instead."
+        )
+
     # IMPORTANT: do NOT filter by SavedPoster.deleted_at here. A poster
     # deleted while it had a flag now carries an awaiting_approval revision
     # that admin still needs to see — that absolutely counts toward
@@ -1357,14 +1404,49 @@ def title_skip(
         r.resolved_at = datetime.utcnow()
         r.admin_verdict = "auto-resolved: title skipped"
     t.needs_revision = 0
+
+    # ── v15: Delete all live posters when skipping ──────────────────────
+    # If the worker saved posters under this title and then clicks Skip
+    # instead of Confirm/Done, those posters should not exist (they'd
+    # otherwise still count towards pay, which makes no sense for a
+    # skipped title). Soft-delete every live poster + unlink from disk.
+    live_posters = (
+        db.query(SavedPoster)
+          .filter(
+              SavedPoster.master_title_id == t.id,
+              SavedPoster.deleted_at.is_(None),
+          )
+          .all()
+    )
+    deleted_poster_ids: list[int] = []
+    for sp in live_posters:
+        fs = saved_poster_path(sp)
+        fs.unlink(missing_ok=True)
+        sp.deleted_at = datetime.utcnow()
+        sp.delete_note = "auto-deleted: title skipped"
+        deleted_poster_ids.append(sp.id)
+
+    # Clean up the now-empty title folder on disk.
+    if deleted_poster_ids and live_posters:
+        import shutil
+        title_dir = saved_poster_path(live_posters[0]).parent
+        if title_dir.is_dir():
+            try:
+                remaining_files = list(title_dir.iterdir())
+                if not remaining_files:
+                    shutil.rmtree(title_dir, ignore_errors=True)
+            except Exception:
+                pass
+
     log_activity(
         db, user=user, action="skipped", target_type="master_title", target_id=t.id,
         details={"reason": reason.strip() or None,
                  "reason_source": reason_source or None,
-                 "resolved_flags": len(active_revs)},
+                 "resolved_flags": len(active_revs),
+                 "deleted_posters": deleted_poster_ids},
     )
     db.commit()
-    return JSONResponse({"ok": True})
+    return JSONResponse({"ok": True, "deleted_posters": len(deleted_poster_ids)})
 
 
 @router.post("/title/{master_id}/reopen")
@@ -1405,6 +1487,33 @@ def resolve_revision(
     rev.worker_note = worker_note.strip() or None
     log_activity(db, user=user, action="submitted_for_approval", target_type="revision", target_id=rev.id)
     db.commit()
+    return JSONResponse({"ok": True})
+
+
+@router.post("/api/receipts/{run_id}/not_received")
+def receipt_not_received(
+    run_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """
+    v15: Worker indicates they have NOT received a pushed payment.
+    Sets not_received_at so admin can follow up. The receipt disappears
+    from the worker's dashboard (same as ack), but admin sees the
+    'not_received' status instead of 'acknowledged'.
+    """
+    from ..models import PaymentRun
+    run = db.query(PaymentRun).filter_by(id=run_id).first()
+    if run is None or run.worker_id != user.id:
+        raise HTTPException(404, "Receipt not found.")
+    if run.pushed_at is None:
+        raise HTTPException(400, "Receipt was never pushed to you.")
+    if run.ack_at is not None:
+        raise HTTPException(400, "Already acknowledged.")
+    if run.not_received_at is None:
+        run.not_received_at = datetime.utcnow()
+        log_activity(db, user=user, action="receipt_not_received", target_type="payment_run", target_id=run.id)
+        db.commit()
     return JSONResponse({"ok": True})
 
 

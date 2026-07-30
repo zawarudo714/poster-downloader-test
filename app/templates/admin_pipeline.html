@@ -1,0 +1,594 @@
+{% extends "base.html" %}
+{% from "_macros.html" import info %}
+{% block title %}Pipeline · Admin{% endblock %}
+
+{#
+  Post-production pipeline control centre.
+
+  Sections are progressive: the overview answers "is it running and where is
+  everything", then Greenlight feeds work in, then Processing / Upload
+  Settings tune how it runs, then Test & Debug lets you exercise one stage
+  on one image, and Failures closes the loop.
+
+  Everything here is data-driven from /admin/pipeline/api/*. Adding a setting
+  to pipeline.DEFAULTS surfaces it automatically in the settings forms — do
+  not hardcode field lists in the markup.
+#}
+
+{% block content %}
+<div class="admin-grid" data-pipeline data-no-global-scroll>
+
+  {# ── Sub-navigation ─────────────────────────────────────────────── #}
+  <div class="pipe-tabs" role="tablist">
+    <button class="pipe-tab active" data-section="overview"   role="tab">OVERVIEW</button>
+    <button class="pipe-tab"        data-section="greenlight" role="tab">GREENLIGHT<span class="pipe-tab-badge" data-badge="greenlight" hidden>0</span></button>
+    <button class="pipe-tab"        data-section="processing" role="tab">PROCESSING</button>
+    <button class="pipe-tab"        data-section="upload"     role="tab">UPLOAD</button>
+    <button class="pipe-tab"        data-section="test"       role="tab">TEST &amp; DEBUG</button>
+    <button class="pipe-tab"        data-section="failures"   role="tab">FAILURES<span class="pipe-tab-badge pipe-tab-badge-error" data-badge="failures" hidden>0</span></button>
+    <button class="pipe-tab"        data-section="nodes"      role="tab">NODES</button>
+  </div>
+
+  {# ═══════════════════════════════════════════════════════════════ #}
+  {#  OVERVIEW                                                       #}
+  {# ═══════════════════════════════════════════════════════════════ #}
+  <div class="pipe-section" data-section-panel="overview">
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>PIPELINE FUNNEL
+          {{ info("Live poster counts at each stage. 'Awaiting greenlight' is completed work not yet approved for processing — that's your actionable backlog. Click any stage to see the titles in it.") }}
+        </span>
+        <button type="button" class="btn btn-ghost btn-tiny" data-action="refresh-overview">REFRESH</button>
+      </div>
+      <div class="panel-body">
+        <div class="funnel-grid" data-funnel>
+          <div class="muted">Loading…</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>UPLOAD ACCOUNTS &amp; TODAY'S QUOTA
+          {{ info("Each marketplace account has its own daily cap (FineArtAmerica allows 100 designs/day). The server enforces this, so a worker node can never exceed it. 'Pending' is how many processed images are queued for that account.") }}
+        </span>
+      </div>
+      <div class="panel-body" data-account-quotas>
+        <div class="muted">Loading…</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>UPLOADS — LAST 30 DAYS
+          {{ info("Confirmed uploads per day across all accounts. The dashed line is the 100/day marketplace cap.") }}
+        </span>
+      </div>
+      <div class="panel-body">
+        <canvas id="pipe-history-chart" height="120"></canvas>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>RECENT JOBS
+          {{ info("Batch runs and diagnostics. Click a job to tail its live log in the console below.") }}
+        </span>
+        <span class="filter-row" style="gap:6px">
+          <button type="button" class="btn btn-ghost btn-tiny" data-action="run-process">RUN PROCESS NOW</button>
+          <button type="button" class="btn btn-ghost btn-tiny" data-action="run-upload">RUN UPLOAD NOW</button>
+        </span>
+      </div>
+      <div class="panel-body" data-jobs-list>
+        <div class="muted">Loading…</div>
+      </div>
+    </section>
+
+    {# Live console is shared by every section — a test in the Test tab and a
+       batch run here both stream into the same place, so there's one habit to
+       learn rather than several. #}
+    <section class="panel" data-console-panel hidden>
+      <div class="panel-head">
+        <span>LIVE CONSOLE — <span class="mono" data-console-title>job</span>
+          {{ info("Streamed from the worker node as it works, phase by phase. This is where you see exactly which step failed instead of reconstructing it afterwards.") }}
+        </span>
+        <span class="filter-row" style="gap:6px">
+          <label class="inline-check"><input type="checkbox" data-console-follow checked> FOLLOW</label>
+          <button type="button" class="btn btn-ghost btn-tiny" data-action="console-close">CLOSE</button>
+        </span>
+      </div>
+      <div class="panel-body">
+        <div class="pipe-progress"><div class="pipe-progress-bar" data-console-progress style="width:0%"></div></div>
+        <pre class="pipe-console" data-console-log></pre>
+        <div class="pipe-console-result" data-console-result hidden></div>
+      </div>
+    </section>
+
+  </div>
+
+  {# ═══════════════════════════════════════════════════════════════ #}
+  {#  GREENLIGHT                                                     #}
+  {# ═══════════════════════════════════════════════════════════════ #}
+  <div class="pipe-section" data-section-panel="greenlight" hidden>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>GREENLIGHT MODE
+          {{ info("'Payment' auto-greenlights posters when you mark a payment run as paid — so paying for a week releases that week into the pipeline. 'Manual' means only the buttons below promote work. 'Both' gives you the auto behaviour plus manual control.") }}
+        </span>
+      </div>
+      <div class="panel-body">
+        <div class="filter-row">
+          <label>MODE
+            <select data-greenlight-mode>
+              <option value="both">Both — auto on payment, manual also allowed</option>
+              <option value="payment">Payment only — auto when paid</option>
+              <option value="manual">Manual only</option>
+            </select>
+          </label>
+          <button type="button" class="btn btn-accent btn-tiny" data-action="save-greenlight-mode">SAVE</button>
+          <span class="muted mono" data-greenlight-mode-status></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>AWAITING GREENLIGHT — BY SAVE DATE
+          {{ info("Completed titles not yet approved for processing, grouped by the date the worker saved them. 'PAID' means every poster on that date is already covered by a payment run, so it's safe to release. Select dates and greenlight them together.") }}
+        </span>
+        <span class="filter-row" style="gap:6px">
+          <button type="button" class="btn btn-ghost btn-tiny" data-action="gl-select-paid">SELECT ALL PAID</button>
+          <button type="button" class="btn btn-ghost btn-tiny" data-action="gl-select-none">CLEAR</button>
+        </span>
+      </div>
+      <div class="panel-body">
+        <div class="filter-row" style="margin-bottom:10px">
+          <button type="button" class="btn btn-accent" data-action="gl-greenlight-selected">GREENLIGHT SELECTED</button>
+          <button type="button" class="btn btn-ghost" data-action="gl-greenlight-all-paid">GREENLIGHT EVERYTHING ALREADY PAID</button>
+          <span class="muted mono" data-gl-summary></span>
+        </div>
+        <div data-greenlight-queue><div class="muted">Loading…</div></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>GREENLIGHT A DATE RANGE
+          {{ info("Bulk-release everything completed between two dates. Already-greenlit titles are skipped, so re-running this is harmless.") }}
+        </span>
+      </div>
+      <div class="panel-body">
+        <div class="filter-row">
+          <label>FROM <input type="date" data-gl-start></label>
+          <label>TO   <input type="date" data-gl-end></label>
+          <button type="button" class="btn btn-accent btn-tiny" data-action="gl-greenlight-range">GREENLIGHT RANGE</button>
+          <span class="muted mono" data-gl-range-status></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>TITLE BROWSER
+          {{ info("Drill into any pipeline stage. Click a row to select it, shift-click for a range, or drag down the list. Selection survives paging, so you can select across pages before acting. Greenlighting only ever promotes posters that aren't already in the pipeline, so nothing gets processed twice.") }}
+        </span>
+      </div>
+      <div class="panel-body">
+
+        {# Filters #}
+        <div class="filter-row" style="margin-bottom:8px">
+          <label>STAGE
+            <select data-titles-status>
+              <option value="awaiting_greenlight">Awaiting greenlight</option>
+              <option value="greenlit">Greenlit</option>
+              <option value="processing">Processing</option>
+              <option value="processed">Processed</option>
+              <option value="uploading">Uploading</option>
+              <option value="uploaded">Uploaded</option>
+              <option value="failed">Failed</option>
+              <option value="">Any stage</option>
+            </select>
+          </label>
+          <label>SEARCH <input type="search" data-titles-q placeholder="Title…"></label>
+          <label>FROM <input type="date" data-titles-from></label>
+          <label>TO   <input type="date" data-titles-to></label>
+          <label>PER PAGE
+            <select data-titles-pagesize>
+              <option>50</option><option selected>100</option><option>200</option>
+            </select>
+          </label>
+          <button type="button" class="btn btn-ghost btn-tiny" data-action="titles-load">LOAD</button>
+        </div>
+
+        {# Selection + bulk actions. Sticky so the buttons stay reachable while
+           scrolling a long list — the original browser's main ergonomic win. #}
+        <div class="pipe-bulkbar" data-titles-bulkbar hidden>
+          <div class="pipe-bulkbar-left">
+            <strong data-titles-selcount>0</strong> selected
+            <button type="button" class="btn btn-ghost btn-tiny" data-action="titles-select-page">SELECT PAGE</button>
+            <button type="button" class="btn btn-ghost btn-tiny" data-action="titles-select-all">SELECT ALL MATCHING</button>
+            <button type="button" class="btn btn-ghost btn-tiny" data-action="titles-select-none">CLEAR</button>
+          </div>
+          <div class="pipe-bulkbar-right">
+            <button type="button" class="btn btn-accent btn-tiny" data-action="titles-greenlight" disabled>GREENLIGHT SELECTED</button>
+            <button type="button" class="btn btn-ghost btn-tiny"  data-action="titles-ungreenlight" disabled>PULL BACK SELECTED</button>
+          </div>
+        </div>
+
+        <div data-titles-list><div class="muted">Choose a stage and hit LOAD.</div></div>
+
+        {# Pagination #}
+        <div class="pipe-pager" data-titles-pager hidden>
+          <button type="button" class="btn btn-ghost btn-tiny" data-action="titles-first">« FIRST</button>
+          <button type="button" class="btn btn-ghost btn-tiny" data-action="titles-prev">‹ PREV</button>
+          <span class="muted mono" data-titles-pageinfo></span>
+          <button type="button" class="btn btn-ghost btn-tiny" data-action="titles-next">NEXT ›</button>
+          <button type="button" class="btn btn-ghost btn-tiny" data-action="titles-last">LAST »</button>
+        </div>
+
+      </div>
+    </section>
+
+  </div>
+
+  {# ═══════════════════════════════════════════════════════════════ #}
+  {#  PROCESSING (Photoshop)                                         #}
+  {# ═══════════════════════════════════════════════════════════════ #}
+  <div class="pipe-section" data-section-panel="processing" hidden>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>PHOTOSHOP SETTINGS
+          {{ info("These substitute into the script below at runtime. Change a number here rather than editing the script, so the script stays generic. Takes effect on the worker node's next batch — no deploy needed.") }}
+        </span>
+      </div>
+      <div class="panel-body">
+        <div class="settings-grid" data-settings-group="processing"></div>
+        <div class="filter-row" style="margin-top:12px">
+          <button type="button" class="btn btn-accent" data-action="save-settings" data-group="processing">SAVE PROCESSING SETTINGS</button>
+          <span class="muted mono" data-settings-status="processing"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>PHOTOSHOP SCRIPT (JSX)
+          {{ info("The script the worker node runs on each image, edited here like a text file. It handles ONE image — batching, retries and folder walking are the pipeline's job. The node injects INPUT_FILE and OUTPUT_FILE; {{PLACEHOLDERS}} are filled from the settings above. Save, then use Test & Debug to run it on a single image.") }}
+        </span>
+        <span class="filter-row" style="gap:6px">
+          <span class="muted mono">version <span data-script-version>—</span></span>
+          <button type="button" class="btn btn-ghost btn-tiny" data-action="script-preview">PREVIEW RENDERED</button>
+          <button type="button" class="btn btn-ghost btn-tiny" data-action="script-reset">RESET TO DEFAULT</button>
+        </span>
+      </div>
+      <div class="panel-body">
+        <textarea class="pipe-code-editor" data-script-editor spellcheck="false" rows="26"></textarea>
+        <div class="filter-row" style="margin-top:10px">
+          <button type="button" class="btn btn-accent" data-action="save-script">SAVE SCRIPT</button>
+          <span class="muted mono" data-script-status></span>
+        </div>
+        <details class="pipe-details" style="margin-top:12px">
+          <summary>Rendered script (what the node actually receives)</summary>
+          <pre class="pipe-console" data-script-preview>Click PREVIEW RENDERED.</pre>
+        </details>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>STORAGE
+          {{ info("Where processed images are archived. The path is on the worker node (typically a mounted Hetzner Storage Box). Paths in the database are stored relative to this root, so remounting elsewhere is just a change here.") }}
+        </span>
+      </div>
+      <div class="panel-body">
+        <div class="settings-grid" data-settings-group="storage"></div>
+        <div class="filter-row" style="margin-top:12px">
+          <button type="button" class="btn btn-accent" data-action="save-settings" data-group="storage">SAVE STORAGE SETTINGS</button>
+          <span class="muted mono" data-settings-status="storage"></span>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  {# ═══════════════════════════════════════════════════════════════ #}
+  {#  UPLOAD                                                         #}
+  {# ═══════════════════════════════════════════════════════════════ #}
+  <div class="pipe-section" data-section-panel="upload" hidden>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>MARKETPLACE ACCOUNTS
+          {{ info("Accounts the pipeline uploads into. Passwords are encrypted and only ever sent to an authenticated worker node — never back to this page. Adding an account does not queue anything by itself; use REQUEUE to push the processed back catalogue onto it (the ban-recovery path).") }}
+        </span>
+        <button type="button" class="btn btn-accent btn-tiny" data-action="account-new">ADD ACCOUNT</button>
+      </div>
+      <div class="panel-body" data-accounts-list>
+        <div class="muted">Loading…</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>UPLOAD SETTINGS
+          {{ info("Batch size, retry cap and scheduling. Sequential single-tab uploading is deliberate — the old multi-tab approach lost 20-30% of every batch to stale tabs and session timeouts. Leave it on unless you have a specific reason.") }}
+        </span>
+      </div>
+      <div class="panel-body">
+        <div class="settings-grid" data-settings-group="upload"></div>
+        <div class="filter-row" style="margin-top:12px">
+          <button type="button" class="btn btn-accent" data-action="save-settings" data-group="upload">SAVE UPLOAD SETTINGS</button>
+          <span class="muted mono" data-settings-status="upload"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>LISTING TEMPLATES
+          {{ info("How each listing's title, keywords and description are built. Variables: {title} {year} {letter} {index} {content_type} {external_id} {description}. {letter} is the per-image A/B/C suffix. Titles are ASCII-folded automatically because marketplaces reject accents.") }}
+        </span>
+      </div>
+      <div class="panel-body">
+        <div class="settings-grid" data-settings-group="templates"></div>
+        <div class="filter-row" style="margin-top:12px">
+          <button type="button" class="btn btn-accent" data-action="save-settings" data-group="templates">SAVE TEMPLATES</button>
+          <span class="muted mono" data-settings-status="templates"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>PAGE SELECTORS
+          {{ info("The CSS/XPath map for the marketplace's upload form. THIS is what breaks when a site redesigns — fix it here, then hit Test Upload on one image to confirm, no code change or redeploy. Prefix with css:, xpath: or name:.") }}
+        </span>
+        <button type="button" class="btn btn-ghost btn-tiny" data-action="selectors-reset">RESET TO DEFAULTS</button>
+      </div>
+      <div class="panel-body">
+        <div class="settings-grid" data-selectors-grid></div>
+        <div class="filter-row" style="margin-top:12px">
+          <button type="button" class="btn btn-accent" data-action="save-selectors">SAVE SELECTORS</button>
+          <span class="muted mono" data-selectors-status></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>SELENIUM TIMINGS
+          {{ info("Waits between automation steps. Raise these if uploads fail on a slow connection; lower them to go faster once things are stable. Per-account overrides live on each account row above.") }}
+        </span>
+      </div>
+      <div class="panel-body">
+        <div class="settings-grid" data-timings-grid></div>
+        <div class="filter-row" style="margin-top:12px">
+          <button type="button" class="btn btn-accent" data-action="save-timings">SAVE TIMINGS</button>
+          <span class="muted mono" data-timings-status></span>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  {# ═══════════════════════════════════════════════════════════════ #}
+  {#  TEST & DEBUG                                                   #}
+  {# ═══════════════════════════════════════════════════════════════ #}
+  <div class="pipe-section" data-section-panel="test" hidden>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>WHY THIS EXISTS</span>
+      </div>
+      <div class="panel-body">
+        <p>Each stage runs independently on a single item, so you never have to start a
+        full pipeline run to find out whether a small fix worked. Every test streams
+        into the Live Console with per-phase timing, and a failure captures a
+        screenshot plus the page source.</p>
+        <p class="muted">Test output is written under a <code>_tests/</code> prefix in storage
+        and never overwrites a live derivative. Test uploads do not mutate tracking state.</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>1 · TEST DOWNLOAD
+          {{ info("Pulls one title's source images from this server to the worker node. Proves the API connection, token and file transfer work — without involving Photoshop or the marketplace.") }}
+        </span>
+      </div>
+      <div class="panel-body">
+        <div class="filter-row">
+          <label>TITLE ID (master) <input type="number" data-test-master-id placeholder="e.g. 50"></label>
+          <button type="button" class="btn btn-accent btn-tiny" data-action="test-download">RUN TEST DOWNLOAD</button>
+          <span class="muted mono" data-test-status="download"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>2 · TEST PROCESSING
+          {{ info("Runs the current JSX on exactly one image and reports output dimensions, file size and duration. Edit the script, run this, see the result in seconds — that's the loop instead of waiting for a batch.") }}
+        </span>
+      </div>
+      <div class="panel-body">
+        <div class="filter-row">
+          <label>POSTER ID <input type="number" data-test-poster-id placeholder="e.g. 1234"></label>
+          <button type="button" class="btn btn-accent btn-tiny" data-action="test-process">RUN TEST PROCESS</button>
+          <span class="muted mono" data-test-status="process"></span>
+        </div>
+        <p class="muted" style="margin-top:8px">Find a poster id in the Title Browser under Greenlight, or in the Failures list.</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>3 · TEST UPLOAD
+          {{ info("Walks one processed image through login → upload page → file input → form fill → submit, logging each phase separately so you can see precisely which selector or timing failed. Nothing is marked uploaded.") }}
+        </span>
+      </div>
+      <div class="panel-body">
+        <div class="filter-row">
+          <label>POSTER ID <input type="number" data-test-upload-poster placeholder="e.g. 1234"></label>
+          <label>ACCOUNT
+            <select data-test-upload-account><option value="">—</option></select>
+          </label>
+          <button type="button" class="btn btn-accent btn-tiny" data-action="test-upload">RUN TEST UPLOAD</button>
+          <span class="muted mono" data-test-status="upload"></span>
+        </div>
+        <div class="pipe-preview" data-test-upload-preview hidden></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><span>RECENT TESTS</span></div>
+      <div class="panel-body" data-test-jobs><div class="muted">No tests run yet.</div></div>
+    </section>
+
+  </div>
+
+  {# ═══════════════════════════════════════════════════════════════ #}
+  {#  FAILURES                                                       #}
+  {# ═══════════════════════════════════════════════════════════════ #}
+  <div class="pipe-section" data-section-panel="failures" hidden>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>FAILURES
+          {{ info("Retries happen automatically up to the configured cap; items shown as EXHAUSTED have used all attempts and need a look. RETRY resets the counter for a genuine fresh start. MARK REMOVED is for marketplace takedowns — permanent for that account, but the processed file stays in storage so the image can be listed elsewhere.") }}
+        </span>
+        <span class="filter-row" style="gap:6px">
+          <select data-failures-kind>
+            <option value="upload">Upload failures</option>
+            <option value="processing">Processing failures</option>
+          </select>
+          <button type="button" class="btn btn-ghost btn-tiny" data-action="failures-load">RELOAD</button>
+        </span>
+      </div>
+      <div class="panel-body">
+        <div class="filter-row" style="margin-bottom:10px">
+          <button type="button" class="btn btn-accent btn-tiny" data-action="failures-retry">RETRY SELECTED</button>
+          <button type="button" class="btn btn-ghost btn-tiny"  data-action="failures-removed">MARK REMOVED</button>
+          <button type="button" class="btn btn-ghost btn-tiny"  data-action="failures-skip">SKIP PERMANENTLY</button>
+          <span class="muted mono" data-failures-summary></span>
+        </div>
+        <div data-failures-list><div class="muted">Loading…</div></div>
+      </div>
+    </section>
+
+    {# Screenshot viewer — the single most useful artefact when a marketplace
+       changes its form, so it gets a dedicated lightbox rather than a link. #}
+    <div class="pipe-lightbox" data-shot-lightbox hidden>
+      <div class="pipe-lightbox-inner">
+        <div class="pipe-lightbox-head">
+          <span class="mono" data-shot-title></span>
+          <button type="button" class="btn btn-ghost btn-tiny" data-action="shot-close">CLOSE</button>
+        </div>
+        <img data-shot-img alt="Failure screenshot">
+      </div>
+    </div>
+
+  </div>
+
+  {# ═══════════════════════════════════════════════════════════════ #}
+  {#  NODES                                                          #}
+  {# ═══════════════════════════════════════════════════════════════ #}
+  <div class="pipe-section" data-section-panel="nodes" hidden>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>WORKER NODES
+          {{ info("Machines allowed to run pipeline work — normally one Windows VPS with Photoshop and Chrome. A node holds no configuration: it fetches the script, selectors, timings and credentials on every run. Rebuild it any time; only the token needs restoring.") }}
+        </span>
+        <button type="button" class="btn btn-accent btn-tiny" data-action="node-new">REGISTER NODE</button>
+      </div>
+      <div class="panel-body" data-nodes-list>
+        <div class="muted">Loading…</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><span>SETUP — WHAT TO PUT ON THE WINDOWS VPS</span></div>
+      <div class="panel-body">
+        <ol class="pipe-steps">
+          <li>Install Adobe Photoshop (with the Real Paint FX plugin), Google Chrome and Python 3.11+.</li>
+          <li>Mount the storage box as a drive letter and make sure the path matches
+              <code>storage_root</code> under Processing → Storage.</li>
+          <li>Copy the <code>worker_service/</code> folder from the repo onto the machine
+              and run <code>pip install -r requirements.txt</code>.</li>
+          <li>Register a node above and copy the token it shows once.</li>
+          <li>Create <code>worker_service/config.json</code> with the server URL and that token.</li>
+          <li>Run <code>python -m worker_service.agent</code> to verify, then install it as a
+              scheduled task set to run at startup.</li>
+        </ol>
+        <p class="muted">Full detail, including the one-time migration of your existing
+        processed files and upload history, is in <code>PIPELINE.md</code> in the repo.</p>
+      </div>
+    </section>
+
+  </div>
+
+  {# ── Modals ─────────────────────────────────────────────────────── #}
+  <div class="pipe-modal" data-account-modal hidden>
+    <div class="pipe-modal-inner">
+      <div class="pipe-modal-head">
+        <span data-account-modal-title>ADD ACCOUNT</span>
+        <button type="button" class="btn btn-ghost btn-tiny" data-action="account-cancel">CLOSE</button>
+      </div>
+      <div class="pipe-modal-body">
+        <input type="hidden" data-account-id>
+        <label>NAME <input type="text" data-account-name placeholder="e.g. GR"></label>
+        <label>MARKETPLACE
+          <select data-account-target>
+            <option value="faa">FineArtAmerica</option>
+            <option value="teepublic">TeePublic</option>
+          </select>
+        </label>
+        <label>EMAIL <input type="email" data-account-email></label>
+        <label>PASSWORD <input type="password" data-account-password placeholder="Leave blank to keep existing"></label>
+        <label>PROFILE URL <input type="url" data-account-profile placeholder="https://fineartamerica.com/profiles/…"></label>
+        <label>CHROME PROFILE DIR (on the node)
+          <input type="text" data-account-chrome placeholder="C:/faa/profiles/GR">
+        </label>
+        <label>DAILY LIMIT <input type="number" data-account-limit value="100" min="1" max="1000"></label>
+        <label class="inline-check"><input type="checkbox" data-account-enabled checked> ENABLED</label>
+      </div>
+      <div class="pipe-modal-foot">
+        <button type="button" class="btn btn-accent" data-action="account-save">SAVE</button>
+        <span class="muted mono" data-account-status></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="pipe-modal" data-node-modal hidden>
+    <div class="pipe-modal-inner">
+      <div class="pipe-modal-head">
+        <span>REGISTER WORKER NODE</span>
+        <button type="button" class="btn btn-ghost btn-tiny" data-action="node-cancel">CLOSE</button>
+      </div>
+      <div class="pipe-modal-body">
+        <label>NAME <input type="text" data-node-name placeholder="e.g. win-vps-1"></label>
+        <label class="inline-check"><input type="checkbox" data-node-cap-process checked> CAN RUN PHOTOSHOP</label>
+        <label class="inline-check"><input type="checkbox" data-node-cap-upload checked> CAN RUN UPLOADS</label>
+        <div class="pipe-token-box" data-node-token-box hidden>
+          <p><strong>Copy this token now.</strong> Only its hash is stored — it cannot be shown again.</p>
+          <pre class="mono" data-node-token></pre>
+        </div>
+      </div>
+      <div class="pipe-modal-foot">
+        <button type="button" class="btn btn-accent" data-action="node-save">REGISTER</button>
+        <span class="muted mono" data-node-status></span>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
+<script src="/static/js/admin_pipeline.js?v={{ app_version }}"></script>
+{% endblock %}

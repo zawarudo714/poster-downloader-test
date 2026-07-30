@@ -2419,9 +2419,33 @@ def payments_mark_paid(
                  "count": len(ids), "amount": str(amount), "pushed": bool(push_to_worker),
                  "back_pay_dates": back_pay_dates},
     )
+
+    # ── Pipeline hook: auto-greenlight what was just paid for ───────────
+    # Paying for a batch is the natural signal that it's approved for
+    # post-production, which is the workflow you already follow manually.
+    # Driven off the run's poster_ids so back-pay days are included and
+    # unpaid days never leak in. Respects the `greenlight_mode` setting, so
+    # setting it to 'manual' disables this without touching code.
+    #
+    # Deliberately non-fatal: recording the payment must never fail because
+    # of a pipeline problem (e.g. migration not yet run).
+    greenlit = None
+    try:
+        from .. import pipeline as P
+        greenlit = P.greenlight_for_payment_run(db, run, by=admin.username)
+        if greenlit.get("greenlit"):
+            log_activity(
+                db, user=admin, action="pipeline_greenlight",
+                target_type="payment_run", target_id=run.id,
+                details={"via": "payment", **greenlit},
+            )
+    except Exception as e:
+        greenlit = {"error": str(e)}
+
     db.commit()
     return JSONResponse({"ok": True, "run_id": run.id, "poster_count": len(ids),
-                         "back_pay_dates": back_pay_dates})
+                         "back_pay_dates": back_pay_dates,
+                         "greenlit": greenlit})
 
 
 @router.post("/payments/{run_id}/push")

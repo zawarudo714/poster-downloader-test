@@ -10,3 +10,7 @@ openpyxl==3.1.5
 # tzdata bundles the IANA timezone database — required for zoneinfo.ZoneInfo
 # inside Python on slim/alpine images that don't ship system tzdata.
 tzdata==2024.2
+# Fernet encryption for marketplace account passwords in the post-production
+# pipeline (app/pipeline.py). The key derives from PIPELINE_SECRET, falling
+# back to SESSION_SECRET. See PIPELINE.md §8 before rotating either.
+cryptography==43.0.1

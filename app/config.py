@@ -14,7 +14,7 @@ from pathlib import Path
 # Bumped on every deploy. Templates append `?v={APP_VERSION}` to every
 # <script> and <link rel="stylesheet"> URL, so deploys force browsers to
 # refetch JS/CSS automatically — no Ctrl+Shift+R needed by users.
-APP_VERSION = "15"
+APP_VERSION = "17"
 
 
 # ── Paths ────────────────────────────────────────────────────────────────────
@@ -29,9 +29,31 @@ WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
 # Database
 DATABASE_URL = os.environ.get("DATABASE_URL", f"sqlite:///{BASE_DIR / 'poster.db'}")
 
-# Where the SQLite file lives on disk (used by backup/restore — only meaningful
-# when DATABASE_URL is sqlite:///). Pulled out of DATABASE_URL for convenience.
-DB_PATH = BASE_DIR / "poster.db"
+
+def _sqlite_file_from_url(url: str, fallback: Path) -> Path:
+    """
+    Extract the on-disk path from a sqlite:/// URL.
+
+    DB_PATH must track DATABASE_URL. It's used by the backup/restore code
+    (app/backups.py) to copy and replace the actual file, so if someone
+    relocates the database with the DATABASE_URL env var — which the Docker
+    deployment does, to keep it on a mounted volume — a hardcoded DB_PATH
+    would silently back up a file that isn't the live database, and restore
+    would write over the wrong path. Deriving it removes that whole class of
+    mistake.
+    """
+    prefix = "sqlite:///"
+    if url.startswith(prefix):
+        raw = url[len(prefix):]
+        if raw:
+            return Path(raw).resolve()
+    # Non-SQLite backend (or malformed URL): backups are SQLite-specific and
+    # will report the file as missing rather than doing something surprising.
+    return fallback
+
+
+# Where the SQLite file lives on disk. Only meaningful for sqlite:/// URLs.
+DB_PATH = _sqlite_file_from_url(DATABASE_URL, BASE_DIR / "poster.db")
 
 # Backups + snapshots live under <project_root>/backups/. Daily auto-backups are
 # written here at midnight; admin-triggered manual snapshots also go here.

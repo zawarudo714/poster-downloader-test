@@ -27,3 +27,6 @@ Thumbs.db
 # Env
 .env
 .env.local
+
+# Runtime state — the Docker bind mount (db, workspace, backups)
+data/

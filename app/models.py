@@ -105,6 +105,23 @@ class MasterTitle(Base):
     original_save_date = Column(Date, nullable=True)
     title_folder_path  = Column(String(512), nullable=True)
 
+    # ── Post-production pipeline ────────────────────────────────────────
+    # Which niche/workflow this title belongs to. Nullable so the existing
+    # 101k rows don't need a backfill before the app boots; the migration
+    # sets them all to project 1 and pipeline code treats NULL as project 1.
+    project_id        = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    # Admin (or auto-on-payment) approval gate. Until this is set, the
+    # Photoshop stage will not touch the title's posters, even if complete.
+    greenlit_at       = Column(DateTime, nullable=True, index=True)
+    greenlit_by       = Column(String(64), nullable=True)
+    # Rollup of the per-poster pipeline state, recomputed by
+    # pipeline.recompute_title_status(). Denormalized purely so the Pipeline
+    # dashboard can page/filter thousands of titles cheaply — never trust it
+    # over the saved_posters rows.
+    #   NULL | greenlit | processing | processed | uploading | uploaded
+    #   | partial | failed
+    pipeline_status   = Column(String(24), nullable=True, index=True)
+
     # Bookkeeping
     created_at    = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at    = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
@@ -153,12 +170,35 @@ class SavedPoster(Base):
     created_at         = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
     deleted_at         = Column(DateTime, nullable=True, index=True)
 
+    # ── Post-production pipeline (per-image state) ──────────────────────
+    # The authoritative per-image stage. The title-level MasterTitle
+    # .pipeline_status is just a rollup of these.
+    #   NULL       — not greenlit yet
+    #   greenlit   — approved, waiting for Photoshop
+    #   processing — a worker node claimed it for Photoshop
+    #   processed  — derivative exists in storage (see processed_images)
+    #   uploading  — a worker node claimed it for marketplace upload
+    #   uploaded   — live on at least one marketplace account
+    #   failed_processing / failed_upload — needs attention or retry
+    #   skipped    — admin excluded it from the pipeline
+    pipeline_status    = Column(String(24), nullable=True, index=True)
+    # Retry/backoff bookkeeping for the Photoshop stage. Upload-side attempts
+    # live on upload_tracking (per account), not here.
+    process_attempts   = Column(Integer, nullable=False, default=0)
+    process_error      = Column(Text, nullable=True)
+    # Set when a node claims this poster, cleared on completion. Lets a stale
+    # claim be reaped if a node dies mid-batch.
+    claimed_at         = Column(DateTime, nullable=True)
+    claimed_by         = Column(String(64), nullable=True)
+
     master_title = relationship("MasterTitle", back_populates="saved_posters")
 
     __table_args__ = (
         # Fast "live posters by user" lookup (excludes deleted via where deleted_at IS NULL).
         Index("ix_poster_user_alive", "user_id", "deleted_at"),
         Index("ix_poster_master_alive", "master_title_id", "deleted_at"),
+        # Drives the pipeline dispatcher's "what's next" query.
+        Index("ix_poster_pipeline", "pipeline_status", "deleted_at"),
     )
 
 
@@ -363,3 +403,279 @@ class ChatReadState(Base):
     worker_id   = Column(Integer, ForeignKey("users.id"), primary_key=True)
     viewer_id   = Column(Integer, ForeignKey("users.id"), primary_key=True)
     last_read_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  POST-PRODUCTION PIPELINE
+#  ------------------------
+#  Everything below powers the automated Photoshop → stock-site upload
+#  pipeline. Design rules (read before extending):
+#
+#  1. NOTHING IS HARDCODED. Scripts, CSS selectors, title formats, keyword
+#     templates, timings and schedules all live in `app_settings` (see
+#     app/pipeline.py `get_setting`). The dashboard edits them; the remote
+#     worker fetches them at runtime. Never inline a selector or a path.
+#
+#  2. MULTI-PROJECT FROM DAY ONE. Every pipeline table carries `project_id`.
+#     Today there is exactly one project ("Tell-A-Vision", movies/series).
+#     Adding the celebrity niche, or a TeePublic target, must never require
+#     a schema migration — only new rows.
+#
+#  3. MULTI-TARGET FROM DAY ONE. `target_site` is a free string ('faa',
+#     'teepublic', ...). Upload logic is selected by that value on the
+#     worker side, so a new marketplace is a new worker module plus a new
+#     settings block — not a schema change.
+#
+#  4. THE DATABASE IS THE ONLY SOURCE OF TRUTH. The legacy JSON files
+#     (faa_upload_tracking.json, faa_content_data.json, faa_config.json,
+#     faa_settings.json) are imported once by scripts/migrate_pipeline.py
+#     and then retired. Do not reintroduce sidecar state files.
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class Project(Base):
+    """
+    A niche / workflow. One row per (content vertical + processing style).
+
+    Project 1 is seeded as 'tell-a-vision' (movies & series, TMDB source,
+    Real Paint FX processing, FineArtAmerica target) to match the existing
+    single-workflow install. A second project ('celebrity', Pinterest source,
+    2 images per title) drops in as another row with no code changes.
+
+    `settings_prefix` is what pipeline.get_setting() uses to scope
+    per-project overrides in app_settings — e.g. a project-specific JSX
+    script lives under `pipeline.celebrity.process_script` and falls back
+    to the global `pipeline.process_script` when unset.
+    """
+    __tablename__ = "projects"
+
+    id              = Column(Integer, primary_key=True)
+    slug            = Column(String(64), unique=True, nullable=False, index=True)
+    name            = Column(String(128), nullable=False)
+    # Where source images come from — informational, drives UI copy/links.
+    source_site     = Column(String(64), nullable=True)       # 'tmdb' | 'pinterest' | ...
+    # How many images a worker is expected to save per title (soft guidance).
+    images_per_title = Column(Integer, nullable=True)
+    is_active       = Column(Integer, nullable=False, default=1)
+    notes           = Column(Text, nullable=True)
+    created_at      = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    @property
+    def settings_prefix(self) -> str:
+        return self.slug
+
+
+class WorkerNode(Base):
+    """
+    A remote machine allowed to run pipeline work (the Windows VPS running
+    Photoshop + Selenium). Authenticates to the pipeline API with a bearer
+    token; we store only a SHA-256 hash of it.
+
+    Several nodes can be registered — e.g. one box dedicated to Photoshop
+    and another to uploads, or a second box when volume grows. Each node
+    declares which capabilities it has so the dispatcher only hands it work
+    it can actually do.
+    """
+    __tablename__ = "worker_nodes"
+
+    id            = Column(Integer, primary_key=True)
+    name          = Column(String(64), unique=True, nullable=False, index=True)
+    token_hash    = Column(String(64), nullable=False)
+    # Comma-separated capability list: 'process,upload'
+    capabilities  = Column(String(128), nullable=False, default="process,upload")
+    is_enabled    = Column(Integer, nullable=False, default=1)
+    # Self-reported by the node on each poll — purely diagnostic.
+    hostname      = Column(String(128), nullable=True)
+    agent_version = Column(String(32), nullable=True)
+    last_seen_at  = Column(DateTime, nullable=True, index=True)
+    created_at    = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class UploadAccount(Base):
+    """
+    A marketplace account the pipeline uploads into (replaces faa_config.json).
+
+    `password_enc` is Fernet-encrypted with PIPELINE_SECRET (see
+    app/pipeline.py). It is never returned to the browser — only to an
+    authenticated worker node that needs it to log in.
+
+    `timing_json` holds the per-account Selenium waits that used to live in
+    the Tkinter Settings tab (login_wait, upload_wait, ...). `selectors_json`
+    optionally overrides the project-level selector map for this one account,
+    which matters when a marketplace A/B-tests its upload form.
+    """
+    __tablename__ = "upload_accounts"
+
+    id                = Column(Integer, primary_key=True)
+    project_id        = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    name              = Column(String(64), nullable=False)
+    target_site       = Column(String(32), nullable=False, default="faa")
+    email             = Column(String(255), nullable=False)
+    password_enc      = Column(Text, nullable=False)
+    profile_url       = Column(Text, nullable=True)
+    # Directory ON THE WORKER NODE holding the persistent Chrome profile
+    # (session cookies). Disposable — recreated by re-login if wiped.
+    chrome_profile_dir = Column(String(512), nullable=True)
+    daily_limit       = Column(Integer, nullable=False, default=100)
+    is_enabled        = Column(Integer, nullable=False, default=1)
+    timing_json       = Column(Text, nullable=True)
+    selectors_json    = Column(Text, nullable=True)
+    # Set when a run hits bot-detection / login failure. While in the future,
+    # the dispatcher refuses to hand this account any work.
+    paused_until      = Column(DateTime, nullable=True)
+    pause_reason      = Column(Text, nullable=True)
+    last_run_at       = Column(DateTime, nullable=True)
+    created_at        = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_by        = Column(String(64), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "name", name="uq_upload_account_project_name"),
+    )
+
+
+class ProcessedImage(Base):
+    """
+    One row per (saved poster → processed output). Records that Photoshop
+    produced a derivative and where it now lives in permanent storage.
+
+    `storage_path` is relative to the configured storage root (the mounted
+    Hetzner Storage Box), never an absolute local path — so remounting at a
+    different drive letter or migrating providers doesn't invalidate the DB.
+
+    `script_version` is a hash of the JSX used, so when you tweak the effect
+    you can tell which images came from which revision and selectively
+    reprocess.
+
+    A poster can legitimately have several rows over time (reprocessed after
+    a script change); `is_current` marks the one the uploader should use.
+    """
+    __tablename__ = "processed_images"
+
+    id              = Column(Integer, primary_key=True)
+    saved_poster_id = Column(Integer, ForeignKey("saved_posters.id"), nullable=False, index=True)
+    project_id      = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    storage_path    = Column(String(768), nullable=False)
+    filename        = Column(String(512), nullable=False)
+    file_size       = Column(Integer, nullable=True)
+    output_width    = Column(Integer, nullable=True)
+    output_height   = Column(Integer, nullable=True)
+    script_version  = Column(String(64), nullable=True)
+    processed_by    = Column(String(64), nullable=True)   # worker node name
+    duration_ms     = Column(Integer, nullable=True)
+    is_current      = Column(Integer, nullable=False, default=1, index=True)
+    created_at      = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    saved_poster = relationship("SavedPoster")
+
+    __table_args__ = (
+        Index("ix_processed_poster_current", "saved_poster_id", "is_current"),
+    )
+
+
+class UploadTracking(Base):
+    """
+    One row per (image → marketplace account) upload attempt lifecycle.
+    Replaces faa_upload_tracking.json.
+
+    Keyed on saved_poster_id (NOT the processed file) because the poster is
+    the stable identity across reprocessing. `processed_image_id` records
+    which derivative was actually sent.
+
+    The (saved_poster_id, account_id) pair is unique: an image is uploaded
+    at most once per account. Re-uploading the same image to a *different*
+    account after a ban is a new row — which is exactly how account recovery
+    works without touching storage or Photoshop.
+
+    status:
+      pending    — queued, not attempted yet
+      uploading  — a worker claimed it (guards against double-upload)
+      uploaded   — confirmed live on the marketplace
+      failed     — attempt failed; eligible for retry until attempts hits the
+                   configured cap, then surfaced for admin review
+      removed    — was live, then taken down (copyright/DMCA)
+      skipped    — admin decided never to upload this one
+    """
+    __tablename__ = "upload_tracking"
+
+    id                 = Column(Integer, primary_key=True)
+    saved_poster_id    = Column(Integer, ForeignKey("saved_posters.id"), nullable=False, index=True)
+    processed_image_id = Column(Integer, ForeignKey("processed_images.id"), nullable=True)
+    account_id         = Column(Integer, ForeignKey("upload_accounts.id"), nullable=False, index=True)
+    project_id         = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    target_site        = Column(String(32), nullable=False, default="faa")
+
+    # The exact title submitted to the marketplace, e.g. "Pulp Fiction - 1994 A".
+    # Frozen at upload time so the listing can always be found again even if
+    # the title template later changes.
+    remote_title       = Column(String(512), nullable=True)
+    # Index of this image within its title (0→A, 1→B, ...). Drives the suffix.
+    letter_index       = Column(Integer, nullable=True)
+    # Marketplace-side identifier / URL once known.
+    remote_id          = Column(String(128), nullable=True)
+
+    status             = Column(String(16), nullable=False, default="pending", index=True)
+    attempts           = Column(Integer, nullable=False, default=0)
+    last_error         = Column(Text, nullable=True)
+    # Failure artefacts saved by the worker, relative to the storage root.
+    last_screenshot    = Column(String(768), nullable=True)
+    claimed_at         = Column(DateTime, nullable=True)
+    claimed_by         = Column(String(64), nullable=True)
+    uploaded_at        = Column(DateTime, nullable=True, index=True)
+    removed_at         = Column(DateTime, nullable=True)
+    removed_reason     = Column(Text, nullable=True)
+    created_at         = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    saved_poster    = relationship("SavedPoster")
+    processed_image = relationship("ProcessedImage")
+
+    __table_args__ = (
+        UniqueConstraint("saved_poster_id", "account_id", name="uq_upload_poster_account"),
+        # Drives the "how many did this account do today" quota query.
+        Index("ix_upload_account_day", "account_id", "uploaded_at"),
+        Index("ix_upload_status_site", "status", "target_site"),
+    )
+
+
+class PipelineJob(Base):
+    """
+    A unit of remote work, plus its log. Covers both scheduled batch runs
+    and the one-off diagnostics fired from the dashboard's Test & Debug panel.
+
+    The point of this table is that you never have to run the whole pipeline
+    to debug one stage: `kind` can be a single-image test, and its log +
+    result land here for inspection within seconds.
+
+    kind:
+      process        — batch Photoshop run
+      upload         — batch marketplace upload run
+      test_download  — fetch one title's sources to the node
+      test_process   — run the JSX on exactly one image
+      test_upload    — upload exactly one image, phase by phase
+
+    status: queued → running → done | error | cancelled
+    """
+    __tablename__ = "pipeline_jobs"
+
+    id            = Column(Integer, primary_key=True)
+    project_id    = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    kind          = Column(String(32), nullable=False, index=True)
+    status        = Column(String(16), nullable=False, default="queued", index=True)
+    # Inputs (poster ids, account id, overrides) and outputs (dimensions,
+    # per-phase timings, produced paths). Free-form JSON so new job kinds
+    # never need a migration.
+    payload_json  = Column(Text, nullable=True)
+    result_json   = Column(Text, nullable=True)
+    # Appended live by the worker; streamed to the dashboard's Live Console.
+    log_text      = Column(Text, nullable=True)
+    error         = Column(Text, nullable=True)
+    progress      = Column(Integer, nullable=False, default=0)   # 0..100
+    progress_note = Column(String(255), nullable=True)
+    requested_by  = Column(String(64), nullable=True)
+    claimed_by    = Column(String(64), nullable=True)            # worker node name
+    created_at    = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    started_at    = Column(DateTime, nullable=True)
+    finished_at   = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("ix_job_kind_status", "kind", "status"),
+    )

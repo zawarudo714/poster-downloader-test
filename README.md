@@ -1,20 +1,49 @@
 # Poster Downloader (web)
 
 A FastAPI + SQLite + vanilla-JS web app for a small team to download poster
-images from TMDB into a tidy, audit-trailable folder structure.
+images from TMDB into a tidy, audit-trailable folder structure — plus an
+automated post-production pipeline (Photoshop → marketplace upload). See
+[`PIPELINE.md`](PIPELINE.md) for the pipeline.
 
-## Quick start (Windows)
+## Quick start — local development
+
+**Double-click `DEV_SETUP.bat`.** It creates a virtual environment on first
+run, installs dependencies, and opens a setup window. Click **SETUP**, then
+**START SERVER**.
+
+Every run wipes and rebuilds from scratch, so you always land in the same
+known-good state:
+
+| | |
+|---|---|
+| `admin` / `123456` | admin account |
+| `worker1` / `123456` | worker account |
+| Master titles | a few hundred, ready to claim |
+| Completed work | real PNG files on disk, so the gallery/payments/pipeline are all populated |
+| Pipeline | a registered node (token printed), a disabled demo account, seeded work greenlit |
+
+Equivalent CLI, same code path:
 
 ```cmd
-cd path\to\poster_downloader_web
+python scripts\dev_setup.py --cli
+python scripts\dev_setup.py --cli --master-titles 1000 --completed-titles 40
+```
+
+> The tool **refuses to run against a production-looking database** (>5,000
+> master titles or >3 payment runs). `--force` overrides it, CLI only. Stop the
+> server before running setup — it holds the database file open.
+
+## Manual start
+
+```cmd
 python -m venv .venv
 .venv\Scripts\activate.bat
 pip install -r requirements.txt
+python scripts\create_admin.py
 uvicorn app.main:app --reload
 ```
 
-Open <http://localhost:8000>. First-run admin credentials are printed to the
-console (also stored in `.first_admin.txt`).
+Open <http://localhost:8000>.
 
 > **Schema note** — pure additive; no DB migration needed for this round.
 >
@@ -95,6 +124,56 @@ console (also stored in `.first_admin.txt`).
 >   `<select>` dropdown.
 > - ZIP supports multiple dates in one archive.
 > - Disabled workers see "site undergoing update" instead of a login error.
+
+## What this version adds (v16 — post-production pipeline)
+
+> **NOTE for v16**: This round adds the automated Photoshop → marketplace
+> upload pipeline. It adds **six new tables** and **nine new columns** on
+> existing tables. `create_all()` handles the tables but NOT the columns, so
+> **run the migration before rebuilding:**
+> ```bash
+> # Back up first — this alters master_titles and saved_posters.
+> docker compose exec web python -c "
+> import shutil, datetime
+> shutil.copy('/app/poster.db', f'/app/backups/manual-{datetime.date.today()}__pre-pipeline.db')
+> print('backed up')"
+>
+> docker compose exec web python scripts/migrate_pipeline.py --schema-only
+> git pull && docker compose up -d --build
+> ```
+> The migration is idempotent — safe to re-run. It was verified against a copy
+> of the live 101,605-row database.
+>
+> `cryptography` is a new dependency (marketplace password encryption).
+>
+> **Full documentation is in [`PIPELINE.md`](PIPELINE.md)** — architecture,
+> data state, deployment, operating procedures and extension points. Read that
+> before touching the pipeline.
+
+What it does, briefly:
+
+- **Greenlight** — paying a payment run auto-approves exactly the posters paid
+  for, releasing them into the pipeline. Manual greenlight by date or title is
+  also available. Configurable (`manual` / `payment` / `both`).
+- **Remote Photoshop** — a Windows worker node pulls greenlit images, runs the
+  painterly effect one image at a time, and archives the result to a mounted
+  storage box. The JSX is **edited in the dashboard**, not in the repo.
+- **Automated uploading** — sequential, single-tab Selenium against
+  FineArtAmerica, respecting a server-enforced daily cap. Every CSS selector,
+  wait and title template is dashboard-editable, so a marketplace redesign is
+  a text-field fix plus a one-image test, not a redeploy.
+- **Test & Debug** — run any single stage on a single image and watch a
+  per-phase log. No full pipeline run needed to check a fix.
+- **Failure handling** — automatic retry with backoff, failure screenshots and
+  page dumps stored server-side, and account-level pausing when a problem is
+  systemic (bot wall, bad credentials, changed markup).
+- **Ban recovery** — processed images live in permanent storage, so pointing a
+  new marketplace account at the whole back catalogue reprocesses nothing.
+- **Multi-niche ready** — every pipeline table carries `project_id` and
+  `target_site`. Adding the planned celebrity niche or a TeePublic target is
+  new rows and new settings, not a migration.
+
+New admin nav entry: **Pipeline**.
 
 ## What this version adds (v15)
 

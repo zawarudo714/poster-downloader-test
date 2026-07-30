@@ -3633,3 +3633,480 @@ body:has(#ib-bulk-bar:not([hidden])) { padding-bottom: 88px; }
 /* But keep scroll and image viewing working */
 .user-grid.peek-mode { pointer-events: auto; }
 .user-grid.peek-mode img { pointer-events: auto; cursor: default; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   POST-PRODUCTION PIPELINE
+   Styles for /admin/pipeline. Reuses the existing .panel / .data-table /
+   .status-pill vocabulary; everything below is additive so no existing page
+   is affected.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Sub-navigation ─────────────────────────────────────────────────── */
+.pipe-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+.pipe-tab {
+  position: relative;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px 4px 0 0;
+  color: var(--subtext);
+  font: 600 11px/1 inherit;
+  letter-spacing: 0.08em;
+  padding: 9px 14px;
+  cursor: pointer;
+  transition: color .12s, background .12s;
+}
+.pipe-tab:hover { color: var(--text); background: rgba(255,255,255,0.03); }
+.pipe-tab.active {
+  color: var(--accent);
+  background: var(--card);
+  border-color: var(--border);
+  border-bottom-color: var(--card);
+}
+.pipe-tab-badge {
+  display: inline-block;
+  margin-left: 6px;
+  min-width: 16px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #14131a;
+  font-size: 10px;
+  font-weight: 700;
+}
+.pipe-tab-badge-error { background: var(--error); color: #fff; }
+
+.pipe-section { display: contents; }
+
+/* ── Funnel ─────────────────────────────────────────────────────────── */
+.funnel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 8px;
+}
+.funnel-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 10px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color .12s, background .12s;
+}
+.funnel-cell:hover { border-color: var(--accent); background: rgba(232,184,75,0.06); }
+.funnel-num   { font: 700 22px/1 inherit; color: var(--text); }
+.funnel-label { font-size: 10.5px; letter-spacing: .06em; color: var(--subtext); text-transform: uppercase; }
+.funnel-warn  .funnel-num { color: var(--skip); }
+.funnel-ok    .funnel-num { color: var(--success); }
+.funnel-error .funnel-num { color: var(--error); }
+.funnel-error { border-color: rgba(232,85,75,0.35); }
+
+/* ── Progress bars (quota + job progress) ───────────────────────────── */
+.pipe-progress {
+  height: 8px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 4px 0;
+}
+.pipe-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 4px;
+  transition: width .3s ease;
+}
+.pipe-bar-ok    { background: var(--success); }
+.pipe-bar-warn  { background: var(--skip); }
+.pipe-bar-error { background: var(--error); }
+
+/* ── Account quota rows ─────────────────────────────────────────────── */
+.quota-row { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.quota-row:last-child { border-bottom: none; }
+.quota-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+.quota-note {
+  margin-top: 4px;
+  padding: 6px 9px;
+  background: rgba(232,85,75,0.10);
+  border-left: 3px solid var(--error);
+  border-radius: 3px;
+  font-size: 12px;
+  color: #ffb3ad;
+}
+
+/* ── Account cards ──────────────────────────────────────────────────── */
+.account-card {
+  padding: 12px;
+  margin-bottom: 10px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.account-card:last-child { margin-bottom: 0; }
+.account-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.account-stats { font-size: 11.5px; color: var(--subtext); margin-bottom: 8px; }
+
+/* ── Generated settings forms ───────────────────────────────────────── */
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  gap: 14px;
+}
+.setting-field > label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11px;
+  letter-spacing: .05em;
+  color: var(--subtext);
+  text-transform: none;
+}
+.setting-field input[type="text"],
+.setting-field input[type="number"],
+.setting-field input[type="email"],
+.setting-field input[type="url"],
+.setting-field input[type="password"],
+.setting-field select,
+.setting-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+.setting-field textarea { resize: vertical; font-family: var(--mono, monospace); font-size: 12px; }
+.setting-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+.setting-badge {
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(232,184,75,0.18);
+  border: 1px solid rgba(232,184,75,0.35);
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.setting-help {
+  margin: 5px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--subtext);
+}
+.setting-bool > label { flex-direction: row; align-items: center; gap: 8px; }
+.setting-bool input[type="checkbox"] { width: auto; }
+
+/* ── Code editor (JSX) ──────────────────────────────────────────────── */
+.pipe-code-editor {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 380px;
+  padding: 12px;
+  background: #0a0a10;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: #d8d5cc;
+  font-family: var(--mono, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 12px;
+  line-height: 1.55;
+  tab-size: 4;
+  resize: vertical;
+}
+.pipe-code-editor:focus { outline: none; border-color: var(--accent); }
+
+/* ── Console ────────────────────────────────────────────────────────── */
+.pipe-console {
+  max-height: 340px;
+  overflow: auto;
+  margin: 0;
+  padding: 11px 13px;
+  background: #08080d;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: #c9c6bd;
+  font-family: var(--mono, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.pipe-console-result {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.pipe-console-result pre {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  font-size: 11px;
+  max-height: 220px;
+  overflow: auto;
+}
+.pipe-result-ok {
+  background: rgba(78,201,138,0.08);
+  border-left: 3px solid var(--success);
+  color: #a9e8c6;
+}
+.pipe-result-error {
+  background: rgba(232,85,75,0.10);
+  border-left: 3px solid var(--error);
+  color: #ffb3ad;
+}
+
+/* ── Failure table cells ────────────────────────────────────────────── */
+.pipe-error-cell {
+  max-width: 420px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #ffb3ad;
+  word-break: break-word;
+}
+.pipe-subrow td { padding-top: 0 !important; border-top: none !important; }
+.pipe-subrow    { background: rgba(232,85,75,0.04); }
+
+/* ── Modals + lightbox ──────────────────────────────────────────────── */
+.pipe-modal,
+.pipe-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(0,0,0,0.72);
+  backdrop-filter: blur(2px);
+}
+.pipe-modal[hidden],
+.pipe-lightbox[hidden] { display: none; }
+
+.pipe-modal-inner,
+.pipe-lightbox-inner {
+  width: 100%;
+  max-width: 520px;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 18px 60px rgba(0,0,0,0.6);
+}
+.pipe-lightbox-inner { max-width: 92vw; }
+
+.pipe-modal-head,
+.pipe-lightbox-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  font: 600 11px/1 inherit;
+  letter-spacing: .08em;
+  color: var(--accent);
+  text-transform: uppercase;
+}
+.pipe-modal-body {
+  padding: 14px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+.pipe-modal-body > label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font: 600 10.5px/1 inherit;
+  letter-spacing: .07em;
+  color: var(--subtext);
+  text-transform: uppercase;
+}
+.pipe-modal-body input,
+.pipe-modal-body select {
+  width: 100%;
+  box-sizing: border-box;
+}
+.pipe-modal-body > label.inline-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.pipe-modal-body > label.inline-check input { width: auto; }
+.pipe-modal-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+}
+.pipe-lightbox-inner img {
+  max-width: 100%;
+  max-height: calc(88vh - 46px);
+  object-fit: contain;
+  display: block;
+}
+
+/* One-time token reveal — deliberately loud, it can't be shown again. */
+.pipe-token-box {
+  padding: 11px;
+  background: rgba(232,184,75,0.08);
+  border: 1px solid rgba(232,184,75,0.35);
+  border-radius: 4px;
+  font-size: 12px;
+}
+.pipe-token-box pre {
+  margin: 8px 0 0;
+  padding: 9px;
+  background: #08080d;
+  border-radius: 3px;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: all;
+}
+
+/* ── Misc ───────────────────────────────────────────────────────────── */
+.pipe-details summary {
+  cursor: pointer;
+  font: 600 11px/1 inherit;
+  letter-spacing: .06em;
+  color: var(--subtext);
+  text-transform: uppercase;
+  padding: 6px 0;
+}
+.pipe-details summary:hover { color: var(--text); }
+.pipe-details[open] summary { color: var(--accent); margin-bottom: 8px; }
+
+.pipe-steps { margin: 0; padding-left: 20px; line-height: 1.85; font-size: 13px; }
+.pipe-steps code {
+  padding: 1px 5px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 3px;
+  font-size: 11.5px;
+}
+
+.pipe-preview {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+label.inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  letter-spacing: .05em;
+  color: var(--subtext);
+  text-transform: uppercase;
+}
+
+/* Marketplace pills */
+.status-faa       { background: rgba(120,160,255,0.16) !important; color: #bcd0ff !important; border: 1px solid rgba(120,160,255,0.35); }
+.status-teepublic { background: rgba(180,120,255,0.16) !important; color: #dcc4ff !important; border: 1px solid rgba(180,120,255,0.35); }
+
+@media (max-width: 720px) {
+  .pipe-tabs { gap: 2px; }
+  .pipe-tab  { padding: 8px 9px; font-size: 10px; }
+  .settings-grid { grid-template-columns: 1fr; }
+  .funnel-grid   { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); }
+  .funnel-num    { font-size: 18px; }
+  .pipe-error-cell { max-width: 200px; }
+}
+
+/* ── Pipeline title browser: batch selection ────────────────────────── */
+/* Mirrors the worker-facing master browser so both feel the same:
+   click a row anywhere, shift-click for a range, drag for a run. */
+.pipe-titles-table tbody tr[data-id] { cursor: pointer; user-select: none; }
+.pipe-titles-table tbody tr[data-id]:hover { background: rgba(255,255,255,0.035); }
+.pipe-titles-table tbody tr[data-id].selected {
+  background: rgba(232,184,75,0.13);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.pipe-titles-table tbody tr[data-id].selected:hover { background: rgba(232,184,75,0.18); }
+/* Rows nothing can be done to — still readable, clearly not selectable. */
+.pipe-titles-table tbody tr.row-inert { cursor: default; opacity: 0.55; }
+.pipe-titles-table tbody tr.row-inert:hover { background: transparent; }
+.pipe-titles-table .col-cb { text-align: center; }
+.pipe-titles-table thead input[type="checkbox"],
+.pipe-titles-table tbody input[type="checkbox"] { cursor: pointer; }
+
+/* Why a row can't be actioned, inline rather than in a tooltip. */
+.pipe-hint {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.06);
+  color: var(--subtext);
+  font-size: 10px;
+  letter-spacing: .03em;
+  white-space: nowrap;
+}
+
+/* Sticky bulk bar — keeps the actions reachable while scrolling a long list. */
+.pipe-bulkbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.pipe-bulkbar[hidden] { display: none; }
+.pipe-bulkbar-left,
+.pipe-bulkbar-right { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pipe-bulkbar-left  { font-size: 12px; color: var(--subtext); }
+.pipe-bulkbar-left strong { color: var(--accent); font-size: 14px; margin-right: 2px; }
+.pipe-bulkbar button[disabled] { opacity: .4; cursor: not-allowed; }
+
+/* Pager */
+.pipe-pager {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.pipe-pager[hidden] { display: none; }
+.pipe-pager .mono { min-width: 190px; text-align: center; font-size: 11.5px; }

@@ -1,8 +1,53 @@
+# Production deployment.
+#
+# ─────────────────────────────────────────────────────────────────────────
+# EVERYTHING THAT MUST SURVIVE A REBUILD LIVES UNDER /app/data
+# ─────────────────────────────────────────────────────────────────────────
+# The container filesystem is discarded on every `docker compose up --build`.
+# An earlier version of this file mounted ./data, but the app still wrote its
+# database, workspace and backups to /app/* — i.e. into the container's
+# writable layer — so a rebuild would have destroyed the database and every
+# saved poster.
+#
+# The three env vars below relocate all persistent state into /app/data,
+# which is bind-mounted to ./data on the host. Do not remove them, and do not
+# add new state that writes outside /app/data.
+#
+# ─────────────────────────────────────────────────────────────────────────
+# SECRETS COME FROM .env — SEE .env.example
+# ─────────────────────────────────────────────────────────────────────────
+# Both use `:?` so Compose refuses to start when they're missing. Deliberate:
+#   SESSION_SECRET  — otherwise falls back to a random value per process,
+#                     silently logging every user out on each restart.
+#   PIPELINE_SECRET — encrypts marketplace account passwords. If it changes,
+#                     stored passwords stop decrypting and uploads fail.
+# Failing loudly at startup beats discovering either of these in production.
+
 services:
   web:
     build: .
     restart: always
     ports:
       - "80:8000"
+    environment:
+      # Timezone — drives displayed timestamps and the "what counts as today"
+      # boundary for payments and marketplace daily quotas.
+      - TZ=${TZ:-Africa/Nairobi}
+      - APP_TZ=${APP_TZ:-Africa/Nairobi}
+
+      - SESSION_SECRET=${SESSION_SECRET:?SESSION_SECRET is required - see .env.example}
+      - PIPELINE_SECRET=${PIPELINE_SECRET:?PIPELINE_SECRET is required - see .env.example}
+
+      # Persistent state. Four slashes after sqlite: means an absolute path.
+      - DATABASE_URL=sqlite:////app/data/poster.db
+      - WORKSPACE_DIR=/app/data/workspace
+      - BACKUPS_DIR=/app/data/backups
     volumes:
       - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s

@@ -1,0 +1,706 @@
+"""
+Marketplace upload stage — Selenium, sequential, one tab.
+
+════════════════════════════════════════════════════════════════════════════
+WHY SEQUENTIAL (do not "optimise" this back)
+════════════════════════════════════════════════════════════════════════════
+The legacy tool opened one tab per image up-front (35-50 at a time) and then
+walked them in phases. It lost 20-30% of every batch, and the loss rate grew
+with batch size. Causes, all structural:
+
+  * Memory pressure — dozens of live marketplace pages, tabs crash silently.
+  * Session/page staleness — the page opened at tab 5 has expired by tab 40.
+  * Stale element references — Selenium handles die when a tab re-renders.
+  * Rate heuristics — many simultaneous opens looks exactly like a bot.
+
+This module opens ONE tab and completes one image at a time. It's slower per
+image and that is irrelevant: the node is unattended and only needs to land
+100/day. Reliability is the whole point.
+
+════════════════════════════════════════════════════════════════════════════
+EVERYTHING IS CONFIGURATION
+════════════════════════════════════════════════════════════════════════════
+No CSS selector, URL, wait or template appears as a literal below — they all
+arrive from the dashboard in the claim payload. When a marketplace changes its
+form you edit a selector in the browser and re-run a single-image test. That
+is the difference between a five-minute fix and a redeploy.
+
+Selector strings are prefixed: `css:`, `xpath:` or `name:`.
+"""
+
+from __future__ import annotations
+
+import os
+import time
+from pathlib import Path
+from typing import Any, Callable, Optional
+
+from selenium import webdriver
+from selenium.common.exceptions import (
+    NoSuchElementException, TimeoutException, WebDriverException,
+)
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
+
+from .client import PipelineClient, PipelineError
+
+
+# Phrases that mean "the site is challenging us, not rejecting the image".
+# Seeing one of these must pause the whole account rather than burn attempts
+# on every queued image.
+BOT_MARKERS = (
+    "cloudflare", "captcha", "checking your browser", "access denied",
+    "are you human", "unusual traffic", "verify you are human",
+    "rate limit", "too many requests",
+)
+
+
+class UploadError(RuntimeError):
+    """
+    An upload failure.
+
+    `pause_minutes` > 0 marks it systemic (bot check, bad credentials, form
+    structure changed) so the server parks the account. `fatal` aborts the
+    remaining batch on this node.
+    """
+
+    def __init__(self, message: str, *, pause_minutes: int = 0,
+                 pause_reason: Optional[str] = None, fatal: bool = False):
+        super().__init__(message)
+        self.pause_minutes = pause_minutes
+        self.pause_reason = pause_reason or message
+        self.fatal = fatal
+
+
+def parse_selector(raw: str) -> tuple[str, str]:
+    """
+    Turn a configured selector string into a Selenium (By, value) pair.
+
+    Prefixes keep the dashboard honest about intent and let a single text
+    field express any lookup strategy. Unprefixed values are treated as CSS,
+    which is what an admin pasting from devtools will produce.
+    """
+    value = (raw or "").strip()
+    if value.startswith("css:"):
+        return By.CSS_SELECTOR, value[4:].strip()
+    if value.startswith("xpath:"):
+        return By.XPATH, value[6:].strip()
+    if value.startswith("name:"):
+        return By.NAME, value[5:].strip()
+    if value.startswith("id:"):
+        return By.ID, value[3:].strip()
+    return By.CSS_SELECTOR, value
+
+
+class MarketplaceUploader:
+    """
+    Drives one browser session for one account.
+
+    Built per batch and disposed afterwards so a wedged browser can never
+    poison the next run.
+    """
+
+    def __init__(self, *, account: dict, settings: dict, config: dict,
+                 client: PipelineClient, log: Callable[..., None],
+                 job_id: Optional[int] = None):
+        self.account = account
+        self.settings = settings
+        self.config = config
+        self.client = client
+        self.log = log
+        self.job_id = job_id
+
+        self.selectors: dict[str, str] = account["selectors"]
+        self.timings: dict[str, float] = account["timings"]
+        self.driver: Optional[webdriver.Chrome] = None
+        self.wait: Optional[WebDriverWait] = None
+
+    # ── Helpers ────────────────────────────────────────────────────────────
+
+    def t(self, key: str, default: float = 1.0) -> float:
+        try:
+            return float(self.timings.get(key, default))
+        except (TypeError, ValueError):
+            return default
+
+    def sel(self, key: str) -> str:
+        value = self.selectors.get(key)
+        if not value:
+            # A missing selector is a configuration problem, not a transient
+            # one — pause so the queue isn't wasted while it's unfixed.
+            raise UploadError(
+                f"Selector '{key}' is not configured. Set it under "
+                f"Pipeline → Upload → Page Selectors.",
+                pause_minutes=60,
+                pause_reason=f"Missing selector: {key}",
+            )
+        return value
+
+    def emit(self, message: str, *, level: str = "info",
+             progress: Optional[int] = None, note: Optional[str] = None) -> None:
+        """Log locally and to the dashboard's Live Console in one call."""
+        self.log(message, level=level)
+        if self.job_id:
+            self.client.job_log(self.job_id, message, level=level,
+                                progress=progress, note=note)
+
+    def find(self, key: str, *, clickable: bool = False, timeout: Optional[float] = None):
+        by, value = parse_selector(self.sel(key))
+        wait = WebDriverWait(self.driver, timeout or self.t("element_timeout", 30))
+        condition = (EC.element_to_be_clickable((by, value)) if clickable
+                     else EC.presence_of_element_located((by, value)))
+        try:
+            return wait.until(condition)
+        except TimeoutException:
+            raise UploadError(
+                f"Element '{key}' not found within "
+                f"{timeout or self.t('element_timeout', 30):.0f}s "
+                f"(selector: {self.sel(key)}). The site's markup may have changed — "
+                f"update it under Pipeline → Upload → Page Selectors and re-test.",
+                pause_minutes=45,
+                pause_reason=f"Selector '{key}' no longer matches",
+            )
+
+    # ── Bot detection ──────────────────────────────────────────────────────
+
+    def check_for_bot_wall(self, context: str) -> None:
+        """
+        Look for a challenge page.
+
+        Checked after navigation and login because continuing past one wastes
+        the batch and makes the account look worse. Raising with a long pause
+        gives the site time to cool off.
+        """
+        try:
+            page = (self.driver.page_source or "").lower()
+        except WebDriverException:
+            return
+        hits = [marker for marker in BOT_MARKERS if marker in page]
+        if not hits:
+            return
+        shot = self.capture_evidence(f"botwall_{context}")
+        raise UploadError(
+            f"Bot-protection page detected during {context} "
+            f"(matched: {', '.join(hits)}). Account paused to cool off.",
+            pause_minutes=180,
+            pause_reason=f"Bot wall during {context}: {', '.join(hits)}",
+            fatal=True,
+        )
+
+    def capture_evidence(self, label: str) -> Optional[str]:
+        """
+        Push a screenshot and the page HTML to the server.
+
+        Stored server-side, not on this disposable node, so it's still
+        available in the dashboard when you sit down to work out what broke.
+        The screenshot is what the Failures list shows.
+        """
+        if self.driver is None:
+            return None
+        path = None
+        try:
+            png = self.driver.get_screenshot_as_png()
+            path = self.client.upload_artifact(
+                kind="screenshot", name=f"{label}.png", data=png)
+        except Exception:
+            pass
+        try:
+            html = (self.driver.page_source or "").encode("utf-8", "replace")
+            self.client.upload_artifact(
+                kind="pagesource", name=f"{label}.html", data=html)
+        except Exception:
+            pass
+        return path
+
+    # ── Browser lifecycle ──────────────────────────────────────────────────
+
+    def start(self) -> None:
+        """
+        Launch Chrome with the account's persistent profile.
+
+        The profile carries the marketplace session cookie, which is why most
+        runs skip the login form entirely. It's disposable: wipe it and the
+        next run logs in again.
+        """
+        profile_dir = (self.account.get("chrome_profile_dir")
+                       or str(Path(self.config.get("temp_dir", "C:/faa/temp"))
+                              / "profiles" / self.account["name"]))
+        Path(profile_dir).mkdir(parents=True, exist_ok=True)
+
+        options = Options()
+        options.add_argument(f"--user-data-dir={profile_dir}")
+        options.add_argument("--profile-directory=Default")
+        # Unattended box: no visible window, and the flags below are what make
+        # headless Chrome behave on a bare Windows VPS.
+        options.add_argument("--headless=new")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--window-size=1920,1080")
+        options.add_argument("--disable-blink-features=AutomationControlled")
+        options.add_experimental_option("prefs", {
+            "credentials_enable_service": False,
+            "profile.password_manager_enabled": False,
+        })
+        options.add_experimental_option("excludeSwitches", ["enable-automation"])
+
+        try:
+            self.driver = webdriver.Chrome(options=options)
+        except WebDriverException as e:
+            raise UploadError(
+                f"Could not start Chrome: {e}. Check Chrome and chromedriver "
+                f"are installed and their versions match.",
+                fatal=True,
+            )
+
+        self.driver.set_page_load_timeout(90)
+        self.wait = WebDriverWait(self.driver, self.t("element_timeout", 30))
+
+        try:
+            caps = self.driver.capabilities
+            self.emit(
+                f"Chrome {caps.get('browserVersion', '?')} / "
+                f"chromedriver "
+                f"{caps.get('chrome', {}).get('chromedriverVersion', '?').split(' ')[0]}"
+            )
+        except Exception:
+            pass
+
+    def stop(self) -> None:
+        """
+        Tear the browser down.
+
+        Also sweeps orphaned processes for this profile: in headless mode a
+        crashed run leaves invisible chrome.exe holding the profile lock,
+        which then breaks the *next* run with "user data directory already in
+        use".
+        """
+        if self.driver is not None:
+            try:
+                self.driver.quit()
+            except Exception:
+                pass
+            self.driver = None
+        self._kill_orphans()
+
+    # Process names to sweep, covering both platforms. The upload stage is
+    # deliberately OS-portable — only the Photoshop stage genuinely requires
+    # Windows — so this must not assume .exe. Running uploads on the Linux
+    # server while Photoshop runs elsewhere is a supported deployment.
+    _BROWSER_PROCESS_NAMES = (
+        "chrome.exe", "chromedriver.exe",          # Windows
+        "chrome", "chromedriver",                  # Linux
+        "google-chrome", "google-chrome-stable",   # Linux packaging variants
+    )
+
+    def _kill_orphans(self) -> None:
+        profile_dir = self.account.get("chrome_profile_dir")
+        if not profile_dir:
+            return
+        try:
+            import psutil
+        except ImportError:
+            return
+
+        key = os.path.normpath(profile_dir).lower()
+        killed = 0
+        for proc in psutil.process_iter(["name", "cmdline"]):
+            try:
+                name = (proc.info.get("name") or "").lower()
+                if name not in self._BROWSER_PROCESS_NAMES:
+                    continue
+                cmdline = " ".join(proc.info.get("cmdline") or []).lower()
+                # Only this profile's processes — never the operator's own browser.
+                if key in cmdline:
+                    proc.kill()
+                    killed += 1
+            except Exception:
+                continue
+        if killed:
+            self.emit(f"Cleaned up {killed} orphaned Chrome process(es)")
+
+    # ── Login ──────────────────────────────────────────────────────────────
+
+    def login(self) -> None:
+        """
+        Authenticate, reusing the saved session when possible.
+
+        Credential entry is conditional on the login form actually being
+        present: on most runs the profile cookie is still valid and we skip
+        straight through, which is both faster and less conspicuous.
+        """
+        self.emit("Phase: login", progress=5)
+        step = "opening login page"
+        try:
+            self.driver.get(self.sel("login_url"))
+            time.sleep(self.t("page_load_wait", 2))
+            self.check_for_bot_wall("login")
+
+            step = "clicking the artist-login link"
+            try:
+                self.find("artist_login_link", clickable=True, timeout=10).click()
+                time.sleep(self.t("page_load_wait", 2))
+            except UploadError:
+                # Not fatal — an existing session often lands past this link.
+                self.emit("Login link not present (likely already signed in)")
+
+            # Only fill the form if it's actually there.
+            by, value = parse_selector(self.sel("username_field"))
+            form_present = True
+            try:
+                self.driver.find_element(by, value)
+            except NoSuchElementException:
+                form_present = False
+
+            if form_present:
+                step = "entering credentials"
+                self.emit("Login form present — entering credentials")
+                field = self.find("username_field")
+                field.clear()
+                field.send_keys(self.account["email"])
+
+                by_p, value_p = parse_selector(self.sel("password_field"))
+                password = self.driver.find_element(by_p, value_p)
+                password.clear()
+                password.send_keys(self.account["password"])
+
+                step = "submitting the login form"
+                self.find("login_submit", clickable=True).click()
+                time.sleep(self.t("login_wait", 2))
+                self.check_for_bot_wall("login submit")
+
+                # Still on a login form means the credentials were rejected.
+                try:
+                    self.driver.find_element(by, value)
+                    shot = self.capture_evidence("login_rejected")
+                    raise UploadError(
+                        "Still on the login form after submitting — credentials "
+                        "look wrong or the account is locked.",
+                        pause_minutes=240,
+                        pause_reason="Login rejected — check the stored password",
+                        fatal=True,
+                    )
+                except NoSuchElementException:
+                    pass
+            else:
+                self.emit("Reusing saved session — no credential entry needed")
+
+            step = "navigating to the profile page"
+            profile_url = self.account.get("profile_url") or self.selectors.get("control_panel_url")
+            if profile_url:
+                self.driver.get(profile_url)
+                time.sleep(self.t("popup_delay", 2))
+
+            step = "dismissing any popup"
+            try:
+                by_c, value_c = parse_selector(self.sel("popup_close"))
+                self.driver.find_element(by_c, value_c).click()
+                time.sleep(1)
+                self.emit("Dismissed an interstitial popup")
+            except (NoSuchElementException, UploadError):
+                pass
+
+            self.emit("Login OK", level="ok", progress=10)
+
+        except UploadError:
+            raise
+        except WebDriverException as e:
+            self.capture_evidence("login_error")
+            raise UploadError(f"Login failed while {step}: {e}", pause_minutes=30)
+
+    # ── Single image ───────────────────────────────────────────────────────
+
+    def upload_one(self, item: dict, image_path: Path) -> dict[str, Any]:
+        """
+        Take one image through the full form, logging each phase separately.
+
+        Per-phase logging is the point: when something breaks you can see it
+        was the file input rather than the title field, which tells you exactly
+        which selector to fix.
+        """
+        if not image_path.is_file():
+            raise UploadError(f"Image not readable at {image_path}. "
+                              f"Check the storage mount matches storage_root.")
+
+        timings: dict[str, int] = {}
+
+        def phase(name: str) -> Callable[[], None]:
+            started = time.time()
+
+            def done() -> None:
+                timings[name] = int((time.time() - started) * 1000)
+            return done
+
+        # 1 — open a fresh upload form
+        mark = phase("open_form")
+        self.emit(f"  → opening upload form")
+        profile_url = self.account.get("profile_url")
+        if profile_url:
+            self.driver.get(profile_url)
+            time.sleep(self.t("page_load_wait", 2))
+        self.find("upload_button", clickable=True).click()
+        time.sleep(self.t("page_load_wait", 2))
+        self.check_for_bot_wall("upload form")
+        mark()
+
+        # 2 — hand the file to the input
+        mark = phase("send_file")
+        self.emit(f"  → sending file ({image_path.stat().st_size / 1024:.0f} KB)")
+        self.find("file_input").send_keys(str(image_path.resolve()))
+        time.sleep(self.t("page_load_wait", 2))
+        mark()
+
+        # 3 — confirm the upload and wait for the site to ingest it
+        mark = phase("confirm_upload")
+        self.emit("  → confirming upload")
+        self.find("upload_confirm", clickable=True).click()
+        time.sleep(self.t("upload_wait", 5))
+        self.check_for_bot_wall("image upload")
+        mark()
+
+        # 4 — fill the listing form
+        mark = phase("fill_form")
+        self.emit(f"  → filling form: {item['remote_title']!r}")
+        delay = self.t("form_input_delay", 0.4)
+
+        title_field = self.find("title_field")
+        title_field.click()
+        time.sleep(delay)
+        # Select-all + delete rather than clear(): some forms re-populate on
+        # clear() and end up with concatenated text.
+        title_field.send_keys(Keys.CONTROL + "a")
+        title_field.send_keys(Keys.DELETE)
+        time.sleep(delay)
+        title_field.send_keys(item["remote_title"])
+        time.sleep(delay)
+
+        if item.get("keywords"):
+            by_k, value_k = parse_selector(self.sel("keywords_field"))
+            keywords = self.driver.find_element(by_k, value_k)
+            keywords.click()
+            time.sleep(delay)
+            # Append rather than replace — the site pre-fills keywords from
+            # the title and those are worth keeping.
+            keywords.send_keys(Keys.CONTROL + Keys.END)
+            time.sleep(delay)
+            keywords.send_keys(item["keywords"])
+            time.sleep(delay)
+
+        if item.get("description"):
+            by_d, value_d = parse_selector(self.sel("description_field"))
+            description = self.driver.find_element(by_d, value_d)
+            description.click()
+            time.sleep(delay)
+            description.send_keys(Keys.CONTROL + "a")
+            description.send_keys(Keys.DELETE)
+            time.sleep(delay)
+            description.send_keys(item["description"])
+            time.sleep(delay)
+        mark()
+
+        # 5 — submit and verify
+        mark = phase("submit")
+        self.emit("  → submitting")
+        self.find("submit_button", clickable=True).click()
+        time.sleep(self.t("submit_wait", 2.5))
+
+        # A silent submit failure leaves us on the form. Detecting it here is
+        # what stops the legacy tool's habit of recording phantom successes.
+        marker = self.selectors.get("still_on_form_marker")
+        current_url = self.driver.current_url or ""
+        if marker and marker.lower() in current_url.lower():
+            shot = self.capture_evidence(f"submit_failed_{item['tracking_id']}")
+            raise UploadError(
+                f"Submit did not complete — still on the form ({current_url}). "
+                f"The site may have rejected the image or a required field.",
+                pause_minutes=0,
+            )
+        mark()
+
+        self.emit(f"  ✓ live: {item['remote_title']}", level="ok")
+        return {"timings": timings, "final_url": current_url}
+
+
+class UploadStage:
+    """
+    Drives the upload stage: claim → login once → upload each image → report.
+
+    Reporting happens per image, immediately, so a crash at image 30 of 40
+    keeps the first 29 recorded as uploaded.
+    """
+
+    def __init__(self, client: PipelineClient, config: dict,
+                 log: Callable[..., None]):
+        self.client = client
+        self.config = config
+        self.log = log
+        self.temp_dir = Path(config.get("temp_dir") or "C:/faa/temp")
+
+    def _resolve_image(self, item: dict, storage_root: Path) -> Path:
+        """
+        Locate the processed image.
+
+        Reads straight off the mounted storage box normally — no transfer at
+        all. Falls back to an HTTP fetch if the mount is missing, so a
+        misconfigured drive letter makes uploads slow rather than impossible.
+        """
+        candidate = storage_root / item["storage_path"]
+        if candidate.is_file():
+            return candidate
+
+        self.log(
+            f"Not on the storage mount ({candidate}) — fetching over HTTP instead",
+            level="warn",
+        )
+        fallback = self.temp_dir / "upload_cache" / item["filename"]
+        self.client.download_processed(item["tracking_id"], fallback)
+        return fallback
+
+    def run_batch(self, *, job_id: Optional[int] = None,
+                  account_id: Optional[int] = None,
+                  project_id: Optional[int] = None) -> dict:
+        claim = self.client.claim_upload_batch(
+            account_id=account_id, project_id=project_id)
+
+        account = claim.get("account")
+        items = claim.get("items") or []
+        if not account or not items:
+            self.log("Nothing to upload (no work, or every account is at its daily cap)")
+            return {"claimed": 0, "uploaded": 0, "failed": 0}
+
+        settings = claim["settings"]
+        quota = claim.get("quota") or {}
+        storage_root = Path(self.config.get("storage_root_override")
+                            or settings["storage_root"])
+
+        self.log(
+            f"Claimed {len(items)} image(s) for '{account['name']}' "
+            f"({account['target_site']}) · quota {quota.get('used')}/{quota.get('limit')}"
+        )
+        if job_id:
+            self.client.job_log(
+                job_id,
+                f"Uploading {len(items)} image(s) to {account['name']} "
+                f"· {quota.get('remaining')} left of today's {quota.get('limit')}",
+                progress=2,
+            )
+
+        uploader = MarketplaceUploader(
+            account=account, settings=settings, config=self.config,
+            client=self.client, log=self.log, job_id=job_id,
+        )
+
+        uploaded = failed = 0
+        gap = float(account["timings"].get("between_images", 3))
+
+        try:
+            uploader.start()
+            uploader.login()
+
+            for index, item in enumerate(items, start=1):
+                progress = 10 + int(index / len(items) * 88)
+                uploader.emit(
+                    f"[{index}/{len(items)}] {item['remote_title']}",
+                    progress=progress, note=f"{uploaded} up, {failed} failed",
+                )
+                try:
+                    image_path = self._resolve_image(item, storage_root)
+                    uploader.upload_one(item, image_path)
+                    # Report immediately — never batch the bookkeeping.
+                    self.client.report_uploaded(tracking_id=item["tracking_id"])
+                    uploaded += 1
+
+                except UploadError as e:
+                    failed += 1
+                    shot = uploader.capture_evidence(f"fail_{item['tracking_id']}")
+                    uploader.emit(f"  ✗ {e}", level="error")
+                    self.client.report_upload_failure(
+                        tracking_id=item["tracking_id"], error=str(e),
+                        screenshot=shot, pause_minutes=e.pause_minutes,
+                        pause_reason=e.pause_reason,
+                    )
+                    if e.fatal:
+                        uploader.emit(
+                            "Stopping this run — the problem affects the whole account.",
+                            level="error",
+                        )
+                        break
+
+                except Exception as e:
+                    failed += 1
+                    shot = uploader.capture_evidence(f"fail_{item['tracking_id']}")
+                    uploader.emit(f"  ✗ unexpected: {e}", level="error")
+                    self.client.report_upload_failure(
+                        tracking_id=item["tracking_id"],
+                        error=f"{type(e).__name__}: {e}", screenshot=shot,
+                    )
+
+                # A human-ish gap between images. Cheap insurance against rate
+                # heuristics, and irrelevant to an unattended box.
+                if index < len(items) and gap > 0:
+                    time.sleep(gap)
+
+        finally:
+            uploader.stop()
+
+        summary = {"claimed": len(items), "uploaded": uploaded, "failed": failed,
+                   "account": account["name"]}
+        self.log(f"Upload run done — {uploaded} uploaded, {failed} failed")
+        return summary
+
+    # ── Test hook ──────────────────────────────────────────────────────────
+
+    def test_upload(self, job_id: int, payload: dict) -> dict:
+        """
+        Walk exactly one image through the whole flow, phase by phase.
+
+        Nothing is marked uploaded: this exists to tell you *where* the flow
+        breaks after a selector or timing change, in about a minute, without
+        consuming a queue item or a slot in the daily quota.
+        """
+        account = payload["account"]
+        settings = payload["settings"]
+        storage_root = Path(self.config.get("storage_root_override")
+                            or settings["storage_root"])
+
+        item = {
+            "tracking_id":  payload["tracking_id"],
+            "remote_title": payload["remote_title"],
+            "keywords":     payload.get("keywords", ""),
+            "description":  payload.get("description", ""),
+            "storage_path": payload["storage_path"],
+            "filename":     payload["filename"],
+        }
+
+        self.client.job_log(job_id, [
+            f"Account: {account['name']} ({account['target_site']})",
+            f"Listing title: {item['remote_title']}",
+            f"Keywords: {item['keywords']}",
+            f"Description: {(item['description'] or '')[:120]}"
+            + ("…" if len(item.get("description") or "") > 120 else ""),
+            f"Image: {item['storage_path']}",
+            "This is a dry run — nothing will be marked uploaded.",
+        ], progress=3)
+
+        uploader = MarketplaceUploader(
+            account=account, settings=settings, config=self.config,
+            client=self.client, log=self.log, job_id=job_id,
+        )
+
+        try:
+            uploader.start()
+            uploader.login()
+            image_path = self._resolve_image(item, storage_root)
+            self.client.job_log(
+                job_id, f"Image resolved to {image_path}", progress=20)
+            result = uploader.upload_one(item, image_path)
+            self.client.job_log(
+                job_id, "All phases completed successfully.",
+                level="ok", progress=100)
+            return {"phases_ms": result["timings"], "final_url": result["final_url"],
+                    "dry_run": True}
+        finally:
+            uploader.stop()

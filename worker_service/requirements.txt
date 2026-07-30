@@ -1,0 +1,5 @@
+# Worker node dependencies. Deliberately minimal so the node can be
+# provisioned on a bare Windows box without a build toolchain.
+requests>=2.31.0
+selenium>=4.16.0
+psutil>=5.9.0

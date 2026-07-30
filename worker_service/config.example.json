@@ -1,0 +1,12 @@
+{
+  "_comment": "Copy to config.json and fill in. This is the ONLY configuration on the node — everything about how work is done lives in the dashboard.",
+
+  "server_url": "http://178.105.34.144:8000",
+  "token": "PASTE_THE_TOKEN_SHOWN_WHEN_YOU_REGISTERED_THIS_NODE",
+
+  "temp_dir": "C:/faa/temp",
+  "log_dir": "C:/faa/logs",
+
+  "_storage_note": "Leave null to use the storage_root configured in the dashboard. Only set this if THIS node has the storage box mounted at a different path than the others.",
+  "storage_root_override": null
+}

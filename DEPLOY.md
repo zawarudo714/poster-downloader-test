@@ -318,9 +318,52 @@ SSH). Then open:
 http://178.105.232.196/login
 ```
 
-> Plain HTTP means passwords cross the network in the clear. Fine for a test
-> box. Before real workers use it, put Caddy or nginx in front for TLS — a
-> domain plus Caddy is about five lines and gets you an automatic certificate.
+> **Use `http://`, not `https://`.** There is no TLS certificate on this box,
+> so `https://178.105.232.196/login` will not load — the most common reason
+> the site appears "down" when it's actually running fine. If Chrome silently
+> upgrades the URL back to HTTPS, turn off *Always use secure connections* at
+> `chrome://settings/security`, or test in a private window.
+>
+> Plain HTTP means passwords cross the network in the clear. Fine while you're
+> testing. Before real workers use it, put Caddy in front for TLS — point a
+> domain at the IP and it's about five lines for an automatic certificate.
+
+### If the site won't load
+
+Work outward from the app. Each step isolates one layer:
+
+```bash
+# 1. Container running?
+docker compose ps                       # STATUS: Up (healthy)
+
+# 2. App alive inside the container?
+docker compose exec web curl -s http://127.0.0.1:8000/healthz
+
+# 3. Through the port mapping?
+curl -s http://localhost/healthz        # {"ok":true}
+
+# 4. Does the login page render?
+curl -I http://localhost/login          # HTTP/1.1 200 OK
+
+# 5. Listening on all interfaces, not just loopback?
+ss -tlnp | grep :80                     # expect 0.0.0.0:80
+
+# 6. Host firewall?
+ufw status                              # "inactive" is the Hetzner default
+```
+
+From your own machine:
+
+```cmd
+curl -I http://178.105.232.196/login
+```
+
+| Where it breaks | Cause |
+|---|---|
+| Steps 1–6 pass, external fails | Hetzner **cloud firewall** — Console → Firewalls, allow inbound TCP 80 |
+| Step 1 shows Exited | `docker compose logs web` — usually a missing `.env` value |
+| Step 2 fails | App crashed on startup; check the logs |
+| Everything passes, browser still fails | You're on `https://` — see above |
 
 ## 6. Import the master sheet
 

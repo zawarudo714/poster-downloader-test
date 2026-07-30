@@ -437,6 +437,19 @@ plumbing.
   Don't add a `NOT NULL` constraint without a full backfill.
 - **Test output goes to `_tests/`** in storage. Keep it that way so
   experimenting can't overwrite a live derivative.
+- **Real Paint FX depends on Photoshop application state.** Its pattern
+  (`.pat`) and action (`.atn`) sets must be loaded into Photoshop itself; they
+  live in Photoshop's preferences, not in any file the pipeline controls. If
+  the processing stage starts failing with plugin errors on a node that
+  previously worked, check these first — a preferences reset or a rebuilt VPS
+  loses them silently, with the script and all paths unchanged. Copies are kept
+  at `S:\installers\realpaintfx-presets\`, and the node's snapshot is what
+  normally preserves them. See `SETUP_WINDOWS_NODE.md` §5c.
+- **The FX Box panel installer is not used and does not work on Photoshop
+  2026.** `Fx Tool\Real-Paint-FX_installer.jsx` only registers the effect in
+  the interactive panel and throws `TypeError: undefined is not an object` on
+  current Photoshop. The pipeline calls
+  `Real Paint FX\Scripts (actions)\Real-Paint-FX.jsx` directly. Don't chase it.
 
 ---
 

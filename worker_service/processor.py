@@ -1,19 +1,47 @@
 """
 Photoshop stage — runs the dashboard-supplied JSX on one image at a time.
 
-Why one image per Photoshop invocation rather than a folder walk:
+════════════════════════════════════════════════════════════════════════════
+HOW PHOTOSHOP IS DRIVEN, AND WHY IT LOOKS ODD
+════════════════════════════════════════════════════════════════════════════
+`Photoshop.exe -r script.jsx` does NOT behave like a normal CLI tool:
 
-  * A single bad file can no longer kill a whole batch. The legacy script
-    walked entire date trees inside Photoshop, so one unopenable image or one
-    plugin hiccup took the rest of the run down with it.
-  * Every image gets its own timeout. A hung Photoshop is detected and killed
-    instead of stalling the queue overnight.
+  * If Photoshop isn't running, it launches, runs the script, and then STAYS
+    OPEN. The process never exits.
+  * If Photoshop IS running, the new process hands the script to the existing
+    instance and exits almost immediately — the script may not even have
+    started yet, let alone finished.
+
+So process exit tells you nothing about whether the work is done. An earlier
+version of this module called `subprocess.run(..., timeout=...)` and waited
+for exit; it blocked forever on the very first image, with Photoshop sitting
+idle at its Home screen and the whole agent wedged. `subprocess.run` also
+can't be relied on to unblock on timeout here, because it drains the captured
+pipes afterwards and Photoshop's surviving children hold them open.
+
+The correct model, implemented below:
+
+  1. Ensure exactly one Photoshop instance is alive (start it if not).
+  2. Dispatch the script to it and DON'T wait on the launcher.
+  3. Poll for a result file the script writes when it finishes.
+  4. If that file doesn't appear within the timeout, the run is genuinely
+     hung — kill Photoshop and let the next image start it fresh.
+
+Keeping Photoshop alive between images is also a straight speed win: startup
+was costing 15-30s per image and is now paid once per batch.
+
+════════════════════════════════════════════════════════════════════════════
+ISOLATION IS PRESERVED
+════════════════════════════════════════════════════════════════════════════
+One image per script run still means:
+
+  * A single bad file can't kill the batch — the legacy script walked whole
+    date trees inside Photoshop, so one unopenable image took the rest down.
+  * Every image has its own timeout, enforced by polling rather than by
+    process exit.
   * Progress is reported per image, so a crash mid-batch keeps credit for
     everything already finished.
-  * Retries become granular — the pipeline retries one image, not 200.
-
-The tradeoff is Photoshop startup cost per image. That's the right trade for
-an unattended box: reliability over throughput.
+  * Retries are granular — one image, not 200.
 """
 
 from __future__ import annotations
@@ -29,10 +57,19 @@ from typing import Any, Callable, Optional
 from .client import PipelineClient, PipelineError
 
 
-# The JSX expects INPUT_FILE and OUTPUT_FILE to already exist as globals; we
-# prepend them rather than templating the whole script so the dashboard-edited
-# body stays byte-for-byte what the admin wrote.
-_HEADER = 'var INPUT_FILE = {input};\nvar OUTPUT_FILE = {output};\n'
+# The JSX expects these to already exist as globals; we prepend them rather
+# than templating the whole script so the dashboard-edited body stays
+# byte-for-byte what the admin wrote.
+#
+# RESULT_FILE is a LOCAL path, deliberately: the script's completion signal
+# must not depend on the network storage mount. Writing it beside OUTPUT_FILE
+# on an SMB share meant the poll below could be delayed by client-side caching,
+# or miss it entirely if the mount dropped mid-run.
+_HEADER = (
+    'var INPUT_FILE  = {input};\n'
+    'var OUTPUT_FILE = {output};\n'
+    'var RESULT_FILE = {result};\n'
+)
 
 
 def _jsx_string(path: Path) -> str:
@@ -51,9 +88,10 @@ class PhotoshopRunner:
 
     def __init__(self, *, exe: str, script: str, version: str,
                  work_dir: Path, timeout_s: int,
-                 log: Callable[[str], None]):
+                 log: Callable[[str], None], warmup_s: int = 60):
         self.exe = exe
         self.timeout_s = timeout_s
+        self.warmup_s = warmup_s
         self.log = log
         self.work_dir = work_dir
         self.work_dir.mkdir(parents=True, exist_ok=True)
@@ -62,57 +100,47 @@ class PhotoshopRunner:
         self.script_body = script
         self.script_path = self.work_dir / f"process_{version}.jsx"
 
-    def _write_script(self, source: Path, output: Path) -> Path:
-        """
-        Compose the runnable script for one image.
+    # ── Process management ─────────────────────────────────────────────────
 
-        Written per-image because the header carries that image's paths. Kept
-        beside the versioned body so a failure can be reproduced by hand with
-        the exact file Photoshop was given.
-        """
-        header = _HEADER.format(input=_jsx_string(source), output=_jsx_string(output))
-        runnable = self.work_dir / "run_current.jsx"
-        runnable.write_text(header + self.script_body, encoding="utf-8")
-        return runnable
+    def _process_name(self) -> str:
+        return os.path.basename(self.exe) or "Photoshop.exe"
 
-    def run(self, source: Path, output: Path) -> dict[str, Any]:
-        """
-        Process one image. Returns the sidecar result dict from the JSX.
-
-        Photoshop's ExtendScript can't talk back over stdout reliably, so the
-        script writes `<output>.result.json` and we read it. Absence of that
-        file is itself diagnostic: it means the script died before its own
-        error handler ran.
-        """
-        if not source.is_file():
-            raise RuntimeError(f"Source file missing: {source}")
-
-        output.parent.mkdir(parents=True, exist_ok=True)
-        sidecar = Path(str(output) + ".result.json")
-
-        # Clear stale artefacts so we can't mistake a previous run's output
-        # for this one's.
-        for stale in (output, sidecar):
-            if stale.exists():
-                try:
-                    stale.unlink()
-                except OSError:
-                    pass
-
-        runnable = self._write_script(source, output)
-        started = time.time()
-
+    def is_running(self) -> bool:
+        """Whether a Photoshop instance is already up."""
         try:
-            completed = subprocess.run(
-                [self.exe, "-r", str(runnable)],
-                timeout=self.timeout_s,
-                capture_output=True,
-            )
-        except subprocess.TimeoutExpired:
-            self._kill_photoshop()
-            raise RuntimeError(
-                f"Photoshop timed out after {self.timeout_s}s. "
-                "The process was killed; raise process_timeout_s if this is a large image."
+            import psutil
+        except ImportError:
+            # Without psutil we can't tell; assume not and let the launcher
+            # deal with it. Dispatch is harmless either way.
+            return False
+        target = self._process_name().lower()
+        for proc in psutil.process_iter(["name"]):
+            try:
+                if (proc.info.get("name") or "").lower() == target:
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def ensure_running(self) -> None:
+        """
+        Make sure one Photoshop instance is alive, without blocking on it.
+
+        Popen and walk away — Photoshop is a long-lived GUI app, so waiting for
+        it to exit is exactly the mistake that wedged the agent before. The
+        warmup pause gives it time to finish loading before we hand it a
+        script; dispatching too early is silently ignored.
+        """
+        if self.is_running():
+            return
+
+        self.log("Starting Photoshop…")
+        try:
+            subprocess.Popen(
+                [self.exe],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
         except FileNotFoundError:
             raise RuntimeError(
@@ -120,31 +148,185 @@ class PhotoshopRunner:
                 "Fix photoshop_exe under Pipeline → Processing."
             )
 
+        deadline = time.time() + self.warmup_s
+        while time.time() < deadline:
+            if self.is_running():
+                break
+            time.sleep(1)
+        # Even once the process exists it needs a moment before it will accept
+        # a script. Short, and only paid once per batch.
+        time.sleep(min(8, self.warmup_s))
+
+    def kill(self) -> None:
+        """
+        Force-kill Photoshop.
+
+        Used when a run hangs — typically a modal dialog nothing can dismiss,
+        which would otherwise block every remaining image in the batch.
+        """
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/IM", self._process_name()],
+                capture_output=True, timeout=30,
+            )
+            self.log("Killed hung Photoshop process")
+            time.sleep(3)
+        except Exception as e:
+            self.log(f"Could not kill Photoshop: {e}")
+
+    # ── Running one image ──────────────────────────────────────────────────
+
+    def _write_script(self, source: Path, output: Path, result_file: Path) -> Path:
+        """
+        Compose the runnable script for one image.
+
+        The filename is unique per run. Reusing a fixed `run_current.jsx` meant
+        that whenever Photoshop still held the previous script open — which is
+        exactly what happens after a hung or killed run — the next write failed
+        with `PermissionError: [Errno 13]` and took the whole batch down with
+        it. A file Photoshop is holding is now simply never the one we write to.
+
+        Old scripts are swept below rather than on exit, so a crashed agent
+        doesn't leave them behind forever.
+        """
+        self._sweep_old_scripts()
+
+        header = _HEADER.format(
+            input=_jsx_string(source),
+            output=_jsx_string(output),
+            result=_jsx_string(result_file),
+        )
+        runnable = self.work_dir / f"run_{os.getpid()}_{int(time.time() * 1000)}.jsx"
+        runnable.write_text(header + self.script_body, encoding="utf-8")
+        return runnable
+
+    def _sweep_old_scripts(self, keep_seconds: int = 600) -> None:
+        """
+        Delete generated scripts older than `keep_seconds`.
+
+        Best-effort by design: anything Photoshop still has open will refuse to
+        delete, and that's fine — we never write to those names again.
+        """
+        cutoff = time.time() - keep_seconds
+        for path in self.work_dir.glob("run_*.jsx"):
+            try:
+                if path.stat().st_mtime < cutoff:
+                    path.unlink()
+            except OSError:
+                pass
+        # Legacy fixed-name file from before this change.
+        legacy = self.work_dir / "run_current.jsx"
+        try:
+            if legacy.exists() and legacy.stat().st_mtime < cutoff:
+                legacy.unlink()
+        except OSError:
+            pass
+
+    def run(self, source: Path, output: Path) -> dict[str, Any]:
+        """
+        Process one image and return its metrics.
+
+        Completion is detected by polling for the result file the script
+        writes, NOT by waiting for a process to exit — see the module docstring
+        for why that distinction matters.
+        """
+        if not source.is_file():
+            raise RuntimeError(f"Source file missing: {source}")
+
+        output.parent.mkdir(parents=True, exist_ok=True)
+
+        result_file = self.work_dir / "last_result.json"
+        # Older saved scripts write beside the output instead; poll both so a
+        # customised script from before this change still works.
+        legacy_sidecar = Path(str(output) + ".result.json")
+
+        # Clear stale artefacts — otherwise a previous run's output could be
+        # mistaken for this one's.
+        for stale in (output, result_file, legacy_sidecar):
+            try:
+                if stale.exists():
+                    stale.unlink()
+            except OSError:
+                pass
+
+        self.ensure_running()
+        runnable = self._write_script(source, output, result_file)
+        started = time.time()
+
+        # Dispatch. With Photoshop already up this returns almost immediately;
+        # we don't depend on that, and a hang here is caught by the poll below.
+        try:
+            launcher = subprocess.Popen(
+                [self.exe, "-r", str(runnable)],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except FileNotFoundError:
+            raise RuntimeError(
+                f"Photoshop executable not found at {self.exe}. "
+                "Fix photoshop_exe under Pipeline → Processing."
+            )
+
+        # Poll for the script's own completion signal.
+        deadline = time.time() + self.timeout_s
+        raw: Optional[str] = None
+        while time.time() < deadline:
+            for candidate in (result_file, legacy_sidecar):
+                if candidate.is_file():
+                    try:
+                        raw = candidate.read_text(encoding="utf-8")
+                    except OSError:
+                        # Still being written; try again next tick.
+                        raw = None
+                    if raw:
+                        break
+            if raw:
+                break
+            time.sleep(0.5)
+
+        try:
+            launcher.poll()
+            if launcher.returncode is None:
+                launcher.kill()
+        except Exception:
+            pass
+
+        if raw is None:
+            # Nothing came back in time. Photoshop is most likely sitting on a
+            # modal it can't get past, so kill it — the next image starts a
+            # clean instance rather than inheriting the stuck one.
+            self.kill()
+            raise RuntimeError(
+                f"Photoshop did not finish within {self.timeout_s}s. "
+                "It was killed and will be restarted for the next image. "
+                "If this repeats, run the script by hand in Photoshop — it is "
+                "usually a dialog waiting for input (a missing plugin preset, "
+                "a colour-profile prompt, or a font warning). "
+                "Raise process_timeout_s if the image is simply very large."
+            )
+
         duration_ms = int((time.time() - started) * 1000)
 
         result: dict[str, Any] = {}
-        if sidecar.is_file():
+        try:
+            result = json.loads(raw)
+        except ValueError:
+            result = {}
+        for artefact in (result_file, legacy_sidecar):
             try:
-                result = json.loads(sidecar.read_text(encoding="utf-8"))
-            except (ValueError, OSError):
-                result = {}
-            finally:
-                try:
-                    sidecar.unlink()
-                except OSError:
-                    pass
+                if artefact.exists():
+                    artefact.unlink()
+            except OSError:
+                pass
 
         if result.get("ok") is False:
             raise RuntimeError(f"Script reported: {result.get('error', 'unknown error')}")
 
         if not output.is_file():
-            # No output and no sidecar means Photoshop failed before the
-            # script's own error path — surface whatever it printed.
-            stderr = (completed.stderr or b"").decode("utf-8", "replace").strip()
-            stdout = (completed.stdout or b"").decode("utf-8", "replace").strip()
-            detail = stderr or stdout or "no output from Photoshop"
             raise RuntimeError(
-                f"Photoshop produced no output file. Exit={completed.returncode}. {detail[:500]}"
+                f"Script reported success but no output file exists at {output}. "
+                "Check the storage mount is writable from this machine."
             )
 
         return {
@@ -153,23 +335,6 @@ class PhotoshopRunner:
             "width": result.get("width"),
             "height": result.get("height"),
         }
-
-    def _kill_photoshop(self) -> None:
-        """
-        Force-kill Photoshop after a timeout.
-
-        Necessary because a hung Photoshop holds a modal dialog that would
-        block every subsequent image — one stuck file would otherwise end the
-        night's work.
-        """
-        try:
-            subprocess.run(
-                ["taskkill", "/F", "/IM", os.path.basename(self.exe)],
-                capture_output=True, timeout=30,
-            )
-            self.log("Killed hung Photoshop process")
-        except Exception as e:
-            self.log(f"Could not kill Photoshop: {e}")
 
 
 class ProcessStage:
@@ -223,6 +388,7 @@ class ProcessStage:
             version=version,
             work_dir=self.temp_dir / "scripts",
             timeout_s=int(settings.get("timeout_s") or 600),
+            warmup_s=int(settings.get("warmup_s") or 60),
             log=self.log,
         )
         self._runner_version = version

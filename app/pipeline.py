@@ -144,11 +144,21 @@ function run() {
     }
 }
 
-// Photoshop can't talk to the pipeline directly, so it drops a JSON sidecar
-// next to the output that the worker node reads and deletes.
+// Photoshop can't talk to the pipeline directly, so it drops a small JSON file
+// that the worker node polls for. THIS IS THE COMPLETION SIGNAL — the node
+// does not wait for Photoshop to exit (it never does), it waits for this file.
+// Always write it, on both the success and failure paths, or the node will
+// consider the run hung and kill Photoshop.
+//
+// RESULT_FILE is a local path supplied by the node. The fallback keeps older
+// saved scripts working; it writes beside the output instead, which is on the
+// network share and therefore slower to appear.
 function writeResult(obj) {
     try {
-        var f = new File(OUTPUT_FILE + ".result.json");
+        var target = (typeof RESULT_FILE !== "undefined" && RESULT_FILE)
+                     ? RESULT_FILE
+                     : (OUTPUT_FILE + ".result.json");
+        var f = new File(target);
         f.open("w"); f.write(toJSON(obj)); f.close();
     } catch (e) {}
 }
@@ -258,6 +268,9 @@ DEFAULTS: dict[str, Any] = {
     "photoshop_exe":      "C:/Program Files/Adobe/Adobe Photoshop 2023/Photoshop.exe",
     # Seconds before a single-image Photoshop run is considered hung.
     "process_timeout_s":  600,
+    # How long to wait for a cold Photoshop to become ready before
+    # dispatching the first script. Only paid once per batch.
+    "photoshop_warmup_s": 60,
     "process_batch_size": 20,
     "process_max_attempts": 3,
 
@@ -1532,6 +1545,11 @@ def process_settings_payload(
         "photoshop_exe":    get_setting(db, "photoshop_exe", project=project),
         "storage_root":     get_setting(db, "storage_root", project=project),
         "timeout_s":        get_setting(db, "process_timeout_s", project=project),
+        "warmup_s":         get_setting(db, "photoshop_warmup_s", project=project),
+        # Echoed back so the node's own log can state what it is applying —
+        # the test log printed "work ?px -> out ?px" without these.
+        "work_width":       get_setting(db, "work_width", project=project),
+        "output_width":     get_setting(db, "output_width", project=project),
         "batch_size":       get_setting(db, "process_batch_size", project=project),
         "output_suffix":    get_setting(db, "output_suffix", project=project),
         "poll_interval_s":  get_setting(db, "poll_interval_s", project=project),

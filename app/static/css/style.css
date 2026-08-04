@@ -3643,12 +3643,21 @@ body:has(#ib-bulk-bar:not([hidden])) { padding-bottom: 88px; }
 
 /* ── Sub-navigation ─────────────────────────────────────────────────── */
 .pipe-tabs {
+  /* Sticks BELOW the main header, whose height varies because the admin nav
+     wraps to two rows on narrower screens. JS measures it and sets
+     --pipe-tabs-top; the 48px fallback is the unwrapped height. */
+  position: sticky;
+  top: var(--pipe-tabs-top, 48px);
+  /* Under the header's z-index of 50, so the header always wins. */
+  z-index: 30;
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
   margin-bottom: 4px;
+  padding: 8px 0;
+  /* Opaque, or panels scroll through it. */
+  background: var(--bg);
   border-bottom: 1px solid var(--border);
-  padding-bottom: 8px;
 }
 .pipe-tab {
   position: relative;
@@ -3682,7 +3691,17 @@ body:has(#ib-bulk-bar:not([hidden])) { padding-bottom: 88px; }
 }
 .pipe-tab-badge-error { background: var(--error); color: #fff; }
 
+/* Sections behave as if they weren't there, so their panels sit directly in
+   the admin grid. */
 .pipe-section { display: contents; }
+
+/* THIS RULE IS LOad-BEARING — do not remove.
+   `display: contents` above is author CSS, and author CSS beats the browser's
+   built-in `[hidden] { display: none }`. Without an explicit override, setting
+   `hidden` on a section did nothing at all: every section rendered at once as
+   one enormous scroll, the tab buttons appeared dead, and sections that hadn't
+   been opened yet sat visibly on "Loading…". */
+.pipe-section[hidden] { display: none; }
 
 /* ── Funnel ─────────────────────────────────────────────────────────── */
 .funnel-grid {
@@ -4114,3 +4133,12 @@ label.inline-check {
 /* In-flight rows whose claim has gone stale — will be auto-returned. */
 .inflight-stale { background: rgba(232, 85, 75, 0.07); }
 .inflight-stale td { color: #ffb3ad; }
+
+
+/* Live console sits outside the sections so it works from any tab. Marked
+   visually so it's obviously not part of the section you're looking at. */
+.pipe-console-panel {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(232, 184, 75, 0.18);
+}
+.pipe-console-panel[hidden] { display: none; }

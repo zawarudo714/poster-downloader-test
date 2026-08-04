@@ -100,26 +100,6 @@
       </div>
     </section>
 
-    {# Live console is shared by every section — a test in the Test tab and a
-       batch run here both stream into the same place, so there's one habit to
-       learn rather than several. #}
-    <section class="panel" data-console-panel hidden>
-      <div class="panel-head">
-        <span>LIVE CONSOLE — <span class="mono" data-console-title>job</span>
-          {{ info("Streamed from the worker node as it works, phase by phase. This is where you see exactly which step failed instead of reconstructing it afterwards.") }}
-        </span>
-        <span class="filter-row" style="gap:6px">
-          <label class="inline-check"><input type="checkbox" data-console-follow checked> FOLLOW</label>
-          <button type="button" class="btn btn-ghost btn-tiny" data-action="console-close">CLOSE</button>
-        </span>
-      </div>
-      <div class="panel-body">
-        <div class="pipe-progress"><div class="pipe-progress-bar" data-console-progress style="width:0%"></div></div>
-        <pre class="pipe-console" data-console-log></pre>
-        <div class="pipe-console-result" data-console-result hidden></div>
-      </div>
-    </section>
-
   </div>
 
   {# ═══════════════════════════════════════════════════════════════ #}
@@ -545,6 +525,35 @@
     </section>
 
   </div>
+
+  {# ═══════════════════════════════════════════════════════════════ #}
+  {#  LIVE CONSOLE — deliberately OUTSIDE every section              #}
+  {# ═══════════════════════════════════════════════════════════════ #}
+  {#
+     It is opened from two different tabs: Overview (batch runs) and
+     Test & Debug (single-image tests). If it lived inside a section it would
+     silently render nothing whenever it was opened from the other one —
+     unhiding a panel inside a hidden parent does nothing.
+
+     Kept here so it is available from wherever you happen to be, and so one
+     habit covers watching a test and watching a batch.
+  #}
+  <section class="panel pipe-console-panel" data-console-panel hidden>
+    <div class="panel-head">
+      <span>LIVE CONSOLE — <span class="mono" data-console-title>job</span>
+        {{ info("Streamed from the worker node as it works, phase by phase. This is where you see exactly which step failed instead of reconstructing it afterwards. Available from any tab.") }}
+      </span>
+      <span class="filter-row" style="gap:6px">
+        <label class="inline-check"><input type="checkbox" data-console-follow checked> FOLLOW</label>
+        <button type="button" class="btn btn-ghost btn-tiny" data-action="console-close">CLOSE</button>
+      </span>
+    </div>
+    <div class="panel-body">
+      <div class="pipe-progress"><div class="pipe-progress-bar" data-console-progress style="width:0%"></div></div>
+      <pre class="pipe-console" data-console-log></pre>
+      <div class="pipe-console-result" data-console-result hidden></div>
+    </div>
+  </section>
 
   {# ── Modals ─────────────────────────────────────────────────────── #}
   <div class="pipe-modal" data-account-modal hidden>

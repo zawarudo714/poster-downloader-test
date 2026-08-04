@@ -139,11 +139,35 @@
     nodes:      loadOverview,
   };
 
-  function showSection(name) {
+  // Keep the sticky sub-nav pinned directly under the main header. The
+  // header's height changes when the admin nav wraps, so measure rather than
+  // assume.
+  function syncStickyOffset() {
+    const bar = document.querySelector('.topbar');
+    if (!bar) return;
+    document.documentElement.style.setProperty(
+      '--pipe-tabs-top', bar.offsetHeight + 'px');
+  }
+  syncStickyOffset();
+  window.addEventListener('resize', syncStickyOffset);
+
+  function showSection(name, opts) {
+    const silent = opts && opts.silent;
+
     qa('.pipe-tab').forEach((t) =>
       t.classList.toggle('active', t.dataset.section === name));
     qa('[data-section-panel]').forEach((p) =>
       p.hidden = p.dataset.sectionPanel !== name);
+
+    // Put the URL in charge of which section is open: back/forward work,
+    // refreshing keeps your place, and a section can be bookmarked or shared.
+    if (!silent && location.hash !== '#' + name) {
+      history.pushState({ section: name }, '', '#' + name);
+    }
+
+    // Land at the top of the new section rather than wherever you happened to
+    // be scrolled to in the previous one.
+    window.scrollTo({ top: 0, behavior: 'auto' });
 
     // Load once per section, then only on explicit action — switching tabs
     // stays instant. `loaded` is cleared again if the loader throws, so a
@@ -1610,11 +1634,23 @@
   });
 
   // ── Boot ─────────────────────────────────────────────────────────────────
+  // The URL wins, then the last-visited section, then Overview.
   let initial = 'overview';
-  try {
-    const saved = sessionStorage.getItem('pipe-section');
-    if (saved && q(`[data-section-panel="${saved}"]`)) initial = saved;
-  } catch (e) {}
+  const fromHash = (location.hash || '').replace('#', '');
+  if (fromHash && q(`[data-section-panel="${fromHash}"]`)) {
+    initial = fromHash;
+  } else {
+    try {
+      const saved = sessionStorage.getItem('pipe-section');
+      if (saved && q(`[data-section-panel="${saved}"]`)) initial = saved;
+    } catch (e) {}
+  }
+
+  // Back/forward between sections.
+  window.addEventListener('popstate', () => {
+    const name = (location.hash || '').replace('#', '') || 'overview';
+    if (q(`[data-section-panel="${name}"]`)) showSection(name, { silent: true });
+  });
 
   // Overview and settings both load up front.
   //
@@ -1630,7 +1666,7 @@
     loadOverview().catch((e) => toast('Overview: ' + e.message, 'error')),
     loadSettings().catch((e) => { loaded.processing = false; }),
   ]).then(() => {
-    if (initial !== 'overview') showSection(initial);
+    showSection(initial, { silent: true });
   });
 
   // Refresh the overview periodically so quota and node health stay honest

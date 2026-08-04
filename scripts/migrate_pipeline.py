@@ -88,78 +88,11 @@ from app.models import (
 #  1. SCHEMA
 # ═════════════════════════════════════════════════════════════════════════
 
-# (table, column, DDL type). Ordered so a partial previous run resumes cleanly.
-NEW_COLUMNS = [
-    ("master_titles", "project_id",       "INTEGER"),
-    ("master_titles", "greenlit_at",      "DATETIME"),
-    ("master_titles", "greenlit_by",      "VARCHAR(64)"),
-    ("master_titles", "pipeline_status",  "VARCHAR(24)"),
-    ("saved_posters", "pipeline_status",  "VARCHAR(24)"),
-    ("saved_posters", "process_attempts", "INTEGER NOT NULL DEFAULT 0"),
-    ("saved_posters", "process_error",    "TEXT"),
-    ("saved_posters", "claimed_at",       "DATETIME"),
-    ("saved_posters", "claimed_by",       "VARCHAR(64)"),
-    # Fair sharing between projects / rotation between accounts.
-    ("projects",        "process_weight", "INTEGER NOT NULL DEFAULT 1"),
-    ("upload_accounts", "rotation_order", "INTEGER NOT NULL DEFAULT 100"),
-    ("upload_accounts", "rotation_size",  "INTEGER"),
-]
-
-NEW_INDEXES = [
-    ("ix_master_titles_project_id",     "master_titles", "project_id"),
-    ("ix_master_titles_greenlit_at",    "master_titles", "greenlit_at"),
-    ("ix_master_titles_pipeline_status","master_titles", "pipeline_status"),
-    ("ix_saved_posters_pipeline_status","saved_posters", "pipeline_status"),
-    ("ix_poster_pipeline",              "saved_posters", "pipeline_status, deleted_at"),
-]
-
-
-def migrate_schema(*, dry_run: bool = False) -> dict:
-    """
-    Add the pipeline columns and their indexes.
-
-    Uses ALTER TABLE ADD COLUMN, which SQLite handles without rewriting the
-    table — so this is fast and safe even on a 100k-row master list. Existing
-    columns are detected and skipped, so re-running is a no-op.
-    """
-    inspector = inspect(engine)
-    existing_tables = set(inspector.get_table_names())
-
-    added, skipped = [], []
-    with engine.begin() as conn:
-        for table, column, ddl in NEW_COLUMNS:
-            if table not in existing_tables:
-                skipped.append(f"{table}.{column} (table missing)")
-                continue
-            columns = {c["name"] for c in inspector.get_columns(table)}
-            if column in columns:
-                skipped.append(f"{table}.{column}")
-                continue
-            if dry_run:
-                added.append(f"{table}.{column} (would add)")
-                continue
-            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
-            added.append(f"{table}.{column}")
-
-        if not dry_run:
-            for name, table, columns in NEW_INDEXES:
-                if table not in existing_tables:
-                    continue
-                try:
-                    conn.execute(text(
-                        f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({columns})"
-                    ))
-                except Exception:
-                    # An index is an optimisation, never a correctness
-                    # requirement — don't fail the migration over one.
-                    pass
-
-    # Creates the brand-new pipeline tables (projects, upload_accounts,
-    # processed_images, upload_tracking, pipeline_jobs, worker_nodes).
-    if not dry_run:
-        init_db()
-
-    return {"added": added, "skipped": skipped}
+# Column and index definitions live in app/schema_migrations.py, which the app
+# also applies automatically at startup. Imported rather than duplicated: two
+# copies of a migration list is exactly how a column ends up added in one place
+# and not the other.
+from app.schema_migrations import NEW_COLUMNS, NEW_INDEXES, migrate_schema  # noqa: F401,E402
 
 
 # ═════════════════════════════════════════════════════════════════════════

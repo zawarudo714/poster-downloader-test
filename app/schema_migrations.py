@@ -1,0 +1,121 @@
+"""
+Additive schema migrations, applied automatically at startup.
+
+════════════════════════════════════════════════════════════════════════════
+WHY THIS RUNS ITSELF
+════════════════════════════════════════════════════════════════════════════
+`Base.metadata.create_all()` creates new TABLES but never ALTERs existing
+ones, so a release that adds a column needs an explicit migration. In a Docker
+deployment that creates an ordering trap with no good answer:
+
+  * Migrate BEFORE rebuilding and you run the OLD script — the whole repo is
+    baked into the image at build time, so `docker compose exec` executes
+    whatever the running container was built with. New columns are silently
+    skipped and it cheerfully reports "nothing to add".
+  * Migrate AFTER rebuilding and the app serves 500s in the window between the
+    two commands, because the new code queries columns that don't exist yet.
+
+Either way it depends on remembering the right order, and getting it wrong
+produces an Internal Server Error with no obvious cause. So the app applies its
+own additive schema changes on startup, before it accepts a request. Deploying
+becomes `git pull && docker compose up -d --build` with nothing to remember.
+
+════════════════════════════════════════════════════════════════════════════
+WHAT BELONGS HERE — AND WHAT DOESN'T
+════════════════════════════════════════════════════════════════════════════
+ONLY changes that are safe to apply unattended, to any database, in any order:
+
+    ADD COLUMN (nullable, or with a default)
+    CREATE INDEX IF NOT EXISTS
+
+Every entry must be idempotent and fast. SQLite's ADD COLUMN doesn't rewrite
+the table, so this stays quick even on the 100k-row master list.
+
+DO NOT put data migrations here — backfills, imports, anything that rewrites
+rows or could take minutes. Those belong in scripts/migrate_pipeline.py where
+a human runs them deliberately, can dry-run them first, and can take a backup.
+A destructive step that runs itself on every boot is a very bad day.
+"""
+
+from __future__ import annotations
+
+from sqlalchemy import inspect, text
+
+from .db import engine
+
+
+# (table, column, DDL). Append new entries; never edit or reorder existing ones.
+NEW_COLUMNS: list[tuple[str, str, str]] = [
+    # ── Post-production pipeline ────────────────────────────────────────
+    ("master_titles", "project_id",       "INTEGER"),
+    ("master_titles", "greenlit_at",      "DATETIME"),
+    ("master_titles", "greenlit_by",      "VARCHAR(64)"),
+    ("master_titles", "pipeline_status",  "VARCHAR(24)"),
+    ("saved_posters", "pipeline_status",  "VARCHAR(24)"),
+    ("saved_posters", "process_attempts", "INTEGER NOT NULL DEFAULT 0"),
+    ("saved_posters", "process_error",    "TEXT"),
+    ("saved_posters", "claimed_at",       "DATETIME"),
+    ("saved_posters", "claimed_by",       "VARCHAR(64)"),
+    # ── Fair sharing between projects / rotation between accounts ───────
+    ("projects",        "process_weight", "INTEGER NOT NULL DEFAULT 1"),
+    ("upload_accounts", "rotation_order", "INTEGER NOT NULL DEFAULT 100"),
+    ("upload_accounts", "rotation_size",  "INTEGER"),
+]
+
+NEW_INDEXES: list[tuple[str, str, str]] = [
+    ("ix_master_titles_project_id",      "master_titles", "project_id"),
+    ("ix_master_titles_greenlit_at",     "master_titles", "greenlit_at"),
+    ("ix_master_titles_pipeline_status", "master_titles", "pipeline_status"),
+    ("ix_saved_posters_pipeline_status", "saved_posters", "pipeline_status"),
+    ("ix_poster_pipeline",               "saved_posters", "pipeline_status, deleted_at"),
+    ("ix_upload_rotation",               "upload_accounts", "last_run_at, rotation_order"),
+]
+
+
+def migrate_schema(*, dry_run: bool = False) -> dict:
+    """
+    Add any missing columns and indexes. Safe to call repeatedly.
+
+    Existing columns are detected and skipped, so this is a no-op on an
+    up-to-date database — which is the normal case on every restart.
+    """
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+
+    added: list[str] = []
+    skipped: list[str] = []
+
+    with engine.begin() as conn:
+        for table, column, ddl in NEW_COLUMNS:
+            if table not in existing_tables:
+                # Table doesn't exist yet — create_all() will build it with
+                # this column already present, so there's nothing to add.
+                skipped.append(f"{table}.{column} (table not created yet)")
+                continue
+
+            columns = {c["name"] for c in inspector.get_columns(table)}
+            if column in columns:
+                skipped.append(f"{table}.{column}")
+                continue
+
+            if dry_run:
+                added.append(f"{table}.{column} (would add)")
+                continue
+
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+            added.append(f"{table}.{column}")
+
+        if not dry_run:
+            for name, table, columns in NEW_INDEXES:
+                if table not in existing_tables:
+                    continue
+                try:
+                    conn.execute(text(
+                        f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({columns})"
+                    ))
+                except Exception:
+                    # An index is an optimisation, never a correctness
+                    # requirement. Never fail a boot over one.
+                    pass
+
+    return {"added": added, "skipped": skipped}

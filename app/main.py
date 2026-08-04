@@ -53,7 +53,31 @@ async def no_cache_dynamic(request: Request, call_next):
 
 @app.on_event("startup")
 def on_startup():
+    # Create any new tables, then add any new columns to existing ones.
+    #
+    # ORDER MATTERS: create_all() makes new tables but never ALTERs existing
+    # ones, so the column migration has to follow it. Running this here rather
+    # than as a deploy step removes an ordering trap that produced a bare
+    # "Internal Server Error" with no clue as to why — see
+    # app/schema_migrations.py for the full explanation.
+    #
+    # Only additive, idempotent changes run automatically. Data migrations and
+    # backfills stay in scripts/migrate_pipeline.py where a human runs them
+    # deliberately.
     init_db()
+
+    import logging
+    log = logging.getLogger("uvicorn.error")
+    try:
+        from .schema_migrations import migrate_schema
+        result = migrate_schema()
+        if result["added"]:
+            log.info("Schema migration added: %s", ", ".join(result["added"]))
+    except Exception as e:
+        # Don't take the whole app down over this — but make it loud, because
+        # the symptom otherwise is 500s on whichever page uses the new column.
+        log.error("Schema migration FAILED: %s", e)
+
     # Daily auto-backup of poster.db at 00:00:05 server time, with a catch-up
     # if today's backup is missing (e.g. server was offline over midnight).
     from .backups import start_background_scheduler
@@ -61,19 +85,15 @@ def on_startup():
 
     # Guarantee the default pipeline project exists so the Pipeline tab and
     # the worker API have something to resolve against on a fresh install.
-    # Note: new pipeline *columns* on existing tables are added by
-    # scripts/migrate_pipeline.py — create_all() only creates new tables.
     from .db import SessionLocal
     from .pipeline import ensure_default_project
     db = SessionLocal()
     try:
         ensure_default_project(db)
         db.commit()
-    except Exception:
-        # A missing column means the migration hasn't run yet. Don't block
-        # boot — the worker dashboard stays usable and the Pipeline tab will
-        # report the problem.
+    except Exception as e:
         db.rollback()
+        log.error("Could not ensure the default project: %s", e)
     finally:
         db.close()
 

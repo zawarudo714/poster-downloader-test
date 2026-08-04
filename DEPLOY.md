@@ -288,12 +288,8 @@ docker compose up -d --build
 docker compose logs -f          # Ctrl-C once you see uvicorn listening
 ```
 
-Create the pipeline tables and columns (harmless on a fresh database, and it
-keeps the migration exercised):
-
-```bash
-docker compose exec web python scripts/migrate_pipeline.py --schema-only
-```
+Tables and columns are created automatically on startup, so there's nothing
+to run here.
 
 Create your admin account:
 
@@ -472,12 +468,19 @@ git pull
 docker compose up -d --build
 ```
 
-Safe now that state lives in `./data`. If the release adds database columns,
-run the migration *before* rebuilding:
+Safe now that state lives in `./data`. **No separate migration step** — the
+app adds any new columns itself at startup, before it serves a request.
 
-```bash
-docker compose exec web python scripts/migrate_pipeline.py --schema-only
-```
+> Earlier versions of this doc told you to run
+> `migrate_pipeline.py --schema-only` before rebuilding. That advice was wrong
+> and produced a bare "Internal Server Error": the whole repo is baked into the
+> image at build time, so `docker compose exec` ran the OLD migration script and
+> silently skipped the new columns, after which the new code queried columns
+> that didn't exist. Running it *after* the rebuild worked but left a window of
+> 500s in between. The app now handles it, so there is no order to get wrong.
+>
+> `scripts/migrate_pipeline.py` is still the tool for the **legacy data import**
+> — that one you run deliberately, after a backup, with `--dry-run` first.
 
 Bump `APP_VERSION` in `app/config.py` whenever you change JS or CSS — it's the
 cache-buster on every static asset, and without it browsers keep serving the

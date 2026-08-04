@@ -418,8 +418,10 @@ plumbing.
 ## 8. Traps
 
 - **`Base.metadata.create_all()` does not ALTER existing tables.** New columns
-  on `master_titles` / `saved_posters` must go in
-  `migrate_pipeline.NEW_COLUMNS`. New *tables* are created automatically.
+  go in `app/schema_migrations.NEW_COLUMNS`, which the app applies itself at
+  startup — there is no deploy step to remember and no ordering to get wrong.
+  Only additive, idempotent changes belong there; data migrations and backfills
+  stay in `scripts/migrate_pipeline.py` where a human runs them deliberately.
 - **`get_setting()` raises `KeyError` for unknown keys.** Intentional — it
   stops a dashboard typo from silently resolving to `None` at runtime. Add to
   `DEFAULTS` first.

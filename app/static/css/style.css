@@ -4142,3 +4142,240 @@ label.inline-check {
   box-shadow: 0 0 0 1px rgba(232, 184, 75, 0.18);
 }
 .pipe-console-panel[hidden] { display: none; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MASTER / PROJECT SPLIT
+   Project cards on the master dashboard, and the "back out" link that sits at
+   the head of a project's nav. Mobile matters here: the operator's workers use
+   phones, and the admin checks the dashboard from one.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.project-grid {
+  display: grid;
+  /* auto-fill, not auto-fit: with one project the card stays a sane width
+     instead of stretching across a 27" monitor. */
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.project-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--card);
+  color: var(--text);
+  text-decoration: none;
+  transition: border-color 0.12s ease, transform 0.12s ease;
+}
+.project-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+
+.project-card-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+}
+.project-card-name {
+  font-family: Georgia, serif; font-size: 16px; font-weight: bold;
+  color: var(--accent); letter-spacing: 0.02em;
+}
+.project-card-site {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--subtext);
+}
+
+.project-card-stats {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.project-card-stats > div { display: flex; flex-direction: column; gap: 3px; }
+.pc-num { font-size: 17px; line-height: 1; }
+.pc-lbl { font-size: 9px; letter-spacing: 0.06em; color: var(--subtext); }
+
+.project-card-go {
+  font-size: 10px; letter-spacing: 0.12em; color: var(--subtext);
+  text-transform: uppercase;
+}
+.project-card:hover .project-card-go { color: var(--accent); }
+
+/* Leaving a project. Visually separated from the project's own pages so it
+   never reads as "one more tab in this project". */
+.topnav .navlink-exit {
+  color: var(--text);
+  border-color: var(--border);
+  margin-right: 8px;
+}
+.topnav .navlink-exit:hover { border-color: var(--accent); color: var(--accent); }
+
+@media (max-width: 640px) {
+  .project-grid { grid-template-columns: 1fr; }
+  /* Five stats across is unreadable on a phone; two rows of legible numbers
+     beats five columns of 8px text. */
+  .project-card-stats { grid-template-columns: repeat(3, 1fr); row-gap: 12px; }
+  .pc-num { font-size: 20px; }
+  .pc-lbl { font-size: 10px; }
+  .topnav .navlink-exit { margin-right: 0; margin-bottom: 6px; }
+}
+
+/* Worker-side project switcher — only rendered for workers on 2+ projects. */
+.nav-project-switch { display: flex; gap: 4px; margin-left: auto; }
+.topnav .navlink-proj {
+  border-color: var(--border);
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+@media (max-width: 900px) {
+  .nav-project-switch { margin-left: 0; flex-wrap: wrap; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   POSTER TIMELINE (history modal)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Sits under the delete ✕, same reveal-on-hover behaviour. */
+.g-poster-history {
+  position: absolute;
+  top: 30px;
+  right: 4px;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: var(--text);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  cursor: pointer;
+  display: none;
+  align-items: center; justify-content: center;
+  padding: 0;
+}
+.g-poster:hover .g-poster-history { display: flex; }
+.g-poster-history:hover { border-color: var(--accent); }
+@media (max-width: 700px) {
+  .g-poster-history { display: flex; }
+}
+
+.pd-modal { position: fixed; inset: 0; z-index: 200; display: flex;
+            align-items: center; justify-content: center; padding: 20px; }
+.pd-modal[hidden] { display: none; }
+.pd-modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.72); }
+.pd-modal-panel {
+  position: relative;
+  width: min(760px, 100%);
+  max-height: 86vh;
+  display: flex; flex-direction: column;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.pd-modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.pd-modal-title { font-size: 12px; letter-spacing: 0.12em; color: var(--accent); }
+.pd-modal-close {
+  background: none; border: none; color: var(--subtext);
+  font-size: 15px; cursor: pointer; padding: 4px 8px;
+}
+.pd-modal-close:hover { color: var(--text); }
+.pd-modal-body { padding: 16px; overflow-y: auto; }
+
+.tl-head { margin-bottom: 16px; }
+.tl-head-name { font-size: 14px; color: var(--text); }
+.tl-head-sub { font-size: 12px; margin-top: 2px; }
+.tl-head-facts {
+  display: flex; flex-wrap: wrap; gap: 14px;
+  margin-top: 10px; font-size: 11px; color: var(--subtext);
+}
+
+.tl-list { list-style: none; margin: 0; padding: 0; }
+.tl-item {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 12px;
+  padding: 10px 0 10px 12px;
+  /* The rail. Colour is set per event kind below so the shape of a poster's
+     life is readable at a glance without reading a word of it. */
+  border-left: 2px solid var(--border);
+}
+.tl-when { font-size: 11px; color: var(--subtext); }
+.tl-text { font-size: 13px; }
+.tl-detail {
+  font-size: 11px; color: var(--subtext); margin-top: 3px;
+  word-break: break-all;
+}
+.tl-flagged, .tl-failed, .tl-removed, .tl-deleted, .tl-warn { border-left-color: var(--error); }
+.tl-uploaded, .tl-processed, .tl-resolved { border-left-color: var(--success); }
+.tl-greenlit { border-left-color: var(--accent); }
+
+@media (max-width: 640px) {
+  .pd-modal { padding: 0; }
+  .pd-modal-panel { max-height: 100vh; height: 100%; border-radius: 0; border: none; }
+  .tl-item { grid-template-columns: 1fr; gap: 2px; }
+}
+
+/* Per-worker project assignment (Users page). */
+.user-projects summary { cursor: pointer; font-size: 12px; }
+.user-projects-form {
+  display: flex; flex-direction: column; gap: 6px;
+  margin-top: 8px; padding: 10px;
+  border: 1px solid var(--border); border-radius: 3px;
+  background: var(--bg);
+  min-width: 200px;
+}
+.user-project-opt { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DIAGNOSTICS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.diag-intro { max-width: 70ch; margin-bottom: 14px; }
+.diag-summary {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  margin-bottom: 16px;
+}
+.diag-chip {
+  font-size: 11px; padding: 4px 10px; border-radius: 3px;
+  border: 1px solid var(--border); letter-spacing: 0.04em;
+}
+.diag-chip.diag-error { border-color: var(--error); color: var(--error); }
+.diag-chip.diag-warn  { border-color: var(--skip);  color: var(--skip); }
+.diag-chip.diag-info  { color: var(--subtext); }
+
+.diag-check {
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 3px;
+  margin-bottom: 10px;
+  background: var(--card);
+}
+.diag-check.diag-error { border-left-color: var(--error); }
+.diag-check.diag-warn  { border-left-color: var(--skip); }
+.diag-check.diag-info  { border-left-color: var(--border); }
+/* A clean check should be quiet. The point of the page is what's wrong. */
+.diag-check.is-clean { border-left-color: var(--success); opacity: 0.65; }
+
+.diag-check > summary {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+  list-style: none;
+}
+.diag-check > summary::-webkit-details-marker { display: none; }
+.diag-check-title { font-size: 13px; }
+.diag-count { font-size: 11px; color: var(--subtext); }
+.diag-check-body { padding: 0 14px 14px; }
+.diag-explain { max-width: 70ch; font-size: 12px; margin: 0 0 10px; }
+
+.diag-findings { list-style: none; margin: 0; padding: 0; }
+.diag-findings > li {
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+.diag-findings a { color: var(--accent); }
+.diag-detail { font-size: 11px; margin-top: 2px; word-break: break-all; }

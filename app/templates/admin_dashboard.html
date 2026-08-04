@@ -1,50 +1,46 @@
 {% extends "base.html" %}
 {% from "_macros.html" import info, status_pill %}
-{% block title %}Admin · Poster Downloader{% endblock %}
+{% block title %}Admin · Print On Demand{% endblock %}
 
 {% block content %}
 <div class="admin-grid">
 
-  <section class="stat-row">
-    <a href="/admin/master" class="stat-tile stat-tile-link">
-      <div class="stat-label">TOTAL TITLES {{ info("All rows in the master list, regardless of status. Click to open the title list.") }}</div>
-      <div class="stat-value mono">{{ master_total }}</div>
-    </a>
-    <a href="/admin/master?status=pending" class="stat-tile stat-tile-link">
-      <div class="stat-label">PENDING {{ info("Unclaimed titles still waiting for a user to take them. Click to filter.") }}</div>
-      <div class="stat-value mono">{{ master_pending }}</div>
-    </a>
-    <a href="/admin/master?status=in_progress" class="stat-tile stat-tile-link">
-      <div class="stat-label">IN PROGRESS {{ info("Claimed by a user — work has begun or is reserved. Click to filter.") }}</div>
-      <div class="stat-value mono">{{ master_in_progress }}</div>
-    </a>
-    <a href="/admin/master?status=complete" class="stat-tile stat-tile-link">
-      <div class="stat-label">DONE {{ info("Marked complete by the user that worked them. Click to filter.") }}</div>
-      <div class="stat-value success mono">{{ master_complete }}</div>
-    </a>
-    <a href="/admin/skipped" class="stat-tile stat-tile-link">
-      <div class="stat-label">SKIPPED {{ info("Marked skipped by users. Click to review and send back if needed.") }}</div>
-      <div class="stat-value mono">{{ master_skipped }}</div>
-    </a>
-    <a href="/admin/master?needs_revision=1" class="stat-tile stat-tile-link">
-      <div class="stat-label">NEEDS CHANGES {{ info("Titles with at least one open or awaiting-approval flag. Click to filter.") }}</div>
-      <div class="stat-value error mono">{{ master_needs_revision }}</div>
-    </a>
-  </section>
+  {#
+    PROJECTS — the master dashboard's main job.
 
-  <section class="stat-row">
-    <a href="/admin/revisions" class="stat-tile stat-tile-link">
-      <div class="stat-label">FLAGS WAITING ON USERS {{ info("You've flagged these; the user hasn't acted yet. Click to review.") }}</div>
-      <div class="stat-value mono">{{ open_revisions }}</div>
-    </a>
-    <a href="/admin/revisions" class="stat-tile stat-tile-link">
-      <div class="stat-label">AWAITING YOUR APPROVAL {{ info("User has replaced/fixed; you need to approve or reject. Click to review.") }}</div>
-      <div class="stat-value error mono">{{ awaiting_revisions }}</div>
-    </a>
-    <a href="/admin/revisions" class="stat-tile stat-tile-link">
-      <div class="stat-label">PENDING COMPLETIONS {{ info("Worker clicked DONE on a title while it still had open flags or pending changes. Admin reviews the full title diff and approves or sends it back.") }}</div>
-      <div class="stat-value error mono">{{ master_complete_pending }}</div>
-    </a>
+    Title counts used to live here as six flat tiles, which only worked while
+    there was exactly one niche. One card per project scales to the ten
+    pipelines that are planned, and clicking a card is how you enter a project
+    (the nav then replaces itself with that project's links).
+  #}
+  <section class="panel">
+    <div class="panel-head">
+      <span>PROJECTS {{ info("Each project is one design niche on one marketplace. Click a project to work inside it — the menu changes to that project's pages.") }}</span>
+    </div>
+    <div class="panel-body">
+      {% if projects %}
+      <div class="project-grid">
+        {% for p in projects %}
+        <a class="project-card" href="/admin/project/{{ p.slug }}">
+          <div class="project-card-head">
+            <span class="project-card-name">{{ p.name }}</span>
+            <span class="project-card-site mono">{{ p.site }}</span>
+          </div>
+          <div class="project-card-stats">
+            <div><span class="pc-num mono">{{ p.pending }}</span><span class="pc-lbl">PENDING</span></div>
+            <div><span class="pc-num mono">{{ p.active }}</span><span class="pc-lbl">IN PROGRESS</span></div>
+            <div><span class="pc-num mono {% if p.awaiting %}error{% endif %}">{{ p.awaiting }}</span><span class="pc-lbl">AWAITING YOU</span></div>
+            <div><span class="pc-num mono success">{{ p.complete }}</span><span class="pc-lbl">DONE</span></div>
+            <div><span class="pc-num mono">{{ p.skipped }}</span><span class="pc-lbl">SKIPPED</span></div>
+          </div>
+          <div class="project-card-go">OPEN&nbsp;&rarr;</div>
+        </a>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="muted">No active projects.</p>
+      {% endif %}
+    </div>
   </section>
 
   <section class="panel">

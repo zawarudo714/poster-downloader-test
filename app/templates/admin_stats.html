@@ -1,4 +1,8 @@
 {% extends "base.html" %}
+{# Worker stats exist at BOTH levels — inside a project (this project's work)
+   and at master level (everything, across projects). Same page, same JS; the
+   route decides which nav wraps it so the admin's sense of place is correct. #}
+{% set nav_scope = stats_scope | default('project', true) %}
 {% from "_macros.html" import info %}
 {% block title %}Worker Stats · Admin{% endblock %}
 
@@ -11,7 +15,7 @@
     <div class="stats-admin-worker-list">
       {% if workers %}
         {% for w in workers %}
-          <a href="/admin/stats?worker_id={{ w.id }}"
+          <a href="{{ '/admin/master_stats' if nav_scope == 'master' else '/admin/stats' }}?worker_id={{ w.id }}"
              class="stats-admin-worker-row {% if w.id == selected_worker_id %}active{% endif %}">
             <span class="stats-admin-worker-name mono">{{ w.username }}</span>
           </a>

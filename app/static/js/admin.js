@@ -298,6 +298,20 @@
     });
     btn.appendChild(delBtn);
 
+    // History — the full provenance of this one image. Read-only, so it sits
+    // next to the destructive controls without any confirmation of its own.
+    const histBtn = document.createElement('button');
+    histBtn.type = 'button';
+    histBtn.className = 'g-poster-history';
+    histBtn.setAttribute('aria-label', 'Poster history');
+    histBtn.title = 'Where this image came from and everything that happened to it';
+    histBtn.textContent = '🕑';
+    histBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openTimeline(p.poster_id);
+    });
+    btn.appendChild(histBtn);
+
     btn.addEventListener('click', (e) => {
       if (e.target === check || e.target === delBtn) return;
       openLightbox(t, p);
@@ -734,3 +748,88 @@
 
   loadList();
 })();
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   POSTER TIMELINE
+   One image's whole life: downloaded → flagged → fixed → greenlit →
+   Photoshopped → uploaded → (removed). Assembled server-side from six tables
+   by /admin/api/poster/<id>/timeline; this only renders it.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+async function openTimeline(posterId) {
+  let host = document.getElementById('pd-timeline');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'pd-timeline';
+    host.className = 'pd-modal';
+    host.hidden = true;
+    host.innerHTML =
+      '<div class="pd-modal-backdrop" data-close="1"></div>' +
+      '<div class="pd-modal-panel" role="dialog" aria-modal="true" aria-label="Poster history">' +
+        '<div class="pd-modal-head">' +
+          '<span class="pd-modal-title">POSTER HISTORY</span>' +
+          '<button type="button" class="pd-modal-close" data-close="1" aria-label="Close">✕</button>' +
+        '</div>' +
+        '<div class="pd-modal-body"><p class="muted">Loading…</p></div>' +
+      '</div>';
+    document.body.appendChild(host);
+    host.addEventListener('click', (e) => {
+      if (e.target.dataset && e.target.dataset.close) host.hidden = true;
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') host.hidden = true;
+    });
+  }
+
+  const body = host.querySelector('.pd-modal-body');
+  body.innerHTML = '<p class="muted">Loading…</p>';
+  host.hidden = false;
+
+  let data;
+  try {
+    const r = await fetch('/admin/api/poster/' + posterId + '/timeline');
+    if (!r.ok) throw new Error(r.status);
+    data = await r.json();
+  } catch (err) {
+    body.innerHTML = '<p class="error">Could not load history (' + err.message + ').</p>';
+    return;
+  }
+
+  const esc = (v) => String(v == null ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  const p = data.poster, t = data.title;
+  let html =
+    '<div class="tl-head">' +
+      '<div class="tl-head-name mono">' + esc(p.filename) + '</div>' +
+      '<div class="tl-head-sub muted">' + esc(t.name) + ' (' + esc(t.year) + ')' +
+        (t.external_id != null ? ' · #' + esc(t.external_id) : '') + '</div>' +
+      '<div class="tl-head-facts">' +
+        '<span>worker <b class="mono">' + esc(p.worker) + '</b></span>' +
+        '<span>saved <b class="mono">' + esc(p.saved_on) + '</b></span>' +
+        (p.dimensions ? '<span>size <b class="mono">' + esc(p.dimensions) + '</b></span>' : '') +
+        '<span>stage <b class="mono">' + esc(p.pipeline_status) + '</b></span>' +
+        (p.deleted ? '<span class="error">DELETED</span>' : '') +
+      '</div>' +
+    '</div>';
+
+  if (!data.events.length) {
+    html += '<p class="muted">No recorded events.</p>';
+  } else {
+    html += '<ol class="tl-list">';
+    data.events.forEach((e) => {
+      html +=
+        '<li class="tl-item tl-' + esc(e.kind) + '">' +
+          '<div class="tl-when mono">' + esc(e.at.replace('T', ' ').slice(0, 16)) + '</div>' +
+          '<div class="tl-what">' +
+            '<div class="tl-text">' + esc(e.text) +
+              (e.actor ? ' <span class="muted">· ' + esc(e.actor) + '</span>' : '') + '</div>' +
+            (e.detail ? '<div class="tl-detail mono">' + esc(e.detail) + '</div>' : '') +
+          '</div>' +
+        '</li>';
+    });
+    html += '</ol>';
+  }
+  body.innerHTML = html;
+}

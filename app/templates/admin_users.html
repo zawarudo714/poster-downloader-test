@@ -26,7 +26,7 @@
       <table class="data-table">
         <thead>
           <tr>
-            <th>USERNAME</th><th>ROLE</th><th>STATUS</th><th>CLAIMS {{ info("Number of master rows currently claimed by this user.") }}</th><th>CREATED</th><th>ACTIONS</th>
+            <th>USERNAME</th><th>ROLE</th><th>STATUS</th><th>CLAIMS {{ info("Number of master rows currently claimed by this user.") }}</th><th>PROJECTS {{ info("Which projects this worker can pull titles from. Tick none to leave them unrestricted (they see every project).") }}</th><th>CREATED</th><th>ACTIONS</th>
           </tr>
         </thead>
         <tbody>
@@ -36,6 +36,29 @@
             <td>{% if u.role == 'admin' %}<span class="role-badge role-admin">ADMIN</span>{% else %}<span class="role-badge">USER</span>{% endif %}</td>
             <td>{% if u.is_active %}<span class="ok">active</span>{% else %}<span class="muted">disabled</span>{% endif %}</td>
             <td class="mono">{{ claim_counts.get(u.id, 0) }}</td>
+            <td>
+              {% if u.role == 'admin' %}
+                <span class="muted">all</span>
+              {% else %}
+                {% set mine = assigned.get(u.id, []) %}
+                <details class="user-projects">
+                  <summary>
+                    {% if mine %}{{ mine | length }} of {{ all_projects | length }}{% else %}<span class="muted">unrestricted</span>{% endif %}
+                  </summary>
+                  <form method="post" action="/admin/users/{{ u.id }}/projects" class="user-projects-form">
+                    {% for p in all_projects %}
+                      <label class="user-project-opt">
+                        <input type="checkbox" name="pid" value="{{ p.id }}"
+                               {% if p.id in mine %}checked{% endif %}>
+                        <span>{{ p.name }}</span>
+                      </label>
+                    {% endfor %}
+                    <input type="hidden" name="project_ids" value="">
+                    <button class="btn btn-accent btn-tiny" type="submit">SAVE</button>
+                  </form>
+                </details>
+              {% endif %}
+            </td>
             <td class="mono">{{ u.created_at | local_dt('%Y-%m-%d') }}</td>
             <td class="actions-cell">
               <form method="post" action="/admin/users/{{ u.id }}/toggle" class="inline">
@@ -98,4 +121,19 @@
 
 {% block scripts %}
 <script src="/static/js/admin.js?v={{ app_version }}"></script>
+<script>
+  // Collapse the tick boxes into the single comma-separated field the route
+  // expects. Done here rather than server-side because FastAPI's Form()
+  // handling of repeated fields would need a different signature, and one
+  // string keeps the endpoint identical whether it's called from this page,
+  // curl, or whatever assigns projects automatically later.
+  document.querySelectorAll('.user-projects-form').forEach(function (form) {
+    form.addEventListener('submit', function () {
+      var ids = Array.prototype.slice
+        .call(form.querySelectorAll('input[name="pid"]:checked'))
+        .map(function (cb) { return cb.value; });
+      form.querySelector('input[name="project_ids"]').value = ids.join(',');
+    });
+  });
+</script>
 {% endblock %}

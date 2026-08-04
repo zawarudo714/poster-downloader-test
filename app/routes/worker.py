@@ -46,6 +46,9 @@ from ..config import (
 )
 from ..db import get_db
 from ..models import ActivityLog, MasterTitle, Revision, SavedPoster, User
+from ..projects import (
+    allowed_projects, remember_project, scope_titles_multi, set_project_cookie,
+)
 from ..timeutil import fmt_local, local_today
 from ..parsing import IMAGE_EXT_RE, filename_for, folder_name_for, sanitize
 from ..templating import templates
@@ -60,6 +63,27 @@ router = APIRouter()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+# ── Project scoping ──────────────────────────────────────────────────────────
+
+def _my_projects(db: Session, user: User):
+    """
+    The projects this worker is allowed to draw work from.
+
+    EVERY query that can hand a worker a new title must go through
+    `_scope_to_my_projects`. Without it, the day a celebrity project is added
+    a movie worker's GET button starts pulling celebrity titles — silently,
+    with no error, and you'd only find out when the wrong images arrived.
+
+    A worker with no assignment at all falls back to the default project, so
+    the existing install keeps working untouched through this upgrade.
+    """
+    return allowed_projects(db, user)
+
+
+def _scope_to_my_projects(q, db: Session, user: User):
+    return scope_titles_multi(q, _my_projects(db, user))
+
 
 def _my_queue(db: Session, user: User):
     """All MasterTitle rows currently claimed by `user` (any active status)."""
@@ -236,6 +260,15 @@ def _state_payload(db: Session, user: User) -> dict:
                 by_day = json.loads(by_day_raw)
             except (TypeError, ValueError):
                 pass
+        # Which projects this single payment covered. Shown on the receipt so
+        # a worker who covers two niches can see the whole week accounted for
+        # in one payment rather than wondering which half they were paid for.
+        by_project = {}
+        if r.by_project_json:
+            try:
+                by_project = json.loads(r.by_project_json)
+            except (TypeError, ValueError):
+                pass
         back_pay_dates = []
         if r.back_pay_dates_json:
             try:
@@ -253,6 +286,7 @@ def _state_payload(db: Session, user: User) -> dict:
             "note":         r.note or "",
             "pushed_at":    fmt_local(r.pushed_at, "%Y-%m-%d %H:%M") or None,
             "by_day":       by_day,           # {"2026-04-30": 5, ...}
+            "by_project":   by_project,       # {"Tell-A-Vision": 120, ...}
             "back_pay_dates": back_pay_dates, # ["2026-04-23", ...] subset of by_day
         })
     # Chat unread (worker viewing their own thread).
@@ -329,6 +363,30 @@ def api_state(user: User = Depends(require_user), db: Session = Depends(get_db))
     return JSONResponse(_state_payload(db, user))
 
 
+@router.get("/switch_project/{slug}")
+def switch_project(
+    slug: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """
+    A worker moving between the projects they're assigned to.
+
+    Validated against their own assignments, not just "does this project
+    exist" — the slug arrives in a URL the worker controls, and a bare
+    existence check would let anyone browse any niche's queue.
+    """
+    target = next((p for p in _my_projects(db, user) if p.slug == slug), None)
+    if target is None:
+        raise HTTPException(404, "No such project.")
+
+    resp = RedirectResponse(url="/", status_code=303)
+    set_project_cookie(resp, target)
+    remember_project(db, user, target)
+    db.commit()
+    return resp
+
+
 @router.get("/master_browse", response_class=HTMLResponse)
 def master_browse_page(request: Request, user: User = Depends(require_user)):
     return templates.TemplateResponse(
@@ -355,7 +413,7 @@ def api_master(
     Paginated, filtered master browse for the user's manual-select view.
     Read-only — users cannot edit master content here.
     """
-    query = db.query(MasterTitle)
+    query = _scope_to_my_projects(db.query(MasterTitle), db, user)
 
     if status in ("pending", "in_progress", "complete", "complete_pending", "skipped"):
         query = query.filter(MasterTitle.status == status)
@@ -422,7 +480,7 @@ def pull_next(
     n = min(n, MAX_PULL_SIZE)
 
     rows = (
-        db.query(MasterTitle)
+        _scope_to_my_projects(db.query(MasterTitle), db, user)
           .filter(
               MasterTitle.status == "pending",
               MasterTitle.claimed_by_id.is_(None),
@@ -470,8 +528,11 @@ def select_titles(
     if not wanted:
         raise HTTPException(400, "No ids supplied.")
 
+    # Scoped as well as filtered by id: the id list comes from the browser, so
+    # a worker could otherwise claim any title in the database by posting ids
+    # their own master browse would never have shown them.
     rows = (
-        db.query(MasterTitle)
+        _scope_to_my_projects(db.query(MasterTitle), db, user)
           .filter(
               MasterTitle.id.in_(wanted),
               MasterTitle.status == "pending",

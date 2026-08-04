@@ -51,6 +51,53 @@ async def no_cache_dynamic(request: Request, call_next):
     return response
 
 
+@app.middleware("http")
+async def attach_project_context(request: Request, call_next):
+    """
+    Resolve the active project once per page view and hang it off
+    `request.state` so base.html can render the right nav.
+
+    Done in middleware rather than as a dependency because EVERY template
+    needs it and there are dozens of TemplateResponse calls across four
+    routers. One forgotten `active_project=` would render a page with the
+    wrong nav — a bug you'd only notice by looking. This way there is nothing
+    to remember and nothing to forget.
+
+    Skipped for anything that doesn't render a template (static assets, the
+    JSON APIs, image serving, the machine API), because the extra DB session
+    would be pure overhead on the highest-frequency requests in the app —
+    the /api/state poll and the browse gallery's image loads.
+    """
+    path = request.url.path
+    skip = (
+        path.startswith("/static/")
+        or path.startswith("/api/")
+        or path.startswith("/admin/api/")
+        or path.startswith("/admin/file/")
+        or path.startswith("/admin/zip/")
+        or path.startswith("/file_own/")
+        or path == "/healthz"
+    )
+    request.state.project_ctx = None
+    if not skip:
+        from .db import SessionLocal
+        from .auth import get_current_user
+        from .projects import project_context
+
+        db = SessionLocal()
+        try:
+            user = get_current_user(request, db)
+            request.state.project_ctx = project_context(request, db, user)
+        except Exception:
+            # The nav is not worth a 500. Fall through with no context and
+            # base.html degrades to the master nav.
+            request.state.project_ctx = None
+        finally:
+            db.close()
+
+    return await call_next(request)
+
+
 @app.on_event("startup")
 def on_startup():
     # Create any new tables, then add any new columns to existing ones.

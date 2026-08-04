@@ -320,11 +320,18 @@ DEFAULTS: dict[str, Any] = {
     # ── Storage ──────────────────────────────────────────────────────────
     # Root on the worker node where processed output is written. Kept as a
     # setting so remounting the Storage Box elsewhere is a dashboard edit.
-    "storage_root":       "S:/processed",
-    # Layout template for the archive. Mirrors the workspace layout so the
-    # existing local `Outputs/Straight From Photoshop` tree can be dropped
-    # in as-is during migration.
-    "storage_layout":     "{date}/{title_folder}/{filename}",
+    "storage_root":       "S:",
+    # Layout template for the archive, relative to storage_root.
+    #
+    # The {site}/{project} prefix is what keeps ten pipelines from colliding
+    # in one flat tree — and, more importantly, what makes recovery from a
+    # marketplace ban a copy of one folder rather than a query. Read it as:
+    #
+    #     S:/Fineartamerica/MovieSeries/processed/2026-05-24/50. Pulp Fiction (1994)/50_1_Painted.jpg
+    #
+    # {site} is the project's target marketplace, {project} its name. Both are
+    # slugified for the filesystem — see `_path_token()`.
+    "storage_layout":     "{site}/{project}/processed/{date}/{title_folder}/{filename}",
 
     # ── Upload stage ─────────────────────────────────────────────────────
     "upload_batch_size":  40,
@@ -482,6 +489,7 @@ def ensure_default_project(db: Session) -> Project:
             slug=DEFAULT_PROJECT_SLUG,
             name="Tell-A-Vision (Movies & Series)",
             source_site="tmdb",
+            target_site="fineartamerica",
             images_per_title=3,
             notes="Original workflow: TMDB posters → Real Paint FX → FineArtAmerica.",
         )
@@ -640,6 +648,29 @@ def script_version(db: Session, *, project: Optional[Project] = None) -> str:
     return hashlib.sha256(rendered.encode("utf-8")).hexdigest()[:16]
 
 
+# Characters Windows refuses in a path component. Slashes are excluded too:
+# a project named "Movies/TV" must not silently become two directory levels.
+_PATH_UNSAFE = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
+
+
+def _path_token(value: str) -> str:
+    """
+    Make one path component out of a name the admin typed in a text box.
+
+    Project and marketplace names go straight into a filesystem path on a
+    Windows node, and the admin can name a project anything. Without this,
+    a colon or a slash produces either a crash mid-batch or — worse — a file
+    written somewhere nobody looks for it.
+
+    Spaces are kept (Windows is fine with them and the folders are read by a
+    human); everything Windows rejects is collapsed to a single dash.
+    """
+    cleaned = _PATH_UNSAFE.sub("-", (value or "").strip())
+    # Trailing dots and spaces are legal to write but unopenable on Windows.
+    cleaned = cleaned.rstrip(". ")
+    return cleaned or "unnamed"
+
+
 def storage_path_for(
     db: Session, title: MasterTitle, poster: SavedPoster,
     *, project: Optional[Project] = None,
@@ -661,7 +692,13 @@ def storage_path_for(
         "date":         (poster.original_save_date or local_today()).isoformat(),
         "title_folder": poster.title_folder_path or "",
         "filename":     filename,
-        "project":      project.slug,
+        # {project} is the human name, not the slug — these folders are opened
+        # by hand on a Windows box, and "MovieSeries" beats "tell-a-vision"
+        # when you're looking for something at 1am. {project_slug} is still
+        # available for anyone who wants the stable identifier.
+        "project":      _path_token(project.name or project.slug),
+        "project_slug": project.slug,
+        "site":         _path_token(project.target_site or "unknown"),
         "username":     poster.username or "",
         "external_id":  title.external_id if title.external_id is not None else "",
     })
@@ -702,6 +739,12 @@ def greenlight_titles(
         poster picked up. An earlier version short-circuited on
         `title.greenlit_at is not None` and silently stranded those posters
         forever.
+
+    `reason` is recorded on the title as `greenlit_source`. It used to be
+    accepted and thrown away, which made "was this released because it was
+    paid for, or because someone clicked the button?" unanswerable — and that
+    is the one question worth asking, since a manual release can put unpaid
+    work onto the marketplace.
 
     Returns counts of titles that had at least one poster promoted, titles
     where there was nothing left to do, and the number of posters promoted.
@@ -747,6 +790,7 @@ def greenlight_titles(
             if title.greenlit_at is None:
                 title.greenlit_at = now
                 title.greenlit_by = by
+                title.greenlit_source = reason
             skipped += 1
             continue
 
@@ -755,6 +799,7 @@ def greenlight_titles(
         if title.greenlit_at is None:
             title.greenlit_at = now
             title.greenlit_by = by
+            title.greenlit_source = reason
         if title.project_id is None:
             if default_project_id is None:
                 default_project_id = ensure_default_project(db).id
@@ -828,7 +873,7 @@ def greenlight_for_payment_run(db: Session, run, *, by: str) -> dict[str, int]:
           .distinct()
           .all()
     ]
-    return greenlight_titles(db, title_ids, by=by, reason=f"payment_run:{run.id}")
+    return greenlight_titles(db, title_ids, by=by, reason=f"payment:{run.id}")
 
 
 def ungreenlight_titles(db: Session, title_ids: Iterable[int]) -> int:
@@ -997,7 +1042,12 @@ def claim_process_batch(
                           SavedPoster.pipeline_status == "failed_processing"))
         )
         if only_project:
-            q = q.filter(project_scope(only_project))
+            # NULL project_id belongs to the default project only. Without
+            # the second argument every project's dispatcher would pick up
+            # the 101,605 unassigned movie rows — a celebrity node would be
+            # handed movie posters and upload them to the wrong account.
+            q = q.filter(project_scope(only_project,
+                                       default_project_id=_default_project_id(db)))
         return q.order_by(SavedPoster.original_save_date.asc(),
                           MasterTitle.external_id.asc().nullslast(),
                           SavedPoster.id.asc())
@@ -1777,20 +1827,47 @@ def finish_job(
 #  DASHBOARD AGGREGATES
 # ═════════════════════════════════════════════════════════════════════════
 
-def project_scope(project_id: Optional[int]):
+def _default_project_id(db: Session) -> Optional[int]:
     """
-    Scope a MasterTitle query to a project, treating NULL as the default one.
+    The default project's id, read (never created) by slug.
+
+    A plain lookup rather than ensure_default_project() so that scoping a
+    query can't insert a row as a side effect.
+    """
+    row = db.query(Project.id).filter_by(slug=DEFAULT_PROJECT_SLUG).first()
+    return row[0] if row else None
+
+
+def project_scope(project_id: Optional[int], *, default_project_id: Optional[int] = None):
+    """
+    Scope a MasterTitle query to a project, treating NULL as the DEFAULT one.
 
     Titles imported through the admin CSV/XLSX importer are created without a
     project_id, and the 100k rows that predate multi-project support are NULL
-    too. Matching on equality alone would make all of them invisible to the
-    Pipeline tab. Everywhere that scopes by project uses this so the funnel,
-    the greenlight queue and the title browser agree.
+    too. Matching on equality alone would make all of them invisible.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY default_project_id IS NOT OPTIONAL IN PRACTICE
+    ════════════════════════════════════════════════════════════════════════
+    This used to fold NULL into EVERY project's scope. That was harmless while
+    there was one project and quietly catastrophic the moment there were two:
+    the celebrity project's Title List would show all 101,605 movie rows, its
+    worker queue would hand them out, and its pipeline would send movie
+    posters to the celebrity marketplace account.
+
+    NULL means "the default project" and nothing else. Callers that know the
+    default pass it; the two-argument form is the one to use.
+
+    Passing `default_project_id=None` keeps the old behaviour of folding NULL
+    in, which is still correct when the caller has already established that
+    the project IS the default one.
     """
     if not project_id:
         return sa_true()
-    return or_(MasterTitle.project_id == project_id,
-               MasterTitle.project_id.is_(None))
+    if default_project_id is None or project_id == default_project_id:
+        return or_(MasterTitle.project_id == project_id,
+                   MasterTitle.project_id.is_(None))
+    return MasterTitle.project_id == project_id
 
 
 def funnel_counts(db: Session, *, project_id: Optional[int] = None) -> dict[str, int]:
@@ -1803,7 +1880,8 @@ def funnel_counts(db: Session, *, project_id: Optional[int] = None) -> dict[str,
         db.query(SavedPoster.pipeline_status, func.count(SavedPoster.id))
           .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
           .filter(SavedPoster.deleted_at.is_(None))
-          .filter(project_scope(project_id))
+          .filter(project_scope(project_id,
+                                default_project_id=_default_project_id(db)))
     )
 
     counts = {
@@ -1825,7 +1903,8 @@ def funnel_counts(db: Session, *, project_id: Optional[int] = None) -> dict[str,
           .filter(SavedPoster.deleted_at.is_(None),
                   MasterTitle.status == "complete",
                   awaiting_greenlight_poster_filter())
-          .filter(project_scope(project_id))
+          .filter(project_scope(project_id,
+                                default_project_id=_default_project_id(db)))
     )
     counts["awaiting_greenlight"] = backlog_q.scalar() or 0
 

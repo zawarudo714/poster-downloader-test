@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Poster Downloader{% endblock %}</title>
+  <title>{% block title %}Print On Demand{% endblock %}</title>
   <link rel="stylesheet" href="/static/css/style.css?v={{ app_version }}">
   <style>
     :root {
@@ -38,34 +38,72 @@
         <span class="nav-toggle-bar"></span>
         <span class="nav-toggle-badge" id="nav-toggle-badge" hidden>0</span>
       </button>
-      <a href="{% if user is defined and user and user.role == 'admin' %}/admin{% else %}/{% endif %}" class="brand">
+      {#
+        Nav scope. `pctx` comes from middleware (app/main.py), so no route has
+        to pass it. `scope` is 'master' or 'project' and decides which of the
+        two navs renders — they REPLACE each other, never stack. Pages declare
+        their own scope by putting `{% set nav_scope = 'project' %}` at the top
+        level of the child template (Jinja evaluates those before the parent
+        body, so they're visible here). Anything that doesn't say is master.
+      #}
+      {% set pctx = request.state.project_ctx if request and request.state.project_ctx else {} %}
+      {% set proj = pctx.get('active_project') %}
+      {% set scope = nav_scope | default('master', true) %}
+      <a href="{% if user is defined and user and user.role == 'admin' %}{% if scope == 'project' and proj %}/admin/browse{% else %}/admin{% endif %}{% else %}/{% endif %}" class="brand">
         <span class="brand-mark">▌</span>
-        <span class="brand-full">POSTER&nbsp;DOWNLOADER</span>
-        <span class="brand-short" aria-hidden="true">PD</span>
+        {% if user is defined and user and user.role != 'admin' %}
+          <span class="brand-full">{{ (pctx.get('worker_label') or 'Poster Downloader') | upper }}</span>
+          <span class="brand-short" aria-hidden="true">{{ (pctx.get('worker_label') or 'PD')[:2] | upper }}</span>
+        {% elif scope == 'project' and proj %}
+          <span class="brand-full">{{ proj.name | upper }}</span>
+          <span class="brand-short" aria-hidden="true">{{ proj.name[:2] | upper }}</span>
+        {% else %}
+          <span class="brand-full">PRINT&nbsp;ON&nbsp;DEMAND</span>
+          <span class="brand-short" aria-hidden="true">POD</span>
+        {% endif %}
       </a>
       <nav class="topnav" id="topnav">
         {% if user is defined and user %}
-          {% if user.role == 'admin' %}
-            <a href="/admin"           class="navlink {% if active_tab == 'dashboard' %}active{% endif %}">Dashboard</a>
+          {% if user.role == 'admin' and scope == 'project' and proj %}
+            {# ── Inside a project ─────────────────────────────────────── #}
+            <a href="/admin" class="navlink navlink-exit">&larr;&nbsp;All&nbsp;Projects</a>
             <a href="/admin/browse"    class="navlink {% if active_tab == 'browse' %}active{% endif %}">Review&nbsp;Posters</a>
             <a href="/admin/master"    class="navlink {% if active_tab == 'master' %}active{% endif %}">Title&nbsp;List</a>
             <a href="/admin/revisions" class="navlink {% if active_tab == 'revisions' %}active{% endif %}">Changes&nbsp;Requested</a>
             <a href="/admin/skipped"   class="navlink {% if active_tab == 'skipped' %}active{% endif %}">Skipped</a>
-            <a href="/admin/payments"  class="navlink {% if active_tab == 'payments' %}active{% endif %}">Payments</a>
             <a href="/admin/pipeline"  class="navlink {% if active_tab == 'pipeline' %}active{% endif %}">Pipeline</a>
+            <a href="/admin/stats"     class="navlink {% if active_tab == 'stats' %}active{% endif %}">Stats</a>
+            <a href="/admin/peek"      class="navlink {% if active_tab == 'peek' %}active{% endif %}">Peek</a>
+          {% elif user.role == 'admin' %}
+            {# ── Master level ─────────────────────────────────────────── #}
+            <a href="/admin"           class="navlink {% if active_tab == 'dashboard' %}active{% endif %}">Dashboard</a>
+            <a href="/admin/payments"  class="navlink {% if active_tab == 'payments' %}active{% endif %}">Payments</a>
             <a href="/admin/chat"      class="navlink chat-nav {% if active_tab == 'chat' %}active{% endif %}">Chat<span class="nav-badge" id="nav-chat-badge" hidden>0</span></a>
             <a href="/admin/users"     class="navlink {% if active_tab == 'users' %}active{% endif %}">Users</a>
             <a href="/admin/backups"   class="navlink {% if active_tab == 'backups' %}active{% endif %}">Backups</a>
             <a href="/admin/email"     class="navlink {% if active_tab == 'email' %}active{% endif %}">Email</a>
             <a href="/admin/audit"     class="navlink {% if active_tab == 'audit' %}active{% endif %}">Activity&nbsp;Log</a>
-            <a href="/admin/stats"     class="navlink {% if active_tab == 'stats' %}active{% endif %}">Stats</a>
-            <a href="/admin/peek"      class="navlink {% if active_tab == 'peek' %}active{% endif %}">Peek</a>
+            <a href="/admin/master_stats" class="navlink {% if active_tab == 'master_stats' %}active{% endif %}">Stats</a>
+            <a href="/admin/diagnostics"   class="navlink {% if active_tab == 'diagnostics' %}active{% endif %}">Diagnostics</a>
             <a href="/worker"          class="navlink">Work&nbsp;Mode</a>
           {% else %}
             <a href="/"                class="navlink {% if active_tab == 'dashboard' %}active{% endif %}">Dashboard</a>
             <a href="/history"         class="navlink {% if active_tab == 'history' %}active{% endif %}">Save&nbsp;History</a>
             <a href="/stats"           class="navlink {% if active_tab == 'stats' %}active{% endif %}">Stats</a>
             <a href="/chat"            class="navlink chat-nav {% if active_tab == 'chat' %}active{% endif %}">Chat<span class="nav-badge" id="nav-chat-badge" hidden>0</span></a>
+            {#
+              Only shown to workers covering more than one project. Most
+              workers have exactly one and should never see a control that
+              implies there's somewhere else they're supposed to be.
+            #}
+            {% if pctx.get('user_projects') and pctx.get('user_projects') | length > 1 %}
+              <span class="nav-project-switch">
+                {% for p in pctx.get('user_projects') %}
+                  <a href="/switch_project/{{ p.slug }}"
+                     class="navlink navlink-proj {% if proj and p.id == proj.id %}active{% endif %}">{{ p.name }}</a>
+                {% endfor %}
+              </span>
+            {% endif %}
           {% endif %}
         {% endif %}
       </nav>

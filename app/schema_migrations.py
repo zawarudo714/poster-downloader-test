@@ -60,6 +60,11 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("projects",        "process_weight", "INTEGER NOT NULL DEFAULT 1"),
     ("upload_accounts", "rotation_order", "INTEGER NOT NULL DEFAULT 100"),
     ("upload_accounts", "rotation_size",  "INTEGER"),
+    # ── Master/project split, worker scoping, provenance ────────────────
+    ("projects",      "target_site",     "VARCHAR(64) NOT NULL DEFAULT 'fineartamerica'"),
+    ("users",         "last_project_id", "INTEGER"),
+    ("master_titles", "greenlit_source", "VARCHAR(32)"),
+    ("payment_runs",  "by_project_json", "TEXT"),
 ]
 
 NEW_INDEXES: list[tuple[str, str, str]] = [
@@ -69,6 +74,7 @@ NEW_INDEXES: list[tuple[str, str, str]] = [
     ("ix_saved_posters_pipeline_status", "saved_posters", "pipeline_status"),
     ("ix_poster_pipeline",               "saved_posters", "pipeline_status, deleted_at"),
     ("ix_upload_rotation",               "upload_accounts", "last_run_at, rotation_order"),
+    ("ix_master_greenlit_source",        "master_titles", "greenlit_source"),
 ]
 
 

@@ -56,7 +56,13 @@ from ..config import WORKSPACE_DIR
 from ..db import SessionLocal, get_db
 from ..models import (
     ActivityLog, AppSetting, ChatMessage, ChatReadState,
-    ImportJob, MasterTitle, PaymentRun, Revision, SavedPoster, User,
+    ImportJob, MasterTitle, PaymentRun, ProcessedImage, Project, Revision,
+    SavedPoster, UploadAccount, UploadTracking, User, UserProject,
+)
+from ..pipeline import ensure_default_project
+from ..projects import (
+    active_project, allowed_projects, project_by_slug, remember_project,
+    scope_titles, set_project_cookie,
 )
 from ..timeutil import fmt_local, local_today
 from ..templating import templates
@@ -69,6 +75,76 @@ from ..utils import (
 
 
 router = APIRouter(prefix="/admin")
+
+
+# ── Project switching ────────────────────────────────────────────────────────
+#
+# The active project is session state, not part of the URL — see the module
+# docstring in app/projects.py for why. These two routes are the only way it
+# changes, which keeps the "where am I" logic in one place.
+
+@router.get("/project/{slug}")
+def enter_project(
+    slug: str,
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Enter a project. The nav replaces itself from here on."""
+    proj = project_by_slug(db, slug)
+    if proj is None:
+        raise HTTPException(status_code=404, detail="No such project")
+
+    resp = RedirectResponse(url="/admin/browse", status_code=303)
+    set_project_cookie(resp, proj)
+    remember_project(db, admin, proj)
+    db.commit()
+    return resp
+
+
+@router.get("/projects/exit")
+def exit_project(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """Back out to the master level."""
+    resp = RedirectResponse(url="/admin", status_code=303)
+    set_project_cookie(resp, None)
+    remember_project(db, admin, None)
+    db.commit()
+    return resp
+
+
+def current_project(request: Request, admin: User, db: Session) -> Project:
+    """
+    The project a project-scoped route operates on.
+
+    Falls back to the default project rather than erroring, because every
+    existing page was written before projects existed and its behaviour on a
+    single-project install must be byte-identical to what it does today.
+    """
+    return active_project(request, db, admin) or ensure_default_project(db)
+
+
+# ── Diagnostics ──────────────────────────────────────────────────────────────
+
+@router.get("/diagnostics", response_class=HTMLResponse)
+def diagnostics_page(request: Request, admin: User = Depends(require_admin)):
+    """Master-level: the checks span every project by design."""
+    return templates.TemplateResponse(
+        request, "admin_diagnostics.html",
+        {"user": admin, "admin": admin, "active_tab": "diagnostics"},
+    )
+
+
+@router.get("/api/diagnostics")
+def api_diagnostics(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """
+    Run the consistency scan.
+
+    Fetched on demand rather than on page load: the disk walk is the slow part
+    and it should be something the admin chooses to start, not something that
+    fires every time they land on the page.
+    """
+    from ..diagnostics import run_all
+    return JSONResponse(run_all(db))
 
 
 # ── Dashboard ────────────────────────────────────────────────────────────────
@@ -154,10 +230,50 @@ def admin_dashboard(request: Request, admin: User = Depends(require_admin), db: 
         "week_end":          today.isoformat(),
     }
 
+    # ── Per-project cards ───────────────────────────────────────────────────
+    # The master dashboard's job is to answer "which project needs me?", so
+    # each card carries the numbers you'd otherwise have to enter the project
+    # to see. Counts are grouped in two queries rather than one per project —
+    # with ten pipelines the naive version is 40 queries per page load.
+    projects = allowed_projects(db, admin)
+    status_counts: dict[tuple[int | None, str], int] = {
+        (pid, st): n
+        for pid, st, n in db.query(
+            MasterTitle.project_id, MasterTitle.status, func.count(MasterTitle.id)
+        ).group_by(MasterTitle.project_id, MasterTitle.status).all()
+    }
+    default_proj_id = ensure_default_project(db).id
+
+    def _count(proj_id: int, status: str) -> int:
+        # NULL project_id means the default project — the 101k imported rows
+        # have never been backfilled, and treating NULL as "unassigned" here
+        # would show the primary project as empty.
+        n = status_counts.get((proj_id, status), 0)
+        if proj_id == default_proj_id:
+            n += status_counts.get((None, status), 0)
+        return n
+
+    project_cards = [
+        {
+            "id":       p.id,
+            "slug":     p.slug,
+            "name":     p.name,
+            "site":     p.target_site,
+            "source":   p.source_site,
+            "pending":  _count(p.id, "pending"),
+            "active":   _count(p.id, "in_progress"),
+            "awaiting": _count(p.id, "complete_pending"),
+            "complete": _count(p.id, "complete"),
+            "skipped":  _count(p.id, "skipped"),
+        }
+        for p in projects
+    ]
+
     return templates.TemplateResponse(
         request,
         "admin_dashboard.html",
         {"user": admin, "admin": admin, "today": today.isoformat(),
+            "projects": project_cards,
             "users": user_stats, "open_revisions": open_revs,
             "awaiting_revisions": awaiting_revs,
             "master_pending": pending_master, "master_in_progress": in_progress,
@@ -204,13 +320,71 @@ def users_page(request: Request, admin: User = Depends(require_admin), db: Sessi
           .group_by(MasterTitle.claimed_by_id)
           .all()
     )
+
+    # Project assignments, one query for everyone rather than one per user.
+    all_projects = db.query(Project).filter(Project.is_active == 1).order_by(Project.id).all()
+    assigned: dict[int, set[int]] = {}
+    for row in db.query(UserProject).all():
+        assigned.setdefault(row.user_id, set()).add(row.project_id)
     return templates.TemplateResponse(
         request,
         "admin_users.html",
         {"user": admin, "admin": admin, "users": users,
          "claim_counts": claim_counts,
+         "all_projects": all_projects,
+         "assigned": {uid: sorted(pids) for uid, pids in assigned.items()},
          "active_tab": "users"},
     )
+
+
+@router.post("/users/{user_id}/projects")
+def set_user_projects(
+    user_id: int,
+    project_ids: str = Form(""),   # comma-separated; empty = every project
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Set which projects a worker draws work from.
+
+    An EMPTY list deliberately means "no restriction" rather than "no work".
+    Every worker in the database today has no rows here, and the upgrade must
+    not silently stop them working — so absence of a rule means absence of a
+    restriction, and turning a worker off is what the disable button is for.
+
+    Claims already held are left alone. A worker mid-way through titles from
+    a project they're being removed from should finish them; yanking the work
+    out from under someone is how posters end up half-saved with nobody
+    responsible for them.
+    """
+    u = db.query(User).filter_by(id=user_id, is_deleted=0).first()
+    if not u:
+        raise HTTPException(404, "User not found.")
+    if u.role == "admin":
+        raise HTTPException(400, "Admins already see every project.")
+
+    wanted = {int(x) for x in project_ids.split(",") if x.strip().isdigit()}
+    valid = {p.id for p in db.query(Project).filter(Project.is_active == 1).all()}
+    wanted &= valid
+
+    db.query(UserProject).filter(UserProject.user_id == user_id).delete()
+    now = datetime.utcnow()
+    for pid in sorted(wanted):
+        db.add(UserProject(user_id=user_id, project_id=pid,
+                           assigned_at=now, assigned_by=admin.username))
+
+    # If they were last in a project they can no longer reach, forget it so
+    # their next login resolves to one they can.
+    if wanted and u.last_project_id not in wanted:
+        u.last_project_id = None
+
+    log_activity(
+        db, user=admin, action="projects_assigned", target_type="user",
+        target_id=user_id,
+        details={"worker": u.username, "project_ids": sorted(wanted)},
+    )
+    db.commit()
+    return RedirectResponse(url="/admin/users", status_code=303)
 
 
 @router.post("/users/create")
@@ -433,8 +607,17 @@ def master_page(
     )
 
 
-def _master_query(db: Session, q: str, status: str, content_type: str, needs_revision: int):
-    query = db.query(MasterTitle)
+def _master_query(db: Session, q: str, status: str, content_type: str, needs_revision: int,
+                  project: Optional[Project] = None):
+    """
+    The single funnel for both the Title List page and its JSON API.
+
+    `project` is not optional in practice — every caller passes the active
+    project. It defaults to None only so the signature stays honest about
+    what an unscoped query would mean (all projects), which is what the
+    diagnostic tooling wants and what a project page must never get.
+    """
+    query = scope_titles(db.query(MasterTitle), project)
     if status in ("pending", "in_progress", "complete", "complete_pending", "skipped"):
         query = query.filter(MasterTitle.status == status)
     if content_type:
@@ -449,6 +632,7 @@ def _master_query(db: Session, q: str, status: str, content_type: str, needs_rev
 
 @router.get("/api/master")
 def api_master(
+    request: Request,
     page: int = Query(1, ge=1),
     page_size: int = Query(MASTER_PAGE_SIZE, ge=10, le=500),
     q: str = Query(""),
@@ -458,7 +642,8 @@ def api_master(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    query = _master_query(db, q, status, content_type, needs_revision)
+    query = _master_query(db, q, status, content_type, needs_revision,
+                          project=current_project(request, admin, db))
     total = query.count()
     rows = (
         query
@@ -566,6 +751,7 @@ def master_set_status(
 
 @router.post("/master/bulk_status")
 def master_bulk_status(
+    request: Request,
     ids: str = Form(...),
     status: str = Form(...),
     admin: User = Depends(require_admin),
@@ -580,7 +766,12 @@ def master_bulk_status(
     if not id_list:
         raise HTTPException(400, "No ids supplied.")
 
-    rows = db.query(MasterTitle).filter(MasterTitle.id.in_(id_list)).all()
+    # Scoped as well as filtered by id — the id list comes from the browser
+    # and a bulk action must not reach outside the project it was fired from.
+    rows = scope_titles(
+        db.query(MasterTitle).filter(MasterTitle.id.in_(id_list)),
+        current_project(request, admin, db),
+    ).all()
     now = datetime.utcnow()
     total_resolved_revs = 0
     for r in rows:
@@ -629,13 +820,22 @@ def master_bulk_status(
 
 
 @router.post("/master/clear")
-def master_clear(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
-    """Wipe master entirely. Saved posters (if any) keep their data; their master_title_id
-    becomes a dangling reference, but SavedPoster has the immutable folder so files are still locatable."""
-    n = db.query(MasterTitle).count()
-    db.query(MasterTitle).delete()
+def master_clear(request: Request, admin: User = Depends(require_admin),
+                 db: Session = Depends(get_db)):
+    """
+    Wipe THIS PROJECT's title list.
+
+    Scoped, not global: the button lives on a project page and clearing one
+    niche must not take the others with it. Saved posters keep their data —
+    their master_title_id dangles, but SavedPoster carries the immutable
+    folder path so the files are still locatable.
+    """
+    proj = current_project(request, admin, db)
+    q = scope_titles(db.query(MasterTitle), proj)
+    n = q.count()
+    scope_titles(db.query(MasterTitle), proj).delete(synchronize_session=False)
     log_activity(db, user=admin, action="bulk_status", target_type="bulk",
-                 details={"deleted_master_rows": n})
+                 details={"deleted_master_rows": n, "project": proj.slug})
     db.commit()
     return RedirectResponse("/admin/master", status_code=302)
 
@@ -645,8 +845,22 @@ def master_clear(admin: User = Depends(require_admin), db: Session = Depends(get
 IMPORT_LOCK = threading.Lock()
 
 
-def _import_worker(job_id: int, raw_bytes: bytes, file_ext: str, replace: bool, started_by: str):
-    """Runs in a background thread. Owns its own DB session."""
+def _import_worker(job_id: int, raw_bytes: bytes, file_ext: str, replace: bool,
+                   started_by: str, project_id: int):
+    """
+    Runs in a background thread. Owns its own DB session.
+
+    `project_id` is which project's title list this file becomes. Two things
+    depend on it and both are destructive to get wrong:
+
+      * Imported rows are stamped with it. Rows used to be created with
+        project_id NULL, which the whole app reads as "the default project" —
+        so a celebrity sheet imported without this would silently join the
+        movie queue.
+      * REPLACE deletes only that project's rows. It used to delete the entire
+        master_titles table. Importing a 2,000-row celebrity sheet with
+        Replace ticked would have destroyed all 101,605 movie titles.
+    """
     db = SessionLocal()
     try:
         job = db.query(ImportJob).filter_by(id=job_id).first()
@@ -686,7 +900,19 @@ def _import_worker(job_id: int, raw_bytes: bytes, file_ext: str, replace: bool, 
         db.commit()
 
         if replace:
-            db.query(MasterTitle).delete()
+            # Scoped delete — see the docstring. NULL is folded in only when
+            # importing into the default project, since that's what NULL means.
+            from ..pipeline import DEFAULT_PROJECT_SLUG
+            from ..models import Project as _Project
+            default_row = db.query(_Project.id).filter_by(slug=DEFAULT_PROJECT_SLUG).first()
+            is_default = bool(default_row) and default_row[0] == project_id
+            q = db.query(MasterTitle).filter(MasterTitle.project_id == project_id)
+            if is_default:
+                q = db.query(MasterTitle).filter(
+                    or_(MasterTitle.project_id == project_id,
+                        MasterTitle.project_id.is_(None))
+                )
+            q.delete(synchronize_session=False)
             db.commit()
 
         # Insert in batches for speed
@@ -723,6 +949,7 @@ def _import_worker(job_id: int, raw_bytes: bytes, file_ext: str, replace: bool, 
                 external_id=ext_id, title=title, year=year_str,
                 content_type=content_type, votes=votes, rating=rating,
                 description=description, status="pending",
+                project_id=project_id,
             )
             batch.append(mt)
             if len(batch) >= BATCH_SIZE:
@@ -743,7 +970,8 @@ def _import_worker(job_id: int, raw_bytes: bytes, file_ext: str, replace: bool, 
         # Audit at the end (reuse the existing session from this worker thread)
         log_activity(
             db, user=None, action="imported", target_type="import_job", target_id=job.id,
-            details={"by": started_by, "rows": job.done_rows, "replaced": bool(replace)},
+            details={"by": started_by, "rows": job.done_rows,
+                     "replaced": bool(replace), "project_id": project_id},
             commit=True,
         )
     except Exception as e:
@@ -762,6 +990,7 @@ def _import_worker(job_id: int, raw_bytes: bytes, file_ext: str, replace: bool, 
 
 @router.post("/master/upload")
 async def master_upload(
+    request: Request,
     file: UploadFile = File(...),
     replace: int = Form(0),
     admin: User = Depends(require_admin),
@@ -781,9 +1010,14 @@ async def master_upload(
     db.commit()
     db.refresh(job)
 
+    # Resolved here, on the request thread, and passed in — the background
+    # thread has no request and therefore no way to know which project the
+    # admin was standing in.
+    project = current_project(request, admin, db)
+
     threading.Thread(
         target=_import_worker,
-        args=(job.id, raw, ext, bool(replace), admin.username),
+        args=(job.id, raw, ext, bool(replace), admin.username, project.id),
         daemon=True,
     ).start()
 
@@ -820,7 +1054,11 @@ def browse_page(
 
     # Sticky default: if worker param given, save it as default for this admin.
     # If no param, read the saved default. Fallback to alphabetical first.
-    settings_key = f"admin.{admin.id}.browse_default_worker"
+    # Scoped per project: an admin reviewing movies and celebrities has a
+    # different "usual worker" in each, and a shared key would make switching
+    # project silently change who you're looking at.
+    proj = current_project(request, admin, db)
+    settings_key = f"admin.{admin.id}.{proj.slug}.browse_default_worker"
     if worker:
         # Save this selection as the new default.
         setting = db.query(AppSetting).filter_by(key=settings_key).first()
@@ -857,6 +1095,7 @@ def browse_page(
 
 @router.get("/api/browse")
 def api_browse(
+    request: Request,
     worker: str,
     date: str,
     admin: User = Depends(require_admin),
@@ -886,6 +1125,13 @@ def api_browse(
               SavedPoster.original_save_date == d,
               SavedPoster.deleted_at.is_(None),
           )
+    )
+    # Scoped through the joined MasterTitle rather than the poster: posters
+    # carry no project of their own, and deliberately so — a title's project
+    # is the one fact, and duplicating it onto every poster would be a second
+    # copy to keep in sync through renames, replacements and reassignments.
+    rows = (
+        scope_titles(rows, current_project(request, admin, db))
           .order_by(SavedPoster.title_folder_path.asc(), SavedPoster.filename.asc())
           .all()
     )
@@ -926,6 +1172,146 @@ def api_browse(
         "title_count": len(titles),
         "poster_count": sum(len(t["posters"]) for t in titles.values()),
         "titles": list(titles.values()),
+    })
+
+
+@router.get("/api/poster/{poster_id}/timeline")
+def poster_timeline(
+    poster_id: int,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Everything that ever happened to one poster, oldest first.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS EXISTS
+    ════════════════════════════════════════════════════════════════════════
+    The state of a poster is spread across six tables — the poster row, the
+    activity log, revisions, processed_images, upload_tracking and the title
+    it belongs to. Answering "why is this image not on FineArtAmerica?"
+    currently means opening a SQLite shell and joining them by hand.
+
+    That question gets asked constantly and will get asked more as niches and
+    marketplaces multiply, so it deserves an answer in the UI. This assembles
+    one ordered list from all six, in the operator's own vocabulary.
+
+    Read-only, by design: this is a place to understand what happened, never
+    to change it. Anything that mutates state belongs on the page that owns
+    that state, where the confirmation and the audit entry already exist.
+    """
+    sp = db.query(SavedPoster).filter_by(id=poster_id).first()
+    if not sp:
+        raise HTTPException(404, "Poster not found.")
+    title = db.query(MasterTitle).filter_by(id=sp.master_title_id).first()
+
+    events: list[dict] = []
+
+    def add(when, kind: str, text: str, detail: str = "", actor: str = ""):
+        if when is None:
+            return
+        events.append({
+            "at": when.isoformat() if hasattr(when, "isoformat") else str(when),
+            "kind": kind, "text": text, "detail": detail, "actor": actor,
+        })
+
+    # ── Sourcing ────────────────────────────────────────────────────────────
+    add(sp.created_at, "saved",
+        "Downloaded by " + (sp.added_by or sp.username),
+        sp.source_url or "", sp.added_by or sp.username)
+    if sp.low_quality_url:
+        add(sp.created_at, "warn", "Saved past the low-quality warning",
+            f"{sp.image_width or '?'}×{sp.image_height or '?'}", sp.username)
+
+    # ── Admin/worker actions from the audit log ─────────────────────────────
+    for row in (
+        db.query(ActivityLog)
+          .filter(ActivityLog.target_type == "saved_poster",
+                  ActivityLog.target_id == poster_id)
+          .order_by(ActivityLog.created_at.asc())
+          .all()
+    ):
+        add(row.created_at, row.action, row.action.replace("_", " ").title(),
+            row.details or "", row.username or "system")
+
+    # ── Change requests ─────────────────────────────────────────────────────
+    for rev in (
+        db.query(Revision)
+          .filter(Revision.saved_poster_id == poster_id)
+          .order_by(Revision.created_at.asc())
+          .all()
+    ):
+        add(rev.created_at, "flagged", "Changes requested", rev.comment or "")
+        add(rev.submitted_at, "resubmitted", "Worker submitted a fix", rev.worker_note or "")
+        add(rev.resolved_at, "resolved", f"Change request {rev.status}",
+            rev.admin_verdict or "")
+
+    # ── Pipeline: greenlight, Photoshop, upload ─────────────────────────────
+    if title is not None and title.greenlit_at:
+        src = title.greenlit_source or "unknown"
+        add(title.greenlit_at, "greenlit",
+            "Released into the pipeline",
+            f"source: {src}", title.greenlit_by or "")
+
+    for pi in (
+        db.query(ProcessedImage)
+          .filter(ProcessedImage.saved_poster_id == poster_id)
+          .order_by(ProcessedImage.created_at.asc())
+          .all()
+    ):
+        add(pi.created_at, "processed",
+            "Processed" + ("" if pi.is_current else " (superseded)"),
+            f"{pi.storage_path} · {round((pi.duration_ms or 0) / 1000)}s"
+            + (f" · script {pi.script_version}" if pi.script_version else ""),
+            pi.processed_by or "")
+
+    for ut, acct in (
+        db.query(UploadTracking, UploadAccount)
+          .outerjoin(UploadAccount, UploadTracking.account_id == UploadAccount.id)
+          .filter(UploadTracking.saved_poster_id == poster_id)
+          .all()
+    ):
+        who = acct.name if acct else f"account {ut.account_id}"
+        add(ut.created_at, "upload_queued", f"Queued for {who}", ut.target_site or "")
+        add(ut.uploaded_at, "uploaded", f"Live on {who}", ut.remote_title or "")
+        add(ut.removed_at, "removed", f"Removed from {who}", ut.removed_reason or "")
+        if ut.status == "failed" and ut.last_error:
+            # UploadTracking keeps no per-attempt timestamp, so the failure is
+            # pinned to the claim that produced it. Close enough to order the
+            # timeline correctly, and honest about what's actually recorded.
+            add(ut.claimed_at or ut.created_at, "failed",
+                f"Upload failed on {who} (attempt {ut.attempts})",
+                ut.last_error[:400])
+
+    if sp.process_error:
+        add(sp.claimed_at or sp.created_at, "failed", "Processing failed",
+            sp.process_error[:400], sp.claimed_by or "")
+
+    add(sp.deleted_at, "deleted", "Deleted", sp.delete_note or "")
+
+    events.sort(key=lambda e: e["at"])
+
+    return JSONResponse({
+        "poster": {
+            "id": sp.id,
+            "filename": sp.filename,
+            "folder": sp.title_folder_path,
+            "worker": sp.username,
+            "saved_on": sp.original_save_date.isoformat() if sp.original_save_date else "",
+            "size": sp.file_size,
+            "dimensions": (f"{sp.image_width}×{sp.image_height}"
+                           if sp.image_width and sp.image_height else ""),
+            "pipeline_status": sp.pipeline_status or "not greenlit",
+            "source_url": sp.source_url,
+            "deleted": sp.deleted_at is not None,
+        },
+        "title": {
+            "id": title.id if title else None,
+            "name": title.title if title else "(unknown)",
+            "year": title.year if title else "",
+            "external_id": title.external_id if title else None,
+        },
+        "events": events,
     })
 
 
@@ -1628,9 +2014,15 @@ def revisions_page(
 
       5. RESOLVED — history.
     """
+    # Every section on this page is scoped to the project the admin is inside.
+    # Revisions hang off posters, and posters hang off titles, so the join to
+    # MasterTitle is what carries the project — which is why each query below
+    # joins it even where the section doesn't display title fields.
+    proj = current_project(request, admin, db)
+
     # ── Pending completions: titles in complete_pending ─────────────────────
     pending_titles = (
-        db.query(MasterTitle)
+        scope_titles(db.query(MasterTitle), proj)
           .filter(MasterTitle.status == "complete_pending")
           .order_by(MasterTitle.updated_at.desc().nullslast())
           .all()
@@ -1672,13 +2064,13 @@ def revisions_page(
         pending_title_ids.add(t.id)
 
     # ── Awaiting approval (standalone — NOT inside a pending completion) ────
-    awaiting_q = (
+    awaiting_q = scope_titles((
         db.query(Revision, SavedPoster, MasterTitle)
           .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
-          .outerjoin(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
           .filter(Revision.status == "awaiting_approval")
           .order_by(Revision.submitted_at.desc().nullslast())
-    )
+    ), proj)
     if pending_title_ids:
         # Hide any awaiting revision whose title is in a pending-completion
         # block — those are already rendered there.
@@ -1688,43 +2080,36 @@ def revisions_page(
     awaiting_rows = awaiting_q.all()
 
     # ── Open (waiting on user) ──────────────────────────────────────────────
-    open_rows = (
+    open_rows = scope_titles((
         db.query(Revision, SavedPoster, MasterTitle)
           .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
-          .outerjoin(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
           .filter(Revision.status == "open")
-          .order_by(Revision.created_at.desc())
-          .all()
-    )
+    ), proj).order_by(Revision.created_at.desc()).all()
 
     # ── Recent mistake-deletions (legacy round-9 round-trip path) ────────────
     # After round 11 these only catch deletions on NON-flagged posters
     # (worker accidentally saved wrong image and deleted it). The
     # auto-resolve admin_verdict pattern is preserved for these.
-    deletion_rows = (
+    deletion_rows = scope_titles((
         db.query(Revision, SavedPoster, MasterTitle)
           .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
-          .outerjoin(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
           .filter(
               Revision.status == "resolved",
               Revision.admin_acked_at.is_(None),
               Revision.admin_verdict.like("auto-resolved: file deleted%"),
           )
-          .order_by(Revision.resolved_at.desc())
-          .limit(50)
-          .all()
-    )
+    ), proj).order_by(Revision.resolved_at.desc()).limit(50).all()
 
     # ── Resolved history ────────────────────────────────────────────────────
-    resolved_rows = (
+    resolved_rows = scope_titles((
         db.query(Revision, SavedPoster, MasterTitle)
           .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
-          .outerjoin(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
           .filter(Revision.status == "resolved")
-          .order_by(Revision.resolved_at.desc())
-          .limit(50)
-          .all()
-    )
+    ), proj).order_by(Revision.resolved_at.desc()).limit(50).all()
+
     return templates.TemplateResponse(
         request,
         "admin_revisions.html",
@@ -1747,7 +2132,7 @@ def skipped_page(
     db: Session = Depends(get_db),
 ):
     rows = (
-        db.query(MasterTitle)
+        scope_titles(db.query(MasterTitle), current_project(request, admin, db))
           .filter(MasterTitle.status == "skipped")
           .order_by(MasterTitle.completed_at.desc().nullslast(), MasterTitle.updated_at.desc())
           .limit(500)
@@ -2395,6 +2780,29 @@ def payments_mark_paid(
     # Per-day breakdown for receipt transparency.
     by_day = per_day_breakdown(db, poster_ids=ids)
 
+    # ── Per-project breakdown ───────────────────────────────────────────────
+    # A worker covering two niches is paid ONCE, at one rate — splitting the
+    # payment per project would mean two M-Pesa transfers for the same week's
+    # work, which is worse for everyone. What the split IS needed for is
+    # answering "what is the celebrity niche costing me", so it's recorded on
+    # the run and shown on the receipt rather than driving the payout.
+    by_project: dict[str, int] = {}
+    if ids:
+        default_pid = ensure_default_project(db).id
+        proj_names = {p.id: p.name for p in db.query(Project).all()}
+        rows = (
+            db.query(MasterTitle.project_id, func.count(SavedPoster.id))
+              .join(SavedPoster, SavedPoster.master_title_id == MasterTitle.id)
+              .filter(SavedPoster.id.in_(ids))
+              .group_by(MasterTitle.project_id)
+              .all()
+        )
+        for pid, n in rows:
+            # NULL project_id means the default project — the imported master
+            # rows have never been backfilled.
+            name = proj_names.get(pid if pid is not None else default_pid, "unknown")
+            by_project[name] = by_project.get(name, 0) + n
+
     run = PaymentRun(
         worker_id           = worker_id,
         worker_username     = worker_username,
@@ -2407,6 +2815,7 @@ def payments_mark_paid(
         note                = note.strip() or None,
         poster_ids_json     = json.dumps(ids),
         by_day_json         = json.dumps(by_day),
+        by_project_json     = json.dumps(by_project) if by_project else None,
         back_pay_dates_json = json.dumps(back_pay_dates) if back_pay_dates else None,
         pushed_at           = datetime.utcnow() if push_to_worker else None,
         created_by          = admin.username,
@@ -2730,6 +3139,41 @@ def admin_stats_page(
         request, "admin_stats.html",
         {"user": admin, "admin": admin,
          "active_tab": "stats",
+         "stats_scope": "project",
+         "workers": workers,
+         "selected_worker_id": worker_id},
+    )
+
+
+@router.get("/master_stats", response_class=HTMLResponse)
+def admin_master_stats_page(
+    request: Request,
+    worker_id: int = Query(0),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    The same worker-performance page, reached from the master nav.
+
+    Worker output is a person-level fact, not a project-level one — a worker
+    covering two niches has one throughput and one flag rate. So rather than
+    build a second stats page, this renders the same one under the master nav
+    so the admin doesn't have to enter an arbitrary project to answer "how is
+    humphrey doing".
+    """
+    workers = (
+        db.query(User)
+          .filter(User.role == "worker", User.is_deleted == 0)
+          .order_by(User.username.asc())
+          .all()
+    )
+    if not worker_id and workers:
+        worker_id = workers[0].id
+    return templates.TemplateResponse(
+        request, "admin_stats.html",
+        {"user": admin, "admin": admin,
+         "active_tab": "master_stats",
+         "stats_scope": "master",
          "workers": workers,
          "selected_worker_id": worker_id},
     )

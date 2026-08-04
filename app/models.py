@@ -62,6 +62,31 @@ class User(Base):
     is_deleted       = Column(Integer, default=0, nullable=False, index=True)
     deleted_at       = Column(DateTime, nullable=True)
 
+    # Which project this user was last working in. Admins land back in the
+    # project they left; workers assigned to more than one resume where they
+    # were rather than being dropped at a chooser every session.
+    last_project_id  = Column(Integer, ForeignKey("projects.id"), nullable=True)
+
+
+class UserProject(Base):
+    """
+    Which projects a worker may work on. Many-to-many by design: one worker can
+    cover movies and celebrities, and one project has several workers.
+
+    Before this existed a worker's GET button pulled from EVERY project's
+    master list, so the day a second niche was added, celebrity titles would
+    have landed in a movie worker's queue with nothing to prevent it.
+
+    Admins are not listed here — they see everything and switch project from
+    the master dashboard.
+    """
+    __tablename__ = "user_projects"
+
+    user_id    = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), primary_key=True)
+    assigned_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    assigned_by = Column(String(64), nullable=True)
+
 
 # ── Master title sheet ───────────────────────────────────────────────────────
 
@@ -114,6 +139,16 @@ class MasterTitle(Base):
     # Photoshop stage will not touch the title's posters, even if complete.
     greenlit_at       = Column(DateTime, nullable=True, index=True)
     greenlit_by       = Column(String(64), nullable=True)
+    # HOW it was greenlit, not just who by:
+    #   'payment:<run_id>' — released automatically when that run was paid
+    #   'manual'           — released by hand, which means it may be UNPAID
+    #   'all_paid'         — bulk release of everything already covered by a run
+    #   'migration'        — inferred during the legacy import
+    #
+    # Kept as a filterable column rather than only in the activity log because
+    # the question you will actually ask is "show me everything released
+    # without payment", and that has to be a query, not an audit trawl.
+    greenlit_source   = Column(String(32), nullable=True, index=True)
     # Rollup of the per-poster pipeline state, recomputed by
     # pipeline.recompute_title_status(). Denormalized purely so the Pipeline
     # dashboard can page/filter thousands of titles cheaply — never trust it
@@ -347,6 +382,10 @@ class PaymentRun(Base):
     # Per-day breakdown captured at run creation time, for receipt
     # transparency. Format: {"2026-04-30": 5, "2026-04-29": 2, ...}
     by_day_json     = Column(Text, nullable=True)
+    # Per-project split of this run: {"tell-a-vision": 120, "celebrity": 40}.
+    # A worker covering two projects is paid ONCE; this is what lets the
+    # receipt show where the work came from, and lets you cost a project.
+    by_project_json = Column(Text, nullable=True)
     # Subset of dates in by_day_json that are OUTSIDE [period_start, period_end]
     # — i.e. older "back-pay" posters admin manually included in this run
     # because they became eligible after the original period was paid.
@@ -454,6 +493,11 @@ class Project(Base):
     name            = Column(String(128), nullable=False)
     # Where source images come from — informational, drives UI copy/links.
     source_site     = Column(String(64), nullable=True)       # 'tmdb' | 'pinterest' | ...
+    # Which marketplace this project publishes to. Drives the storage layout
+    # (S:/{site}/{project}/processed/...) and how the project is labelled.
+    # A project is one design type on one marketplace — it may have many
+    # accounts there, which is why accounts live on their own table.
+    target_site     = Column(String(64), nullable=False, default="fineartamerica")
     # How many images a worker is expected to save per title (soft guidance).
     images_per_title = Column(Integer, nullable=True)
     # Relative share of each Photoshop batch when several projects have work

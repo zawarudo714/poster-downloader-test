@@ -826,6 +826,11 @@
       item.className = 'receipt-item';
       const hasBackPay = (r.back_pay_dates && r.back_pay_dates.length > 0);
       const byDayDates = Object.keys(r.by_day || {}).sort();
+      // Only shown when the run actually spans more than one project — a
+      // worker on a single niche doesn't need a line telling them so.
+      const byProject = r.by_project || {};
+      const projNames = Object.keys(byProject);
+      const showProjects = projNames.length > 1;
       item.innerHTML = `
         <div class="receipt-row">
           <strong class="mono receipt-amount"></strong>
@@ -841,6 +846,7 @@
             <div class="receipt-day-list"></div>
           </details>
         ` : ''}
+        ${showProjects ? `<div class="receipt-projects muted"></div>` : ''}
         ${hasBackPay ? `<div class="receipt-backpay">includes back-pay from <span class="receipt-backpay-dates"></span></div>` : ''}
         <div class="receipt-actions">
           <button class="btn btn-accent btn-tiny receipt-ack-btn" type="button">ACKNOWLEDGE</button>
@@ -875,6 +881,12 @@
             </div>`;
         });
         dayList.innerHTML = html;
+      }
+
+      // One payment, several projects — say so explicitly.
+      if (showProjects) {
+        item.querySelector('.receipt-projects').textContent =
+          'Covers ' + projNames.map((n) => `${n}: ${byProject[n]}`).join(' · ');
       }
 
       // Back-pay summary line.

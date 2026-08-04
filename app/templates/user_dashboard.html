@@ -1,4 +1,7 @@
 {% extends "base.html" %}
+{# Admin peek reuses this worker page. When it does, keep the project nav
+   so the admin doesn't appear to have left the project they're inspecting. #}
+{% set nav_scope = 'project' if peek_username is defined and peek_username else 'master' %}
 {% from "_macros.html" import info, status_pill %}
 {% block title %}Dashboard · Poster Downloader{% endblock %}
 

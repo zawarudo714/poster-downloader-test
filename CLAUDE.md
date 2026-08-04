@@ -70,12 +70,45 @@ and rebuild the box from nothing.
 
 ---
 
+## The master / project split (added 2026-08-04)
+
+The admin UI now has two levels, and the nav **replaces itself** between them.
+
+| | |
+|---|---|
+| **Master** | Dashboard (project cards), Payments, Chat, Users, Backups, Email, Activity Log, Stats, Diagnostics |
+| **Project** | Review Posters, Title List, Changes Requested, Skipped, Pipeline, Stats, Peek |
+
+The active project is session state — cookie `pd_project`, falling back to
+`User.last_project_id`, falling back to the default project. It is **not** in
+the URL: every existing admin route and every `fetch()` in the JS keeps
+working and simply means "…within the project I'm in". See the module
+docstring in `app/projects.py` for why that trade was made.
+
+Rules that matter:
+
+- A template declares its level with `{% set nav_scope = 'project' %}` at the
+  top level, right after `{% extends %}`. Anything that doesn't say is master.
+- Any query that can show or hand out a title goes through
+  `projects.scope_titles()` (admin) or `scope_titles_multi()` (worker).
+  Nothing filters on `project_id` by hand.
+- **`project_id IS NULL` means the DEFAULT project, not "any project".** The
+  101,605 imported rows are all NULL. `pipeline.project_scope()` takes a
+  `default_project_id` for exactly this — omitting it made every project
+  inherit the movie backlog.
+- Workers are scoped by the `user_projects` table. **No rows = no restriction**,
+  because that's the state every existing worker is in.
+
 ## Code map
 
 ```
 app/
   models.py            All tables. Pipeline models are at the bottom with a
                        design contract comment — read it before adding one.
+  projects.py          Active-project resolution + query scoping. Read its
+                       docstring before touching navigation.
+  diagnostics.py       Read-only consistency scanner (DB vs disk vs pipeline).
+                       Never writes — see the docstring for why.
   pipeline.py          ALL post-production policy. Settings resolution,
                        greenlight, dispatch/claiming, templates, encryption.
                        DEFAULTS is the only place a pipeline literal belongs.
@@ -143,6 +176,12 @@ tool needs, add it to `REQUIRED_MODULES` in `dev_setup.py` too.
 - **`Base.metadata.create_all()` does not ALTER existing tables.** New columns
   need an explicit migration (see `migrate_pipeline.NEW_COLUMNS`). The README's
   per-round notes are the precedent.
+- **Storage layout is `{site}/{project}/processed/{date}/{title_folder}/{filename}`**
+  relative to `storage_root` (now `S:` rather than `S:/processed`). Project and
+  site names are slugified through `pipeline._path_token()` before they touch a
+  Windows path. **On an existing install `storage_root` is already stored in
+  `app_settings` and will NOT pick up the new default — change it on the
+  Pipeline page to `S:` or the layout ends up doubled.**
 - **Comments explain *why*, not *what*.** The existing code does this well —
   match it. Several modules carry a design-contract header; keep those current.
 

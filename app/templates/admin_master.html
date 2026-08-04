@@ -1,4 +1,6 @@
 {% extends "base.html" %}
+{# Project-scoped page: the nav shows this project's links, not the master ones. #}
+{% set nav_scope = 'project' %}
 {% from "_macros.html" import info %}
 {% block title %}Title List · Admin{% endblock %}
 

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% from "_macros.html" import info %}
+{% block title %}Diagnostics · Admin{% endblock %}
+
+{% block content %}
+<div class="admin-grid" data-no-global-scroll>
+
+  <section class="panel">
+    <div class="panel-head">
+      <span>SYSTEM CHECK {{ info("Compares the database against the files on disk and against the pipeline's own records, and reports anything that disagrees. It never changes anything — every fix is a deliberate action on the page that owns it.") }}</span>
+      <button class="btn btn-accent btn-tiny" id="diag-run" type="button">RUN&nbsp;SCAN</button>
+    </div>
+    <div class="panel-body">
+      <p class="muted diag-intro">
+        Nothing keeps the database, the workspace and the marketplace in step
+        with each other. This finds where they've drifted apart. The scan walks
+        the whole workspace, so it takes a few seconds.
+      </p>
+      <div id="diag-summary" hidden></div>
+      <div id="diag-results"></div>
+    </div>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/admin_diagnostics.js?v={{ app_version }}"></script>
+{% endblock %}

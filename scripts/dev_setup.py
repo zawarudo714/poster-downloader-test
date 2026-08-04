@@ -442,12 +442,37 @@ class DevSetup:
         db.flush()
 
     def create_project(self, db):
+        """
+        The primary project, plus an empty SECOND one.
+
+        The second project exists purely so the master/project split is
+        exercised locally. With one project the nav never replaces itself, the
+        dashboard shows a single card, and the worker switcher stays hidden —
+        which means every bug in that machinery would go unseen until the
+        celebrity niche is added on the live server. An empty project costs
+        nothing and makes the shape of the app visible.
+        """
         from app import pipeline as P
+        from app.models import Project
 
         project = P.ensure_default_project(db)
         db.flush()
-        self.log("Pipeline project", level="head")
-        self.log(f"  {project.name} (slug: {project.slug})")
+        self.log("Pipeline projects", level="head")
+        self.log(f"  {project.name} (slug: {project.slug}) — seeded with work")
+
+        second = db.query(Project).filter_by(slug="celebrity").first()
+        if second is None:
+            second = Project(
+                slug="celebrity",
+                name="Celebrity Portraits",
+                source_site="pinterest",
+                target_site="fineartamerica",
+                images_per_title=2,
+                notes="Empty placeholder so the master/project split is testable locally.",
+            )
+            db.add(second)
+            db.flush()
+        self.log(f"  {second.name} (slug: {second.slug}) — empty, for testing the split")
         return project
 
     def seed_master_titles(self, db, project) -> int:

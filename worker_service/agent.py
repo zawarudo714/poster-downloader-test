@@ -45,7 +45,7 @@ from .processor import ProcessStage
 from .uploader import UploadStage
 
 
-AGENT_VERSION = "1.0.0"
+AGENT_VERSION = "1.1.0"
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_CONFIG = HERE / "config.json"
@@ -73,11 +73,65 @@ class Agent:
         self.schedule_mode = "continuous"
         self.daily_start_hour = 6
 
-        log_dir = Path(config.get("log_dir") or (Path(config.get("temp_dir", ".")) / "logs"))
-        log_dir.mkdir(parents=True, exist_ok=True)
-        self.log_path = log_dir / f"agent_{datetime.now():%Y-%m-%d}.log"
+        # Idle back-off. All three are refreshed from the server on every
+        # handshake; these are only the values used before the first one.
+        self.poll_interval_idle = 180
+        self.poll_idle_after_min = 10
+        self.log_retention_days = 14
+        # When the current run of "nothing to do" began. None means the last
+        # cycle did real work.
+        self._idle_since: Optional[float] = None
+
+        self.log_dir = Path(config.get("log_dir") or (Path(config.get("temp_dir", ".")) / "logs"))
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        # Deliberately NOT computed once and cached — see _current_log_path().
+        self._log_day: Optional[str] = None
+        self.log_path = self._current_log_path()
 
     # ── Logging ────────────────────────────────────────────────────────────
+
+    def _current_log_path(self) -> Path:
+        """
+        Today's log file, re-evaluated on every write.
+
+        The filename used to be computed once at startup, which was fine for a
+        one-off run and wrong for the thing this agent is actually meant to be:
+        a service that stays up for weeks. A week-long run wrote everything
+        into the file named for the day it started, so "yesterday's log" did
+        not exist and one file grew without limit.
+        """
+        today = f"{datetime.now():%Y-%m-%d}"
+        if today != self._log_day:
+            self._log_day = today
+            self.log_path = self.log_dir / f"agent_{today}.log"
+            self._prune_old_logs()
+        return self.log_path
+
+    def _prune_old_logs(self) -> None:
+        """
+        Delete agent logs older than the retention window.
+
+        Called on rollover rather than on a timer, so it happens once a day at
+        most and costs nothing. Silent by design: a failure to delete an old
+        log is not worth a line in the log, and certainly not worth stopping
+        the agent.
+
+        retention_days = 0 keeps everything, for when you're chasing an
+        intermittent fault and want the full history.
+        """
+        days = int(self.log_retention_days or 0)
+        if days <= 0:
+            return
+        cutoff = time.time() - days * 86400
+        try:
+            for path in self.log_dir.glob("agent_*.log"):
+                try:
+                    if path.stat().st_mtime < cutoff:
+                        path.unlink()
+                except OSError:
+                    pass
+        except OSError:
+            pass
 
     def log(self, message: str, *, level: str = "info") -> None:
         """
@@ -91,7 +145,7 @@ class Agent:
         line = f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {prefix} {message}"
         print(line, flush=True)
         try:
-            with open(self.log_path, "a", encoding="utf-8") as handle:
+            with open(self._current_log_path(), "a", encoding="utf-8") as handle:
                 handle.write(line + "\n")
         except OSError:
             pass
@@ -115,6 +169,10 @@ class Agent:
         self.poll_interval = int(data.get("poll_interval_s") or 30)
         self.schedule_mode = data.get("schedule_mode") or "continuous"
         self.daily_start_hour = int(data.get("daily_start_hour") or 6)
+        self.poll_interval_idle = int(data.get("poll_interval_idle_s")
+                                      or self.poll_interval)
+        self.poll_idle_after_min = int(data.get("poll_idle_after_min") or 10)
+        self.log_retention_days = int(data.get("node_log_retention_days") or 0)
         return True
 
     def can(self, capability: str) -> bool:
@@ -231,20 +289,63 @@ class Agent:
             self.log(traceback.format_exc(), level="error")
         return False
 
+    def _current_sleep(self) -> int:
+        """
+        How long to wait before polling again.
+
+        Full speed while there is work or the quiet spell is short; stretched
+        towards the idle interval once the box has been doing nothing for
+        `poll_idle_after_min` minutes.
+
+        This costs no responsiveness. The back-off only ever applies AFTER a
+        cycle that found nothing, and any cycle that finds work resets it — so
+        the delay before starting a batch is unchanged, and the only thing
+        saved is round trips into an empty queue. Overnight that is a few
+        thousand pointless requests and a console you can actually read.
+        """
+        if self.poll_interval_idle <= self.poll_interval:
+            return self.poll_interval          # back-off disabled
+        if self._idle_since is None:
+            return self.poll_interval
+        idle_for = time.time() - self._idle_since
+        if idle_for < self.poll_idle_after_min * 60:
+            return self.poll_interval
+        return self.poll_interval_idle
+
+    def _note_activity(self, did_work: bool) -> None:
+        """Track how long we've been idle so the back-off has something to go on."""
+        if did_work:
+            if self._idle_since is not None:
+                # Coming out of a quiet spell — say so, otherwise the jump back
+                # to 30s polling looks like the agent restarted itself.
+                self.log("Work found — back to full-speed polling.", level="ok")
+            self._idle_since = None
+        elif self._idle_since is None:
+            self._idle_since = time.time()
+
     def _log_idle(self) -> None:
         """
         Say something occasionally while there's nothing to do.
 
         A silent window is indistinguishable from a crashed one, which is how
         an idle agent gets restarted unnecessarily. Rate-limited to once a
-        minute so a long idle period doesn't bury the log.
+        minute normally, and once per idle-poll while backed off — there is no
+        point logging "still nothing" more often than we actually check.
         """
         now = time.time()
-        if now - self._last_idle_log < 60:
+        gap = max(60, self._current_sleep())
+        if now - self._last_idle_log < gap:
             return
         self._last_idle_log = now
-        self.log(f"Idle — nothing queued. Polling every {self.poll_interval}s. "
-                 f"Ctrl+C to stop.")
+        sleep_for = self._current_sleep()
+        if sleep_for > self.poll_interval:
+            mins = int((now - (self._idle_since or now)) // 60)
+            self.log(f"Idle for {mins}m — polling every {sleep_for}s to keep the "
+                     f"noise down. Picks up immediately when work appears. "
+                     f"Ctrl+C to stop.")
+        else:
+            self.log(f"Idle — nothing queued. Polling every {sleep_for}s. "
+                     f"Ctrl+C to stop.")
 
     # ── Main loop ──────────────────────────────────────────────────────────
 
@@ -295,9 +396,10 @@ class Agent:
 
             # Only sleep when idle. After real work, loop straight back so a
             # backlog drains without an artificial pause between batches.
+            self._note_activity(did_work)
             if not did_work:
                 self._log_idle()
-                time.sleep(self.poll_interval)
+                time.sleep(self._current_sleep())
 
 
 def main() -> None:

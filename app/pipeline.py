@@ -363,6 +363,22 @@ DEFAULTS: dict[str, Any] = {
     "claim_timeout_min":  45,
     # Node poll interval hint (seconds). The node honours this.
     "poll_interval_s":    30,
+    # Idle back-off. After `poll_idle_after_min` minutes with nothing to do,
+    # the node stretches its polling towards `poll_interval_idle_s`, snapping
+    # straight back to `poll_interval_s` the moment work appears.
+    #
+    # This is purely about noise and pointless requests: 30s polling while a
+    # box sits idle overnight is ~2,900 wasted round trips and a console you
+    # can't read. Responsiveness when there IS work is unchanged, because the
+    # first batch resets the interval.
+    #
+    # Set poll_interval_idle_s equal to poll_interval_s to disable back-off.
+    "poll_interval_idle_s": 180,
+    "poll_idle_after_min":  10,
+    # Local agent logs on the node are deleted after this many days. 0 keeps
+    # them forever. They are the only record when the node cannot reach the
+    # server, so this is generous by default.
+    "node_log_retention_days": 14,
 }
 
 
@@ -1775,6 +1791,9 @@ def upload_settings_payload(
         "poll_interval_s": get_setting(db, "poll_interval_s", project=project),
         "schedule_mode":   get_setting(db, "schedule_mode", project=project),
         "daily_start_hour": get_setting(db, "daily_start_hour", project=project),
+        "poll_interval_idle_s":    get_setting(db, "poll_interval_idle_s", project=project),
+        "poll_idle_after_min":     get_setting(db, "poll_idle_after_min", project=project),
+        "node_log_retention_days": get_setting(db, "node_log_retention_days", project=project),
     }
 
 
@@ -1799,6 +1818,9 @@ def process_settings_payload(
         "poll_interval_s":  get_setting(db, "poll_interval_s", project=project),
         "schedule_mode":    get_setting(db, "schedule_mode", project=project),
         "daily_start_hour": get_setting(db, "daily_start_hour", project=project),
+        "poll_interval_idle_s":    get_setting(db, "poll_interval_idle_s", project=project),
+        "poll_idle_after_min":     get_setting(db, "poll_idle_after_min", project=project),
+        "node_log_retention_days": get_setting(db, "node_log_retention_days", project=project),
     }
 
 

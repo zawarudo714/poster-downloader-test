@@ -126,6 +126,13 @@ def hello(
         "poll_interval_s": P.get_setting(db, "poll_interval_s"),
         "schedule_mode": P.get_setting(db, "schedule_mode"),
         "daily_start_hour": P.get_setting(db, "daily_start_hour"),
+        # Idle back-off + local log retention. Delivered on every handshake so
+        # the node holds no configuration of its own — change it on the
+        # Pipeline page and it takes effect on the next cycle, with no RDP
+        # session and no restart.
+        "poll_interval_idle_s": P.get_setting(db, "poll_interval_idle_s"),
+        "poll_idle_after_min": P.get_setting(db, "poll_idle_after_min"),
+        "node_log_retention_days": P.get_setting(db, "node_log_retention_days"),
     })
 
 

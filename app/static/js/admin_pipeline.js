@@ -59,7 +59,10 @@
       ['upload_sequential',   'bool',   'Sequential uploads','Strongly recommended. One tab at a time. The old parallel-tab approach lost 20-30% of every batch to stale tabs, memory pressure and session timeouts.'],
       ['schedule_mode',       'select', 'Schedule',          'Continuous runs whenever there is work. Daily waits for the start hour.', ['continuous', 'daily']],
       ['daily_start_hour',    'number', 'Daily start hour',  'Node local time, 0-23. Only used in daily mode.'],
-      ['poll_interval_s',     'number', 'Poll interval (s)', 'How often the node asks for work.'],
+      ['poll_interval_s',     'number', 'Poll interval (s)', 'How often the node asks for work while there is work to do.'],
+      ['poll_interval_idle_s','number', 'Idle poll interval (s)', 'How often the node asks for work once it has been idle for a while. Stops an overnight idle box making thousands of pointless requests and filling its console. Set it equal to the normal poll interval to switch the back-off off.'],
+      ['poll_idle_after_min', 'number', 'Back off after (min)', 'How long the node must find nothing before it slows its polling down. It snaps back to the normal interval the moment work appears, so this never delays a batch.'],
+      ['node_log_retention_days','number','Node log retention (days)', "How long the worker node keeps its own local log files on the Windows box. These are the only record when the node cannot reach this server. 0 keeps them forever."],
       ['claim_timeout_min',   'number', 'Claim timeout (min)','Work claimed by a node that stops reporting is automatically returned to the queue after this long.'],
     ],
     templates: [

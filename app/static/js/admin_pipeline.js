@@ -45,6 +45,7 @@
       ['photoshop_exe',       'text',   'Photoshop executable',    'Absolute path to Photoshop.exe on the worker node.'],
       ['process_timeout_s',   'number', 'Per-image timeout (s)',   'A single image taking longer than this is treated as hung: Photoshop is killed and the image retried.'],
       ['photoshop_warmup_s',  'number', 'Photoshop warmup (s)',    'How long to wait for a cold Photoshop to become ready before sending it the first script. Paid once per batch, not per image.'],
+      ['photoshop_restart_every','number','Restart Photoshop every N images','Photoshop stays open between images for speed, but degrades over a long run — memory climbs and images get slower. A periodic restart costs ~30s and prevents a slide into timeouts. 0 disables it.'],
       ['process_batch_size',  'number', 'Batch size',              'Images claimed per Photoshop run.'],
       ['process_max_attempts','number', 'Max attempts',            'Retries before an image is parked for review.'],
     ],
@@ -186,6 +187,7 @@
     }
     projectId = overview.project.id;
     renderFunnel();
+    renderInFlight();
     renderAccountQuotas();
     renderJobs();
     renderNodes();
@@ -229,6 +231,54 @@
         }
       });
     });
+  }
+
+  function fmtElapsed(sec) {
+    if (sec == null) return '—';
+    if (sec < 60) return sec + 's';
+    const m = Math.floor(sec / 60), r = sec % 60;
+    return m + 'm ' + String(r).padStart(2, '0') + 's';
+  }
+
+  function renderInFlight() {
+    const el = q('[data-inflight]');
+    if (!el) return;
+    const items = overview.in_flight || [];
+
+    const stamp = q('[data-inflight-updated]');
+    if (stamp) stamp.textContent = 'updated ' + new Date().toLocaleTimeString();
+
+    if (!items.length) {
+      el.innerHTML = '<p class="muted">Nothing in flight. '
+        + 'Either there is no greenlit work, or every node is idle between batches.</p>';
+      return;
+    }
+
+    el.innerHTML = `
+      <table class="data-table">
+        <thead><tr>
+          <th style="width:104px">STAGE</th><th>TITLE</th><th>IMAGE</th>
+          <th style="width:120px">NODE</th><th style="width:110px">ELAPSED</th>
+        </tr></thead>
+        <tbody>
+        ${items.map((i) => `
+          <tr class="${i.stale ? 'inflight-stale' : ''}">
+            <td><span class="status-pill status-${i.stage === 'processing' ? 'in-progress' : 'pending'}">${esc(i.stage)}</span></td>
+            <td>${i.external_id == null ? '' : '<span class="muted mono">#' + i.external_id + '</span> '}${esc(i.title)}
+                <span class="muted">(${esc(i.year || '')})</span>
+                ${i.remote_title ? `<div class="muted mono" style="font-size:11px">→ ${esc(i.remote_title)}${i.account ? ' · ' + esc(i.account) : ''}</div>` : ''}</td>
+            <td class="mono">${esc(i.filename)} <span class="muted">#${i.poster_id}</span></td>
+            <td class="mono">${esc(i.node || '—')}</td>
+            <td class="mono">${fmtElapsed(i.elapsed_s)}
+                ${i.stale ? '<span class="status-pill status-error">STALE</span>' : ''}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+      <p class="setting-help" style="margin-top:8px">
+        A single Photoshop run commonly takes 1–6 minutes. STALE means the claim
+        has outlived the claim timeout and will be returned to the queue on the
+        next dispatch — no action needed.
+      </p>`;
   }
 
   function renderAccountQuotas() {
@@ -1542,10 +1592,15 @@
 
   // Refresh the overview periodically so quota and node health stay honest
   // while the tab sits open — but only while it's the visible section.
+  // Refresh the overview while it's the visible tab. Cadence adapts: 8s when
+  // something is actually in flight so you can watch a batch move, 30s when
+  // idle so an open tab isn't polling pointlessly all day.
+  let overviewTick = 0;
   overviewTimer = setInterval(() => {
     const active = q('.pipe-tab.active');
-    if (active && active.dataset.section === 'overview' && !document.hidden) {
-      loadOverview();
-    }
-  }, 30000);
+    if (!active || active.dataset.section !== 'overview' || document.hidden) return;
+    const busy = overview && (overview.in_flight || []).length > 0;
+    overviewTick += 1;
+    if (busy || overviewTick % 4 === 0) loadOverview();
+  }, 8000);
 })();

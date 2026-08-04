@@ -31,6 +31,7 @@ Selector strings are prefixed: `css:`, `xpath:` or `name:`.
 from __future__ import annotations
 
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -56,6 +57,28 @@ BOT_MARKERS = (
     "are you human", "unusual traffic", "verify you are human",
     "rate limit", "too many requests",
 )
+
+
+def _find_chrome_binary() -> Optional[str]:
+    """
+    Locate chrome.exe in the usual places.
+
+    Used only to turn chromedriver's opaque "Chrome instance exited" into a
+    message that names the actual problem.
+    """
+    import shutil as _shutil
+
+    candidates = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+        "/usr/bin/google-chrome",
+        "/usr/bin/chromium-browser",
+    ]
+    for path in candidates:
+        if path and os.path.isfile(path):
+            return path
+    return _shutil.which("chrome") or _shutil.which("google-chrome")
 
 
 class UploadError(RuntimeError):
@@ -225,10 +248,23 @@ class MarketplaceUploader:
         runs skip the login form entirely. It's disposable: wipe it and the
         next run logs in again.
         """
+        # Account names are free text ("TEST WnB"), and chromedriver is
+        # unreliable with spaces in --user-data-dir. Slugify rather than pass
+        # the raw name through.
+        slug = re.sub(r"[^A-Za-z0-9_-]+", "_", self.account["name"]).strip("_") or "account"
         profile_dir = (self.account.get("chrome_profile_dir")
                        or str(Path(self.config.get("temp_dir", "C:/faa/temp"))
-                              / "profiles" / self.account["name"]))
+                              / "profiles" / slug))
         Path(profile_dir).mkdir(parents=True, exist_ok=True)
+
+        # Fail with something actionable rather than chromedriver's stack dump.
+        if " " in str(profile_dir):
+            self.emit(
+                f"Chrome profile path contains a space ({profile_dir}) — "
+                f"chromedriver often fails on these. Set a space-free path in "
+                f"the account's 'Chrome profile dir'.",
+                level="warn",
+            )
 
         options = Options()
         options.add_argument(f"--user-data-dir={profile_dir}")
@@ -250,9 +286,37 @@ class MarketplaceUploader:
         try:
             self.driver = webdriver.Chrome(options=options)
         except WebDriverException as e:
+            # chromedriver's own message is a stack dump that says nothing
+            # useful. Work out what's actually wrong and say that instead.
+            hints: list[str] = []
+
+            found = _find_chrome_binary()
+            if found:
+                hints.append(f"Chrome found at {found}")
+            else:
+                hints.append(
+                    "Chrome was NOT found in any standard location — install it, "
+                    "or set its path in the account settings"
+                )
+
+            if " " in str(profile_dir):
+                hints.append(f"profile path contains a space: {profile_dir}")
+
+            lock = Path(profile_dir) / "SingletonLock"
+            if lock.exists():
+                hints.append(
+                    "a stale SingletonLock exists in the profile — a previous "
+                    "Chrome is still holding it, or crashed while holding it"
+                )
+
+            hints.append(
+                "verify by hand with: "
+                f'& "{found or "chrome.exe"}" --headless=new --disable-gpu '
+                f'--no-sandbox --dump-dom https://example.com'
+            )
+
             raise UploadError(
-                f"Could not start Chrome: {e}. Check Chrome and chromedriver "
-                f"are installed and their versions match.",
+                "Could not start Chrome. " + "; ".join(hints) + f". Original: {e}",
                 fatal=True,
             )
 

@@ -136,6 +136,65 @@ def api_overview(
           .all()
     ]
 
+    # ── Work in flight right now ────────────────────────────────────────
+    # Which exact images a node is holding, and for how long. Without this the
+    # only signal during a five-minute Photoshop run is a stage counter ticking
+    # up, which is indistinguishable from a hang.
+    now = datetime.utcnow()
+    in_flight = []
+
+    processing_rows = (
+        db.query(SavedPoster, MasterTitle)
+          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+          .filter(SavedPoster.pipeline_status == "processing",
+                  SavedPoster.deleted_at.is_(None))
+          .order_by(SavedPoster.claimed_at.asc().nullslast())
+          .limit(50)
+          .all()
+    )
+    for poster, title in processing_rows:
+        elapsed = int((now - poster.claimed_at).total_seconds()) if poster.claimed_at else None
+        in_flight.append({
+            "stage": "processing",
+            "poster_id": poster.id,
+            "title": title.title,
+            "year": title.year,
+            "external_id": title.external_id,
+            "filename": poster.filename,
+            "node": poster.claimed_by,
+            "elapsed_s": elapsed,
+            # The dispatcher reaps a claim once it goes stale; surface that so a
+            # long-running image reads differently from an abandoned one.
+            "stale": bool(elapsed and elapsed > int(P.get_setting(db, "claim_timeout_min")) * 60),
+        })
+
+    uploading_rows = (
+        db.query(UploadTracking, SavedPoster, MasterTitle, UploadAccount)
+          .join(SavedPoster, UploadTracking.saved_poster_id == SavedPoster.id)
+          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+          .join(UploadAccount, UploadTracking.account_id == UploadAccount.id)
+          .filter(UploadTracking.status == "uploading")
+          .order_by(UploadTracking.claimed_at.asc().nullslast())
+          .limit(50)
+          .all()
+    )
+    for tracking, poster, title, account in uploading_rows:
+        elapsed = int((now - tracking.claimed_at).total_seconds()) if tracking.claimed_at else None
+        in_flight.append({
+            "stage": "uploading",
+            "poster_id": poster.id,
+            "tracking_id": tracking.id,
+            "title": title.title,
+            "year": title.year,
+            "external_id": title.external_id,
+            "filename": poster.filename,
+            "remote_title": tracking.remote_title,
+            "account": account.name,
+            "node": tracking.claimed_by,
+            "elapsed_s": elapsed,
+            "stale": bool(elapsed and elapsed > int(P.get_setting(db, "claim_timeout_min")) * 60),
+        })
+
     process_failures = (
         db.query(func.count(SavedPoster.id))
           .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
@@ -159,6 +218,7 @@ def api_overview(
             for p in db.query(Project).order_by(Project.id.asc()).all()
         ],
         "funnel": funnel,
+        "in_flight": in_flight,
         "accounts": accounts,
         "nodes": nodes,
         "jobs": jobs,

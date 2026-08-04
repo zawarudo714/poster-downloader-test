@@ -77,6 +77,40 @@ def _jsx_string(path: Path) -> str:
     return json.dumps(str(path).replace("\\", "/"))
 
 
+def read_jpeg_dimensions(path: Path) -> Optional[tuple[int, int]]:
+    """
+    Read width/height straight from a JPEG's SOF marker.
+
+    The script also reports dimensions, but ExtendScript's loose typing makes
+    that unreliable — it was returning booleans, which surfaced as a cheerful
+    "TruexTrue" in the logs. The file on disk is the authority, so we measure
+    it here and treat the script's numbers as a fallback only.
+
+    Deliberately dependency-free (no Pillow) to keep the node easy to provision.
+    """
+    try:
+        with open(path, "rb") as handle:
+            if handle.read(2) != b"\xff\xd8":
+                return None
+            while True:
+                marker = handle.read(2)
+                if len(marker) < 2 or marker[0] != 0xFF:
+                    return None
+                # SOF0-SOF15, excluding DHT/JPG/DAC which share the range
+                if marker[1] in (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6,
+                                 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF):
+                    handle.read(3)                      # length + precision
+                    height = int.from_bytes(handle.read(2), "big")
+                    width = int.from_bytes(handle.read(2), "big")
+                    return (width, height) if width and height else None
+                length = int.from_bytes(handle.read(2), "big")
+                if length < 2:
+                    return None
+                handle.seek(length - 2, 1)
+    except (OSError, ValueError):
+        return None
+
+
 class PhotoshopRunner:
     """
     Wraps a Photoshop executable and one script revision.
@@ -88,10 +122,16 @@ class PhotoshopRunner:
 
     def __init__(self, *, exe: str, script: str, version: str,
                  work_dir: Path, timeout_s: int,
-                 log: Callable[[str], None], warmup_s: int = 60):
+                 log: Callable[[str], None], warmup_s: int = 60,
+                 restart_every: int = 25):
         self.exe = exe
         self.timeout_s = timeout_s
         self.warmup_s = warmup_s
+        # Images completed since Photoshop last started. Drives the periodic
+        # recycle below; the counter lives on the runner, which survives across
+        # batches, so a long backlog is covered rather than just one batch.
+        self.restart_every = restart_every
+        self.images_since_start = 0
         self.log = log
         self.work_dir = work_dir
         self.work_dir.mkdir(parents=True, exist_ok=True)
@@ -174,6 +214,29 @@ class PhotoshopRunner:
         except Exception as e:
             self.log(f"Could not kill Photoshop: {e}")
 
+
+    def _recycle_if_due(self) -> None:
+        """
+        Restart Photoshop periodically during a long run.
+
+        Keeping it open is a large speed win, but Photoshop degrades over
+        hundreds of operations — memory climbs and each image gets slower even
+        with a purge after every one. A clean restart costs about 30 seconds
+        and avoids sliding into timeouts partway through a backlog.
+
+        Configurable from the dashboard; 0 disables it.
+        """
+        if self.restart_every <= 0:
+            return
+        if self.images_since_start < self.restart_every:
+            return
+        self.log(
+            f"Recycling Photoshop after {self.images_since_start} images "
+            f"(keeps a long run from slowing down)"
+        )
+        self.kill()
+        self.images_since_start = 0
+
     # ── Running one image ──────────────────────────────────────────────────
 
     def _write_script(self, source: Path, output: Path, result_file: Path) -> Path:
@@ -222,13 +285,20 @@ class PhotoshopRunner:
         except OSError:
             pass
 
-    def run(self, source: Path, output: Path) -> dict[str, Any]:
+    def run(self, source: Path, output: Path,
+            heartbeat: Optional[Callable[[int], None]] = None) -> dict[str, Any]:
         """
         Process one image and return its metrics.
 
         Completion is detected by polling for the result file the script
         writes, NOT by waiting for a process to exit — see the module docstring
         for why that distinction matters.
+
+        `heartbeat(elapsed_seconds)` is called roughly every 15s while waiting.
+        A single image can take five minutes or more, and without this the node
+        looks dead: it stops polling the server (so the dashboard marks it
+        OFFLINE) and prints nothing locally, which is indistinguishable from
+        being wedged.
         """
         if not source.is_file():
             raise RuntimeError(f"Source file missing: {source}")
@@ -249,6 +319,7 @@ class PhotoshopRunner:
             except OSError:
                 pass
 
+        self._recycle_if_due()
         self.ensure_running()
         runnable = self._write_script(source, output, result_file)
         started = time.time()
@@ -271,6 +342,8 @@ class PhotoshopRunner:
         # Poll for the script's own completion signal.
         deadline = time.time() + self.timeout_s
         raw: Optional[str] = None
+        last_beat = time.time()
+
         while time.time() < deadline:
             for candidate in (result_file, legacy_sidecar):
                 if candidate.is_file():
@@ -283,6 +356,15 @@ class PhotoshopRunner:
                         break
             if raw:
                 break
+
+            # Keep the operator and the server informed while Photoshop works.
+            if heartbeat and time.time() - last_beat >= 15:
+                last_beat = time.time()
+                try:
+                    heartbeat(int(time.time() - started))
+                except Exception:
+                    pass
+
             time.sleep(0.5)
 
         try:
@@ -320,6 +402,8 @@ class PhotoshopRunner:
             except OSError:
                 pass
 
+        self.images_since_start += 1
+
         if result.get("ok") is False:
             raise RuntimeError(f"Script reported: {result.get('error', 'unknown error')}")
 
@@ -329,11 +413,28 @@ class PhotoshopRunner:
                 "Check the storage mount is writable from this machine."
             )
 
+        # Measure the file we produced rather than trusting the script's own
+        # numbers — see read_jpeg_dimensions for why.
+        width = height = None
+        measured = read_jpeg_dimensions(output)
+        if measured:
+            width, height = measured
+        else:
+            # Fall back to whatever the script said, but only if it's usable.
+            for key, target in (("width", "w"), ("height", "h")):
+                value = result.get(key)
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    continue
+                if target == "w":
+                    width = int(value)
+                else:
+                    height = int(value)
+
         return {
             "duration_ms": duration_ms,
             "file_size": output.stat().st_size,
-            "width": result.get("width"),
-            "height": result.get("height"),
+            "width": width,
+            "height": height,
         }
 
 
@@ -355,6 +456,34 @@ class ProcessStage:
         self._runner_version: Optional[str] = None
 
     # ── Storage ────────────────────────────────────────────────────────────
+
+    def _check_storage_writable(self, root: Path) -> None:
+        """
+        Confirm the archive is reachable and writable before claiming work.
+
+        Windows maps network drives per elevation context, so a drive mapped in
+        an elevated console is invisible to a normal one and vice versa. That
+        produced a genuinely baffling failure: Python (elevated) could create
+        the output folder, Photoshop (not elevated) could not write into it,
+        and Photoshop's suppressed dialogs meant it reported success anyway.
+        Checking here turns that into one clear message instead of N confusing
+        ones.
+        """
+        probe = root / ".pipeline_write_test"
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink()
+        except OSError as e:
+            raise RuntimeError(
+                f"Archive at {root} is not writable from this process: {e}\n"
+                f"  • Is the drive mapped for the user running the agent? "
+                f"Windows keeps mappings separate between elevated and normal "
+                f"sessions.\n"
+                f"  • Fix permanently by setting EnableLinkedConnections and "
+                f"rebooting, then re-map the drive.\n"
+                f"  • Check with:  net use   and   dir {root}"
+            )
 
     def _storage_root(self, settings: dict) -> Path:
         """
@@ -389,6 +518,7 @@ class ProcessStage:
             work_dir=self.temp_dir / "scripts",
             timeout_s=int(settings.get("timeout_s") or 600),
             warmup_s=int(settings.get("warmup_s") or 60),
+            restart_every=int(settings.get("restart_every") or 0),
             log=self.log,
         )
         self._runner_version = version
@@ -413,9 +543,20 @@ class ProcessStage:
 
         root = self._storage_root(settings)
         runner = self._ensure_runner(settings)
+
+        # Fail the whole batch up front rather than one image at a time if the
+        # archive isn't reachable. Photoshop suppresses its own save errors, so
+        # without this the symptom is "script reported success but no output
+        # file" repeated for every image in the run.
+        self._check_storage_writable(root)
+
         self.log(f"Claimed {len(batch)} image(s) · script {settings.get('script_version')}")
+        self.log(f"Archive: {root}   Photoshop: {settings.get('photoshop_exe')}")
         if job_id:
-            self.client.job_log(job_id, f"Claimed {len(batch)} images", progress=2)
+            self.client.job_log(job_id, [
+                f"Claimed {len(batch)} images",
+                f"Archive: {root}",
+            ], progress=2)
 
         processed = failed = 0
         source_dir = self.temp_dir / "sources"
@@ -426,9 +567,33 @@ class ProcessStage:
             source_path = source_dir / f"{item['poster_id']}_{item['source_filename']}"
             target_path = root / item["storage_path"]
 
+            # Announce BEFORE the work, not just after. A single image can take
+            # five minutes; previously the log went silent for that entire time
+            # and there was no way to tell work from a hang.
+            started_msg = f"[{index}/{len(batch)}] START {label}  (poster #{item['poster_id']})"
+            self.log(started_msg)
+            if job_id:
+                self.client.job_log(
+                    job_id, started_msg,
+                    progress=int((index - 1) / len(batch) * 100),
+                    note=f"{processed} done, {failed} failed",
+                )
+
+            def beat(elapsed: int, _i=index, _label=label) -> None:
+                """Prove liveness locally and to the server during a long run."""
+                self.log(f"[{_i}/{len(batch)}] …still working on {_label} ({elapsed}s)")
+                # Refresh last_seen so the dashboard doesn't mark the node
+                # OFFLINE just because one image is taking a while.
+                try:
+                    self.client.hello(hostname="", agent_version="")
+                except Exception:
+                    pass
+                if job_id:
+                    self.client.job_log(job_id, f"  …{elapsed}s elapsed")
+
             try:
                 self.client.download_source(item["poster_id"], source_path)
-                metrics = runner.run(source_path, target_path)
+                metrics = runner.run(source_path, target_path, heartbeat=beat)
 
                 self.client.report_processed(
                     poster_id=item["poster_id"],

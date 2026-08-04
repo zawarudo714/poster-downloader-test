@@ -128,12 +128,37 @@ function run() {
 
         var opts = new JPEGSaveOptions();
         opts.quality = {{JPEG_QUALITY}};
-        doc.saveAs(new File(OUTPUT_FILE), opts, true, Extension.LOWERCASE);
+        var outFile = new File(OUTPUT_FILE);
+        doc.saveAs(outFile, opts, true, Extension.LOWERCASE);
 
-        // Report dimensions back so the pipeline can record them without
-        // re-opening the file.
+        // Verify the save actually landed.
+        //
+        // app.displayDialogs = DialogModes.NO suppresses Photoshop's error
+        // dialogs, and saveAs to an unreachable path can then fail SILENTLY —
+        // the script carries on and reports success for a file that was never
+        // written. The usual cause is the storage drive not being visible to
+        // THIS Photoshop process (Windows maps drives per elevation context,
+        // so a drive mapped in an admin console is invisible to a normal one).
+        outFile = new File(OUTPUT_FILE);
+        if (!outFile.exists) {
+            throw new Error(
+                "saveAs reported no error but produced no file at " + OUTPUT_FILE +
+                ". The drive is most likely not mapped or not writable for the " +
+                "user running Photoshop."
+            );
+        }
+
         var w = doc.width.value, h = doc.height.value;
         doc.close(SaveOptions.DONOTSAVECHANGES);
+
+        // Release undo history, clipboard and cached tiles.
+        //
+        // Photoshop stays open across the whole batch, so without this it
+        // accumulates state image after image — measurably slower each time,
+        // and eventually unstable. Cheap to do, and the difference over a
+        // hundred-image run is large.
+        try { app.purge(PurgeTarget.ALLCACHES); } catch (e) {}
+
         writeResult({ ok: true, width: w, height: h });
     } catch (e) {
         writeResult({ ok: false, error: String(e) });
@@ -271,6 +296,12 @@ DEFAULTS: dict[str, Any] = {
     # How long to wait for a cold Photoshop to become ready before
     # dispatching the first script. Only paid once per batch.
     "photoshop_warmup_s": 60,
+    # Restart Photoshop every N images. It stays open between images for
+    # speed, but degrades over a long unattended run — memory creeps up and
+    # throughput drops even with a purge after each image. A periodic clean
+    # restart costs ~30s and prevents a slow slide into timeouts.
+    # 0 disables it entirely.
+    "photoshop_restart_every": 25,
     "process_batch_size": 20,
     "process_max_attempts": 3,
 
@@ -1546,6 +1577,7 @@ def process_settings_payload(
         "storage_root":     get_setting(db, "storage_root", project=project),
         "timeout_s":        get_setting(db, "process_timeout_s", project=project),
         "warmup_s":         get_setting(db, "photoshop_warmup_s", project=project),
+        "restart_every":    get_setting(db, "photoshop_restart_every", project=project),
         # Echoed back so the node's own log can state what it is applying —
         # the test log printed "work ?px -> out ?px" without these.
         "work_width":       get_setting(db, "work_width", project=project),

@@ -48,6 +48,21 @@
       </div>
     </section>
 
+    {# What a node is holding right now. The funnel tells you how many are at
+       each stage; this tells you WHICH, on which node, and for how long —
+       which is the difference between "working" and "hung". #}
+    <section class="panel" data-inflight-panel>
+      <div class="panel-head">
+        <span>IN FLIGHT NOW
+          {{ info("Exactly which images a worker node is holding this second, and how long it has held them. A Photoshop run of several minutes is normal; anything marked STALE has exceeded the claim timeout and will be automatically returned to the queue on the next dispatch.") }}
+        </span>
+        <span class="muted mono" data-inflight-updated></span>
+      </div>
+      <div class="panel-body" data-inflight>
+        <div class="muted">Loading…</div>
+      </div>
+    </section>
+
     <section class="panel">
       <div class="panel-head">
         <span>UPLOAD ACCOUNTS &amp; TODAY'S QUOTA

@@ -67,6 +67,7 @@ class Agent:
         self.uploader = UploadStage(self.client, config, self.log)
 
         self.hostname = socket.gethostname()
+        self._last_idle_log = 0.0
         self.capabilities: set[str] = set()
         self.poll_interval = 30
         self.schedule_mode = "continuous"
@@ -230,6 +231,21 @@ class Agent:
             self.log(traceback.format_exc(), level="error")
         return False
 
+    def _log_idle(self) -> None:
+        """
+        Say something occasionally while there's nothing to do.
+
+        A silent window is indistinguishable from a crashed one, which is how
+        an idle agent gets restarted unnecessarily. Rate-limited to once a
+        minute so a long idle period doesn't bury the log.
+        """
+        now = time.time()
+        if now - self._last_idle_log < 60:
+            return
+        self._last_idle_log = now
+        self.log(f"Idle — nothing queued. Polling every {self.poll_interval}s. "
+                 f"Ctrl+C to stop.")
+
     # ── Main loop ──────────────────────────────────────────────────────────
 
     def run(self) -> None:
@@ -255,10 +271,14 @@ class Agent:
 
             # Jobs first, and drained fully: an operator waiting on a test
             # should never sit behind a batch this node chose to start.
+            #
+            # NOTE: --once completes a whole CYCLE (every queued job, then one
+            # process batch, then one upload batch) and only then exits. An
+            # earlier version returned after the first job, so a queue of
+            # "test upload, manual upload run, test process" needed the agent
+            # restarted three times to drain.
             while self.handle_job():
                 did_work = True
-                if self.once:
-                    return
 
             if self.within_schedule():
                 if self.run_process_stage():
@@ -270,11 +290,13 @@ class Agent:
                          f"{self.daily_start_hour:02d}:00) — idling")
 
             if self.once:
+                self.log("Single cycle complete (--once)", level="ok")
                 return
 
             # Only sleep when idle. After real work, loop straight back so a
             # backlog drains without an artificial pause between batches.
             if not did_work:
+                self._log_idle()
                 time.sleep(self.poll_interval)
 
 

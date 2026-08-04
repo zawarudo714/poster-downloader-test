@@ -863,6 +863,102 @@ def api_delete_account(
 #  FAILURES
 # ═══════════════════════════════════════════════════════════════════════════
 
+@router.post("/api/inflight/release")
+def api_release_inflight(
+    payload: dict = Body(default={}),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Hand claimed work back to the queue immediately.
+
+    The dispatcher reaps stale claims automatically, but only after
+    `claim_timeout_min` AND only when a node next asks for work. If you close
+    the agent window mid-batch — or a node dies — those items sit visibly
+    "processing" with nothing working on them until both conditions are met.
+    Waiting 45 minutes to undo a Ctrl+C is not a reasonable operator
+    experience, so this releases them on demand.
+
+    Safe by construction: it only touches rows still in a *claimed* state
+    (processing / uploading). Anything that actually completed has already
+    moved on and is left alone.
+
+    Pass `all_stale: true` to release everything past the timeout, or explicit
+    `poster_ids` / `tracking_ids`.
+    """
+    released_posters = released_uploads = 0
+    now = datetime.utcnow()
+
+    if payload.get("all_stale"):
+        timeout = int(P.get_setting(db, "claim_timeout_min"))
+        cutoff = now - timedelta(minutes=timeout)
+        posters = (
+            db.query(SavedPoster)
+              .filter(SavedPoster.pipeline_status == "processing",
+                      SavedPoster.claimed_at.isnot(None),
+                      SavedPoster.claimed_at < cutoff)
+              .all()
+        )
+        rows = (
+            db.query(UploadTracking)
+              .filter(UploadTracking.status == "uploading",
+                      UploadTracking.claimed_at.isnot(None),
+                      UploadTracking.claimed_at < cutoff)
+              .all()
+        )
+    else:
+        poster_ids = payload.get("poster_ids") or []
+        tracking_ids = payload.get("tracking_ids") or []
+        if not poster_ids and not tracking_ids:
+            raise HTTPException(400, "Provide poster_ids, tracking_ids, or all_stale.")
+        posters = (
+            db.query(SavedPoster)
+              .filter(SavedPoster.id.in_(poster_ids),
+                      SavedPoster.pipeline_status == "processing")
+              .all()
+        ) if poster_ids else []
+        rows = (
+            db.query(UploadTracking)
+              .filter(UploadTracking.id.in_(tracking_ids),
+                      UploadTracking.status == "uploading")
+              .all()
+        ) if tracking_ids else []
+
+    for poster in posters:
+        # Back to greenlit, not failed — nothing went wrong with the image,
+        # it just lost its worker. Attempts are untouched so this can't be
+        # used to dodge the retry cap.
+        poster.pipeline_status = "greenlit"
+        poster.claimed_at = None
+        poster.claimed_by = None
+        title = db.query(MasterTitle).filter_by(id=poster.master_title_id).first()
+        if title:
+            P.recompute_title_status(db, title)
+        released_posters += 1
+
+    for row in rows:
+        row.status = "pending"
+        row.claimed_at = None
+        row.claimed_by = None
+        poster = db.query(SavedPoster).filter_by(id=row.saved_poster_id).first()
+        if poster is not None and poster.pipeline_status == "uploading":
+            poster.pipeline_status = "processed"
+            title = db.query(MasterTitle).filter_by(id=poster.master_title_id).first()
+            if title:
+                P.recompute_title_status(db, title)
+        released_uploads += 1
+
+    log_activity(db, user=admin, action="pipeline_release_claims",
+                 target_type="pipeline",
+                 details={"posters": released_posters, "uploads": released_uploads})
+    db.commit()
+    return JSONResponse({
+        "ok": True,
+        "released_posters": released_posters,
+        "released_uploads": released_uploads,
+    })
+
+
 @router.get("/api/failures")
 def api_failures(
     kind: str = Query("upload"),

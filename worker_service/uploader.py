@@ -140,6 +140,10 @@ class MarketplaceUploader:
         self.timings: dict[str, float] = account["timings"]
         self.driver: Optional[webdriver.Chrome] = None
         self.wait: Optional[WebDriverWait] = None
+        # The login tab collects Chrome dialogs; work happens in a second
+        # tab. See open_work_tab().
+        self.login_handle: Optional[str] = None
+        self.work_handle: Optional[str] = None
 
     # ── Helpers ────────────────────────────────────────────────────────────
 
@@ -170,6 +174,50 @@ class MarketplaceUploader:
             self.client.job_log(self.job_id, message, level=level,
                                 progress=progress, note=note)
 
+    def js_click(self, element, *, what: str = "element") -> None:
+        """
+        Click by dispatching the event on the element itself.
+
+        A normal Selenium click aims at screen coordinates, so anything drawn
+        on top — a promo bar, a cookie notice, a browser dialog — intercepts it.
+        Worse, the click is often reported as successful while nothing happens,
+        which is how a failure surfaces several steps later as a missing
+        element on a page you never left.
+
+        FineArtAmerica has a promotional bar and a "design inspiration" banner
+        on every page, so this is not hypothetical. Dispatching directly on the
+        element ignores all of it, and also ignores scroll position.
+        """
+        try:
+            self.driver.execute_script("arguments[0].click();", element)
+        except WebDriverException:
+            # Fall back to a real click; better a coordinate click than none.
+            try:
+                element.click()
+            except WebDriverException as e:
+                raise UploadError(f"Could not click {what}: {e}")
+
+    def open_work_tab(self) -> None:
+        """
+        Move to a fresh tab for the actual work, leaving the login tab behind.
+
+        The legacy uploader opened N+1 tabs and deliberately never used the
+        first one, because the login tab reliably ends up with a Chrome dialog
+        over it. That tool uploaded thousands of images successfully, so the
+        pattern is worth keeping even though we now also suppress the dialogs
+        at source — belt and braces, and it costs one tab.
+        """
+        try:
+            self.login_handle = self.driver.current_window_handle
+            self.driver.switch_to.new_window("tab")
+            self.work_handle = self.driver.current_window_handle
+            self.emit("Opened a clean tab for uploading (login tab left behind)")
+        except WebDriverException as e:
+            # Not fatal — carry on in the login tab rather than abandoning the
+            # run over a tab we only wanted for hygiene.
+            self.emit(f"Could not open a separate work tab ({e}); "
+                      f"continuing in the login tab", level="warn")
+
     def find(self, key: str, *, clickable: bool = False, timeout: Optional[float] = None):
         by, value = parse_selector(self.sel(key))
         wait = WebDriverWait(self.driver, timeout or self.t("element_timeout", 30))
@@ -178,10 +226,35 @@ class MarketplaceUploader:
         try:
             return wait.until(condition)
         except TimeoutException:
+            # The single most useful fact when an element is missing is which
+            # page we were actually looking at — nine times out of ten the
+            # selector is fine and a previous step failed to navigate. Report
+            # that inline rather than making the operator open the screenshot.
+            try:
+                current = self.driver.current_url or "(unknown)"
+                title = (self.driver.title or "").strip()[:80]
+            except WebDriverException:
+                current, title = "(unavailable)", ""
+
+            # Is the element there but in an iframe? A very common cause, and
+            # invisible from the error alone.
+            frame_hint = ""
+            try:
+                frames = self.driver.find_elements(By.TAG_NAME, "iframe")
+                if frames:
+                    frame_hint = (f" The page contains {len(frames)} iframe(s) — "
+                                  f"the element may be inside one.")
+            except WebDriverException:
+                pass
+
             raise UploadError(
                 f"Element '{key}' not found within "
-                f"{timeout or self.t('element_timeout', 30):.0f}s "
-                f"(selector: {self.sel(key)}). The site's markup may have changed — "
+                f"{timeout or self.t('element_timeout', 30):.0f}s.\n"
+                f"  selector : {self.sel(key)}\n"
+                f"  page now : {current}\n"
+                f"  title    : {title}{frame_hint}\n"
+                f"  If the page above isn't the one you expected, an earlier "
+                f"step failed to navigate and the selector is fine. Otherwise "
                 f"update it under Pipeline → Upload → Page Selectors and re-test.",
                 pause_minutes=45,
                 pause_reason=f"Selector '{key}' no longer matches",
@@ -277,10 +350,28 @@ class MarketplaceUploader:
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--window-size=1920,1080")
         options.add_argument("--disable-blink-features=AutomationControlled")
+        # Suppress every Chrome-level dialog that can steal focus from the page.
+        #
+        # These are BROWSER dialogs, not page elements — Selenium can neither
+        # see nor dismiss them, and while one is up, clicks on the page beneath
+        # can be silently swallowed. The "your password was found in a data
+        # breach" prompt is the one that bites here, and it is controlled
+        # separately from the password manager itself, so disabling the manager
+        # alone (as an earlier version did) was not enough.
         options.add_experimental_option("prefs", {
             "credentials_enable_service": False,
             "profile.password_manager_enabled": False,
+            "profile.password_manager_leak_detection": False,
+            "profile.default_content_setting_values.notifications": 2,
+            "autofill.profile_enabled": False,
+            "autofill.credit_card_enabled": False,
         })
+        options.add_argument("--disable-features=PasswordLeakDetection,AutofillServerCommunication")
+        options.add_argument("--no-first-run")
+        options.add_argument("--no-default-browser-check")
+        options.add_argument("--disable-notifications")
+        options.add_argument("--disable-popup-blocking")
+        options.add_argument("--disable-infobars")
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
 
         try:
@@ -405,7 +496,8 @@ class MarketplaceUploader:
 
             step = "clicking the artist-login link"
             try:
-                self.find("artist_login_link", clickable=True, timeout=10).click()
+                self.js_click(self.find("artist_login_link", clickable=True, timeout=10),
+                              what="artist login link")
                 time.sleep(self.t("page_load_wait", 2))
             except UploadError:
                 # Not fatal — an existing session often lands past this link.
@@ -432,7 +524,8 @@ class MarketplaceUploader:
                 password.send_keys(self.account["password"])
 
                 step = "submitting the login form"
-                self.find("login_submit", clickable=True).click()
+                self.js_click(self.find("login_submit", clickable=True),
+                              what="login submit")
                 time.sleep(self.t("login_wait", 2))
                 self.check_for_bot_wall("login submit")
 
@@ -461,13 +554,16 @@ class MarketplaceUploader:
             step = "dismissing any popup"
             try:
                 by_c, value_c = parse_selector(self.sel("popup_close"))
-                self.driver.find_element(by_c, value_c).click()
+                self.js_click(self.driver.find_element(by_c, value_c), what="popup close")
                 time.sleep(1)
                 self.emit("Dismissed an interstitial popup")
             except (NoSuchElementException, UploadError):
                 pass
 
             self.emit("Login OK", level="ok", progress=10)
+
+            # Everything from here happens in a clean tab.
+            self.open_work_tab()
 
         except UploadError:
             raise
@@ -499,15 +595,70 @@ class MarketplaceUploader:
             return done
 
         # 1 — open a fresh upload form
+        #
+        # Prefer navigating straight to the upload URL. Clicking a button on the
+        # profile page is what the legacy tool did, and it silently stopped
+        # navigating after a site redesign — the click "succeeded", the page
+        # never changed, and the run failed several steps later looking for a
+        # file input that was never going to be there.
         mark = phase("open_form")
-        self.emit(f"  → opening upload form")
-        profile_url = self.account.get("profile_url")
-        if profile_url:
-            self.driver.get(profile_url)
+        upload_url = (self.selectors.get("upload_url") or "").strip()
+
+        if upload_url:
+            # Manual override, for the day the flow below stops working.
+            self.emit(f"  → opening upload form: {upload_url}")
+            self.driver.get(upload_url)
             time.sleep(self.t("page_load_wait", 2))
-        self.find("upload_button", clickable=True).click()
-        time.sleep(self.t("page_load_wait", 2))
+        else:
+            # Read the address out of the Upload Image link and go there,
+            # rather than clicking it.
+            #
+            # The link carries a per-session id
+            # (…/updateartwork.html?newartwork=true&sessionid=…), so the URL
+            # cannot be hardcoded — it has to come from the live page. Reading
+            # it also removes a click, and a click that silently fails to
+            # navigate is precisely what stranded earlier runs on the profile
+            # page with no error.
+            profile_url = self.account.get("profile_url")
+            if profile_url:
+                self.driver.get(profile_url)
+                time.sleep(self.t("page_load_wait", 2))
+
+            link = self.find("upload_button")
+            href = (link.get_attribute("href") or "").strip()
+
+            if href and not href.lower().startswith("javascript:"):
+                self.emit(f"  → opening upload form: {href}")
+                self.driver.get(href)
+            else:
+                # A JavaScript link has no address to follow; dispatch the
+                # click on the element instead of at its coordinates.
+                self.emit("  → opening upload form (script link — clicking)")
+                self.js_click(link, what="upload button")
+            time.sleep(self.t("page_load_wait", 2))
+
         self.check_for_bot_wall("upload form")
+
+        # Confirm we actually landed on the form before going further. Failing
+        # here names the real problem instead of surfacing it three steps later
+        # as a missing element.
+        try:
+            landed = self.driver.current_url or ""
+        except WebDriverException:
+            landed = ""
+        marker = (self.selectors.get("still_on_form_marker") or "updateartwork").lower()
+        if marker and marker not in landed.lower():
+            shot = self.capture_evidence("not_on_upload_form")
+            raise UploadError(
+                f"Did not reach the upload form.\n"
+                f"  expected a URL containing : {marker}\n"
+                f"  actually on               : {landed}\n"
+                f"  If you were redirected to a login or profile page, the "
+                f"session may have expired. If the upload page has simply moved, "
+                f"update 'upload_url' under Pipeline → Upload → Page Selectors.",
+                pause_minutes=30,
+                pause_reason="Cannot reach the upload form",
+            )
         mark()
 
         # 2 — hand the file to the input
@@ -520,7 +671,7 @@ class MarketplaceUploader:
         # 3 — confirm the upload and wait for the site to ingest it
         mark = phase("confirm_upload")
         self.emit("  → confirming upload")
-        self.find("upload_confirm", clickable=True).click()
+        self.js_click(self.find("upload_confirm", clickable=True), what="upload confirm")
         time.sleep(self.t("upload_wait", 5))
         self.check_for_bot_wall("image upload")
         mark()
@@ -568,7 +719,7 @@ class MarketplaceUploader:
         # 5 — submit and verify
         mark = phase("submit")
         self.emit("  → submitting")
-        self.find("submit_button", clickable=True).click()
+        self.js_click(self.find("submit_button", clickable=True), what="submit")
         time.sleep(self.t("submit_wait", 2.5))
 
         # A silent submit failure leaves us on the form. Detecting it here is

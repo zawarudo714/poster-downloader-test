@@ -244,6 +244,18 @@ DEFAULT_FAA_SELECTORS = {
     # element — that proved more reliable across the site's interstitials.
     "control_panel_url":    "https://fineartamerica.com/controlpanel/activity.html",
     "popup_close":          "css:div.popupContent a.popupClose, div.popupContent a.close",
+    # BLANK BY DESIGN — do not put a URL here without good reason.
+    #
+    # The upload form's address carries a per-session id:
+    #   …/controlpanel/updateartwork.html?newartwork=true&sessionid=a4bca890…
+    # so it cannot be hardcoded. When this is blank the node loads the profile
+    # page, reads the address out of the Upload Image link, and navigates to
+    # it — which picks up the current session id automatically.
+    #
+    # Set it only as an emergency override if that flow ever breaks.
+    "upload_url":           "",
+    # The link whose address is read (and clicked, if it turns out to be a
+    # script link rather than a real one).
     "upload_button":        "css:a.buttonEditProfile[href*='updateartwork.html?newartwork=true']",
     "file_input":           "css:input.uploadImageInput[type='file']",
     "upload_confirm":       "css:a.button[href*='uploadArtwork']",

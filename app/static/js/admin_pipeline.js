@@ -254,11 +254,14 @@
       return;
     }
 
+    const staleCount = items.filter((i) => i.stale).length;
+
     el.innerHTML = `
       <table class="data-table">
         <thead><tr>
           <th style="width:104px">STAGE</th><th>TITLE</th><th>IMAGE</th>
           <th style="width:120px">NODE</th><th style="width:110px">ELAPSED</th>
+          <th style="width:90px"></th>
         </tr></thead>
         <tbody>
         ${items.map((i) => `
@@ -271,14 +274,38 @@
             <td class="mono">${esc(i.node || '—')}</td>
             <td class="mono">${fmtElapsed(i.elapsed_s)}
                 ${i.stale ? '<span class="status-pill status-error">STALE</span>' : ''}</td>
+            <td><button class="btn btn-ghost btn-tiny"
+                  data-release-stage="${i.stage}"
+                  data-release-id="${i.stage === 'processing' ? i.poster_id : i.tracking_id}"
+                  title="Hand this item back to the queue">RELEASE</button></td>
           </tr>`).join('')}
         </tbody>
       </table>
+      ${staleCount ? `<div class="filter-row" style="margin-top:10px">
+        <button type="button" class="btn btn-accent btn-tiny" data-action="release-stale">
+          RELEASE ${staleCount} STALE CLAIM${staleCount === 1 ? '' : 'S'}
+        </button>
+      </div>` : ''}
       <p class="setting-help" style="margin-top:8px">
         A single Photoshop run commonly takes 1–6 minutes. STALE means the claim
-        has outlived the claim timeout and will be returned to the queue on the
-        next dispatch — no action needed.
+        has outlived the timeout; it would be reclaimed automatically the next
+        time a node asks for work, but only then — so if you stopped the agent
+        mid-batch, RELEASE puts the item straight back rather than making you
+        wait it out.
       </p>`;
+
+    el.querySelectorAll('[data-release-id]').forEach((b) => {
+      b.addEventListener('click', async () => {
+        const body = b.dataset.releaseStage === 'processing'
+          ? { poster_ids: [parseInt(b.dataset.releaseId, 10)] }
+          : { tracking_ids: [parseInt(b.dataset.releaseId, 10)] };
+        try {
+          await postJSON(API + '/inflight/release', body);
+          toast('Released back to the queue.');
+          loadOverview();
+        } catch (e) { toast(e.message, 'error'); }
+      });
+    });
   }
 
   function renderAccountQuotas() {
@@ -970,6 +997,11 @@
         Prefix determines the lookup strategy: <code>css:</code>, <code>xpath:</code> or
         <code>name:</code>. Values without a prefix are treated as CSS. Entries ending in
         <code>_url</code> or <code>_marker</code> are plain strings, not selectors.
+        <br><br>
+        <strong>upload_url</strong> is used to reach the upload form directly.
+        Leave it blank to fall back to loading the profile page and clicking
+        <strong>upload_button</strong> — only worth doing if the direct URL stops
+        working, since a URL survives site redesigns that break a button's CSS class.
       </p>`;
   }
 
@@ -1407,6 +1439,17 @@
 
     switch (action) {
       case 'refresh-overview': loadOverview(); break;
+
+      case 'release-stale':
+        if (!confirm('Release all stale claims back to the queue?\n\n'
+            + 'Only items still marked as claimed are affected — anything that '
+            + 'actually finished has already moved on.')) return;
+        try {
+          const d = await postJSON(API + '/inflight/release', { all_stale: true });
+          toast(`Released ${d.released_posters} processing, ${d.released_uploads} uploading.`);
+          loadOverview();
+        } catch (e) { toast(e.message, 'error'); }
+        break;
 
       case 'run-process':
       case 'run-upload': {

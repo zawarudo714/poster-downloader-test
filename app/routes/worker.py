@@ -347,15 +347,21 @@ def dashboard(request: Request, user: User = Depends(require_user), db: Session 
     )
 
 
-@router.get("/worker", response_class=HTMLResponse)
-def worker_view(request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)):
-    """Same dashboard — admins can hit this URL to act as a regular user."""
-    state = _state_payload(db, user)
-    return templates.TemplateResponse(
-        request,
-        "user_dashboard.html",
-        {"user": user, "state": state, "active_tab": "dashboard"},
-    )
+@router.get("/worker")
+def worker_view(user: User = Depends(require_user)):
+    """
+    Retired. Kept as a redirect only so old bookmarks and the browser history
+    don't dead-end on a 404.
+
+    This used to render the worker dashboard for an admin — "act as a worker"
+    mode. It was removed because Peek does the same job better: it shows a
+    REAL worker's live state, read-only, whereas this showed the admin's own
+    empty queue and let them claim titles as themselves, quietly attributing
+    work (and pay) to the admin account.
+    """
+    if user.role == "admin":
+        return RedirectResponse("/admin/peek", status_code=302)
+    return RedirectResponse("/", status_code=302)
 
 
 @router.get("/api/state")

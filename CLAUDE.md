@@ -76,7 +76,7 @@ The admin UI now has two levels, and the nav **replaces itself** between them.
 
 | | |
 |---|---|
-| **Master** | Dashboard (project cards), Payments, Chat, Users, Backups, Email, Activity Log, Stats, Diagnostics |
+| **Master** | Dashboard (project cards), Payments, Chat, Projects, Users, Backups, Email, Activity Log, Stats, Diagnostics |
 | **Project** | Review Posters, Title List, Changes Requested, Skipped, Pipeline, Stats, Peek |
 
 The active project is session state — cookie `pd_project`, falling back to
@@ -98,6 +98,18 @@ Rules that matter:
   inherit the movie backlog.
 - Workers are scoped by the `user_projects` table. **No rows = no restriction**,
   because that's the state every existing worker is in.
+- **Projects are declared in code**, in `pipeline.PROJECT_DEFS`, and reconciled
+  into the database by `sync_projects()` on every startup. There is no UI to
+  create or rename one, by the owner's explicit instruction — he states the
+  name he wants and it goes in the registry. A project is a pipeline, not a
+  setting: standing one up needs a source, a script, accounts and worker
+  assignments, all of which are code anyway.
+- A project's **slug is immutable**. Per-project pipeline overrides live under
+  `pipeline.<slug>.<key>`, so renaming it would orphan them silently and the
+  project would fall back to global defaults with no error. Change `name`,
+  never `slug`.
+- `sync_projects()` never touches `process_weight` or `is_active` — those are
+  dashboard levers, and a deploy must not re-enable a project you turned off.
 
 ## Code map
 
@@ -126,6 +138,10 @@ worker_service/        Runs on the Windows VPS. agent.py is the loop.
 scripts/
   create_admin.py
   migrate_pipeline.py  Schema + legacy import + backfill. Idempotent.
+  reset_workflow.py    Wipe all WORK (posters, pipeline, payments, chat, log)
+                       and reset titles to pending. Keeps users, accounts,
+                       settings, projects. Backs up first; refuses on a
+                       production-looking DB without --force.
   dev_setup.py         Local dev: wipes and rebuilds everything. GUI + --cli.
 DEV_SETUP.bat          Double-click launcher for the above (creates .venv).
 ```

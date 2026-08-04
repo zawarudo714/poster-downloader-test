@@ -4379,3 +4379,22 @@ label.inline-check {
 }
 .diag-findings a { color: var(--accent); }
 .diag-detail { font-size: 11px; margin-top: 2px; word-break: break-all; }
+
+/* A pause message whose pause has already expired. Kept visible because it
+   still explains the last failure, but demoted out of alarm colours — a
+   permanently red banner for a fixed problem trains you to ignore red. */
+.quota-note-stale {
+  border-left-color: var(--border) !important;
+  background: transparent !important;
+  color: var(--subtext) !important;
+}
+.quota-note-tag {
+  display: inline-block;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  padding: 1px 6px;
+  margin-right: 8px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--subtext);
+}

@@ -130,17 +130,21 @@ def on_startup():
     from .backups import start_background_scheduler
     start_background_scheduler()
 
-    # Guarantee the default pipeline project exists so the Pipeline tab and
-    # the worker API have something to resolve against on a fresh install.
+    # Reconcile the projects declared in pipeline.PROJECT_DEFS into the
+    # database. Projects are code, not a form — see the registry's comment for
+    # why — so this is what makes a rename or a new niche take effect. Logged
+    # loudly, because a project rename also changes its storage folder and
+    # that should never happen invisibly.
     from .db import SessionLocal
-    from .pipeline import ensure_default_project
+    from .pipeline import sync_projects
     db = SessionLocal()
     try:
-        ensure_default_project(db)
+        for change in sync_projects(db):
+            log.info("Project sync: %s", change)
         db.commit()
     except Exception as e:
         db.rollback()
-        log.error("Could not ensure the default project: %s", e)
+        log.error("Could not sync projects: %s", e)
     finally:
         db.close()
 

@@ -354,7 +354,10 @@
           <div class="pipe-progress">
             <div class="pipe-progress-bar pipe-bar-${tone}" style="width:${pct}%"></div>
           </div>
-          ${a.pause_reason ? `<div class="quota-note">${esc(a.pause_reason)}</div>` : ''}
+          ${a.pause_reason ? `<div class="quota-note ${a.pause_active ? '' : 'quota-note-stale'}">
+              ${a.pause_active ? '' : '<span class="quota-note-tag">LAST ISSUE</span>'}
+              ${esc(a.pause_reason)}
+            </div>` : ''}
         </div>`;
     }).join('');
   }
@@ -1181,10 +1184,15 @@
             removed ${s.removed || 0}
             ${a.last_run_at ? ' · last run ' + esc(a.last_run_at.slice(0, 16).replace('T', ' ')) : ''}
           </div>
-          ${a.pause_reason ? `<div class="quota-note">${esc(a.pause_reason)}</div>` : ''}
+          ${a.pause_reason ? `<div class="quota-note ${a.pause_active ? '' : 'quota-note-stale'}">
+              ${a.pause_active ? '' : '<span class="quota-note-tag">LAST ISSUE</span>'}
+              ${esc(a.pause_reason)}
+            </div>` : ''}
           <div class="actions-cell">
             <button class="btn btn-ghost btn-tiny" data-acc-edit="${a.id}">EDIT</button>
-            ${a.available ? '' : `<button class="btn btn-accent btn-tiny" data-acc-resume="${a.id}">RESUME</button>`}
+            ${a.available
+              ? (a.pause_reason ? `<button class="btn btn-ghost btn-tiny" data-acc-resume="${a.id}">CLEAR MESSAGE</button>` : '')
+              : `<button class="btn btn-accent btn-tiny" data-acc-resume="${a.id}">RESUME</button>`}
             <button class="btn btn-ghost btn-tiny" data-acc-requeue="${a.id}">REQUEUE BACK CATALOGUE</button>
             <button class="btn btn-error btn-tiny" data-acc-delete="${a.id}">DELETE</button>
           </div>
@@ -1199,7 +1207,11 @@
       b.addEventListener('click', async () => {
         try {
           await postJSON(`${API}/accounts/${b.dataset.accResume}/resume`, {});
-          toast('Account resumed.');
+          // Same endpoint either way — it clears paused_until and
+          // pause_reason together. The wording just matches what the admin
+          // was actually looking at.
+          toast(b.textContent.trim() === 'CLEAR MESSAGE'
+                ? 'Message cleared.' : 'Account resumed.');
           loadAccounts(); loadOverview();
         } catch (e) { toast(e.message, 'error'); }
       }));

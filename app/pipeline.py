@@ -478,21 +478,99 @@ def all_settings(db: Session, *, project: Optional[Project | str] = None) -> dic
 DEFAULT_PROJECT_SLUG = "tell-a-vision"
 
 
+# ═════════════════════════════════════════════════════════════════════════
+#  PROJECT REGISTRY
+# ═════════════════════════════════════════════════════════════════════════
+#
+# Projects are declared HERE, in code, and reconciled into the database on
+# every startup. There is deliberately no screen for creating or renaming one.
+#
+# WHY NOT A FORM
+# --------------
+# Everything the operator tweaks day to day lives in the dashboard, and that
+# rule stands. A project is not a tweak — it is a new pipeline. Standing one up
+# means a source site, a Photoshop script, a keyword strategy, a title
+# template, marketplace accounts and worker assignments, and those arrive as a
+# code change anyway. A form that creates the row but none of the rest produces
+# a half-built project that looks finished, which is worse than no form.
+#
+# The name is here for the same reason its folder name is derived from it:
+# renaming a project renames its storage directory, and that should be a
+# deliberate, reviewed, deployed act rather than a text box someone edits.
+#
+# ADDING OR RENAMING A PROJECT
+# ----------------------------
+# Add or edit an entry below, deploy. `sync_projects()` creates what's missing
+# and updates the display fields of what exists. The SLUG is the identity and
+# must never change once live — every per-project setting is stored under
+# `pipeline.<slug>.<key>`, so changing it silently orphans them all and the
+# project falls back to global defaults with no error.
+
+PROJECT_DEFS: list[dict] = [
+    {
+        "slug":             DEFAULT_PROJECT_SLUG,     # 'tell-a-vision' — frozen, it is the identity
+        "name":             "GR(Movie&Series)",
+        "source_site":      "tmdb",
+        "target_site":      "fineartamerica",
+        "images_per_title": 3,
+        "notes":            "Original workflow: TMDB posters -> Real Paint FX -> FineArtAmerica.",
+    },
+]
+
+# Fields sync_projects() will overwrite on an existing row. Deliberately
+# excludes `slug` (identity), `process_weight` and `is_active` — those are
+# operational levers the dashboard owns, and a deploy must not silently reset
+# a project you turned off or re-weighted.
+_SYNCED_FIELDS = ("name", "source_site", "target_site", "images_per_title", "notes")
+
+
+def sync_projects(db: Session) -> list[str]:
+    """
+    Reconcile PROJECT_DEFS into the projects table. Idempotent.
+
+    Returns a list of human-readable changes, which main.py logs on startup so
+    a rename is visible in `docker compose logs` rather than being invisible.
+    """
+    changes: list[str] = []
+
+    for spec in PROJECT_DEFS:
+        proj = db.query(Project).filter_by(slug=spec["slug"]).first()
+
+        if proj is None:
+            proj = Project(**{k: spec.get(k) for k in ("slug", *_SYNCED_FIELDS)})
+            db.add(proj)
+            db.flush()
+            changes.append(f"created project '{spec['slug']}' ({spec['name']})")
+            continue
+
+        for field in _SYNCED_FIELDS:
+            if field not in spec:
+                continue
+            current = getattr(proj, field)
+            if current != spec[field]:
+                setattr(proj, field, spec[field])
+                if field == "name":
+                    changes.append(
+                        f"renamed '{spec['slug']}': {current!r} -> {spec[field]!r}"
+                    )
+                else:
+                    changes.append(f"{spec['slug']}.{field} -> {spec[field]!r}")
+
+    return changes
+
+
 def ensure_default_project(db: Session) -> Project:
     """
-    Guarantee project 1 exists. Called on startup so a fresh install and the
-    existing single-workflow install converge on the same shape.
+    Guarantee the primary project exists, and return it.
+
+    Kept as its own function because it is called from query-scoping paths
+    that must not depend on startup having run — a fresh database, a restored
+    backup, or the dev setup tool all reach here first.
     """
     proj = db.query(Project).filter_by(slug=DEFAULT_PROJECT_SLUG).first()
     if proj is None:
-        proj = Project(
-            slug=DEFAULT_PROJECT_SLUG,
-            name="Tell-A-Vision (Movies & Series)",
-            source_site="tmdb",
-            target_site="fineartamerica",
-            images_per_title=3,
-            notes="Original workflow: TMDB posters → Real Paint FX → FineArtAmerica.",
-        )
+        spec = next(s for s in PROJECT_DEFS if s["slug"] == DEFAULT_PROJECT_SLUG)
+        proj = Project(**{k: spec.get(k) for k in ("slug", *_SYNCED_FIELDS)})
         db.add(proj)
         db.flush()
     return proj
@@ -1435,6 +1513,17 @@ def report_uploaded(
     tracking.last_error = None
     tracking.claimed_at = None
     tracking.claimed_by = None
+
+    # A successful upload proves whatever paused this account is over, so the
+    # explanation goes with it. Every other error field in the app already
+    # self-clears on success (process_error, last_error); pause_reason was the
+    # exception, which is why a selector failure from weeks ago sat on the
+    # dashboard in red with no button to remove it. Stale alarms train you to
+    # ignore real ones.
+    account = db.query(UploadAccount).filter_by(id=tracking.account_id).first()
+    if account is not None and (account.pause_reason or account.paused_until):
+        account.pause_reason = None
+        account.paused_until = None
     if remote_id:
         tracking.remote_id = remote_id[:128]
 
@@ -1659,6 +1748,11 @@ def account_payload(
         "is_enabled":         bool(account.is_enabled),
         "paused_until":       account.paused_until.isoformat() if account.paused_until else None,
         "pause_reason":       account.pause_reason,
+        # Distinguishes "paused right now" from "was paused, and here's what
+        # happened". The UI shows the first in red and the second in grey with
+        # a dismiss button — they are very different messages to wake up to.
+        "pause_active":       bool(account.paused_until
+                                   and account.paused_until > datetime.utcnow()),
         "last_run_at":        account.last_run_at.isoformat() if account.last_run_at else None,
         "timings":            timings,
         "selectors":          selectors,

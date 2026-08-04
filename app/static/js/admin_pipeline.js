@@ -1173,6 +1173,7 @@
             <span class="muted mono">${esc(a.email)}</span>
           </div>
           <div class="account-stats mono">
+            turn #${a.rotation_order ?? 100}, ${a.rotation_size || 'default'} per turn ·
             today ${a.quota.used}/${a.quota.limit} ·
             uploaded ${s.uploaded || 0} ·
             pending ${s.pending || 0} ·
@@ -1235,6 +1236,8 @@
     q('[data-account-profile]').value  = account ? (account.profile_url || '') : '';
     q('[data-account-chrome]').value   = account ? (account.chrome_profile_dir || '') : '';
     q('[data-account-limit]').value    = account ? account.daily_limit : 100;
+    q('[data-account-rotorder]').value = account ? (account.rotation_order ?? 100) : 100;
+    q('[data-account-rotsize]').value  = account && account.rotation_size ? account.rotation_size : '';
     q('[data-account-enabled]').checked = account ? account.is_enabled : true;
     setStatus(q('[data-account-status]'), '');
     m.hidden = false;
@@ -1251,6 +1254,9 @@
       profile_url:        q('[data-account-profile]').value.trim(),
       chrome_profile_dir: q('[data-account-chrome]').value.trim(),
       daily_limit:        parseInt(q('[data-account-limit]').value, 10) || 100,
+      rotation_order:     parseInt(q('[data-account-rotorder]').value, 10) || 100,
+      rotation_size:      q('[data-account-rotsize]').value
+                            ? parseInt(q('[data-account-rotsize]').value, 10) : null,
       is_enabled:         q('[data-account-enabled]').checked,
     };
     const password = q('[data-account-password]').value;

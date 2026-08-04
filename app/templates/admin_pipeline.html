@@ -577,7 +577,22 @@
         <label>CHROME PROFILE DIR (on the node)
           <input type="text" data-account-chrome placeholder="C:/faa/profiles/GR">
         </label>
-        <label>DAILY LIMIT <input type="number" data-account-limit value="100" min="1" max="1000"></label>
+        <label>DAILY LIMIT <input type="number" data-account-limit value="100" min="1" max="1000">
+        </label>
+        <label>ROTATION ORDER
+          <input type="number" data-account-rotorder value="100" min="1" max="999">
+        </label>
+        <label>IMAGES PER TURN
+          <input type="number" data-account-rotsize placeholder="blank = use batch size" min="1" max="500">
+        </label>
+        <p class="setting-help">
+          Accounts take turns rather than one being drained before the next is
+          touched. <strong>Rotation order</strong> sets the sequence (lower goes
+          first); <strong>images per turn</strong> is how many this account gets
+          before the next one runs. So 30 / 40 / 10 / 20 across four accounts with
+          orders 1–4 gives exactly that cycle, then loops. Both are still capped
+          by the daily limit.
+        </p>
         <label class="inline-check"><input type="checkbox" data-account-enabled checked> ENABLED</label>
       </div>
       <div class="pipe-modal-foot">

@@ -731,6 +731,9 @@ def api_create_account(
         profile_url=(payload.get("profile_url") or "").strip() or None,
         chrome_profile_dir=(payload.get("chrome_profile_dir") or "").strip() or None,
         daily_limit=int(payload.get("daily_limit") or 100),
+        rotation_order=int(payload.get("rotation_order") or 100),
+        rotation_size=(int(payload["rotation_size"])
+                       if payload.get("rotation_size") else None),
         is_enabled=1 if payload.get("is_enabled", True) else 0,
         timing_json=json.dumps(payload["timings"]) if payload.get("timings") else None,
         selectors_json=json.dumps(payload["selectors"]) if payload.get("selectors") else None,
@@ -774,6 +777,11 @@ def api_update_account(
         account.target_site = payload["target_site"].strip()
     if "daily_limit" in payload:
         account.daily_limit = int(payload["daily_limit"] or 100)
+    if "rotation_order" in payload:
+        account.rotation_order = int(payload["rotation_order"] or 100)
+    if "rotation_size" in payload:
+        account.rotation_size = (int(payload["rotation_size"])
+                                 if payload["rotation_size"] else None)
     if "is_enabled" in payload:
         account.is_enabled = 1 if payload["is_enabled"] else 0
     if "timings" in payload:

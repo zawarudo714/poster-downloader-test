@@ -987,24 +987,57 @@ def claim_process_batch(
     limit = limit or int(get_setting(db, "process_batch_size", project=project))
     max_attempts = int(get_setting(db, "process_max_attempts", project=project))
 
-    query = (
-        db.query(SavedPoster, MasterTitle)
-          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
-          .filter(SavedPoster.deleted_at.is_(None),
-                  SavedPoster.process_attempts < max_attempts,
-                  or_(SavedPoster.pipeline_status == "greenlit",
-                      SavedPoster.pipeline_status == "failed_processing"))
-    )
-    if project_id:
-        query = query.filter(MasterTitle.project_id == project_id)
+    def pending_query(only_project: Optional[int]):
+        q = (
+            db.query(SavedPoster, MasterTitle)
+              .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+              .filter(SavedPoster.deleted_at.is_(None),
+                      SavedPoster.process_attempts < max_attempts,
+                      or_(SavedPoster.pipeline_status == "greenlit",
+                          SavedPoster.pipeline_status == "failed_processing"))
+        )
+        if only_project:
+            q = q.filter(project_scope(only_project))
+        return q.order_by(SavedPoster.original_save_date.asc(),
+                          MasterTitle.external_id.asc().nullslast(),
+                          SavedPoster.id.asc())
 
-    rows = (
-        query.order_by(SavedPoster.original_save_date.asc(),
-                       MasterTitle.external_id.asc().nullslast(),
-                       SavedPoster.id.asc())
-             .limit(limit)
-             .all()
-    )
+    if project_id:
+        # Node pinned to one project — no sharing to do.
+        rows = pending_query(project_id).limit(limit).all()
+    else:
+        # ── Share the batch between projects that have work ─────────────
+        #
+        # Taking the globally oldest images looks fair but isn't: a large older
+        # backlog in one niche blocks every newer niche entirely until it
+        # drains. Instead each project with pending work gets a slice of the
+        # batch, sized by its process_weight, and stays oldest-first within its
+        # own slice.
+        #
+        # With a single project this is identical to the simple query above.
+        active = [
+            p for p in db.query(Project).filter(Project.is_active == 1).all()
+            if pending_query(p.id).limit(1).first() is not None
+        ]
+
+        if len(active) <= 1:
+            rows = pending_query(active[0].id if active else None).limit(limit).all()
+        else:
+            total_weight = sum(max(1, p.process_weight or 1) for p in active)
+            rows = []
+            for index, proj in enumerate(active):
+                weight = max(1, proj.process_weight or 1)
+                # Everyone with work gets at least one slot, so a low-weight
+                # project can never be starved outright.
+                share = max(1, round(limit * weight / total_weight))
+                # Last project mops up the remainder, so rounding never leaves
+                # the batch short.
+                if index == len(active) - 1:
+                    share = max(1, limit - len(rows))
+                if len(rows) >= limit:
+                    break
+                share = min(share, limit - len(rows))
+                rows.extend(pending_query(proj.id).limit(share).all())
 
     now = datetime.utcnow()
     batch: list[dict[str, Any]] = []
@@ -1245,7 +1278,23 @@ def claim_upload_batch(
     if project_id:
         accounts_q = accounts_q.filter(UploadAccount.project_id == project_id)
 
-    for account in accounts_q.order_by(UploadAccount.id.asc()).all():
+    # ── Take turns between accounts ─────────────────────────────────────
+    #
+    # Ordering by last_run_at means whichever account was served longest ago
+    # goes next, which produces a rotation without storing any cursor. On the
+    # first pass every account has last_run_at NULL, so rotation_order decides
+    # the sequence; afterwards it only breaks ties.
+    #
+    # Self-correcting by construction: an account that's paused, out of quota
+    # or out of work simply keeps its old timestamp and jumps to the front the
+    # moment it can run again.
+    accounts = accounts_q.order_by(
+        UploadAccount.last_run_at.asc().nullsfirst(),
+        UploadAccount.rotation_order.asc(),
+        UploadAccount.id.asc(),
+    ).all()
+
+    for account in accounts:
         if not account_is_available(account):
             continue
 
@@ -1254,7 +1303,12 @@ def claim_upload_batch(
             continue
 
         project = resolve_project(db, account.project_id)
-        batch_size = limit or int(get_setting(db, "upload_batch_size", project=project))
+        # How many this account gets per turn. Its own rotation_size wins;
+        # otherwise the project's batch size. Always capped by whatever is
+        # left of today's marketplace allowance.
+        per_turn = account.rotation_size or int(
+            get_setting(db, "upload_batch_size", project=project))
+        batch_size = limit or per_turn
         take = min(batch_size, quota["remaining"])
         max_attempts = int(get_setting(db, "upload_max_attempts", project=project))
 
@@ -1550,6 +1604,8 @@ def account_payload(
         "profile_url":        account.profile_url,
         "chrome_profile_dir": account.chrome_profile_dir,
         "daily_limit":        account.daily_limit,
+        "rotation_order":     account.rotation_order,
+        "rotation_size":      account.rotation_size,
         "is_enabled":         bool(account.is_enabled),
         "paused_until":       account.paused_until.isoformat() if account.paused_until else None,
         "pause_reason":       account.pause_reason,

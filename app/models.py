@@ -456,6 +456,15 @@ class Project(Base):
     source_site     = Column(String(64), nullable=True)       # 'tmdb' | 'pinterest' | ...
     # How many images a worker is expected to save per title (soft guidance).
     images_per_title = Column(Integer, nullable=True)
+    # Relative share of each Photoshop batch when several projects have work
+    # waiting. Equal weights split the batch evenly; a project with weight 2
+    # gets twice the slots of one with weight 1.
+    #
+    # Without this the dispatcher takes the globally oldest images, so a large
+    # older backlog in one niche starves every newer niche completely — e.g. a
+    # 3,000-image movie backlog would block a brand-new celebrity pipeline for
+    # about a week.
+    process_weight  = Column(Integer, nullable=False, default=1)
     is_active       = Column(Integer, nullable=False, default=1)
     notes           = Column(Text, nullable=True)
     created_at      = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -517,6 +526,22 @@ class UploadAccount(Base):
     # (session cookies). Disposable — recreated by re-login if wiped.
     chrome_profile_dir = Column(String(512), nullable=True)
     daily_limit       = Column(Integer, nullable=False, default=100)
+
+    # ── Rotation between accounts ───────────────────────────────────────
+    # Accounts take turns rather than one being drained before the next is
+    # touched. `rotation_size` is how many images this account gets per turn
+    # (NULL/0 = the project's upload_batch_size), and `rotation_order` sets the
+    # sequence on the first pass and breaks ties afterwards.
+    #
+    # So "30 to A, then 40 to B, then 10 to C, then 20 to D, then back to A" is
+    # four accounts with rotation_order 1..4 and rotation_size 30/40/10/20.
+    #
+    # After the first pass the order is driven by last_run_at (least recently
+    # served goes next), which keeps the rotation going and self-corrects when
+    # an account is paused or runs out of work.
+    rotation_order    = Column(Integer, nullable=False, default=100)
+    rotation_size     = Column(Integer, nullable=True)
+
     is_enabled        = Column(Integer, nullable=False, default=1)
     timing_json       = Column(Text, nullable=True)
     selectors_json    = Column(Text, nullable=True)

@@ -99,6 +99,10 @@ NEW_COLUMNS = [
     ("saved_posters", "process_error",    "TEXT"),
     ("saved_posters", "claimed_at",       "DATETIME"),
     ("saved_posters", "claimed_by",       "VARCHAR(64)"),
+    # Fair sharing between projects / rotation between accounts.
+    ("projects",        "process_weight", "INTEGER NOT NULL DEFAULT 1"),
+    ("upload_accounts", "rotation_order", "INTEGER NOT NULL DEFAULT 100"),
+    ("upload_accounts", "rotation_size",  "INTEGER"),
 ]
 
 NEW_INDEXES = [

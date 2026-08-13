@@ -243,6 +243,7 @@ def _active_revisions_for_user(db: Session, user: User):
             "master_id": mt.id,
             "tmdb_search": _source_search_url(db, mt.title, mt.content_type,
                                               resolve_project(db, mt.project_id)),
+            "images_per_title": resolve_project(db, mt.project_id).images_per_title,
         })
     return out
 
@@ -501,6 +502,166 @@ def api_master(
 
 # ── Pull / claim ─────────────────────────────────────────────────────────────
 
+# ── In-page image search (projects whose workers don't leave the site) ───────
+
+@router.get("/api/search/{master_id}")
+def api_search(
+    master_id: int,
+    deep: int = Query(0),
+    refresh: int = Query(0),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Image results for a title the worker is holding, from cache when possible.
+
+    Cache is keyed on (title, worker, variant) and lives for the claim, so
+    toggling between the normal and deep grids is free after the first look.
+    `refresh=1` forces a new query — the escape hatch when results look stale
+    or a thumbnail has expired.
+    """
+    from ..brave_search import BraveError, search
+    from ..models import SearchCache
+
+    t = _load_my_master(db, user, master_id)
+    variant = "deep" if deep else "normal"
+
+    if not refresh:
+        cached = (
+            db.query(SearchCache)
+              .filter_by(master_title_id=t.id, user_id=user.id, variant=variant)
+              .first()
+        )
+        if cached and (datetime.utcnow() - cached.created_at) < timedelta(hours=24):
+            payload = json.loads(cached.payload_json)
+            payload["cached"] = True
+            return JSONResponse(payload)
+
+    project = resolve_project(db, t.project_id)
+    try:
+        outcome = search(db, t.title, deep=bool(deep), project=project)
+    except BraveError as e:
+        log_activity(db, user=user, action="search_failed", target_type="master_title",
+                     target_id=t.id, details={"error": str(e), "variant": variant})
+        db.commit()
+        return JSONResponse({"ok": False, "message": e.worker_message}, status_code=503)
+
+    payload = {
+        "ok": True,
+        "variant": variant,
+        "queries": outcome.queries,
+        "filtered_small": outcome.filtered_small,
+        "results": [r.as_dict() for r in outcome.results],
+        "cached": False,
+    }
+
+    # Upsert the cache row. Deliberately not fatal — a cache write failing
+    # must not cost the worker the results they are looking at.
+    try:
+        row = (
+            db.query(SearchCache)
+              .filter_by(master_title_id=t.id, user_id=user.id, variant=variant)
+              .first()
+        )
+        stored = json.dumps({k: v for k, v in payload.items() if k != "cached"})
+        if row:
+            row.payload_json = stored
+            row.created_at = datetime.utcnow()
+        else:
+            db.add(SearchCache(master_title_id=t.id, user_id=user.id,
+                               variant=variant, payload_json=stored))
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    return JSONResponse(payload)
+
+
+@router.post("/api/search_save/{master_id}")
+def api_search_save(
+    master_id: int,
+    url: str = Form(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Save one image the worker picked out of the grid.
+
+    Fetches server-side the instant it is clicked — see app/imagefetch.py for
+    why that matters — converts to JPEG, and then hands off to exactly the
+    same save path the paste-a-URL flow uses, so duplicate detection, the
+    soft limit, folder freezing and the activity log all behave identically.
+    """
+    from ..imagefetch import FetchError, fetch_as_jpeg
+
+    t = _load_my_master(db, user, master_id)
+    ok, reason = _validate_image_url(url)
+    if not ok:
+        raise HTTPException(400, reason)
+
+    project = resolve_project(db, t.project_id)
+    soft_limit = int(project.images_per_title or SOFT_LIMIT_PER_TITLE)
+    live = count_live_posters_for_master(db, t.id)
+    if live >= soft_limit:
+        return JSONResponse(
+            {"ok": False, "reason": "soft_limit",
+             "message": f"You already have {live} of {soft_limit} images for this title.",
+             "current_count": live, "soft_limit": soft_limit},
+            status_code=409,
+        )
+
+    today = local_today()
+    _ensure_first_save_metadata(t, today)
+    db.flush()
+
+    from ..workspace_migration import project_folder_for
+    project_folder = project_folder_for(project)
+    folder = title_folder_for(user.username, t.original_save_date,
+                              t.title_folder_path, project_folder)
+
+    count = live + 1
+    target_name = filename_for(t.title, count, ".jpg")
+    target_path = folder / target_name
+    while target_path.exists():
+        count += 1
+        target_name = filename_for(t.title, count, ".jpg")
+        target_path = folder / target_name
+
+    try:
+        written, img_w, img_h = fetch_as_jpeg(url, target_path)
+    except FetchError as e:
+        target_path.unlink(missing_ok=True)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=422)
+
+    sp = SavedPoster(
+        master_title_id    = t.id,
+        user_id            = user.id,
+        username           = user.username,
+        project_folder     = project_folder,
+        original_save_date = t.original_save_date,
+        title_folder_path  = t.title_folder_path,
+        filename           = target_name,
+        source_url         = url,
+        file_size          = written,
+        image_width        = img_w,
+        image_height       = img_h,
+    )
+    db.add(sp)
+    db.flush()
+    log_activity(db, user=user, action="saved", target_type="saved_poster",
+                 target_id=sp.id, details={"via": "search", "url": url})
+    db.commit()
+
+    new_live = count_live_posters_for_master(db, t.id)
+    return JSONResponse({
+        "ok": True,
+        "poster": _serialize_poster(sp),
+        "count": new_live,
+        "soft_limit": soft_limit,
+        "at_limit": new_live >= soft_limit,
+    })
+
+
 @router.post("/pull_next")
 def pull_next(
     n: int = Form(DEFAULT_PULL_SIZE),
@@ -665,6 +826,7 @@ def lock_title(
         "description": (t.description or "")[:600],
         "tmdb_search": _source_search_url(db, t.title, t.content_type,
                                           resolve_project(db, t.project_id)),
+        "images_per_title": resolve_project(db, t.project_id).images_per_title,
     })
 
 
@@ -804,6 +966,7 @@ def go_to_title(
         "description":  (t.description or "")[:600],
         "tmdb_search":  _source_search_url(db, t.title, t.content_type,
                                            resolve_project(db, t.project_id)),
+        "images_per_title": resolve_project(db, t.project_id).images_per_title,
         "reopened":     reopened,
     })
 

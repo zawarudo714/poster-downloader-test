@@ -632,6 +632,10 @@ PROJECT_DEFS: list[dict] = [
         "item_noun":        "image",
         "item_noun_plural": "images",
         "processor":        "gpt",
+        # No external source link: this project searches in-page, so the
+        # worker never leaves the site and the "Open TMDB" button is hidden.
+        # Set as a per-project override on first sync (see sync_projects).
+        "settings":         {"source_search_url": ""},
         # One column of artist names — no year, no movie/tv distinction.
         "has_year":         0,
         "has_content_type": 0,
@@ -668,6 +672,15 @@ def sync_projects(db: Session) -> list[str]:
             db.flush()
             changes.append(f"created project '{spec['slug']}' ({spec['name']})")
             continue
+
+        # Per-project setting overrides declared alongside the project. Only
+        # written when absent, so a value you later change in the dashboard is
+        # never stamped back over on the next deploy.
+        for key, value in (spec.get("settings") or {}).items():
+            existing = _setting_row(db, f"{SETTINGS_ROOT}.{spec['slug']}.{key}")
+            if existing is None:
+                set_setting(db, key, value, project=proj, by="registry")
+                changes.append(f"{spec['slug']}.{key} set to {value!r}")
 
         for field in _SYNCED_FIELDS:
             if field not in spec:

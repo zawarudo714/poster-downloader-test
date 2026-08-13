@@ -316,6 +316,38 @@ class ActivityLog(Base):
     created_at  = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 
 
+class SearchCache(Base):
+    """
+    One worker's search results for one title, held for the life of their claim.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY CACHE AT ALL
+    ════════════════════════════════════════════════════════════════════════
+    A worker toggles between the Pinterest-scoped results and the deep search
+    while deciding. Without a cache each toggle is another paid query for
+    results we already had. Cached, they flip freely and we pay once.
+
+    Keyed on (title, variant) and scoped to the claim rather than a clock:
+    a worker holds a title until they finish it, so that is exactly how long
+    the results stay relevant. The 24h ceiling is a backstop for a claim left
+    open overnight — by then Brave's thumbnail URLs may have expired anyway,
+    so re-querying is the right answer rather than serving dead links.
+    """
+    __tablename__ = "search_cache"
+
+    id              = Column(Integer, primary_key=True)
+    master_title_id = Column(Integer, ForeignKey("master_titles.id"), nullable=False, index=True)
+    user_id         = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    variant         = Column(String(16), nullable=False)   # 'normal' | 'deep'
+    payload_json    = Column(Text, nullable=False)
+    created_at      = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    __table_args__ = (
+        UniqueConstraint("master_title_id", "user_id", "variant",
+                         name="uq_search_cache_title_user_variant"),
+    )
+
+
 # ── Import jobs (background CSV/XLSX import) ─────────────────────────────────
 
 class ImportJob(Base):

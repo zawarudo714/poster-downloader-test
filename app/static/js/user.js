@@ -297,8 +297,21 @@
       fb.querySelector('.att-active-flags-plural').textContent = myRevs.length === 1 ? '' : 's';
     }
 
+    // An external source link, or the in-page grid — never both. A project
+    // that searches inside the site returns an empty tmdb_search, and showing
+    // a link to nowhere is worse than showing nothing.
     const tmdb = node.querySelector('.att-tmdb');
-    tmdb.href = t.tmdb_search;
+    const searchBox = node.querySelector('[data-search-box]');
+    if (t.tmdb_search) {
+      tmdb.href = t.tmdb_search;
+      if (searchBox) searchBox.hidden = true;
+    } else {
+      tmdb.hidden = true;
+      if (searchBox) {
+        searchBox.hidden = false;
+        wireSearch(searchBox, t);
+      }
+    }
 
     const urlInput = node.querySelector('.save-url');
     const saveBtn  = node.querySelector('[data-action="save"]');
@@ -1245,3 +1258,147 @@
   renderAll({ fullActive: true });
   setInterval(refreshState, 8000);
 })();
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   IN-PAGE IMAGE SEARCH
+   For projects that search inside the site instead of sending the worker to
+   an external source. Tap to select, tap again to deselect, save the lot.
+
+   The selection is deliberately capped at the project's images-per-title:
+   letting someone select five and then rejecting three of them at save time
+   wastes their effort and reads as a bug.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function wireSearch(box, title) {
+  if (box.dataset.wiredFor === String(title.id)) return;   // re-render, same title
+  box.dataset.wiredFor = String(title.id);
+
+  const grid    = box.querySelector('[data-search-grid]');
+  const bar     = box.querySelector('[data-search-bar]');
+  const barCount= box.querySelector('.search-bar-count');
+  const status  = box.querySelector('.search-status');
+  const note    = box.querySelector('[data-search-note]');
+
+  const limit    = title.images_per_title || 2;
+  const selected = new Set();
+  let variant    = 'normal';
+  let results    = [];
+
+  function esc(v) {
+    return String(v == null ? '' : v)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function alreadySaved() { return (title.posters || []).length; }
+
+  function refreshBar() {
+    const room = Math.max(0, limit - alreadySaved());
+    bar.hidden = selected.size === 0;
+    barCount.textContent = `${selected.size} selected · ${alreadySaved()}/${limit} saved`;
+    grid.querySelectorAll('.sr-card').forEach((card) => {
+      const on = selected.has(card.dataset.url);
+      card.classList.toggle('is-selected', on);
+      const badge = card.querySelector('.sr-badge');
+      badge.hidden = !on;
+      if (on) badge.textContent = String([...selected].indexOf(card.dataset.url) + 1);
+      // Grey out the rest once the worker has picked their quota.
+      card.classList.toggle('is-blocked', !on && selected.size >= room);
+    });
+  }
+
+  function render() {
+    if (!results.length) {
+      grid.innerHTML = '<p class="muted">No images found. Try DEEP SEARCH.</p>';
+      return;
+    }
+    grid.innerHTML = results.map((r) => `
+      <div class="sr-card" data-url="${esc(r.url)}">
+        <img class="sr-img" loading="lazy" src="${esc(r.thumb)}" alt="">
+        <span class="sr-badge" hidden></span>
+        <span class="sr-dim mono">${r.width || '?'}×${r.height || '?'}</span>
+      </div>`).join('');
+
+    grid.querySelectorAll('.sr-card').forEach((card) => {
+      // A thumbnail that 404s is noise the worker can't act on — drop it.
+      card.querySelector('.sr-img').addEventListener('error', () => card.remove());
+      card.addEventListener('click', () => {
+        const url = card.dataset.url;
+        if (selected.has(url)) selected.delete(url);
+        else {
+          const room = Math.max(0, limit - alreadySaved());
+          if (selected.size >= room) return;
+          selected.add(url);
+        }
+        refreshBar();
+      });
+    });
+    refreshBar();
+  }
+
+  async function run(kind, force) {
+    variant = kind;
+    selected.clear();
+    status.textContent = 'searching…';
+    grid.innerHTML = '<p class="muted">Searching…</p>';
+    note.hidden = true;
+    try {
+      const qs = `?deep=${kind === 'deep' ? 1 : 0}${force ? '&refresh=1' : ''}`;
+      const r  = await fetch(`/api/search/${title.id}${qs}`);
+      const d  = await r.json();
+      if (!r.ok || !d.ok) {
+        grid.innerHTML = `<p class="error">${esc(d.message || 'Search failed.')}</p>`;
+        status.textContent = '';
+        return;
+      }
+      results = d.results || [];
+      status.textContent = `${results.length} result${results.length === 1 ? '' : 's'}`
+                         + (d.cached ? ' · cached' : '');
+      if (d.filtered_small) {
+        note.hidden = false;
+        note.textContent = `${d.filtered_small} image${d.filtered_small === 1 ? ' was' : 's were'} `
+                         + 'too small to use and have been hidden.';
+      }
+      render();
+    } catch (e) {
+      grid.innerHTML = `<p class="error">Search failed: ${esc(e.message)}</p>`;
+      status.textContent = '';
+    }
+  }
+
+  box.querySelector('[data-action="search-normal"]')
+     .addEventListener('click', () => run('normal', false));
+  box.querySelector('[data-action="search-deep"]')
+     .addEventListener('click', () => run('deep', false));
+  box.querySelector('[data-action="search-refresh"]')
+     .addEventListener('click', () => run(variant, true));
+  box.querySelector('[data-action="search-clear"]')
+     .addEventListener('click', () => { selected.clear(); refreshBar(); });
+
+  box.querySelector('[data-action="search-save"]').addEventListener('click', async () => {
+    const btn = box.querySelector('[data-action="search-save"]');
+    btn.disabled = true;
+    const urls = [...selected];
+    let saved = 0;
+    for (const url of urls) {
+      btn.textContent = `SAVING ${saved + 1}/${urls.length}…`;
+      try {
+        const fd = new FormData();
+        fd.append('url', url);
+        const r = await fetch(`/api/search_save/${title.id}`, { method: 'POST', body: fd });
+        const d = await r.json();
+        if (!r.ok || !d.ok) { alert(d.message || 'Save failed.'); break; }
+        saved += 1;
+      } catch (e) { alert('Save failed: ' + e.message); break; }
+    }
+    btn.disabled = false;
+    btn.textContent = 'SAVE SELECTED';
+    selected.clear();
+    await refreshState();
+  });
+
+  // Search on open — the worker's first action is always "show me images",
+  // so making them click for it is a tap they never wanted to make.
+  run('normal', false);
+}

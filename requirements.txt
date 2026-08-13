@@ -14,3 +14,8 @@ tzdata==2024.2
 # pipeline (app/pipeline.py). The key derives from PIPELINE_SECRET, falling
 # back to SESSION_SECRET. See PIPELINE.md §8 before rotating either.
 cryptography==43.0.1
+# Pillow: WebP decoding, format conversion and the Lanczos upscale to print
+# size. Only the Linux server needs it — the Windows node still parses JPEG
+# headers by hand (worker_service/processor.py) because it has no other use
+# for an image library and Photoshop does its own resizing.
+Pillow==10.4.0

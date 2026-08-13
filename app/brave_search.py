@@ -224,8 +224,9 @@ def search(db: Session, artist: str, *, deep: bool = False, project=None) -> Sea
     """
     global _last_free_call
 
-    free_key = str(_setting(db, "brave_api_key_free", project) or "").strip()
-    paid_key = str(_setting(db, "brave_api_key_paid", project) or "").strip()
+    from .pipeline import get_secret
+    free_key = get_secret(db, "brave_api_key_free", project=project)
+    paid_key = get_secret(db, "brave_api_key_paid", project=project)
     if not (free_key or paid_key):
         raise BraveError(
             "No Brave API key configured",

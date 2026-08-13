@@ -225,7 +225,20 @@ class SavedPoster(Base):
     #   uploaded   — live on at least one marketplace account
     #   failed_processing / failed_upload — needs attention or retry
     #   skipped    — admin excluded it from the pipeline
+    #   unusable   — the AI cannot render this image acceptably, ever. Set by
+    #                the admin from the review gate after seeing repeated bad
+    #                output. NOT a deletion: the file, the poster row, the
+    #                worker's pay and the whole history stay. It is simply out
+    #                of the workflow, with `unusable_reason` recording why so
+    #                that finding it in three years answers its own question.
     pipeline_status    = Column(String(24), nullable=True, index=True)
+    # Why an image was taken out of the pipeline permanently. Free text from
+    # the admin — the reasons are judgements ("hands come out wrong every
+    # time", "AI keeps adding a second person") and a fixed list would only
+    # push the real reason into a note nobody reads.
+    unusable_reason    = Column(Text, nullable=True)
+    unusable_at        = Column(DateTime, nullable=True)
+    unusable_by        = Column(String(64), nullable=True)
     # Retry/backoff bookkeeping for the Photoshop stage. Upload-side attempts
     # live on upload_tracking (per account), not here.
     process_attempts   = Column(Integer, nullable=False, default=0)

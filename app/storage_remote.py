@@ -48,13 +48,12 @@ class StorageError(Exception):
 
 
 def _settings(db: Session, project=None) -> dict:
-    from .pipeline import decrypt_secret, get_setting
-    raw_pw = str(get_setting(db, "storage_sftp_password", project=project) or "")
+    from .pipeline import get_secret, get_setting
     return {
         "host": str(get_setting(db, "storage_sftp_host", project=project) or "").strip(),
         "port": int(get_setting(db, "storage_sftp_port", project=project) or 22),
         "user": str(get_setting(db, "storage_sftp_user", project=project) or "").strip(),
-        "password": decrypt_secret(raw_pw) if raw_pw else "",
+        "password": get_secret(db, "storage_sftp_password", project=project),
         "root": str(get_setting(db, "storage_sftp_root", project=project) or "").strip("/"),
         "local_root": str(get_setting(db, "storage_local_root", project=project) or ""),
     }

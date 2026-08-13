@@ -47,6 +47,7 @@ import base64
 import json
 import logging
 import mimetypes
+import re
 import time
 from dataclasses import dataclass
 from decimal import Decimal
@@ -78,9 +79,17 @@ BASE_BACKOFF = 4.0
 class PermanentFailure(Exception):
     """Retrying will fail identically. Park it for the admin."""
 
-    def __init__(self, message: str, *, kind: str = "rejected"):
+    def __init__(self, message: str, *, kind: str = "rejected",
+                 categories: Optional[list[str]] = None):
         super().__init__(message)
         self.kind = kind      # 'rejected' | 'auth' | 'billing' | 'bad_request'
+        # The specific policy categories OpenAI named, e.g. ['sexual'] or
+        # ['gore']. Surfaced separately from the raw message so the failures
+        # list can be grouped and filtered — "show me everything rejected for
+        # gore" is a different question from "show me everything rejected",
+        # and the answer decides whether the fix is a prompt change or a
+        # different source image.
+        self.categories = categories or []
 
 
 class TransientFailure(Exception):
@@ -105,6 +114,11 @@ class Generation:
 
 # ── Failure classification ──────────────────────────────────────────────────
 
+# Matched on the WORDING, not on any one category. OpenAI names whichever
+# policy was tripped — sexual, gore, violence, minors, and whatever they add
+# next — and every one of them is equally permanent for the same image and
+# prompt. Keying on a specific category would have meant a new category
+# silently becoming retryable.
 _PERMANENT_MARKERS = (
     "safety system",
     "safety_violations",
@@ -112,6 +126,24 @@ _PERMANENT_MARKERS = (
     "invalid_request_error",
     "image_parse_error",
 )
+
+_CATEGORY_RE = re.compile(r"safety_violations\s*=\s*\[([^\]]*)\]", re.I)
+
+
+def extract_categories(body: str) -> list[str]:
+    """
+    Pull the named policy categories out of a rejection message.
+
+        "... safety_violations=[sexual]."          -> ['sexual']
+        "... safety_violations=[violence, minors]" -> ['violence', 'minors']
+
+    Returns [] when the message names none, which is normal for the more
+    generic content_policy refusals.
+    """
+    m = _CATEGORY_RE.search(body or "")
+    if not m:
+        return []
+    return [part.strip().strip("'\"") for part in m.group(1).split(",") if part.strip()]
 
 
 def _classify(status: int, body: str) -> Exception:
@@ -136,7 +168,8 @@ def _classify(status: int, body: str) -> Exception:
             "the parked images.", kind="billing")
 
     if status == 400 and any(m in lowered for m in _PERMANENT_MARKERS):
-        return PermanentFailure(body[:600], kind="rejected")
+        return PermanentFailure(body[:600], kind="rejected",
+                                categories=extract_categories(body))
 
     if status in (429, 500, 502, 503, 504):
         return TransientFailure(f"HTTP {status}: {body[:200]}")
@@ -164,13 +197,13 @@ def generate(db: Session, *, source: Path, style: Path, project=None,
 
     Raises PermanentFailure or TransientFailure. Never returns partial work.
     """
-    from .pipeline import get_setting
+    from .pipeline import get_secret, get_setting
 
     def emit(msg, level="info"):
         if log_fn:
             log_fn(msg, level=level)
 
-    api_key = str(get_setting(db, "openai_api_key", project=project) or "").strip()
+    api_key = get_secret(db, "openai_api_key", project=project)
     if not api_key:
         raise PermanentFailure("No OpenAI API key configured.", kind="auth")
     if not style.is_file():

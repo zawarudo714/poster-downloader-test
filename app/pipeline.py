@@ -957,6 +957,11 @@ def storage_path_for(
 IN_PIPELINE_STATES = frozenset({
     "greenlit", "processing", "processed", "uploading", "uploaded",
     "failed_processing", "failed_upload",
+    # 'unusable' is terminal by admin decision. Greenlighting a date range
+    # again must never drag it back in — that would silently undo a call the
+    # admin made deliberately, and re-spend money to produce the same bad
+    # image. Only the admin's own "return to pipeline" action reverses it.
+    "unusable",
 })
 
 
@@ -2090,6 +2095,24 @@ def finish_job(
 # ═════════════════════════════════════════════════════════════════════════
 #  DASHBOARD AGGREGATES
 # ═════════════════════════════════════════════════════════════════════════
+
+def get_secret(db: Session, key: str, *, project=None) -> str:
+    """
+    Read a stored credential, decrypting it.
+
+    Tolerates a plaintext value: settings written before encryption existed,
+    or pasted straight into the database during a debugging session, would
+    otherwise fail to decrypt and look like "no key configured" — which sends
+    you hunting in the wrong place entirely.
+    """
+    raw = str(get_setting(db, key, project=project) or "").strip()
+    if not raw:
+        return ""
+    try:
+        return decrypt_secret(raw)
+    except Exception:
+        return raw
+
 
 def _default_project_id(db: Session) -> Optional[int]:
     """

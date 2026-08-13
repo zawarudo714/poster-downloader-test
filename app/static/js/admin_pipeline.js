@@ -49,9 +49,21 @@
       ['process_batch_size',  'number', 'Batch size',              'Images claimed per Photoshop run.'],
       ['process_max_attempts','number', 'Max attempts',            'Retries before an image is parked for review.'],
     ],
+    // TWO MACHINES, ONE ARCHIVE. The Windows node writes through a mounted
+    // drive letter; this server has no such drive and pushes over SFTP. Both
+    // end up at the same relative path on the same Storage Box, which is why
+    // storage_path in the database means the same thing either way.
     storage: [
-      ['storage_root',   'text', 'Storage root (on node)', 'Where processed images are archived — typically a mounted storage box. Database paths are relative to this, so remounting elsewhere only needs a change here.'],
-      ['storage_layout', 'text', 'Path layout',            'Variables: {date} {title_folder} {filename} {project} {username} {external_id}. Default mirrors the worker folder structure.'],
+      ['storage_root',   'text', 'Drive on the worker node', 'Used by the PHOTOSHOP stage, which runs on the Windows box. Typically S: — the mounted Storage Box. Database paths are relative to this, so remounting elsewhere only needs a change here.'],
+      ['storage_layout', 'text', 'Path layout',            'Shared by both machines. Variables: {site} {project} {date} {title_folder} {filename} {username} {external_id}.'],
+    ],
+    storage_sftp: [
+      ['storage_sftp_host',     'text',     'Storage Box host',  'Used by stages that run on THIS server (GPT generation), which has no mapped drive. e.g. u642720.your-storagebox.de. Leave blank to write to a local folder instead — useful for testing without the box.'],
+      ['storage_sftp_port',     'number',   'Port',              'Hetzner Storage Boxes use 23 for SFTP, not the usual 22.'],
+      ['storage_sftp_user',     'text',     'Username',          'Same as the box name, e.g. u642720.'],
+      ['storage_sftp_password', 'password', 'Password',          'Stored encrypted, like the marketplace passwords.'],
+      ['storage_sftp_root',     'text',     'Subfolder on the box', 'Normally blank — paths are then relative to the box root, matching what the node sees at its drive letter.'],
+      ['storage_local_root',    'text',     'Local fallback folder', 'Where this server writes when no host is set. Fine for a first test; not where a real archive should live.'],
     ],
     // ── GPT projects ──────────────────────────────────────────────────
     // Only rendered when the project declares processor = 'gpt'; the
@@ -1796,6 +1808,21 @@
         body: JSON.stringify({ key: 'openai_prompt' }),
       });
       if (r.ok) { await load(); promptStatus.textContent = 'reset to default'; }
+      return;
+    }
+
+    if (action === 'test-storage') {
+      const el = document.querySelector('[data-storage-test-status]');
+      el.textContent = 'writing a test file…';
+      try {
+        const r = await fetch(`${API}/storage/test`, { method: 'POST' });
+        const d = await r.json();
+        el.textContent = d.message || (d.ok ? 'ok' : 'failed');
+        el.className = d.ok ? 'muted mono' : 'error mono';
+      } catch (err) {
+        el.textContent = 'Test failed: ' + err.message;
+        el.className = 'error mono';
+      }
       return;
     }
 

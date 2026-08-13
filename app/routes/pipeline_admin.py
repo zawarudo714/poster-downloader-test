@@ -671,9 +671,28 @@ def api_set_settings(
     project = _project(request, admin, db, payload.get("project_id"))
     target = project if scope == "project" else None
 
+    # Secrets are encrypted at rest with the same Fernet key that protects
+    # marketplace passwords. Listed explicitly rather than guessed from the
+    # field name: a rule like "anything containing 'password'" would silently
+    # stop protecting a key called `openai_api_key`, which is just as much a
+    # credential.
+    SECRET_KEYS = {
+        "storage_sftp_password",
+        "openai_api_key", "openai_admin_key",
+        "brave_api_key_free", "brave_api_key_paid",
+    }
+
     applied = []
     for key, value in updates.items():
         try:
+            if key in SECRET_KEYS and value:
+                # A blank submission means "leave it alone", not "erase it" —
+                # the form renders secrets masked, so an untouched field
+                # arrives empty and must not wipe a working credential.
+                value = P.encrypt_secret(str(value))
+            elif key in SECRET_KEYS and not value:
+                applied.append(f"{key} (unchanged)")
+                continue
             P.set_setting(db, key, value, project=target, by=admin.username)
         except KeyError as e:
             raise HTTPException(400, str(e))
@@ -1667,6 +1686,119 @@ def api_spend(
     days_out = sorted(by_day.values(), key=lambda d: d["date"], reverse=True)
     return JSONResponse({"days": days_out,
                          "today": days_out[0] if days_out else None})
+
+@router.post("/api/images/unusable")
+def api_mark_unusable(
+    request: Request,
+    payload: dict = Body(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Take an image out of the pipeline permanently — "the AI cannot render
+    this acceptably, and paying to try again is throwing money away".
+
+    ════════════════════════════════════════════════════════════════════════
+    NOT A DELETION
+    ════════════════════════════════════════════════════════════════════════
+    Everything stays: the source file, the poster row, the worker's pay for
+    finding it, every generation that was attempted, and the reason. The only
+    thing that changes is that the pipeline stops offering it work.
+
+    That matters because the alternative — deleting it — destroys the answer
+    to the question you will actually ask in three years: "why is there no
+    listing for this artist?" A row that says
+    `unusable: AI keeps merging her with the background` answers itself.
+
+    `unusable` is in IN_PIPELINE_STATES, so re-greenlighting a date range
+    cannot quietly drag it back and re-spend on the same bad output. Only
+    `return_to_pipeline` below reverses it, deliberately.
+    """
+    poster_ids = payload.get("poster_ids") or []
+    reason = (payload.get("reason") or "").strip()
+    if not poster_ids:
+        raise HTTPException(400, "poster_ids is required.")
+    if not reason:
+        # Enforced, not optional. A blank reason makes this indistinguishable
+        # from a bug three years from now, which is the whole thing we are
+        # trying to avoid.
+        raise HTTPException(400, "A reason is required — it is the only record of why.")
+
+    posters = db.query(SavedPoster).filter(SavedPoster.id.in_(poster_ids)).all()
+    now = datetime.utcnow()
+    for poster in posters:
+        poster.pipeline_status = "unusable"
+        poster.unusable_reason = reason[:2000]
+        poster.unusable_at = now
+        poster.unusable_by = admin.username
+        poster.claimed_at = None
+        poster.claimed_by = None
+        title = db.query(MasterTitle).filter_by(id=poster.master_title_id).first()
+        if title:
+            P.recompute_title_status(db, title)
+
+    log_activity(db, user=admin, action="pipeline_unusable", target_type="pipeline",
+                 details={"poster_ids": [p.id for p in posters], "reason": reason})
+    db.commit()
+    return JSONResponse({"ok": True, "count": len(posters)})
+
+
+@router.post("/api/images/return_to_pipeline")
+def api_return_to_pipeline(
+    request: Request,
+    payload: dict = Body(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Undo `unusable` — the model improved, or the judgement was wrong.
+
+    Deliberately a separate, explicit action rather than something greenlight
+    does by accident.
+    """
+    poster_ids = payload.get("poster_ids") or []
+    if not poster_ids:
+        raise HTTPException(400, "poster_ids is required.")
+
+    posters = (
+        db.query(SavedPoster)
+          .filter(SavedPoster.id.in_(poster_ids),
+                  SavedPoster.pipeline_status == "unusable")
+          .all()
+    )
+    for poster in posters:
+        poster.pipeline_status = "greenlit"
+        poster.process_attempts = 0
+        poster.process_error = None
+        # The reason is kept, not cleared: the history of "this was once
+        # judged unusable" is worth more than a tidy row.
+        title = db.query(MasterTitle).filter_by(id=poster.master_title_id).first()
+        if title:
+            P.recompute_title_status(db, title)
+
+    log_activity(db, user=admin, action="pipeline_return", target_type="pipeline",
+                 details={"poster_ids": [p.id for p in posters]})
+    db.commit()
+    return JSONResponse({"ok": True, "count": len(posters)})
+
+
+@router.post("/api/storage/test")
+def api_storage_test(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Prove this server can actually WRITE to the archive.
+
+    Writes a small file and reports the result, rather than only opening a
+    connection. The failure that happens in practice is a path that is
+    readable but not writable — a login test passes that and you find out
+    when a batch of generated images has nowhere to go.
+    """
+    from ..storage_remote import check
+    ok, message = check(db, project=_project(request, admin, db))
+    return JSONResponse({"ok": ok, "message": message})
 
 @router.get("/api/stats")
 def api_stats(

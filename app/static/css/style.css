@@ -4438,19 +4438,25 @@ label.inline-check {
 .search-status { font-size: 11px; color: var(--subtext); margin-left: auto; }
 .search-note { font-size: 11px; margin-top: 6px; }
 
+/* Masonry, NOT a grid of squares — a portrait cropped to 1:1 loses the top
+   and bottom of the subject, which is the part being judged.
+   NO HEIGHT CAP. Columns fill top-to-bottom and then start a new column to
+   the RIGHT, so capping the height turns a vertical layout into a horizontal
+   strip — which is exactly what happened the first time and made scrolling
+   through 50 results miserable on a phone. Safe to let it grow now that the
+   grid sits at the BOTTOM of the panel with nothing underneath to push away. */
 .search-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 10px;
+  columns: 4 150px;
+  column-gap: 10px;
   margin-top: 12px;
-  max-height: 65vh;
-  overflow-y: auto;
-  padding-right: 4px;
 }
 
 .sr-card {
   position: relative;
-  aspect-ratio: 1 / 1;
+  display: inline-block;
+  width: 100%;
+  margin: 0 0 10px;
+  break-inside: avoid;
   border: 2px solid var(--border);
   border-radius: 4px;
   overflow: hidden;
@@ -4462,7 +4468,8 @@ label.inline-check {
 /* Already at the cap: still visible for comparison, clearly not clickable. */
 .sr-card.is-blocked { opacity: 0.35; cursor: not-allowed; }
 
-.sr-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* height:auto keeps each result's real proportions. */
+.sr-img { width: 100%; height: auto; display: block; }
 
 .sr-badge {
   position: absolute; top: 6px; left: 6px;
@@ -4477,20 +4484,13 @@ label.inline-check {
   font-size: 10px; text-align: center; padding: 2px 0;
 }
 
-/* Pinned so the count and the save button are reachable without scrolling
-   back up, which is the whole point of selecting several at once. */
-.search-bar {
-  position: sticky; bottom: 0; z-index: 5;
-  display: flex; align-items: center; gap: 10px;
-  margin-top: 10px; padding: 10px 12px;
-  background: var(--card);
-  border: 1px solid var(--accent);
-  border-radius: 4px;
-}
-.search-bar-count { font-size: 12px; margin-right: auto; }
+/* The save controls live in the button row at the TOP now, not a floating
+   bar at the bottom — with an uncapped grid there is no fixed bottom to pin
+   to, and the controls should be where the eye already is. */
+.search-bar-count { font-size: 12px; color: var(--subtext); }
 
 @media (max-width: 640px) {
-  .search-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); max-height: 60vh; }
+  .search-grid { columns: 2 110px; }
   .search-status { margin-left: 0; width: 100%; }
 }
 

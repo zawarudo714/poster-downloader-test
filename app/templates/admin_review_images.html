@@ -65,14 +65,20 @@
 
       <div class="review-pair" data-review-pair></div>
 
+      {#
+        Approve-by-default. You are looking for the handful that came out
+        badly; everything you don't touch is released when you save. The tally
+        says what is about to happen so you can read it before committing.
+      #}
       <div class="review-actions">
-        <button class="btn btn-success" data-action="review-approve">APPROVE&nbsp;TITLE&nbsp;<span class="mono">(A)</span></button>
-        <span class="muted">or decide each image above</span>
+        <span class="muted">Everything you don't mark is released. Use RERUN or UNUSABLE on the bad ones.</span>
+        <button class="btn btn-ghost btn-tiny" data-action="review-clear-marks">UNMARK&nbsp;THIS&nbsp;TITLE&nbsp;<span class="mono">(C)</span></button>
         <span class="review-tally mono" data-review-tally></span>
       </div>
 
       <div class="review-commit">
-        <button class="btn btn-accent" data-action="review-commit">SAVE&nbsp;DECISIONS</button>
+        <button class="btn btn-accent" data-action="review-commit">SAVE&nbsp;&amp;&nbsp;RELEASE</button>
+        <button class="btn btn-ghost" data-action="review-approve-all">RELEASE&nbsp;WITHOUT&nbsp;FINISHING&nbsp;THE&nbsp;SKIM</button>
         <span class="muted mono" data-review-commit-status></span>
       </div>
     </div>

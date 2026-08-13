@@ -2,6 +2,11 @@
  *
  * DESIGN NOTES
  *
+ * APPROVAL IS THE DEFAULT. Roughly 10 images in 500 come out badly, so the
+ * screen is built around finding those ten — you skim, mark the exceptions,
+ * and everything you did not touch is released. An earlier version made you
+ * approve each title explicitly, which is 490 confirmations of "yes, fine".
+ *
  * Decisions are held in memory and committed in ONE request at the end.
  * A round trip per keypress would make arrow-keying feel broken, and holding
  * them locally means you can go back three titles and change your mind — which
@@ -130,10 +135,22 @@
         </figure>`;
     }).join('');
 
-    const tally = { approve: 0, rerun: 0, unusable: 0 };
-    decisions.forEach((d) => { tally[d.action] = (tally[d.action] || 0) + 1; });
+    updateTally();
+  }
+
+  function totalImages() {
+    return titles.reduce((n, t) => n + t.images.length, 0);
+  }
+
+  function updateTally() {
+    const marked = { rerun: 0, unusable: 0, approve: 0 };
+    decisions.forEach((d) => { marked[d.action] = (marked[d.action] || 0) + 1; });
+    // Everything not explicitly marked is approved on commit. Spelling that
+    // out is the whole safety of an approve-by-default screen: you should be
+    // able to read what is about to happen before you press the button.
+    const approving = totalImages() - marked.rerun - marked.unusable;
     $('[data-review-tally]').textContent =
-      `decided: ${decisions.size} · keep ${tally.approve} · rerun ${tally.rerun} · unusable ${tally.unusable}`;
+      `${approving} will be released · ${marked.rerun} rerun · ${marked.unusable} retired`;
   }
 
   function decide(pid, action, reason) {
@@ -141,12 +158,11 @@
     render();
   }
 
-  function approveTitle() {
+  function clearTitleMarks() {
     const t = current();
     if (!t) return;
-    t.images.forEach((img) => decisions.set(img.processed_id, { action: 'approve' }));
+    t.images.forEach((img) => decisions.delete(img.processed_id));
     render();
-    move(1);           // approving is the common case, so it advances for you
   }
 
   function move(step) {
@@ -165,6 +181,16 @@
     const imgAction = el.dataset.imgAction;
     if (imgAction) {
       const pid = parseInt(el.dataset.pid, 10);
+      // Pressing the same button again clears the mark, which puts the image
+      // back into the approved majority. Without this, an accidental tap
+      // could only be undone by discarding the whole session.
+      const existing = decisions.get(pid);
+      if (existing && existing.action === imgAction) {
+        decisions.delete(pid);
+        render();
+        return;
+      }
+
       if (imgAction === 'unusable') {
         // The reason is mandatory server-side too. It is the only record of
         // why this image is out of the pipeline, read by someone (probably
@@ -193,9 +219,15 @@
         break;
       case 'review-prev':    move(-1); break;
       case 'review-next':    move(1);  break;
-      case 'review-approve': approveTitle(); break;
+      case 'review-clear-marks': clearTitleMarks(); break;
+      case 'review-approve-all':
+        if (!confirm(
+            `Release everything in this range that you have not marked?\n\n`
+            + `${totalImages() - decisions.size} images will go to the upload queue.`)) return;
+        await commit();
+        break;
       case 'review-exit':
-        if (decisions.size && !confirm(`${decisions.size} decisions haven't been saved. Discard them?`)) return;
+        if (!confirm('Leave without saving? Nothing in this range will be released.')) return;
         stage.hidden = true; picker.hidden = false;
         await loadDates();
         break;
@@ -208,18 +240,27 @@
     if (e.target.matches('input, textarea, select')) return;
     if (e.key === 'ArrowRight') { move(1);  e.preventDefault(); }
     if (e.key === 'ArrowLeft')  { move(-1); e.preventDefault(); }
-    if (e.key.toLowerCase() === 'a') { approveTitle(); e.preventDefault(); }
+    if (e.key.toLowerCase() === 'c') { clearTitleMarks(); e.preventDefault(); }
   });
 
   async function commit() {
     const status = $('[data-review-commit-status]');
-    if (!decisions.size) { status.textContent = 'nothing decided yet'; return; }
+    if (!titles.length) { status.textContent = 'nothing loaded'; return; }
     status.textContent = 'saving…';
 
+    // Send an explicit decision for EVERY image in the range — approvals for
+    // the untouched ones included. The server never infers "approved" from
+    // absence: a dropped request or a half-loaded page would otherwise
+    // release work nobody looked at.
     const payload = { decisions: [] };
-    decisions.forEach((d, pid) => {
-      payload.decisions.push({ processed_id: pid, action: d.action, reason: d.reason });
-    });
+    titles.forEach((t) => t.images.forEach((img) => {
+      const d = decisions.get(img.processed_id);
+      payload.decisions.push({
+        processed_id: img.processed_id,
+        action: d ? d.action : 'approve',
+        reason: d ? d.reason : '',
+      });
+    }));
 
     try {
       const r = await fetch(`${API}/review/decide`, {

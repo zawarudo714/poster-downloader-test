@@ -657,7 +657,14 @@ PROJECT_DEFS: list[dict] = [
         # Source resolution is irrelevant here: GPT redraws the image and the
         # result is upscaled to print size, so a red "640px wide" warning on
         # every artist would be pure noise.
-        "settings":         {"review_min_width_px": 0},
+        "settings":         {
+            "review_min_width_px": 0,
+            # "Carla Bruni - 1" / "Carla Bruni - 2". No year (artists have
+            # none) and digits rather than letters, because an artist called
+            # "Alison A" beside a plain "Alison" makes an A/B suffix
+            # ambiguous at a glance in a list of 500 listings.
+            "title_template": "{title} - {index}",
+        },
         # One column of artist names — no year, no movie/tv distinction.
         "has_year":         0,
         "has_content_type": 0,
@@ -780,18 +787,160 @@ def letter_for_index(index: int) -> str:
     return f"Z{index - 25}"
 
 
-def clean_for_marketplace(text: str) -> str:
+# ═════════════════════════════════════════════════════════════════════════
+#  MARKETPLACE TITLE NORMALISATION
+# ═════════════════════════════════════════════════════════════════════════
+#
+# FineArtAmerica SILENTLY rewrites artwork titles. It does not warn, it does
+# not error — it just saves something different from what you sent. Measured
+# on 2026-08-13 by submitting all 165 distinct non-ASCII characters in the
+# celebrity database and reading back what saved.
+#
+# WHY THIS RUNS HERE AND NOT IN THE UPLOADER
+# The stored `remote_title` must equal what the listing actually shows. If we
+# store "blink-182" while FAA shows "Blink182", the reconciliation scanner
+# compares the two and reports a mismatch on every single listing. Normalise
+# at render time and the database records reality.
+#
+# THE RULES, AS MEASURED
+#   · Latin-1 letters and s/z carons fold to ASCII        é -> e   ß -> Ss
+#   · EVERYTHING else is deleted, including ALL punctuation:
+#     apostrophes, quotes, hyphens, Eastern European diacritics (ł ć š ż),
+#     Turkish dotless i, macrons, symbols, arrows, superscripts
+#   · Max 100 characters, truncated silently
+#   · The first character is upper-cased
+#   · A title that comes out EMPTY is rejected with an HTML error page
+#     reading "Please use only A-Z in your artwork title"
+#
+# Case is NOT reliably preserved: Á->A but Ë->e, È->e, Ì->i, Õ->o. There is no
+# rule to derive, so the table below is the observed behaviour, not an
+# inference. Do not "tidy" it.
+
+_FAA_FOLD = {
+    "Á": "A", "Â": "A", "Ä": "A", "Å": "A", "Æ": "A", "Ç": "C",
+    "È": "e", "É": "E", "Ë": "e", "Ì": "i", "Í": "I", "Ï": "I",
+    "Ñ": "N", "Ó": "O", "Ô": "O", "Õ": "o", "Ö": "O", "Ø": "O",
+    "Ú": "U", "Ü": "U", "ß": "Ss", "à": "a", "á": "a", "â": "a",
+    "ã": "a", "ä": "a", "å": "a", "æ": "a", "ç": "c", "è": "e",
+    "é": "e", "ê": "e", "ë": "e", "ì": "i", "í": "i", "î": "i",
+    "ï": "i", "ð": "o", "ñ": "n", "ò": "o", "ó": "o", "ô": "o",
+    "õ": "o", "ö": "o", "ø": "o", "ù": "u", "ú": "u", "û": "u",
+    "ü": "u", "ý": "y", "þ": "b", "ÿ": "y", "Š": "S", "š": "s",
+    "Ž": "Z", "ž": "z",}
+
+# Characters FAA keeps as-is. Everything not here and not in _FAA_FOLD is
+# deleted — including the apostrophe, which is the surprising part.
+#
+# The ORDINARY hyphen-minus (U+002D) survives — confirmed by submitting one.
+# Note that the unicode hyphens and dashes do NOT: U+2010 in "blink‐182" is
+# deleted, so that name lists as "Blink182". Only this exact byte is safe,
+# which is why the MUSIK title template uses a typed "-" and nothing else.
+_MARKETPLACE_KEEP = set(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -"
+)
+
+MARKETPLACE_TITLE_MAX = 100
+
+# OUR substitution, not FAA's behaviour — kept in a separate table for exactly
+# that reason. FAA DELETES every one of these, so "blink‐182" (U+2010 HYPHEN,
+# not an ordinary one) would list as "Blink182". 259 artist names carry a
+# unicode dash of some kind; swapping it for the plain hyphen that FAA does
+# keep gives "Blink-182", which is how the band spells it anyway.
+#
+# This is safe only because the swap happens BEFORE we send: what we store as
+# remote_title is still exactly what the listing shows, so the reconciliation
+# scanner has nothing to disagree about.
+_DASH_FOLD = {
+    "‐": "-", "‑": "-", "‒": "-", "–": "-", "—": "-", "―": "-",
+    "−": "-",   # MINUS SIGN, which turns up in a handful of names
+}
+
+
+def clean_for_marketplace(text: str, *, max_length: int = MARKETPLACE_TITLE_MAX) -> str:
     """
-    ASCII-fold and strip characters marketplaces reject from titles.
-    Kept permissive: letters, digits, space, apostrophe, hyphen, slash.
+    Render a title exactly as the marketplace will store it.
+
+    Truncation is at a WORD boundary rather than mid-word as FAA does — the
+    result still fits, and "Bulgarian State Radio And Television Female Vocal"
+    reads better than "...Female Voc".
     """
     text = (text or "").replace("&", "AND")
-    for src, dst in _ACCENT_MAP.items():
-        text = text.replace(src, dst)
-    text = unicodedata.normalize("NFD", text)
-    text = "".join(c for c in text if unicodedata.category(c) != "Mn")
-    text = re.sub(r"[^A-Za-z0-9 '\-/]", "", text)
-    return re.sub(r"\s+", " ", text).strip()
+    for bad, good in _DASH_FOLD.items():
+        text = text.replace(bad, good)
+    out = []
+    for ch in text:
+        if ch in _MARKETPLACE_KEEP:
+            out.append(ch)
+        elif ch in _FAA_FOLD:
+            out.append(_FAA_FOLD[ch])
+        # else: deleted, exactly as the marketplace would
+    cleaned = re.sub(r"\s+", " ", "".join(out)).strip()
+
+    if len(cleaned) > max_length:
+        cut = cleaned[:max_length]
+        if " " in cut:
+            cut = cut[:cut.rfind(" ")]
+        cleaned = cut.strip()
+
+    return (cleaned[:1].upper() + cleaned[1:]) if cleaned else ""
+
+
+def tidy_separators(text: str) -> str:
+    """
+    Clean up hyphens left stranded by the stripping above.
+
+    "!!! - 1" loses its whole name and would list as "- 1"; "AC/DC -- 2" can
+    collapse two separators together. Neither is wrong enough for FAA to
+    reject, which is precisely why it has to be caught here — it would list
+    quietly and look sloppy on the storefront.
+
+    Deliberately NOT part of clean_for_marketplace(): that function is also
+    used to MEASURE the suffix budget, and stripping the leading "- " off a
+    measurement would understate the suffix and let truncation eat it.
+    """
+    # Spacing is left EXACTLY as written. An earlier version normalised every
+    # hyphen to " - " and turned "Jay-Z" into "Jay - Z"; a hyphen inside a name
+    # is part of the name, and only the separator we added is ours to tidy.
+    out = re.sub(r"-{2,}", "-", text or "")             # "--" from an empty field
+    out = re.sub(r"(\s-\s)(?:\s*-\s*)+", r"\1", out)    # repeated separators
+    out = out.strip(" -")
+    out = re.sub(r"\s+", " ", out).strip()
+    return (out[:1].upper() + out[1:]) if out else ""
+
+
+def validate_marketplace_title(original: str, rendered: str) -> Optional[str]:
+    """
+    Is this title safe to send? Returns a reason to hold it, or None.
+
+    Checked BEFORE dispatch, because a title that normalises to nothing is
+    rejected by FAA with an HTML page rather than an HTTP error — the node
+    would count it as a failure, retry it, and fail identically. Better to
+    never send it and put it in front of the admin with an editable field.
+    """
+    if not rendered:
+        return "The title contains no characters FineArtAmerica accepts."
+
+    # Judge the NAME, not the assembled title. The template contributes an
+    # index, so "1" always survives and the title is never empty — checking
+    # the whole string would pass a name that vanished completely.
+    original = (original or "").strip()
+    name_kept = clean_for_marketplace(original)
+
+    if not name_kept:
+        return (f"Nothing of {original!r} survives what FineArtAmerica accepts, "
+                f"so the listing would be named after its number alone.")
+
+    # NOT a letters test. 104 artists in the database are digits only — 311,
+    # 112, 702, 54-40 — and those are their actual names, not damage.
+    if len(name_kept) < 2:
+        return f"{original!r} reduces to {name_kept!r}, which is too short to list."
+
+    # More than half lost usually means an abbreviated name collapsing —
+    # "M.I.A." to "MIA" is fine, "MØ" to "M" is not.
+    if len(name_kept) < len(original) * 0.5 and len(name_kept) < 6:
+        return (f"{original!r} becomes {name_kept!r} — most of the name is lost. "
+                f"Edit it before listing.")
+    return None
 
 
 def _title_vars(title: MasterTitle, poster: SavedPoster, index: int) -> dict[str, Any]:
@@ -825,7 +974,22 @@ def render_remote_title(
 ) -> str:
     project = project or project_for_title(db, title)
     template = get_setting(db, "title_template", project=project)
-    return clean_for_marketplace(_render(template, _title_vars(title, poster, index)))
+    vars_ = _title_vars(title, poster, index)
+
+    # ── The 100-character budget belongs to the NAME, not the suffix ────────
+    # FAA truncates at 100 silently. Letting it cut wherever it lands can eat
+    # the " - 1994 A" that distinguishes one image from another — two listings
+    # would end up with the same title and nothing to tell them apart.
+    #
+    # So: render the template with an empty title to measure what the suffix
+    # costs, give the name whatever is left, and assemble.
+    suffix_only = clean_for_marketplace(
+        _render(template, {**vars_, "title": ""}), max_length=MARKETPLACE_TITLE_MAX)
+    budget = max(8, MARKETPLACE_TITLE_MAX - len(suffix_only))
+
+    trimmed = clean_for_marketplace(str(vars_.get("title") or ""), max_length=budget)
+    return tidy_separators(
+        clean_for_marketplace(_render(template, {**vars_, "title": trimmed})))
 
 
 def render_keywords(
@@ -1640,6 +1804,25 @@ def claim_upload_batch(
             tracking.remote_title = render_remote_title(
                 db, title, poster, tracking.letter_index or 0, project=project
             )
+
+            # ── Never dispatch a title the marketplace will refuse ──────────
+            # FAA rejects an unrenderable title with an HTML error PAGE, not
+            # an HTTP error. The node would read that as a generic failure,
+            # retry it to the attempt cap, and burn the account's daily quota
+            # discovering something we can see from here in one comparison.
+            #
+            # Held rather than failed: the fix is an admin editing the title,
+            # not a retry.
+            problem = validate_marketplace_title(title.title or "", tracking.remote_title)
+            if problem:
+                tracking.status = "failed"
+                tracking.last_error = f"title held: {problem}"
+                tracking.claimed_at = None
+                tracking.claimed_by = None
+                poster.pipeline_status = "processed"   # stays ready, not sent
+                recompute_title_status(db, title)
+                continue
+
             items.append({
                 "tracking_id":  tracking.id,
                 "poster_id":    poster.id,

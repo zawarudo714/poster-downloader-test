@@ -185,19 +185,19 @@
      needs no popup.
      ───────────────────────────────────────────────────────────────────── #}
   <div class="search-box" data-search-box hidden>
+    {# One row: find images, then save them. The save controls are disabled
+       rather than hidden until something is selected, so the row never jumps
+       around under your thumb. #}
     <div class="search-head">
       <button class="btn btn-accent" data-action="search-normal">SEARCH</button>
       <button class="btn btn-ghost" data-action="search-deep">DEEP&nbsp;SEARCH</button>
-      <button class="btn btn-ghost btn-tiny" data-action="search-refresh" title="Fetch fresh results">↻</button>
+      <button class="btn btn-accent" data-action="search-save" disabled>SAVE&nbsp;SELECTED</button>
+      <button class="btn btn-ghost" data-action="search-clear" disabled>CLEAR</button>
+      <span class="search-bar-count mono"></span>
       <span class="search-status mono"></span>
     </div>
     <div class="search-note muted" data-search-note hidden></div>
     <div class="search-grid" data-search-grid></div>
-    <div class="search-bar" data-search-bar hidden>
-      <span class="search-bar-count mono"></span>
-      <button class="btn btn-accent" data-action="search-save">SAVE SELECTED</button>
-      <button class="btn btn-ghost btn-tiny" data-action="search-clear">CLEAR</button>
-    </div>
   </div>
 </template>
 

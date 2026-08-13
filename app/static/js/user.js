@@ -1307,7 +1307,8 @@ function wireSearch(box, title) {
   box.dataset.wiredFor = String(title.id);
 
   const grid    = box.querySelector('[data-search-grid]');
-  const bar     = box.querySelector('[data-search-bar]');
+  const saveBtn = box.querySelector('[data-action="search-save"]');
+  const clearBtn= box.querySelector('[data-action="search-clear"]');
   const barCount= box.querySelector('.search-bar-count');
   const status  = box.querySelector('.search-status');
   const note    = box.querySelector('[data-search-note]');
@@ -1327,7 +1328,8 @@ function wireSearch(box, title) {
 
   function refreshBar() {
     const room = Math.max(0, limit - alreadySaved());
-    bar.hidden = selected.size === 0;
+    saveBtn.disabled  = selected.size === 0;
+    clearBtn.disabled = selected.size === 0;
     barCount.textContent = `${selected.size} selected · ${alreadySaved()}/${limit} saved`;
     grid.querySelectorAll('.sr-card').forEach((card) => {
       const on = selected.has(card.dataset.url);
@@ -1415,8 +1417,6 @@ function wireSearch(box, title) {
      .addEventListener('click', () => run('normal', false));
   box.querySelector('[data-action="search-deep"]')
      .addEventListener('click', () => run('deep', false));
-  box.querySelector('[data-action="search-refresh"]')
-     .addEventListener('click', () => run(variant, true));
   box.querySelector('[data-action="search-clear"]')
      .addEventListener('click', () => { selected.clear(); refreshBar(); });
 

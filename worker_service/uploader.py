@@ -81,6 +81,32 @@ def _find_chrome_binary() -> Optional[str]:
     return _shutil.which("chrome") or _shutil.which("google-chrome")
 
 
+
+# FineArtAmerica serves this at a NORMAL artwork URL, with a normal 200 — the
+# body is one sentence and nothing else. Captured 2026-08-13. Because it is a
+# page rather than an HTTP error, a status-code check sails straight past it
+# and the uploader would report every image as failed.
+MAINTENANCE_MARKERS = (
+    "we're undergoing maintenance",
+    "we are undergoing maintenance",
+    "undergoing maintenance and will be back",
+)
+
+
+def looks_like_maintenance(page_source: str) -> bool:
+    """
+    Is the marketplace down for maintenance rather than broken?
+
+    Worth distinguishing because the response is completely different: a
+    failed upload should be retried and eventually surfaced, whereas
+    maintenance means STOP — every account, not just this one — and come back
+    later. Retrying through a maintenance window burns the daily quota on
+    requests that cannot succeed.
+    """
+    lowered = (page_source or "").lower()
+    return any(m in lowered for m in MAINTENANCE_MARKERS)
+
+
 class UploadError(RuntimeError):
     """
     An upload failure.
@@ -173,6 +199,8 @@ class MarketplaceUploader:
         if self.job_id:
             self.client.job_log(self.job_id, message, level=level,
                                 progress=progress, note=note)
+
+    
 
     def js_click(self, element, *, what: str = "element") -> None:
         """
@@ -585,6 +613,23 @@ class MarketplaceUploader:
             raise UploadError(f"Image not readable at {image_path}. "
                               f"Check the storage mount matches storage_root.")
 
+        # Maintenance is checked FIRST, before anything is filled in. The page
+        # looks like a normal 200 and every selector on it is missing, so
+        # without this the run reports a cascade of "field not found" failures
+        # and burns the account's daily quota discovering the site is down.
+        #
+        # It pauses rather than fails: this is not a problem with the image.
+        if looks_like_maintenance(self.driver.page_source):
+            raise UploadError(
+                "FineArtAmerica is showing its maintenance page.",
+                # Long enough that the node stops hammering a site that is
+                # deliberately offline; short enough to resume by itself.
+                pause_minutes=30,
+                pause_reason="Marketplace is in maintenance — nothing to fix, "
+                             "it will resume when the site is back",
+                fatal=True,
+            )
+
         timings: dict[str, int] = {}
 
         def phase(name: str) -> Callable[[], None]:
@@ -734,6 +779,15 @@ class MarketplaceUploader:
                 pause_minutes=0,
             )
         mark()
+
+        # FAA rejects an unrenderable title with an HTML error page, not an
+        # HTTP error, so a "successful" submit can still have listed nothing.
+        # Validation before dispatch should mean we never see this — treat it
+        # as a real failure rather than reporting a listing that isn't there.
+        if "only a-z in your artwork title" in (self.driver.page_source or "").lower():
+            raise UploadError(
+                f"FineArtAmerica rejected the title {item['remote_title']!r}: "
+                f"it contains no characters the site accepts.")
 
         self.emit(f"  ✓ live: {item['remote_title']}", level="ok")
         return {"timings": timings, "final_url": current_url}

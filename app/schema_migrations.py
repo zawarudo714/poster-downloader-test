@@ -65,6 +65,11 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("users",         "last_project_id", "INTEGER"),
     ("master_titles", "greenlit_source", "VARCHAR(32)"),
     ("payment_runs",  "by_project_json", "TEXT"),
+    # ── Per-project vocabulary, upload rotation, workspace split ────────
+    ("projects",      "upload_turn_size",  "INTEGER"),
+    ("projects",      "item_noun",         "VARCHAR(32) NOT NULL DEFAULT 'poster'"),
+    ("projects",      "item_noun_plural",  "VARCHAR(32) NOT NULL DEFAULT 'posters'"),
+    ("saved_posters", "project_folder",    "VARCHAR(64)"),
 ]
 
 NEW_INDEXES: list[tuple[str, str, str]] = [
@@ -75,6 +80,7 @@ NEW_INDEXES: list[tuple[str, str, str]] = [
     ("ix_poster_pipeline",               "saved_posters", "pipeline_status, deleted_at"),
     ("ix_upload_rotation",               "upload_accounts", "last_run_at, rotation_order"),
     ("ix_master_greenlit_source",        "master_titles", "greenlit_source"),
+    ("ix_poster_project_folder",         "saved_posters", "project_folder"),
 ]
 
 

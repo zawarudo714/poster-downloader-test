@@ -142,6 +142,12 @@ def on_startup():
         for change in sync_projects(db):
             log.info("Project sync: %s", change)
         db.commit()
+
+        # Split the raw workspace by project. Safe to automate because it is
+        # an atomic directory rename and because saved_poster_folder() accepts
+        # both layouts — see the module docstring.
+        from .workspace_migration import run_startup_migration
+        run_startup_migration(db)
     except Exception as e:
         db.rollback()
         log.error("Could not sync projects: %s", e)

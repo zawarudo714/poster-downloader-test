@@ -361,6 +361,78 @@ DEFAULTS: dict[str, Any] = {
     "daily_start_hour":   6,
     # How long a claim may sit untouched before reap_stale_claims() frees it.
     "claim_timeout_min":  45,
+    # ── Per-project behaviour that used to be hardcoded ──────────────────
+    # Everything below was a constant in config.py or a literal in a route
+    # until MUSIK made a second niche real. They live here so a THIRD project
+    # needs one registry entry plus overrides — never another rewrite.
+    #
+    # THE RULE: if a screen shows a value that could differ between niches, it
+    # must resolve through get_setting(project=...). A literal in a template
+    # or a constant in config.py is a defect.
+
+    # Worker pay, per item saved. Overridable per project: MUSIK may be worth
+    # more or less per image than a movie poster.
+    "pay_rate_kes":       "5",
+    # Soft warning when a worker saves more than this for one title. Falls
+    # back to the project's images_per_title when that is set.
+    "soft_limit_per_title": 3,
+    # Where the worker is sent to find source images. `{query}` and
+    # `{content_type}` are substituted. Empty means the project searches
+    # in-page instead of linking out — which is what MUSIK does.
+    "source_search_url":  "https://www.themoviedb.org/search?query={query}",
+    # Hosts a worker may download from. Empty means unrestricted.
+    "allowed_download_hosts": "",
+
+    # ── Brave image search (MUSIK) ───────────────────────────────────────
+    # Two keys. Normal searches use the free key; deep searches go straight to
+    # the paid one because they fire two queries at once and the free key
+    # allows only 1 request/second. A normal search that hits a 429 retries
+    # once on the paid key rather than showing the worker an error.
+    "brave_api_key_free": "",
+    "brave_api_key_paid": "",
+    "brave_query_normal": 'site:pinterest.com "{artist}"',
+    # Deep search runs EVERY line below and merges the results, de-duplicated
+    # by image URL. Two queries because no single phrase serves both bands and
+    # solo artists: "U2 musician" returns Bono, "Kanye West band" returns
+    # nothing useful. At half a cent a query, paying beats being clever.
+    "brave_query_deep":   '"{artist}" band\n"{artist}" musician',
+    "brave_min_dimension": 300,
+    "brave_results_per_query": 50,
+    # Off by default — turn it on only if a bug starts looping.
+    "brave_daily_query_cap": 0,
+
+    # ── OpenAI image generation (MUSIK) ──────────────────────────────────
+    "openai_api_key":     "",
+    # Separate, higher-privilege credential. Only the nightly cost
+    # reconciliation uses it; image generation never does.
+    "openai_admin_key":   "",
+    "openai_model":       "gpt-image-2",
+    "openai_size":        "auto",
+    "openai_quality":     "low",
+    "openai_prompt": (
+        "Transform the style of the second image to style of the first image. "
+        "Favor a clean, minimal treatment with broad shapes and restrained "
+        "detail. Use second image color scheme. Zoom in to the upper body "
+        "areas and strictly avoid empty space.\n"
+        "Ratio should either be 1:1, 2:3, 3:2 or 16:9 depending on second "
+        "image overall structure and which it would look best in."
+    ),
+    # Style reference, uploaded from the dashboard. Stored relative to the
+    # workspace. Changing it does NOT retroactively affect already-processed
+    # images — each ProcessedImage records the script/style version it used.
+    "openai_style_image": "",
+    # Spend guard. 'warn' posts a dashboard alert; 'pause' also stops
+    # dispatching. Default warn — a hard stop on a bad estimate is worse than
+    # a message you can act on.
+    "spend_cap_usd_month": 0,
+    "spend_cap_action":   "warn",
+
+    # ── The optional GPT review gate ─────────────────────────────────────
+    # On by default. When off, newly processed images go straight to upload —
+    # but anything ALREADY waiting stays waiting, so turning it off can never
+    # release work you hadn't looked at.
+    "gpt_review_required": 1,
+
     # Node poll interval hint (seconds). The node honours this.
     "poll_interval_s":    30,
     # Idle back-off. After `poll_idle_after_min` minutes with nothing to do,
@@ -530,6 +602,18 @@ PROJECT_DEFS: list[dict] = [
         "target_site":      "fineartamerica",
         "images_per_title": 3,
         "notes":            "Original workflow: TMDB posters -> Real Paint FX -> FineArtAmerica.",
+        "item_noun":        "poster",
+        "item_noun_plural": "posters",
+    },
+    {
+        "slug":             "musik",
+        "name":             "MUSIK",
+        "source_site":      "brave",
+        "target_site":      "fineartamerica",
+        "images_per_title": 2,
+        "notes":            "Music artists: Brave image search -> GPT Image 2 restyle -> FineArtAmerica.",
+        "item_noun":        "image",
+        "item_noun_plural": "images",
     },
 ]
 
@@ -537,7 +621,8 @@ PROJECT_DEFS: list[dict] = [
 # excludes `slug` (identity), `process_weight` and `is_active` — those are
 # operational levers the dashboard owns, and a deploy must not silently reset
 # a project you turned off or re-weighted.
-_SYNCED_FIELDS = ("name", "source_site", "target_site", "images_per_title", "notes")
+_SYNCED_FIELDS = ("name", "source_site", "target_site", "images_per_title", "notes",
+                  "item_noun", "item_noun_plural")
 
 
 def sync_projects(db: Session) -> list[str]:

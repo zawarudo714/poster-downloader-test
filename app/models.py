@@ -185,6 +185,15 @@ class SavedPoster(Base):
     master_title_id    = Column(Integer, ForeignKey("master_titles.id"), nullable=False, index=True)
     user_id            = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     username           = Column(String(64), nullable=False, index=True)  # denormalized for fast filtering
+    # The project's folder segment, denormalised for the same reason username
+    # and original_save_date are: saved_poster_path() is called on every
+    # gallery thumbnail and every pipeline dispatch, and it must not need a
+    # join through master_titles just to build a filename.
+    #
+    # NULL means a row written before the workspace was split by project —
+    # those files live at the old {user}/{date}/... path. See
+    # app/workspace_migration.py.
+    project_folder     = Column(String(64), nullable=True, index=True)
     original_save_date = Column(Date, nullable=False, index=True)
     title_folder_path  = Column(String(512), nullable=False)
     filename           = Column(String(512), nullable=False)
@@ -509,6 +518,23 @@ class Project(Base):
     # 3,000-image movie backlog would block a brand-new celebrity pipeline for
     # about a week.
     process_weight  = Column(Integer, nullable=False, default=1)
+    # How many images this project gets per turn at the UPLOAD stage, before
+    # the dispatcher moves to the next project. Absolute, not proportional —
+    # "40 for movies, then 40 for MUSIK, then round again".
+    #
+    # This is the OUTER of two rotation levels; UploadAccount.rotation_size is
+    # the inner one. Without it a project with two accounts silently gets
+    # double the throughput of a project with one, purely because it has more
+    # accounts — which is an accident of configuration, not a decision.
+    upload_turn_size = Column(Integer, nullable=True)
+
+    # What this project calls the thing a worker saves. Movies save "posters";
+    # MUSIK saves "images"; a future niche might save "designs". Every piece
+    # of worker-facing copy reads this rather than hardcoding a noun, so a new
+    # niche needs no template edits.
+    item_noun        = Column(String(32), nullable=False, default="poster")
+    item_noun_plural = Column(String(32), nullable=False, default="posters")
+
     is_active       = Column(Integer, nullable=False, default=1)
     notes           = Column(Text, nullable=True)
     created_at      = Column(DateTime, default=datetime.utcnow, nullable=False)

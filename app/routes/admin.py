@@ -915,19 +915,47 @@ def _import_worker(job_id: int, raw_bytes: bytes, file_ext: str, replace: bool,
             q.delete(synchronize_session=False)
             db.commit()
 
+        # ── Which column holds the title? ───────────────────────────────
+        # The movie sheet has a `title` column. The MUSIK sheet has exactly
+        # one column, `artist_mb`. Rather than hardcode a list of known
+        # header names — which would need editing for every future niche —
+        # fall back to "the only column there is" when `title` is absent.
+        # A single-column sheet is unambiguous by definition.
+        title_key = "title"
+        if rows and "title" not in rows[0]:
+            headers = [k for k in rows[0].keys() if k]
+            if len(headers) == 1:
+                title_key = headers[0]
+            else:
+                for candidate in ("artist_mb", "artist", "name", "subject"):
+                    if candidate in rows[0]:
+                        title_key = candidate
+                        break
+
         # Insert in batches for speed
         batch = []
         BATCH_SIZE = 1000
+        row_number = 0
         for r in rows:
-            title = (str(r.get("title") or "")).strip()
+            title = (str(r.get(title_key) or "")).strip()
             if not title:
                 continue
+            row_number += 1
             # external_id: try the literal "0" column (which is named "0" in our CSV header), then "num"
             ext = r.get("0") or r.get("num") or r.get("external_id")
             try:
                 ext_id = int(str(ext).strip()) if ext not in (None, "") else None
             except (ValueError, TypeError):
                 ext_id = None
+            if ext_id is None:
+                # No id column — number by position, 1-based, skipping blanks.
+                # external_id is the universal join key: it prefixes the title
+                # folder on disk and matches processed files back to posters,
+                # so every row needs one and it must be stable for the life of
+                # the sheet. Re-importing the SAME file reproduces the same
+                # numbers; importing a re-ordered file would not, which is why
+                # Replace exists rather than merging.
+                ext_id = row_number
             year_raw = r.get("releaseyear") or r.get("release_year") or r.get("year") or ""
             year_str = str(year_raw).strip() if year_raw not in (None, "") else "N/A"
             m = re.search(r"\d{4}", year_str)
@@ -1047,7 +1075,13 @@ def browse_page(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    workers = list_users_with_workspaces()
+    # Resolved once and reused: the folder segment narrows the filesystem
+    # scan to this project's tree, and the slug scopes the sticky default.
+    proj = current_project(request, admin, db)
+    from ..workspace_migration import project_folder_for
+    proj_folder = project_folder_for(proj)
+
+    workers = list_users_with_workspaces(proj_folder)
     if not workers:
         users = db.query(User).filter_by(role="worker").order_by(User.username.asc()).all()
         workers = [u.username for u in users]
@@ -1057,7 +1091,6 @@ def browse_page(
     # Scoped per project: an admin reviewing movies and celebrities has a
     # different "usual worker" in each, and a shared key would make switching
     # project silently change who you're looking at.
-    proj = current_project(request, admin, db)
     settings_key = f"admin.{admin.id}.{proj.slug}.browse_default_worker"
     if worker:
         # Save this selection as the new default.
@@ -1077,7 +1110,7 @@ def browse_page(
         else:
             selected_worker = workers[0] if workers else ""
 
-    dates = list_date_folders(selected_worker) if selected_worker else []
+    dates = list_date_folders(selected_worker, proj_folder) if selected_worker else []
     today_iso = local_today().isoformat()
     if today_iso not in dates and selected_worker:
         dates = [today_iso] + dates
@@ -1450,7 +1483,15 @@ def admin_add_poster(
     _ensure_first_save_metadata(t, today)
     db.flush()
 
-    folder = title_folder_for(worker_username, t.original_save_date, t.title_folder_path)
+    # Same project stamping as the worker save path — an admin-added image
+    # must land in the same tree as the worker's own.
+    from ..workspace_migration import project_folder_for
+    project_folder = project_folder_for(ensure_default_project(db)
+                                        if not t.project_id else
+                                        db.query(Project).filter_by(id=t.project_id).first())
+
+    folder = title_folder_for(worker_username, t.original_save_date,
+                              t.title_folder_path, project_folder)
 
     base = count_live_posters_for_master(db, t.id)
     count = base + 1
@@ -1469,6 +1510,7 @@ def admin_add_poster(
         master_title_id    = t.id,
         user_id            = worker_id,
         username           = worker_username,
+        project_folder     = project_folder,
         original_save_date = t.original_save_date,
         title_folder_path  = t.title_folder_path,
         filename           = target_name,
@@ -2780,28 +2822,19 @@ def payments_mark_paid(
     # Per-day breakdown for receipt transparency.
     by_day = per_day_breakdown(db, poster_ids=ids)
 
-    # ── Per-project breakdown ───────────────────────────────────────────────
-    # A worker covering two niches is paid ONCE, at one rate — splitting the
-    # payment per project would mean two M-Pesa transfers for the same week's
-    # work, which is worse for everyone. What the split IS needed for is
-    # answering "what is the celebrity niche costing me", so it's recorded on
-    # the run and shown on the receipt rather than driving the payout.
-    by_project: dict[str, int] = {}
-    if ids:
-        default_pid = ensure_default_project(db).id
-        proj_names = {p.id: p.name for p in db.query(Project).all()}
-        rows = (
-            db.query(MasterTitle.project_id, func.count(SavedPoster.id))
-              .join(SavedPoster, SavedPoster.master_title_id == MasterTitle.id)
-              .filter(SavedPoster.id.in_(ids))
-              .group_by(MasterTitle.project_id)
-              .all()
-        )
-        for pid, n in rows:
-            # NULL project_id means the default project — the imported master
-            # rows have never been backfilled.
-            name = proj_names.get(pid if pid is not None else default_pid, "unknown")
-            by_project[name] = by_project.get(name, 0) + n
+    # ── Per-project pricing ─────────────────────────────────────────────────
+    # ONE payment per worker — splitting the payout would mean two M-Pesa
+    # transfers for the same week's work. What differs per project is the
+    # RATE, so the amount is sum(count_in_project x rate_of_project) and the
+    # receipt shows the working.
+    from ..payments import price_run
+    pricing = price_run(db, ids)
+    by_project = pricing["by_project"]
+
+    # The admin types the amount they actually sent, which is authoritative —
+    # they may round, or add a bonus. But when the field is left at the
+    # computed figure we record the per-project working alongside it so the
+    # receipt can show HOW that number was reached across two rates.
 
     run = PaymentRun(
         worker_id           = worker_id,

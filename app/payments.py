@@ -54,8 +54,107 @@ def set_setting(db: Session, key: str, value: str, *, by: str | None = None) -> 
         row.updated_at = datetime.utcnow()
 
 
-def get_rate_kes(db: Session) -> str:
-    return get_setting(db, "pay_rate_kes", DEFAULT_RATE_KES)
+def get_rate_kes(db: Session, project=None) -> str:
+    """
+    Pay per item, for one project.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS DELEGATES TO pipeline.get_setting
+    ════════════════════════════════════════════════════════════════════════
+    The rate used to be a single `pay_rate_kes` row, which was right when
+    there was one niche. A movie poster and a MUSIK image are different work
+    and can be worth different money, so the rate has to resolve per project.
+
+    Rather than invent a second per-project settings mechanism, this reuses
+    the pipeline's cascade — `pipeline.<slug>.pay_rate_kes` -> `pipeline
+    .pay_rate_kes` -> DEFAULTS. Same resolution order as every other
+    per-project value, one place to look, nothing new to learn.
+
+    `project=None` returns the global rate, which is what the legacy callers
+    and any cross-project total want.
+    """
+    from .pipeline import get_setting as pipeline_setting
+    try:
+        return str(pipeline_setting(db, "pay_rate_kes", project=project))
+    except Exception:
+        # Never let a settings problem block a payment run.
+        return get_setting(db, "pay_rate_kes", DEFAULT_RATE_KES)
+
+
+def split_poster_ids_by_project(db: Session, poster_ids: list[int]) -> dict:
+    """
+    Group paid posters by the project they belong to.
+
+    Returns {project_id_or_None: [poster_id, ...]}. NULL project_id means the
+    default project — the 101k imported titles have never been backfilled, so
+    this must not be treated as "unassigned".
+    """
+    if not poster_ids:
+        return {}
+    from .models import MasterTitle
+    from .pipeline import ensure_default_project
+
+    default_id = ensure_default_project(db).id
+    out: dict = {}
+    for i in range(0, len(poster_ids), 500):
+        chunk = poster_ids[i:i + 500]
+        rows = (
+            db.query(SavedPoster.id, MasterTitle.project_id)
+              .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+              .filter(SavedPoster.id.in_(chunk))
+              .all()
+        )
+        for pid, proj_id in rows:
+            key = proj_id if proj_id is not None else default_id
+            out.setdefault(key, []).append(pid)
+    return out
+
+
+def price_run(db: Session, poster_ids: list[int]) -> dict:
+    """
+    Price a payment run across however many projects it spans.
+
+    A worker covering two niches is paid ONCE — splitting the payout would
+    mean two M-Pesa transfers for one week's work, which is worse for
+    everyone. What differs per project is the RATE, so the total is
+    sum(count_in_project x rate_of_project).
+
+    Returns:
+        {
+          "total": Decimal,
+          "by_project": {
+              "MUSIK": {"count": 120, "rate": "6", "subtotal": "720"},
+              ...
+          },
+        }
+    """
+    from decimal import Decimal
+    from .models import Project
+
+    grouped = split_poster_ids_by_project(db, poster_ids)
+    by_project: dict = {}
+    total = Decimal("0")
+
+    for project_id, ids in grouped.items():
+        project = db.query(Project).filter_by(id=project_id).first()
+        rate = parse_decimal(get_rate_kes(db, project=project))
+        subtotal = rate * len(ids)
+        total += subtotal
+        name = project.name if project else "Unassigned"
+        by_project[name] = {
+            "count": len(ids),
+            "rate": _trim(rate),
+            "subtotal": _trim(subtotal),
+        }
+    return {"total": total, "by_project": by_project}
+
+
+def _trim(value) -> str:
+    """Render a Decimal without trailing zeros: 720.00 -> 720."""
+    text = str(value)
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
 
 
 def get_week_start_day(db: Session) -> int:

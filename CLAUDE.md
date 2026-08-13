@@ -36,6 +36,69 @@ Stated plans, in order:
 2. **Merge both niches** under one master dashboard with cross-niche reporting.
 3. **More marketplaces** — TeePublic named specifically — and more accounts.
 
+Also planned, stated but not yet built:
+
+4. **Marketplace reconciliation.** Scan a live FineArtAmerica account (most
+   likely by URL structure), compare what is actually listed against what the
+   database believes, and surface the disagreements for the admin to explain
+   rather than guessing. The three cases worth catching:
+     * processed + marked uploaded, but NOT on the site — taken down for
+       copyright, or the upload silently failed and was recorded as success
+     * marked uploaded but never processed — impossible state, means bad data
+     * on the site but not in the database — uploaded outside the pipeline
+   The admin annotates each with a reason and the database is corrected.
+   `UploadTracking` already carries `remote_id`, `status='removed'` and
+   `removed_reason` for exactly this, so the reconciler should write into
+   those rather than inventing a parallel table. Note this is the same shape
+   as `diagnostics.py` — findings + an explanation + a deliberate action — and
+   should probably live beside it rather than in the pipeline module.
+
+5. **Cross-marketplace earnings tab (master level).** NOT a pipeline. The
+   owner has 9 TeePublic accounts earning passively with no uploading, and
+   checks each one by hand by opening its Chrome profile and reading
+   "This Month" / "Next Payment" off the My Account page. The plan is a
+   read-only scraper on the node that visits each account once a day, stores
+   an absolute snapshot, and a dashboard tab that shows deltas ("+$2 since
+   yesterday"), filterable and totalled by site (all / TeePublic / FAA /
+   Redbubble later), by account, or by any subset.
+
+   Design points already established:
+     * An ACCOUNT EXISTS ONCE. The Chrome profiles created for revenue
+       reading are the same accounts a future TeePublic upload pipeline
+       would log into — do not model "revenue account" and "upload account"
+       separately or the owner ends up with two profiles per account.
+       Uploading and revenue-reading are capabilities of one account.
+     * `UploadAccount.project_id` is currently NOT NULL, which does not fit:
+       these 9 accounts belong to no project and may never do. Resolve that
+       before building — probably by making the column nullable rather than
+       inventing a parallel table.
+     * Store ABSOLUTE snapshots, never deltas. "This Month" resets to zero on
+       the 1st, so a stored delta would show a large negative every month.
+       Deltas are computed at read time, within a month boundary.
+     * The figures are estimates that can revise DOWNWARD (refunds), and
+       TeePublic states up to 48h lag after a sale. A drop is not a bug.
+     * This is read-only and belongs with `diagnostics.py` / the marketplace
+       reconciler, not the pipeline module.
+
+6. **Ban recovery / account handover.** When a marketplace account is banned,
+   mark it as such and use that marking to bring a replacement account online
+   with as little manual work as possible — reassign everything that was on
+   the dead account to the new credentials so uploading resumes on its own.
+   `UploadTracking` is already keyed on (poster, account) and REQUEUE BACK
+   CATALOGUE already re-queues processed images against a chosen account, so
+   the pieces exist; what's missing is the "this account is dead, move its
+   work to that one" action and a banned state on `UploadAccount`. Owner has
+   not designed this yet — raise it when ban recovery next comes up.
+
+7. **Reprocess the dot-truncated legacy titles.** The old JSX did
+   `split('.')[0]` on the filename, so every poster in a title containing a
+   dot overwrote the previous one. Measured on disk: **44 title folders**
+   holding 1 file each where 2-3 were expected (`E.T.`, `Kill Bill Vol. 1`,
+   `Mr. & Mrs. Smith`). The owner recalls 61-65; reconcile the figure before
+   acting. These need re-processing through the pipeline once. Intended as a
+   deliberate one-off trigger, not a permanent feature — build it as a
+   throwaway admin action and delete it afterwards.
+
 Concretely, this means:
 
 - Never hardcode a niche, a source site, a marketplace, or a marketplace's DOM.
@@ -110,6 +173,36 @@ Rules that matter:
   never `slug`.
 - `sync_projects()` never touches `process_weight` or `is_active` — those are
   dashboard levers, and a deploy must not re-enable a project you turned off.
+
+## FineArtAmerica title rules (measured 2026-08-13)
+
+FAA silently rewrites artwork titles. Verified by submitting all 165 distinct
+non-ASCII characters from the celebrity database and reading back what saved:
+
+- **Folded to ASCII**: Latin-1 letters plus `š Š ž Ž` — `é→e  ö→o  ñ→n  ç→c
+  ø→o  å→a  æ→a  þ→b  ð→o  ß→Ss`. Case is usually preserved but NOT always:
+  `Ë→e  È→e  Ì→i  Õ→o` come back lowercase. Encode the observed table; do not
+  infer it.
+- **Deleted outright**: everything else — Eastern European diacritics
+  (`ł ć ş č ğ ń ż ę ř ă ą ě ś ň ő ź ď`), Turkish `ı İ`, macrons, ALL
+  punctuation (apostrophes, quotes, hyphens, `… • · × ™ © £ « »`), symbols,
+  arrows, superscripts.
+- **Max title length is 100 characters**, truncated silently.
+- **The first character is upper-cased.**
+- A title that normalises to EMPTY is rejected with a page reading
+  "Please use only A-Z in your artwork title" — an HTML error page, not an
+  HTTP error, so it must be detected by content.
+
+Consequences that are not optional:
+
+- Normalisation belongs in `render_remote_title`, NOT in the uploader, so the
+  stored `remote_title` equals what the listing actually shows. Otherwise the
+  planned reconciliation scanner reports thousands of false mismatches.
+- Titles must be validated BEFORE dispatch. Empty, under ~2 characters, or
+  more than half the length lost => flag for the admin to edit and resend,
+  never send to the node.
+- This applies to the movie project too. `Amélie`, `Léon`, `WALL·E` have been
+  silently mangled all along.
 
 ## Code map
 
@@ -198,10 +291,47 @@ tool needs, add it to `REQUIRED_MODULES` in `dev_setup.py` too.
   Windows path. **On an existing install `storage_root` is already stored in
   `app_settings` and will NOT pick up the new default — change it on the
   Pipeline page to `S:` or the layout ends up doubled.**
+- **Anything that can differ between niches resolves through
+  `pipeline.get_setting(db, key, project=...)`.** Pay rate, item noun, image
+  cap, source search URL, allowed hosts, API keys — all of it. A literal in a
+  template or a constant in `config.py` for such a value is a defect, because
+  it means project number three needs a rewrite instead of a registry entry.
+- **The workspace is `{project}/{worker}/{date}/{title folder}/{file}`.**
+  `SavedPoster.project_folder` is denormalised so `saved_poster_path()` never
+  joins through `master_titles` — it is called on every gallery thumbnail.
+  `saved_poster_folder()` still accepts the OLD `{worker}/{date}/...` layout
+  as a fallback, which is what makes the startup move in
+  `app/workspace_migration.py` safe to automate. Delete the fallback once
+  production scans clean in Diagnostics.
 - **Comments explain *why*, not *what*.** The existing code does this well —
   match it. Several modules carry a design-contract header; keep those current.
 
 ---
+
+## The legacy processed archive (2026-08-04)
+
+The 4,865 files the owner processed by hand live on his laptop at
+`FineArtAmerica Tell-A-Vision\Outputs\Straight From Photoshop\` in exactly
+the layout the pipeline now writes: `{date}/{external_id}. {Title} ({Year})/`.
+22 date folders, 2,077 titles.
+
+They are being copied to `S:/fineartamerica/GR(Movie&Series)/processed/` with
+rclone (`UPLOAD_TO_STORAGE.bat` next to the Outputs folder), which is a plain
+file copy — no database involvement.
+
+Registering them as `ProcessedImage` rows is a SEPARATE, later step, and it
+has to happen against **production**, because that is the only database that
+still holds the `saved_posters` rows they belong to. The match is:
+
+    folder prefix  -> MasterTitle.external_id      (exact)
+    " N_Painted"   -> the Nth poster of that title (exact)
+
+4,821 of 4,865 files map exactly. The other 44 are the titles containing a
+dot — `E.T.`, `Kill Bill Vol. 1`, `Mr. & Mrs. Smith` — where the old JSX did
+`split('.')[0]` on the filename, so every poster in those titles wrote to the
+same truncated name and overwrote each other. Each of those folders now holds
+exactly ONE file with no index in its name. The title is recoverable, the
+per-poster mapping is not; they are cheapest to simply reprocess.
 
 ## Data state (2026-07-30)
 

@@ -29,26 +29,34 @@ from .timeutil import local_today
 
 # ── Workspace layout ─────────────────────────────────────────────────────────
 
-def user_root(username: str) -> Path:
-    """The user's top-level folder. Created on demand."""
-    p = WORKSPACE_DIR / username
+def user_root(username: str, project_folder: str | None = None) -> Path:
+    """
+    A worker's top-level folder, inside their project. Created on demand.
+
+    `project_folder=None` returns the pre-split location, which is what the
+    legacy path fallback and the migration itself need.
+    """
+    base = WORKSPACE_DIR / project_folder if project_folder else WORKSPACE_DIR
+    p = base / username
     p.mkdir(parents=True, exist_ok=True)
     return p
 
 
-def date_folder(username: str, d: date_type) -> Path:
-    """The user's date folder for `d`. Created on demand."""
-    p = user_root(username) / d.isoformat()
+def date_folder(username: str, d: date_type, project_folder: str | None = None) -> Path:
+    """The worker's date folder for `d`. Created on demand."""
+    p = user_root(username, project_folder) / d.isoformat()
     p.mkdir(parents=True, exist_ok=True)
     return p
 
 
-def title_folder_for(username: str, d: date_type, folder_name: str) -> Path:
+def title_folder_for(username: str, d: date_type, folder_name: str,
+                     project_folder: str | None = None) -> Path:
     """
-    Locate the title folder for a given (user, date, folder_name).
-    Used during save / delete / serve. Creates on demand because saves create folders.
+    Locate the title folder for a (project, user, date, folder_name).
+    Used during save / delete / serve. Creates on demand because saves
+    create folders.
     """
-    p = date_folder(username, d) / folder_name
+    p = date_folder(username, d, project_folder) / folder_name
     p.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -86,32 +94,70 @@ def count_images_recursive(folder: Path) -> int:
     return n
 
 
-def list_users_with_workspaces() -> list[str]:
-    """Top-level folders under /workspace/ — one per user that has any work.
-    Excludes private system dirs like _zips."""
+def list_users_with_workspaces(project_folder: str | None = None) -> list[str]:
+    """
+    Worker folders that contain any work, for the browse page's dropdown.
+
+    Understands BOTH layouts, because the workspace is split by project and
+    the migration may not have run (or a file may predate it):
+      · {project}/{worker}/...   — current
+      · {worker}/...             — legacy
+
+    Passing a project narrows to that project; passing None returns every
+    worker seen under either layout, which is what a cross-project view wants.
+    Private dirs (_zips) are excluded in both.
+    """
     if not WORKSPACE_DIR.is_dir():
         return []
-    return sorted(
-        [p.name for p in WORKSPACE_DIR.iterdir()
-         if p.is_dir() and not p.name.startswith("_")]
-    )
+
+    names: set[str] = set()
+
+    if project_folder:
+        root = WORKSPACE_DIR / project_folder
+        if root.is_dir():
+            names |= {p.name for p in root.iterdir()
+                      if p.is_dir() and not p.name.startswith("_")}
+
+    for p in WORKSPACE_DIR.iterdir():
+        if not p.is_dir() or p.name.startswith("_"):
+            continue
+        # A directory whose children are dates is a legacy worker folder; one
+        # whose children are more directories-of-dates is a project folder.
+        children = [c for c in p.iterdir() if c.is_dir()]
+        looks_legacy = any(_is_date_name(c.name) for c in children)
+        if looks_legacy:
+            names.add(p.name)
+        elif not project_folder:
+            names |= {c.name for c in children if not c.name.startswith("_")}
+
+    return sorted(names)
 
 
-def list_date_folders(username: str) -> list[str]:
-    """Date folder names (YYYY-MM-DD) for a given user, newest first."""
-    root = WORKSPACE_DIR / username
-    if not root.is_dir():
-        return []
-    out = []
-    for p in root.iterdir():
-        if p.is_dir():
-            try:
-                date_type.fromisoformat(p.name)
-                out.append(p.name)
-            except ValueError:
-                continue
-    out.sort(reverse=True)
-    return out
+def _is_date_name(name: str) -> bool:
+    try:
+        date_type.fromisoformat(name)
+        return True
+    except ValueError:
+        return False
+
+
+def list_date_folders(username: str, project_folder: str | None = None) -> list[str]:
+    """
+    Date folders for a worker, newest first. Merges both layouts so the
+    browse page shows every date regardless of whether the migration has run.
+    """
+    roots = []
+    if project_folder:
+        roots.append(WORKSPACE_DIR / project_folder / username)
+    roots.append(WORKSPACE_DIR / username)          # legacy
+
+    out: set[str] = set()
+    for root in roots:
+        if not root.is_dir():
+            continue
+        out |= {p.name for p in root.iterdir()
+                if p.is_dir() and _is_date_name(p.name)}
+    return sorted(out, reverse=True)
 
 
 def list_title_folders(username: str, d: date_type) -> list[Path]:
@@ -203,25 +249,54 @@ def count_live_posters_for_master(db, master_title_id: int) -> int:
 
 # ── Filesystem path lookup for a saved poster ────────────────────────────────
 
-def saved_poster_path(poster) -> Path:
-    """Compute the on-disk Path of a SavedPoster row."""
+def _legacy_folder(poster) -> Path:
+    """The pre-multi-project layout: {worker}/{date}/{title folder}."""
     return (
         WORKSPACE_DIR
         / poster.username
         / poster.original_save_date.isoformat()
         / poster.title_folder_path
-        / poster.filename
     )
 
 
 def saved_poster_folder(poster) -> Path:
-    """Compute the on-disk folder Path containing a SavedPoster row."""
-    return (
-        WORKSPACE_DIR
-        / poster.username
-        / poster.original_save_date.isoformat()
-        / poster.title_folder_path
-    )
+    """
+    The on-disk folder holding a SavedPoster.
+
+    Current layout is {project}/{worker}/{date}/{title folder}. Rows written
+    before the workspace was split by project have no `project_folder`, and
+    their files sit at the old {worker}/{date}/... path.
+
+    ════════════════════════════════════════════════════════════════════
+    WHY THERE IS A FALLBACK
+    ════════════════════════════════════════════════════════════════════
+    The startup migration (app/workspace_migration.py) moves the old tree
+    into the new shape. This function accepts BOTH layouts so that move is
+    not load-bearing: if it hasn't run yet, was skipped, or a file was
+    written in the instant before it ran, the file still resolves. Nothing
+    404s, no gallery goes blank, no pipeline job fails on a missing source.
+
+    Remove the fallback once production has been scanned clean by
+    Diagnostics -> "Poster records with no file on disk".
+    """
+    folder = getattr(poster, "project_folder", None)
+    if folder:
+        candidate = (
+            WORKSPACE_DIR
+            / folder
+            / poster.username
+            / poster.original_save_date.isoformat()
+            / poster.title_folder_path
+        )
+        # Trust the new layout unless the file genuinely isn't there yet.
+        if candidate.exists() or not _legacy_folder(poster).exists():
+            return candidate
+    return _legacy_folder(poster)
+
+
+def saved_poster_path(poster) -> Path:
+    """Compute the on-disk Path of a SavedPoster row."""
+    return saved_poster_folder(poster) / poster.filename
 
 
 # ── Security ─────────────────────────────────────────────────────────────────

@@ -46,6 +46,7 @@ from ..config import (
 )
 from ..db import get_db
 from ..models import ActivityLog, MasterTitle, Revision, SavedPoster, User
+from ..pipeline import resolve_project
 from ..projects import (
     allowed_projects, remember_project, scope_titles_multi, set_project_cookie,
 )
@@ -93,6 +94,34 @@ def _my_queue(db: Session, user: User):
           .order_by(MasterTitle.external_id.asc().nullslast(), MasterTitle.id.asc())
           .all()
     )
+
+
+def _source_search_url(db: Session, title: str, content_type: Optional[str],
+                       project=None) -> str:
+    """
+    Where this project's workers go to find source images.
+
+    Resolves through the per-project settings cascade rather than assuming
+    TMDB, because MUSIK searches Brave in-page and returns an empty string
+    here — meaning "no external link, use the built-in search".
+
+    The movie project keeps its content-type-aware TMDB behaviour via the
+    legacy helper below, since /search/tv and /search/movie are genuinely
+    different URLs rather than one template with a substitution.
+    """
+    from ..pipeline import get_setting
+    try:
+        template = str(get_setting(db, "source_search_url", project=project) or "")
+    except Exception:
+        template = ""
+    if not template:
+        return ""
+    if "themoviedb.org" in template:
+        return _tmdb_search_url(title, content_type)
+    from urllib.parse import quote_plus
+    return (template
+            .replace("{query}", quote_plus(title or ""))
+            .replace("{content_type}", quote_plus(content_type or "")))
 
 
 def _tmdb_search_url(title: str, content_type: Optional[str]) -> str:
@@ -212,7 +241,8 @@ def _active_revisions_for_user(db: Session, user: User):
             "title_folder": sp.title_folder_path,
             "date": sp.original_save_date.isoformat(),
             "master_id": mt.id,
-            "tmdb_search": _tmdb_search_url(mt.title, mt.content_type),
+            "tmdb_search": _source_search_url(db, mt.title, mt.content_type,
+                                              resolve_project(db, mt.project_id)),
         })
     return out
 
@@ -228,7 +258,8 @@ def _state_payload(db: Session, user: User) -> dict:
         lt = db.query(MasterTitle).filter_by(id=locked_id).first()
         if lt and lt.claimed_by_id == user.id:
             locked = _serialize_master(lt, db)
-            locked["tmdb_search"] = _tmdb_search_url(lt.title, lt.content_type)
+            locked["tmdb_search"] = _source_search_url(
+                db, lt.title, lt.content_type, resolve_project(db, lt.project_id))
             # Posters already on this title (live only)
             posters = (
                 db.query(SavedPoster)
@@ -632,7 +663,8 @@ def lock_title(
         "year": t.year,
         "content_type": t.content_type,
         "description": (t.description or "")[:600],
-        "tmdb_search": _tmdb_search_url(t.title, t.content_type),
+        "tmdb_search": _source_search_url(db, t.title, t.content_type,
+                                          resolve_project(db, t.project_id)),
     })
 
 
@@ -770,7 +802,8 @@ def go_to_title(
         "year":         t.year,
         "content_type": t.content_type,
         "description":  (t.description or "")[:600],
-        "tmdb_search":  _tmdb_search_url(t.title, t.content_type),
+        "tmdb_search":  _source_search_url(db, t.title, t.content_type,
+                                           resolve_project(db, t.project_id)),
         "reopened":     reopened,
     })
 
@@ -954,11 +987,21 @@ def save_image(
 
     # Soft warning at >= SOFT_LIMIT_PER_TITLE.
     live = count_live_posters_for_master(db, t.id)
-    if live >= SOFT_LIMIT_PER_TITLE and not confirm_soft_limit:
+    # Per-project cap: movies expect 3 images, MUSIK expects 2. Resolved
+    # through the settings cascade so a third niche needs no code change.
+    soft_limit = SOFT_LIMIT_PER_TITLE
+    try:
+        from ..pipeline import get_setting, resolve_project
+        _proj = resolve_project(db, t.project_id)
+        soft_limit = int(_proj.images_per_title
+                         or get_setting(db, "soft_limit_per_title", project=_proj))
+    except Exception:
+        pass
+    if live >= soft_limit and not confirm_soft_limit:
         return JSONResponse(
             {"ok": False, "reason": "soft_limit",
              "message": f"This title already has {live} posters saved. Save another?",
-             "current_count": live, "soft_limit": SOFT_LIMIT_PER_TITLE},
+             "current_count": live, "soft_limit": soft_limit},
             status_code=409,
         )
 
@@ -966,7 +1009,14 @@ def save_image(
     _ensure_first_save_metadata(t, today)
     db.flush()  # so t.title_folder_path / t.original_save_date are visible to helpers
 
-    folder = title_folder_for(user.username, t.original_save_date, t.title_folder_path)
+    # The project's folder segment, resolved once and stamped onto the poster
+    # row below so saved_poster_path() never needs a join to rebuild it.
+    from ..workspace_migration import project_folder_for
+    from ..pipeline import resolve_project
+    project_folder = project_folder_for(resolve_project(db, t.project_id))
+
+    folder = title_folder_for(user.username, t.original_save_date,
+                              t.title_folder_path, project_folder)
 
     # Compute next count using DB live-count + folder probe to avoid filename collisions.
     base = count_live_posters_for_master(db, t.id)
@@ -989,6 +1039,7 @@ def save_image(
         master_title_id    = t.id,
         user_id            = user.id,
         username           = user.username,
+        project_folder     = project_folder,
         original_save_date = t.original_save_date,
         title_folder_path  = t.title_folder_path,
         filename           = target_name,
@@ -1021,7 +1072,7 @@ def save_image(
         "saved_count_for_title": new_live,
         "saved_today": count_user_saves_for_date(db, user.username, today),
         "saved_week":  count_user_saves_for_week(db, user.username, today),
-        "soft_warning": new_live >= SOFT_LIMIT_PER_TITLE,
+        "soft_warning": new_live >= soft_limit,
     })
 
 

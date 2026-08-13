@@ -2087,6 +2087,13 @@ def requeue_for_account(
                   ProcessedImage.project_id == project.id,
                   SavedPoster.deleted_at.is_(None))
     )
+    if project.has_review_gate:
+        # A gated project's derivatives are NOT all releasable. Without this,
+        # requeueing an account would hand the marketplace every generated
+        # image including the ones still waiting to be looked at and the ones
+        # judged unusable — quietly undoing the gate from a button labelled
+        # "requeue back catalogue".
+        query = query.filter(ProcessedImage.review_status == "approved")
     if source_account_id:
         query = query.join(
             UploadTracking,

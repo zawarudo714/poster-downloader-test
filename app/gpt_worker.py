@@ -162,7 +162,7 @@ def process_one(db: Session, poster, title, project) -> bool:
     prior = db.query(ProcessedImage).filter_by(saved_poster_id=poster.id).count()
     gate = bool(project.has_review_gate)
 
-    db.add(ProcessedImage(
+    processed = ProcessedImage(
         saved_poster_id=poster.id,
         project_id=project.id,
         storage_path=full_rel,
@@ -177,14 +177,29 @@ def process_one(db: Session, poster, title, project) -> bool:
         attempt=prior + 1,
         preview_path=preview_rel,
         review_status="pending" if gate else None,
-    ))
+    )
+    db.add(processed)
+    # Flushed so it has an id. ensure_upload_rows() below stores that id on
+    # each upload row, and would otherwise go looking for a current
+    # derivative that has not reached the database yet.
+    db.flush()
 
     # With a review gate the poster stays out of the upload queue until the
-    # admin releases it. Without one it behaves exactly like the movie project.
+    # admin releases it, and the upload rows are created at that moment by
+    # the review endpoint. WITHOUT a gate there is no later moment — so they
+    # have to be created here, exactly as report_processed() does for the
+    # Photoshop path. Miss this and turning the gate off silently stops
+    # anything ever uploading.
     poster.pipeline_status = "processed"
     poster.process_error = None
     poster.claimed_at = None
     poster.claimed_by = None
+
+    if not gate:
+        from .pipeline import ensure_upload_rows
+        ensure_upload_rows(db, poster=poster, title=title,
+                           processed=processed, project=project)
+
     recompute_title_status(db, title)
     db.commit()
     return True

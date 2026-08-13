@@ -2812,6 +2812,22 @@ def api_review_decide(
 
         if action == "approve":
             processed.review_status = "approved"
+            # RELEASING IS WHAT CREATES THE UPLOAD WORK.
+            #
+            # On the Photoshop path, report_processed() seeds an upload row
+            # per enabled account the moment the derivative exists — there is
+            # no gate to wait for. A gated project cannot do that: seeding at
+            # generation time would queue an image for the marketplace before
+            # anyone had looked at it, which is the one thing the gate is for.
+            #
+            # So the rows are created HERE, on approval. Without this the
+            # review screen said "released", the funnel showed 'processed',
+            # and nothing ever uploaded — because no upload row existed for
+            # the dispatcher to find.
+            if poster is not None and title is not None:
+                P.ensure_upload_rows(db, poster=poster, title=title,
+                                     processed=processed,
+                                     project=P.project_for_title(db, title))
             counts["approved"] += 1
 
         elif action == "rerun":

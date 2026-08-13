@@ -10,7 +10,7 @@
   Sections are progressive: the overview answers "is it running and where is
   everything", then Greenlight feeds work in, then Processing / Upload
   Settings tune how it runs, then Test & Debug lets you exercise one stage
-  on one image, and Failures closes the loop.
+  on one image, and Needs Attention closes the loop.
 
   Everything here is data-driven from /admin/pipeline/api/*. Adding a setting
   to pipeline.DEFAULTS surfaces it automatically in the settings forms — do
@@ -18,6 +18,14 @@
 #}
 
 {% block content %}
+{#
+  The active project, resolved once here. base.html sets its own copy for the
+  nav, but a {% set %} in the parent is not visible to this template — so it
+  is fetched again rather than relied upon, which is also why every page that
+  needs it does this explicitly.
+#}
+{% set pctx = request.state.project_ctx if request and request.state.project_ctx else {} %}
+{% set proj = pctx.get('active_project') %}
 <div class="admin-grid" data-pipeline data-no-global-scroll>
 
   {# ── Sub-navigation ─────────────────────────────────────────────── #}
@@ -27,7 +35,11 @@
     <button class="pipe-tab"        data-section="processing" role="tab">PROCESSING</button>
     <button class="pipe-tab"        data-section="upload"     role="tab">UPLOAD</button>
     <button class="pipe-tab"        data-section="test"       role="tab">TEST &amp; DEBUG</button>
-    <button class="pipe-tab"        data-section="failures"   role="tab">FAILURES<span class="pipe-tab-badge pipe-tab-badge-error" data-badge="failures" hidden>0</span></button>
+    {# Replaced the old FAILURES tab. It listed rows whose status was literally
+       'failed', which misses every way this pipeline stops quietly — a spend
+       cap, a bad key, a stale claim, a title held before dispatch. Two tabs
+       showing overlapping subsets of the same problem is worse than one. #}
+    <button class="pipe-tab"        data-section="attention"  role="tab">NEEDS ATTENTION<span class="pipe-tab-badge pipe-tab-badge-error" data-badge="attention" hidden>0</span></button>
     <button class="pipe-tab"        data-section="nodes"      role="tab">NODES</button>
   </div>
 
@@ -511,6 +523,19 @@
       </div>
     </section>
 
+    {#
+      Which tests exist depends on WHERE this project's processing runs.
+
+      Photoshop lives on the Windows node, so its tests are node jobs and a
+      download test is meaningful — getting the file to that machine is a
+      step that can fail on its own. Generation runs in this process from a
+      file this process already has, so neither applies. Showing them anyway
+      would mean offering a button whose failure ("no node available") has
+      nothing to do with the stage being tested.
+    #}
+    {% set proc = (proj.processor if proj else 'photoshop') %}
+
+    {% if proc != 'gpt' %}
     <section class="panel">
       <div class="panel-head">
         <span>1 · TEST DOWNLOAD
@@ -538,13 +563,35 @@
           <button type="button" class="btn btn-accent btn-tiny" data-action="test-process">RUN TEST PROCESS</button>
           <span class="muted mono" data-test-status="process"></span>
         </div>
-        <p class="muted" style="margin-top:8px">Find a poster id in the Title Browser under Greenlight, or in the Failures list.</p>
+        <p class="muted" style="margin-top:8px">Find an image id in the Title Browser under Greenlight, or under Needs Attention.</p>
       </div>
     </section>
+    {% else %}
+    <section class="panel">
+      <div class="panel-head">
+        <span>1 · TEST IMAGE GENERATION
+          {{ info("Generates one image with the current prompt, style reference and upscale settings, and shows you the result. Nothing is recorded against the image and nothing enters the review queue — but the money is real, so the cost is reported every time.") }}
+        </span>
+      </div>
+      <div class="panel-body">
+        <div class="filter-row">
+          <label>IMAGE ID <input type="number" data-test-gpt-poster placeholder="e.g. 1234"></label>
+          <button type="button" class="btn btn-accent btn-tiny" data-action="test-gpt">RUN TEST GENERATION</button>
+          <span class="muted mono" data-test-status="gpt"></span>
+        </div>
+        <p class="muted" style="margin-top:8px">
+          Takes about a minute — it runs here rather than on the Windows machine, so
+          the answer comes back in this page rather than through the queue.
+          Output is written under <code>_tests/</code> and never ships.
+        </p>
+        <div class="pipe-preview" data-test-gpt-result hidden></div>
+      </div>
+    </section>
+    {% endif %}
 
     <section class="panel">
       <div class="panel-head">
-        <span>3 · TEST UPLOAD
+        <span>{{ '2' if proc == 'gpt' else '3' }} · TEST UPLOAD
           {{ info("Walks one processed image through login → upload page → file input → form fill → submit, logging each phase separately so you can see precisely which selector or timing failed. Nothing is marked uploaded.") }}
         </span>
       </div>
@@ -569,31 +616,31 @@
   </div>
 
   {# ═══════════════════════════════════════════════════════════════ #}
-  {#  FAILURES                                                       #}
+  {#  NEEDS ATTENTION                                                #}
   {# ═══════════════════════════════════════════════════════════════ #}
-  <div class="pipe-section" data-section-panel="failures" hidden>
+  {#
+     Findings, not a table dump. Each group states what is true, why it
+     matters and the one action that resolves it — the same shape as
+     Diagnostics, because the question is the same: what do I press.
+
+     An empty page here has to MEAN something, which is why the checks
+     include the quiet stoppages (spend cap, bad key, stale claim) and not
+     only rows marked 'failed'.
+  #}
+  <div class="pipe-section" data-section-panel="attention" hidden>
 
     <section class="panel">
       <div class="panel-head">
-        <span>FAILURES
-          {{ info("Retries happen automatically up to the configured cap; items shown as EXHAUSTED have used all attempts and need a look. RETRY resets the counter for a genuine fresh start. MARK REMOVED is for marketplace takedowns — permanent for that account, but the processed file stays in storage so the image can be listed elsewhere.") }}
+        <span>NEEDS ATTENTION
+          {{ info("Everything stopped or stuck in this project, grouped by what fixes it. Counts are exact; the lists show the most recent items. Groups marked FYI are not problems — they are things worth knowing about.") }}
         </span>
         <span class="filter-row" style="gap:6px">
-          <select data-failures-kind>
-            <option value="upload">Upload failures</option>
-            <option value="processing">Processing failures</option>
-          </select>
-          <button type="button" class="btn btn-ghost btn-tiny" data-action="failures-load">RELOAD</button>
+          <span class="muted mono" data-attention-checked></span>
+          <button type="button" class="btn btn-ghost btn-tiny" data-action="attention-load">RELOAD</button>
         </span>
       </div>
-      <div class="panel-body">
-        <div class="filter-row" style="margin-bottom:10px">
-          <button type="button" class="btn btn-accent btn-tiny" data-action="failures-retry">RETRY SELECTED</button>
-          <button type="button" class="btn btn-ghost btn-tiny"  data-action="failures-removed">MARK REMOVED</button>
-          <button type="button" class="btn btn-ghost btn-tiny"  data-action="failures-skip">SKIP PERMANENTLY</button>
-          <span class="muted mono" data-failures-summary></span>
-        </div>
-        <div data-failures-list><div class="muted">Loading…</div></div>
+      <div class="panel-body" data-attention-list>
+        <div class="muted">Loading…</div>
       </div>
     </section>
 

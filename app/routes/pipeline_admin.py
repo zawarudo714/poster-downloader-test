@@ -12,7 +12,7 @@ WHAT THIS EXPOSES
   Processing          edit the JSX + Photoshop settings, no deploy needed
   Upload accounts     CRUD, credentials, per-account timings and quota
   Upload settings     selector map, title/keyword templates, batch sizes
-  Failures            processing + upload failures with screenshots, retry
+  Needs Attention     everything stopped or stuck, grouped by what fixes it
   Test & Debug        run one stage on one image and watch the log
   Worker nodes        register, rotate tokens, health
 
@@ -32,13 +32,14 @@ from __future__ import annotations
 
 import json
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Optional
 
 from fastapi import (
     APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile,
 )
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
-from sqlalchemy import func, or_
+from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session
 
 from .. import pipeline as P
@@ -216,7 +217,11 @@ def api_overview(
         db.query(SavedPoster, MasterTitle)
           .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
           .filter(SavedPoster.pipeline_status == "processing",
-                  SavedPoster.deleted_at.is_(None))
+                  SavedPoster.deleted_at.is_(None),
+                  # Scoped like every other query on this page. Unscoped, the
+                  # MUSIK overview showed movie posters moving through
+                  # Photoshop and read as if its own stage were running.
+                  _title_scope(db, project))
           .order_by(SavedPoster.claimed_at.asc().nullslast())
           .limit(50)
           .all()
@@ -242,7 +247,8 @@ def api_overview(
           .join(SavedPoster, UploadTracking.saved_poster_id == SavedPoster.id)
           .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
           .join(UploadAccount, UploadTracking.account_id == UploadAccount.id)
-          .filter(UploadTracking.status == "uploading")
+          .filter(UploadTracking.status == "uploading",
+                  UploadTracking.project_id == project.id)
           .order_by(UploadTracking.claimed_at.asc().nullslast())
           .limit(50)
           .all()
@@ -279,9 +285,33 @@ def api_overview(
           .scalar() or 0
     )
 
+    # The tab badge. Stale claims are included because they are exactly the
+    # kind of stoppage a failure count misses — nothing is marked failed, and
+    # nothing is moving either.
+    stale_cutoff = now - timedelta(
+        minutes=int(P.get_setting(db, "claim_timeout_min", project=project) or 30))
+    stalled_count = (
+        db.query(func.count(SavedPoster.id))
+          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+          .filter(SavedPoster.pipeline_status == "processing",
+                  SavedPoster.claimed_at.isnot(None),
+                  SavedPoster.claimed_at < stale_cutoff,
+                  SavedPoster.deleted_at.is_(None),
+                  _title_scope(db, project))
+          .scalar() or 0
+    ) + (
+        db.query(func.count(UploadTracking.id))
+          .filter(UploadTracking.status == "uploading",
+                  UploadTracking.claimed_at.isnot(None),
+                  UploadTracking.claimed_at < stale_cutoff,
+                  UploadTracking.project_id == project.id)
+          .scalar() or 0
+    )
+
     return JSONResponse({
         "ok": True,
         "project": {"id": project.id, "slug": project.slug, "name": project.name},
+        "attention": process_failures + upload_failures + stalled_count,
         "projects": [
             {"id": p.id, "slug": p.slug, "name": p.name, "is_active": bool(p.is_active)}
             for p in db.query(Project).order_by(Project.id.asc()).all()
@@ -1271,6 +1301,145 @@ def api_artifact(
 #  TEST & DEBUG
 # ═══════════════════════════════════════════════════════════════════════════
 
+# NOTE: the two literal /api/test routes below MUST stay above
+# /api/test/{kind}. FastAPI matches in declaration order, so the
+# wildcard would otherwise capture "gpt_process" as a kind and reject
+# it as invalid — a 400 that reads like the test is broken.
+@router.post("/api/test/gpt_process")
+def api_test_gpt_process(
+    request: Request,
+    payload: dict = Body(default={}),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Run the image model on ONE image, right now, and hand back the result.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS IS NOT /api/test/process
+    ════════════════════════════════════════════════════════════════════════
+    That one queues a job for the Windows node, because Photoshop lives
+    there. Generation lives HERE, in this process. Routing a GPT test through
+    the node queue would mean waiting for a machine that has no part in the
+    stage being tested — and would report "no node available" as though the
+    thing you were testing were broken.
+
+    So it runs inline and answers in one request. Roughly 60 seconds, which
+    is why the browser is told not to give up early.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHAT IT DELIBERATELY DOES NOT DO
+    ════════════════════════════════════════════════════════════════════════
+    No ProcessedImage row, no change to the poster's state, no review-gate
+    entry. Output goes under a `_tests/` prefix. You can run it fifty times
+    on the same image while tuning the prompt and the pipeline neither
+    notices nor ships any of it.
+
+    It DOES record the spend, because the money is just as real as in a batch
+    run and a test that quietly under-reports cost is worse than no test.
+    """
+    from .. import gpt_images as G
+    from ..config import WORKSPACE_DIR
+    from ..imagefetch import make_preview, upscale_to_width
+    from ..storage_remote import StorageError, write_bytes
+    from ..utils import saved_poster_path
+
+    poster_id = payload.get("poster_id")
+    if not poster_id:
+        raise HTTPException(400, "poster_id is required.")
+
+    project = _project(request, admin, db, payload.get("project_id"))
+    if project.processor != "gpt":
+        raise HTTPException(400, f"{project.name} does not use image generation.")
+
+    poster = db.query(SavedPoster).filter_by(id=poster_id).first()
+    if poster is None or poster.deleted_at is not None:
+        raise HTTPException(404, "No such image.")
+
+    title = db.query(MasterTitle).filter_by(id=poster.master_title_id).first()
+    if title is None:
+        raise HTTPException(404, "That image has no title attached.")
+    # A test that silently reaches into another project would be a very
+    # confusing way to discover the settings you are tuning are not the ones
+    # being applied.
+    owner = P.project_for_title(db, title)
+    if owner.id != project.id:
+        raise HTTPException(400, f"Image {poster_id} belongs to {owner.name}, not {project.name}.")
+
+    lines: list[str] = []
+
+    def emit(msg, level="info"):
+        lines.append(f"[{level}] {msg}")
+
+    style_rel = str(P.get_setting(db, "openai_style_image", project=project) or "")
+    style = WORKSPACE_DIR / style_rel if style_rel else Path("")
+    source = saved_poster_path(poster)
+    emit(f"source: {source.name}")
+
+    started = datetime.utcnow()
+    try:
+        gen = G.generate(db, source=source, style=style, project=project, log_fn=emit)
+    except G.PermanentFailure as e:
+        return JSONResponse({"ok": False, "fatal": True, "kind": e.kind,
+                             "categories": getattr(e, "categories", []),
+                             "error": str(e), "log": lines}, status_code=200)
+    except G.TransientFailure as e:
+        return JSONResponse({"ok": False, "fatal": False,
+                             "error": str(e), "log": lines}, status_code=200)
+
+    G.record_spend(db, service="openai", operation="test_image_edit",
+                   cost=gen.cost_usd(), project_id=project.id,
+                   saved_poster_id=poster.id,
+                   input_tokens=gen.input_tokens, output_tokens=gen.output_tokens)
+    db.commit()
+    emit(f"generated in {gen.duration_ms} ms, ${gen.cost_usd():.4f}")
+
+    tmp = WORKSPACE_DIR / "_gpt_tmp" / f"test_{poster.id}.jpg"
+    tmp.parent.mkdir(parents=True, exist_ok=True)
+    tmp.write_bytes(gen.image_bytes)
+
+    width = int(P.get_setting(db, "upscale_width_px", project=project) or 4000)
+    sharpen = int(P.get_setting(db, "upscale_sharpen", project=project) or 0)
+    quality = int(P.get_setting(db, "upscale_jpeg_quality", project=project) or 92)
+    out_w, out_h = upscale_to_width(tmp, width=width, sharpen=sharpen, quality=quality)
+    emit(f"upscaled to {out_w}x{out_h} (sharpen {sharpen}, quality {quality})")
+
+    preview_tmp = tmp.with_name(f"test_{poster.id}_preview.jpg")
+    make_preview(tmp, preview_tmp)
+
+    rel = f"_tests/{project.slug}/{poster.id}.jpg"
+    preview_rel = f"_tests/{project.slug}/{poster.id}_preview.jpg"
+    stored = True
+    try:
+        write_bytes(db, rel, tmp.read_bytes(), project=project)
+        write_bytes(db, preview_rel, preview_tmp.read_bytes(), project=project)
+        emit(f"written to {rel}")
+    except StorageError as e:
+        # Reported, not raised. The generation worked and you paid for it;
+        # a storage problem is a separate finding and shouldn't read as
+        # "the prompt failed".
+        stored = False
+        emit(f"storage failed: {e}", level="error")
+    finally:
+        tmp.unlink(missing_ok=True)
+        preview_tmp.unlink(missing_ok=True)
+
+    return JSONResponse({
+        "ok": True,
+        "stored": stored,
+        "width": out_w, "height": out_h,
+        "bytes": len(gen.image_bytes),
+        "duration_ms": gen.duration_ms,
+        "total_ms": int((datetime.utcnow() - started).total_seconds() * 1000),
+        # float(), not the Decimal itself — cost is carried as Decimal so the
+        # spend ledger stays exact, but JSON has no Decimal.
+        "cost_usd": round(float(gen.cost_usd()), 4),
+        "input_tokens": gen.input_tokens, "output_tokens": gen.output_tokens,
+        "preview_path": preview_rel if stored else None,
+        "log": lines,
+    })
+
+
 @router.post("/api/test/{kind}")
 def api_test(
     request: Request,
@@ -1319,6 +1488,32 @@ def api_test(
     P.append_job_log(db, job, f"Queued {job_kind} by {admin.username}")
     db.commit()
     return JSONResponse({"ok": True, "job_id": job.id})
+
+
+@router.get("/api/test/image")
+def api_test_image(
+    path: str = Query(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Stream a test output back to the browser.
+
+    Confined to the `_tests/` prefix. Without that check this would be an
+    admin-authenticated read of any path on the Storage Box, which is a
+    bigger door than a preview button needs.
+    """
+    from ..storage_remote import read_bytes, StorageError
+
+    clean = (path or "").replace("\\", "/").lstrip("/")
+    if not clean.startswith("_tests/") or ".." in clean:
+        raise HTTPException(403, "Only test output can be served here.")
+    try:
+        data = read_bytes(db, clean)
+    except StorageError as e:
+        raise HTTPException(404, str(e))
+    return Response(content=data, media_type="image/jpeg",
+                    headers={"Cache-Control": "private, max-age=60"})
 
 
 @router.get("/api/jobs")
@@ -1704,6 +1899,611 @@ def api_spend(
     days_out = sorted(by_day.values(), key=lambda d: d["date"], reverse=True)
     return JSONResponse({"days": days_out,
                          "today": days_out[0] if days_out else None})
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  NEEDS ATTENTION
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# One page answering one question: what has stopped, and what do I press?
+#
+# ─────────────────────────────────────────────────────────────────────────
+# WHY THIS IS NOT JUST THE FAILURES TAB
+# ─────────────────────────────────────────────────────────────────────────
+# Failures lists rows whose status is literally 'failed'. That misses every
+# way this pipeline stops WITHOUT anything being marked failed:
+#
+#   · spend cap reached          — the GPT stage simply stops claiming
+#   · a bad API key              — every image fails identically, for one
+#                                  reason, and 400 rows say so one at a time
+#   · a title held pre-dispatch  — 'failed', but RETRY re-fails forever
+#                                  because the fix is editing the title
+#   · a stale claim              — status says 'processing', nothing is
+#   · a half-finished title      — image 1 listed, image 2 retired
+#
+# The unifying idea is FINDINGS, the same shape diagnostics.py uses: a thing
+# that is true, why it matters, and the specific action that resolves it.
+# Silence here should mean the pipeline is genuinely fine — which is only
+# worth anything if the checks cover the quiet failures too.
+#
+# ─────────────────────────────────────────────────────────────────────────
+# GENERIC ACROSS PROJECTS
+# ─────────────────────────────────────────────────────────────────────────
+# Nothing below mentions GPT, Photoshop, Brave or FineArtAmerica. A check
+# either applies to whatever this project's processor is, or it is skipped by
+# asking the project what it does. Project three inherits this for free.
+
+def _attention_finding(key, label, why, action, severity="warn", items=None, note=""):
+    return {
+        "key": key, "label": label, "why": why, "action": action,
+        "severity": severity, "note": note,
+        "items": items or [], "count": len(items or []),
+    }
+
+
+@router.get("/api/attention")
+def api_attention(
+    request: Request,
+    project_id: Optional[int] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Everything stopped or stuck in this project, grouped by what fixes it.
+
+    Item lists are capped at `limit` while COUNTS are exact — a check that
+    materialises 3,000 rows to tell you there are 3,000 is how a diagnostics
+    page becomes the thing you avoid opening.
+    """
+    project = _project(request, admin, db, project_id)
+    scope = _title_scope(db, project)
+    findings: list[dict] = []
+    now = datetime.utcnow()
+
+    def title_of(t):
+        return {"master_id": t.id, "external_id": t.external_id,
+                "title": t.title, "year": t.year}
+
+    # ── 1 · Whole stage stopped ─────────────────────────────────────────
+    # Checked FIRST and reported as one line, not N. When the spend cap trips
+    # or a key is wrong, every image fails for the same reason; a per-image
+    # list buries the single fact that matters.
+    if project.processor == "gpt":
+        from .. import gpt_images as G
+        try:
+            cap = G.cap_state(db, project=project)
+        except Exception:
+            cap = None
+        if cap and cap.get("over"):
+            findings.append(_attention_finding(
+                "spend_capped",
+                f"Image generation is {'paused' if cap['action'] == 'pause' else 'over budget'}",
+                f"${cap['spent']} spent this month against a ${cap['cap']} cap. "
+                + ("Nothing is being generated until the cap is raised or the "
+                   "month rolls over." if cap["action"] == "pause"
+                   else "Generation is continuing; this is a warning only."),
+                "Raise or clear the cap under Processing → Spending.",
+                severity="stop" if cap["action"] == "pause" else "warn",
+                items=[{"kind": "note", "spent": cap["spent"], "cap": cap["cap"]}],
+            ))
+
+    # A configuration failure repeats identically on every image. Group by the
+    # error text so a wrong API key reads as one problem with a count, rather
+    # than as 400 separate ones.
+    config_rows = (
+        db.query(SavedPoster, MasterTitle)
+          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+          .filter(SavedPoster.pipeline_status == "failed_processing",
+                  SavedPoster.deleted_at.is_(None),
+                  or_(SavedPoster.process_error.like("[auth]%"),
+                      SavedPoster.process_error.like("[billing]%")),
+                  scope)
+          .limit(500)
+          .all()
+    )
+    if config_rows:
+        by_error: dict[str, int] = {}
+        for poster, _t in config_rows:
+            by_error[(poster.process_error or "")[:200]] = \
+                by_error.get((poster.process_error or "")[:200], 0) + 1
+        findings.append(_attention_finding(
+            "config_blocked",
+            "Images are failing for a configuration reason",
+            "These are not bad images — the account, key or billing is the "
+            "problem, and every image will fail the same way until it is fixed.",
+            "Fix the setting, then RETRY these — they cost nothing so far.",
+            severity="stop",
+            items=[{"kind": "group", "error": e, "count": n} for e, n in by_error.items()],
+            note=f"{len(config_rows)} images affected.",
+        ))
+
+    # ── 2 · The processor refused the image itself ──────────────────────
+    # Distinct from a transient failure because retrying spends money to be
+    # refused again. The decision here is edit-the-source or retire it.
+    rejected_q = (
+        db.query(SavedPoster, MasterTitle)
+          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+          .filter(SavedPoster.pipeline_status == "failed_processing",
+                  SavedPoster.deleted_at.is_(None),
+                  SavedPoster.process_error.like("[rejected]%"),
+                  scope)
+    )
+    rejected_count = rejected_q.count()
+    if rejected_count:
+        from ..gpt_images import extract_categories
+        items = []
+        for poster, t in rejected_q.order_by(SavedPoster.id.desc()).limit(limit).all():
+            items.append({
+                "kind": "poster", "poster_id": poster.id, **title_of(t),
+                "filename": poster.filename,
+                "error": poster.process_error,
+                "categories": extract_categories(poster.process_error or ""),
+                "attempts": poster.process_attempts,
+            })
+        findings.append(_attention_finding(
+            "rejected",
+            "Refused by the image model",
+            "The source image tripped a content rule. Retrying spends again "
+            "and is refused again unless the SOURCE changes — so the real "
+            "choices are send it back to a worker for a different photo, or "
+            "retire it.",
+            "RETURN TO WORKER for a new source, or MARK UNUSABLE.",
+            items=items,
+            note=(f"Showing {len(items)} of {rejected_count}." if rejected_count > len(items) else ""),
+        ))
+
+    # ── 3 · Titles the marketplace would refuse ─────────────────────────
+    # Held BEFORE dispatch, so nothing was sent. RETRY is the wrong verb here
+    # and is deliberately not offered: the row would fail identically.
+    held_q = (
+        db.query(UploadTracking, SavedPoster, MasterTitle)
+          .join(SavedPoster, UploadTracking.saved_poster_id == SavedPoster.id)
+          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+          .filter(UploadTracking.status == "failed",
+                  UploadTracking.project_id == project.id,
+                  UploadTracking.last_error.like("title held:%"))
+    )
+    held_count = held_q.count()
+    if held_count:
+        items = []
+        for tr, poster, t in held_q.order_by(UploadTracking.id.desc()).limit(limit).all():
+            items.append({
+                "kind": "tracking", "tracking_id": tr.id, "poster_id": poster.id,
+                **title_of(t),
+                "remote_title": tr.remote_title,
+                "error": (tr.last_error or "").replace("title held: ", ""),
+            })
+        findings.append(_attention_finding(
+            "title_held",
+            "Held — the marketplace would reject this title",
+            "The marketplace deletes characters it does not accept, and a "
+            "title that survives as nothing is refused with an error PAGE "
+            "rather than an error code. These were stopped before being sent, "
+            "so no attempt was wasted.",
+            "Type a title that works and press SAVE & QUEUE.",
+            items=items,
+            note=(f"Showing {len(items)} of {held_count}." if held_count > len(items) else ""),
+        ))
+
+    # ── 4 · Ordinary exhausted failures ─────────────────────────────────
+    max_process = int(P.get_setting(db, "process_max_attempts", project=project) or 3)
+    proc_q = (
+        db.query(SavedPoster, MasterTitle)
+          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+          .filter(SavedPoster.pipeline_status == "failed_processing",
+                  SavedPoster.deleted_at.is_(None),
+                  or_(SavedPoster.process_error.is_(None),
+                      ~SavedPoster.process_error.like("[%")),
+                  scope)
+    )
+    proc_count = proc_q.count()
+    if proc_count:
+        items = [
+            {"kind": "poster", "poster_id": p.id, **title_of(t),
+             "filename": p.filename, "error": p.process_error,
+             "attempts": p.process_attempts,
+             "exhausted": (p.process_attempts or 0) >= max_process}
+            for p, t in proc_q.order_by(SavedPoster.id.desc()).limit(limit).all()
+        ]
+        findings.append(_attention_finding(
+            "process_failed",
+            "Processing gave up after retrying",
+            "These failed for a reason that looked temporary — a network "
+            "error, storage being unreachable — and used every attempt.",
+            "Fix the cause, then RETRY. Attempts reset to zero.",
+            items=items,
+            note=(f"Showing {len(items)} of {proc_count}." if proc_count > len(items) else ""),
+        ))
+
+    max_upload = int(P.get_setting(db, "upload_max_attempts", project=project) or 3)
+    up_q = (
+        db.query(UploadTracking, SavedPoster, MasterTitle, UploadAccount)
+          .join(SavedPoster, UploadTracking.saved_poster_id == SavedPoster.id)
+          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+          .join(UploadAccount, UploadTracking.account_id == UploadAccount.id)
+          .filter(UploadTracking.status == "failed",
+                  UploadTracking.project_id == project.id,
+                  or_(UploadTracking.last_error.is_(None),
+                      ~UploadTracking.last_error.like("title held:%")))
+    )
+    up_count = up_q.count()
+    if up_count:
+        items = [
+            {"kind": "tracking", "tracking_id": tr.id, "poster_id": p.id,
+             **title_of(t), "account": acc.name, "account_id": acc.id,
+             "remote_title": tr.remote_title, "error": tr.last_error,
+             "screenshot": tr.last_screenshot, "attempts": tr.attempts,
+             "exhausted": (tr.attempts or 0) >= max_upload}
+            for tr, p, t, acc in up_q.order_by(UploadTracking.id.desc()).limit(limit).all()
+        ]
+        findings.append(_attention_finding(
+            "upload_failed",
+            "Upload failed",
+            "The marketplace refused, timed out, or changed its page. A "
+            "screenshot from the moment it broke is attached where the node "
+            "managed to take one.",
+            "RETRY after checking the screenshot, or MARK REMOVED if the "
+            "listing was taken down.",
+            items=items,
+            note=(f"Showing {len(items)} of {up_count}." if up_count > len(items) else ""),
+        ))
+
+    # ── 5 · Claimed, but nothing is happening ───────────────────────────
+    # Status says in-progress, so no failure check sees these. If the node
+    # died between claiming and reporting, this is the only place it shows.
+    timeout_s = int(P.get_setting(db, "claim_timeout_min", project=project) or 30) * 60
+    cutoff = now - timedelta(seconds=timeout_s)
+    stalled = []
+    for poster, t in (
+        db.query(SavedPoster, MasterTitle)
+          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+          .filter(SavedPoster.pipeline_status == "processing",
+                  SavedPoster.claimed_at.isnot(None),
+                  SavedPoster.claimed_at < cutoff,
+                  SavedPoster.deleted_at.is_(None), scope)
+          .limit(limit).all()
+    ):
+        stalled.append({"kind": "poster", "poster_id": poster.id, **title_of(t),
+                        "stage": "processing", "node": poster.claimed_by,
+                        "held_min": int((now - poster.claimed_at).total_seconds() // 60)})
+    for tr, poster, t in (
+        db.query(UploadTracking, SavedPoster, MasterTitle)
+          .join(SavedPoster, UploadTracking.saved_poster_id == SavedPoster.id)
+          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+          .filter(UploadTracking.status == "uploading",
+                  UploadTracking.project_id == project.id,
+                  UploadTracking.claimed_at.isnot(None),
+                  UploadTracking.claimed_at < cutoff)
+          .limit(limit).all()
+    ):
+        stalled.append({"kind": "tracking", "tracking_id": tr.id, "poster_id": poster.id,
+                        **title_of(t), "stage": "uploading", "node": tr.claimed_by,
+                        "held_min": int((now - tr.claimed_at).total_seconds() // 60)})
+    if stalled:
+        findings.append(_attention_finding(
+            "stalled",
+            "Claimed but not finished",
+            "A machine took this work and never reported back — usually it "
+            "was rebooted or lost its connection mid-item. The dispatcher "
+            "frees these automatically; they are listed so a node that keeps "
+            "doing it is visible.",
+            "Usually nothing. RELEASE forces it back into the queue now.",
+            severity="info", items=stalled,
+        ))
+
+    # ── 6 · Retired images ──────────────────────────────────────────────
+    unusable_q = (
+        db.query(SavedPoster, MasterTitle)
+          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+          .filter(SavedPoster.pipeline_status == "unusable",
+                  SavedPoster.deleted_at.is_(None), scope)
+    )
+    unusable_count = unusable_q.count()
+    if unusable_count:
+        items = [
+            {"kind": "poster", "poster_id": p.id, **title_of(t),
+             "reason": p.unusable_reason, "by": p.unusable_by,
+             "at": fmt_local(p.unusable_at, "%Y-%m-%d") if p.unusable_at else None}
+            for p, t in unusable_q.order_by(SavedPoster.unusable_at.desc().nullslast())
+                                  .limit(limit).all()
+        ]
+        findings.append(_attention_finding(
+            "unusable",
+            "Retired by you",
+            "Out of the pipeline on purpose, with the reason kept. Nothing "
+            "was deleted and the worker was still paid. Listed so the "
+            "decision stays reversible if the model improves.",
+            "RETURN TO PIPELINE to try again.",
+            severity="info", items=items,
+            note=(f"Showing {len(items)} of {unusable_count}." if unusable_count > len(items) else ""),
+        ))
+
+    # ── 7 · Titles that will list short ─────────────────────────────────
+    # Every image here is already counted above; the finding is about the
+    # TITLE. An artist listing with one image instead of two is a decision
+    # you may want to revisit, and no per-image row says that.
+    expected = int(project.images_per_title or 0)
+    short = []
+    if expected > 1:
+        rows = (
+            db.query(MasterTitle.id, MasterTitle.external_id, MasterTitle.title,
+                     MasterTitle.year,
+                     func.count(SavedPoster.id).label("total"),
+                     func.sum(
+                         case((SavedPoster.pipeline_status.in_(
+                             ("processed", "uploading", "uploaded")), 1), else_=0)
+                     ).label("good"))
+              .join(SavedPoster, SavedPoster.master_title_id == MasterTitle.id)
+              .filter(SavedPoster.deleted_at.is_(None), scope)
+              .group_by(MasterTitle.id)
+              .having(func.sum(
+                  case((SavedPoster.pipeline_status.in_(
+                      ("processed", "uploading", "uploaded")), 1), else_=0)) > 0)
+              .having(func.sum(
+                  case((SavedPoster.pipeline_status.in_(
+                      ("greenlit", "processing", "uploading")), 1), else_=0)) == 0)
+              .limit(limit * 4)
+              .all()
+        )
+        for mid, ext, name, year, total, good in rows:
+            if (good or 0) < expected:
+                short.append({"kind": "title", "master_id": mid, "external_id": ext,
+                              "title": name, "year": year,
+                              "have": int(good or 0), "expected": expected})
+    if short:
+        findings.append(_attention_finding(
+            "short_titles",
+            f"Fewer than {expected} images will list",
+            "Nothing is stuck — these titles have simply finished with fewer "
+            "images than planned, because the rest were refused, retired or "
+            "never found. Each individual image appears under one of the "
+            "groups above; this says which ARTISTS come out thin.",
+            "Send the title back to a worker for another source image, or "
+            "accept it.",
+            severity="info", items=short[:limit],
+            note=(f"Showing {min(len(short), limit)} of {len(short)}."
+                  if len(short) > limit else ""),
+        ))
+
+    return JSONResponse({
+        "ok": True,
+        "project": {"id": project.id, "slug": project.slug, "name": project.name,
+                    "item_noun": project.item_noun,
+                    "item_noun_plural": project.item_noun_plural},
+        "findings": findings,
+        "total": sum(f["count"] for f in findings if f["severity"] != "info"),
+        "checked_at": fmt_local(now, "%Y-%m-%d %H:%M"),
+    })
+
+
+@router.post("/api/attention/retitle")
+def api_attention_retitle(
+    request: Request,
+    payload: dict = Body(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Replace a held title with one the marketplace accepts, and queue it.
+
+    The submitted text is put through the SAME normalisation the uploader
+    would apply, and stored as the normalised result — not as typed. That is
+    the whole reason the reconciliation scanner can later compare our
+    remote_title against the live listing and expect them to be equal.
+
+    Validated again after normalising, so an edit that still comes out empty
+    is refused here rather than being queued to fail at the marketplace.
+    """
+    tracking_id = payload.get("tracking_id")
+    raw = (payload.get("title") or "").strip()
+    if not tracking_id:
+        raise HTTPException(400, "tracking_id is required.")
+    if not raw:
+        raise HTTPException(400, "A title is required.")
+
+    tracking = db.query(UploadTracking).filter_by(id=tracking_id).first()
+    if tracking is None:
+        raise HTTPException(404, "That upload row no longer exists.")
+
+    cleaned = P.tidy_separators(P.clean_for_marketplace(raw))
+    problem = P.validate_marketplace_title(raw, cleaned)
+    if problem:
+        raise HTTPException(400, problem)
+
+    tracking.remote_title = cleaned
+    tracking.status = "pending"
+    tracking.attempts = 0
+    tracking.last_error = None
+    tracking.claimed_at = None
+    tracking.claimed_by = None
+
+    poster = db.query(SavedPoster).filter_by(id=tracking.saved_poster_id).first()
+    if poster is not None and poster.pipeline_status == "failed_upload":
+        poster.pipeline_status = "processed"
+
+    log_activity(db, user=admin, action="pipeline_retitle", target_type="pipeline",
+                 details={"tracking_id": tracking.id, "typed": raw, "stored": cleaned})
+    db.commit()
+    return JSONResponse({"ok": True, "remote_title": cleaned})
+
+
+@router.post("/api/attention/preview_title")
+def api_attention_preview_title(
+    payload: dict = Body(...),
+    admin: User = Depends(require_admin),
+):
+    """
+    What the marketplace would store for this text — live, as you type.
+
+    Worth an endpoint of its own so the fold table has exactly ONE
+    implementation. A JavaScript copy would drift the first time a character
+    was added to it, and the admin would be editing against a lie.
+    """
+    raw = (payload.get("title") or "")
+    cleaned = P.tidy_separators(P.clean_for_marketplace(raw))
+    return JSONResponse({
+        "ok": True, "rendered": cleaned, "length": len(cleaned),
+        "problem": P.validate_marketplace_title(raw, cleaned),
+    })
+
+
+@router.post("/api/attention/retry_group")
+def api_attention_retry_group(
+    request: Request,
+    payload: dict = Body(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Retry every image affected by a single shared cause.
+
+    Only offered for `config_blocked`, where by definition every row failed
+    for the same reason — a wrong key, an unpaid account. Ticking 400 boxes
+    to express "the thing I just fixed" is busywork, and the count is exact
+    rather than limited to what the page happened to show.
+
+    Deliberately NOT offered for rejections: those failed individually, on
+    their own content, and a blanket retry there spends real money to be
+    refused again.
+    """
+    if payload.get("key") != "config_blocked":
+        raise HTTPException(400, "Only the configuration group can be retried as a whole.")
+
+    project = _project(request, admin, db, payload.get("project_id"))
+    rows = (
+        db.query(SavedPoster)
+          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+          .filter(SavedPoster.pipeline_status == "failed_processing",
+                  SavedPoster.deleted_at.is_(None),
+                  or_(SavedPoster.process_error.like("[auth]%"),
+                      SavedPoster.process_error.like("[billing]%")),
+                  _title_scope(db, project))
+          .all()
+    )
+    for poster in rows:
+        poster.pipeline_status = "greenlit"
+        poster.process_attempts = 0
+        poster.process_error = None
+        poster.claimed_at = None
+        poster.claimed_by = None
+        title = db.query(MasterTitle).filter_by(id=poster.master_title_id).first()
+        if title:
+            P.recompute_title_status(db, title)
+
+    log_activity(db, user=admin, action="pipeline_retry_group", target_type="pipeline",
+                 details={"key": "config_blocked", "count": len(rows)})
+    db.commit()
+    return JSONResponse({"ok": True, "requeued": len(rows)})
+
+
+@router.post("/api/attention/return_to_worker")
+def api_attention_return_to_worker(
+    request: Request,
+    payload: dict = Body(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Send an image back to the worker who found it, for a different source.
+
+    This is the right answer whenever the PROCESSOR refused the picture
+    rather than failing at it: no amount of retrying changes what the source
+    photo contains. Retrying costs money to be refused identically.
+
+    Two things happen together, and both are necessary:
+
+      · a revision is raised, exactly as the Review Posters page does, so it
+        appears in the worker's queue with the reason attached
+      · the image LEAVES the pipeline (status back to NULL, attempts zeroed)
+
+    Without the second step the replacement bytes would arrive under a poster
+    still marked failed_processing, and nothing would ever look at it again.
+    """
+    from ..models import Revision
+
+    poster_ids = payload.get("poster_ids") or []
+    comment = (payload.get("comment") or "").strip()
+    if not poster_ids:
+        raise HTTPException(400, "poster_ids is required.")
+
+    sent = 0
+    for pid in poster_ids:
+        poster = db.query(SavedPoster).filter_by(id=pid).first()
+        if poster is None or poster.deleted_at is not None:
+            continue
+
+        note = comment or (
+            "This image could not be processed automatically. Please find a "
+            "different picture of the same subject."
+        )
+        existing = (
+            db.query(Revision)
+              .filter(Revision.saved_poster_id == poster.id,
+                      Revision.status.in_(("open", "awaiting_approval")))
+              .first()
+        )
+        if existing is None:
+            db.add(Revision(saved_poster_id=poster.id, comment=note,
+                            flagged_by=admin.username, status="open"))
+
+        title = db.query(MasterTitle).filter_by(id=poster.master_title_id).first()
+        if title is not None:
+            title.needs_revision = 1
+
+        # Out of the pipeline entirely. NULL means "not greenlit", so the
+        # replacement goes through the normal gate rather than silently
+        # inheriting an approval given to a different picture.
+        poster.pipeline_status = None
+        poster.process_attempts = 0
+        poster.claimed_at = None
+        poster.claimed_by = None
+        if title is not None:
+            P.recompute_title_status(db, title)
+        sent += 1
+
+    log_activity(db, user=admin, action="pipeline_return_to_worker",
+                 target_type="pipeline",
+                 details={"poster_ids": poster_ids, "comment": comment})
+    db.commit()
+    return JSONResponse({"ok": True, "sent": sent})
+
+
+@router.post("/api/attention/release")
+def api_attention_release(
+    payload: dict = Body(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Free a stale claim now rather than waiting for the reaper.
+
+    Only touches rows that are genuinely claimed — releasing something a node
+    is actively working on would hand the same item to a second machine.
+    """
+    freed = 0
+    for pid in payload.get("poster_ids") or []:
+        poster = db.query(SavedPoster).filter_by(id=pid).first()
+        if poster is not None and poster.pipeline_status == "processing":
+            poster.pipeline_status = "greenlit"
+            poster.claimed_at = None
+            poster.claimed_by = None
+            title = db.query(MasterTitle).filter_by(id=poster.master_title_id).first()
+            if title:
+                P.recompute_title_status(db, title)
+            freed += 1
+    for tid in payload.get("tracking_ids") or []:
+        tracking = db.query(UploadTracking).filter_by(id=tid).first()
+        if tracking is not None and tracking.status == "uploading":
+            tracking.status = "pending"
+            tracking.claimed_at = None
+            tracking.claimed_by = None
+            freed += 1
+
+    log_activity(db, user=admin, action="pipeline_release", target_type="pipeline",
+                 details={"freed": freed})
+    db.commit()
+    return JSONResponse({"ok": True, "freed": freed})
+
 
 @router.post("/api/images/unusable")
 def api_mark_unusable(

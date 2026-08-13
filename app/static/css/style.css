@@ -3920,6 +3920,41 @@ body:has(#ib-bulk-bar:not([hidden])) { padding-bottom: 88px; }
 .pipe-subrow td { padding-top: 0 !important; border-top: none !important; }
 .pipe-subrow    { background: rgba(232,85,75,0.04); }
 
+/* ── Needs Attention ────────────────────────────────────────────────────
+   One block per finding. The left border carries the severity so the page
+   can be read by scanning down the edge — a stopped stage should not look
+   the same as a note about titles listing short. */
+.attn-group {
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--subtext);
+  border-radius: 6px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  background: var(--card);
+}
+.attn-stop { border-left-color: var(--error); }
+.attn-warn { border-left-color: var(--skip); }
+.attn-info { border-left-color: var(--subtext); opacity: .92; }
+
+.attn-head    { display: flex; justify-content: space-between; align-items: center; }
+.attn-title   { font-weight: 700; letter-spacing: .04em; display: flex;
+                align-items: center; gap: 8px; flex-wrap: wrap; }
+.attn-count   { color: var(--subtext); }
+.attn-why     { color: var(--subtext); margin: 8px 0 4px; max-width: 70ch; line-height: 1.5; }
+.attn-do      { margin: 0 0 12px; line-height: 1.5; }
+.attn-actions { margin-top: 12px; }
+
+/* Wide enough to hold a real title without scrolling inside the box —
+   the whole task here is reading what you are typing. */
+.attn-title-input { width: 260px; max-width: 100%; }
+
+.pipe-clear { color: var(--success); font-weight: 600; margin: 0 0 6px; }
+
+@media (max-width: 700px) {
+  .attn-group       { padding: 12px; }
+  .attn-title-input { width: 100%; }
+}
+
 /* ── Modals + lightbox ──────────────────────────────────────────────── */
 .pipe-modal,
 .pipe-lightbox {
@@ -4050,6 +4085,30 @@ body:has(#ib-bulk-bar:not([hidden])) { padding-bottom: 88px; }
   border: 1px solid var(--border);
   border-radius: 4px;
   font-size: 12px;
+}
+
+/* Test output. Capped by viewport height rather than width so a tall
+   portrait image is still fully visible without scrolling — the point of
+   looking at it is judging the whole picture. */
+.pipe-test-img {
+  display: block;
+  max-width: 100%;
+  max-height: 70vh;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.pipe-log {
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: rgba(0,0,0,0.25);
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow-y: auto;
+  color: var(--subtext);
 }
 
 label.inline-check {

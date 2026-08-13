@@ -1572,6 +1572,24 @@ def replace_poster(
     sp.image_width     = img_w
     sp.image_height    = img_h
 
+    # ── These are DIFFERENT BYTES, so any post-production verdict on the old
+    # ones is void. Without this, a poster that reached failed_processing and
+    # was then replaced kept that status forever: the new picture sat behind a
+    # judgement passed on a picture that no longer exists, and nothing in the
+    # pipeline ever looked at it again.
+    #
+    # Only terminal states are cleared. A poster mid-flight is left alone —
+    # a node is holding it, and yanking it here would hand the same item out
+    # twice. Cleared to NULL rather than 'greenlit' so the replacement goes
+    # through the normal approval gate instead of inheriting an approval that
+    # was given to the previous image.
+    if sp.pipeline_status in ("failed_processing", "failed_upload", "unusable"):
+        sp.pipeline_status  = None
+        sp.process_attempts = 0
+        sp.process_error    = None
+        sp.claimed_at       = None
+        sp.claimed_by       = None
+
     # Move any open revision on this poster to 'awaiting_approval'.
     # Includes 'similar'-type revisions where this poster is the primary.
     open_revs = (
@@ -1607,6 +1625,13 @@ def replace_poster(
             r.worker_note = worker_note.strip() or None
             r.worker_action = "replaced"
             submitted_ids.append(r.id)
+
+    # The title's pipeline rollup is derived from its posters, so clearing one
+    # above leaves it stale — the title would still read "failed" with nothing
+    # under it failing.
+    if mt is not None:
+        from ..pipeline import recompute_title_status
+        recompute_title_status(db, mt)
 
     log_activity(
         db, user=user, action="replaced", target_type="saved_poster", target_id=sp.id,

@@ -23,7 +23,6 @@
   let overview    = null;
   let settings    = null;      // {settings, defaults, overrides}
   let accounts    = [];
-  let failures    = [];
   let consoleJob  = null;      // job id currently tailed
   let consoleTimer = null;
   let overviewTimer = null;
@@ -178,7 +177,7 @@
     processing: loadSettings,
     upload:     loadUploadSection,
     test:       loadTestSection,
-    failures:   loadFailures,
+    attention:  loadAttention,
     nodes:      loadOverview,
   };
 
@@ -267,11 +266,15 @@
 
   function renderBadges() {
     const glBadge = q('[data-badge="greenlight"]');
-    const flBadge = q('[data-badge="failures"]');
+    const atBadge = q('[data-badge="attention"]');
     const glCount = (overview.funnel.awaiting_greenlight || 0);
-    const flCount = (overview.failures.processing || 0) + (overview.failures.upload || 0);
+    // Computed server-side so the badge and the tab agree. Counting only
+    // 'failed' rows here would show 0 while a stalled node held work.
+    const atCount = overview.attention != null
+      ? overview.attention
+      : (overview.failures.processing || 0) + (overview.failures.upload || 0);
     if (glBadge) { glBadge.textContent = glCount; glBadge.hidden = glCount === 0; }
-    if (flBadge) { flBadge.textContent = flCount; flBadge.hidden = flCount === 0; }
+    if (atBadge) { atBadge.textContent = atCount; atBadge.hidden = atCount === 0; }
   }
 
   function renderFunnel() {
@@ -1392,102 +1395,398 @@
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════
-  //  FAILURES
-  // ═══════════════════════════════════════════════════════════════════════
+  // ── Generation test ──────────────────────────────────────────────────────
+  //
+  // Runs inline rather than through the job queue, because the stage itself
+  // runs on the server. That means one request held open for ~60s, so the
+  // button has to say so — a silent minute reads as a hang, and the natural
+  // response to a hang is to press the button again and pay twice.
 
-  async function loadFailures() {
-    const el = q('[data-failures-list]');
-    const kind = q('[data-failures-kind]').value;
-    el.innerHTML = '<div class="muted">Loading…</div>';
+  async function runGptTest() {
+    const idEl = q('[data-test-gpt-poster]');
+    const statusEl = q('[data-test-status="gpt"]');
+    const out = q('[data-test-gpt-result]');
+    const id = parseInt(idEl.value, 10);
+    if (!id) return setStatus(statusEl, 'Enter an image id.', 'error');
 
-    let data;
+    const btn = q('[data-action="test-gpt"]');
+    btn.disabled = true;
+    setStatus(statusEl, 'generating — this takes about a minute…');
+    out.hidden = true;
+
+    const started = Date.now();
+    const tick = setInterval(() => setStatus(statusEl,
+      `generating — ${Math.round((Date.now() - started) / 1000)}s elapsed…`), 1000);
+
     try {
-      data = await getJSON(withProject(`${API}/failures?kind=${kind}`));
-      failures = data.items;
+      // project_id goes in the BODY. withProject() puts it in the query
+      // string, which POST handlers here read from the payload — it would be
+      // silently ignored and the call would fall back to the active project.
+      const d = await postJSON(`${API}/test/gpt_process`,
+                               { poster_id: id, project_id: projectId || null });
+      clearInterval(tick);
+
+      if (!d.ok) {
+        // A refusal is a RESULT, not an error: the request worked and the
+        // model declined. Shown in full, with the policy categories, because
+        // that is the thing you are trying to learn from the test.
+        setStatus(statusEl, d.fatal ? 'refused' : 'failed, but retryable', 'error');
+        out.hidden = false;
+        out.innerHTML = `
+          <p class="attn-why">${esc(d.error || 'No detail returned.')}</p>
+          ${(d.categories && d.categories.length)
+            ? '<p>' + d.categories.map((c) => `<span class="status-pill status-error">${esc(c)}</span>`).join(' ') + '</p>'
+            : ''}
+          <pre class="pipe-log">${esc((d.log || []).join('\n'))}</pre>`;
+        return;
+      }
+
+      setStatus(statusEl, `done in ${Math.round(d.total_ms / 1000)}s`, 'ok');
+      out.hidden = false;
+      out.innerHTML = `
+        <div class="filter-row" style="gap:14px;margin-bottom:10px">
+          <span class="mono">${d.width}×${d.height}</span>
+          <span class="mono">${(d.bytes / 1024 / 1024).toFixed(2)} MB</span>
+          <span class="mono">$${d.cost_usd}</span>
+          <span class="muted mono">${d.input_tokens || 0} in / ${d.output_tokens || 0} out</span>
+          ${d.stored ? '' : '<span class="status-pill status-error">NOT STORED</span>'}
+        </div>
+        ${d.preview_path
+          ? `<img class="pipe-test-img" alt="Test output"
+                  src="${API}/test/image?path=${encodeURIComponent(d.preview_path)}&t=${Date.now()}">`
+          : '<p class="muted">No preview — the image could not be written to storage.</p>'}
+        <pre class="pipe-log">${esc((d.log || []).join('\n'))}</pre>`;
+    } catch (e) {
+      clearInterval(tick);
+      setStatus(statusEl, e.message, 'error');
+    } finally {
+      clearInterval(tick);
+      btn.disabled = false;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  //  NEEDS ATTENTION
+  // ═══════════════════════════════════════════════════════════════════════
+  //
+  // Findings, not a table dump. Each group is rendered from what the server
+  // says about it — label, why it matters, what to press — so adding a check
+  // is a server change only. Nothing here knows what GPT or Photoshop is.
+  //
+  // The action buttons a group offers come from its key. A group that should
+  // not offer RETRY simply is not given one: 'title_held' rows would fail
+  // identically on retry, and offering the button would teach you to press
+  // something that cannot work.
+
+  let attention = [];
+
+  const ATTENTION_ACTIONS = {
+    rejected:      ['return_to_worker', 'unusable'],
+    process_failed:['retry_process', 'return_to_worker', 'unusable'],
+    config_blocked:['retry_process_all'],
+    title_held:    ['retitle'],
+    upload_failed: ['retry_upload', 'mark_removed', 'skip_upload'],
+    stalled:       ['release'],
+    unusable:      ['return_to_pipeline'],
+    short_titles:  [],
+    spend_capped:  [],
+  };
+
+  const ACTION_LABEL = {
+    retry_process:      'RETRY',
+    retry_process_all:  'RETRY ALL AFFECTED',
+    retry_upload:       'RETRY',
+    return_to_worker:   'RETURN TO WORKER',
+    unusable:           'MARK UNUSABLE',
+    return_to_pipeline: 'RETURN TO PIPELINE',
+    mark_removed:       'MARK REMOVED',
+    skip_upload:        'SKIP PERMANENTLY',
+    release:            'RELEASE CLAIM',
+    retitle:            '',
+  };
+
+  const SEVERITY_PILL = {
+    stop: '<span class="status-pill status-error">STOPPED</span>',
+    warn: '',
+    info: '<span class="status-pill">FYI</span>',
+  };
+
+  async function loadAttention() {
+    const el = q('[data-attention-list]');
+    el.innerHTML = '<div class="muted">Checking…</div>';
+
+    let d;
+    try {
+      d = await getJSON(withProject(`${API}/attention`));
     } catch (e) {
       el.innerHTML = '<div class="muted">Could not load: ' + esc(e.message) + '</div>';
       return;
     }
+    attention = d.findings || [];
+    setStatus(q('[data-attention-checked]'), `checked ${d.checked_at}`);
 
-    if (!failures.length) {
-      el.innerHTML = '<p class="muted">No failures. </p>';
-      setStatus(q('[data-failures-summary]'), '');
+    if (!attention.length) {
+      // Worth saying plainly. An empty page is only reassuring if you know
+      // what was actually looked at.
+      el.innerHTML = `
+        <p class="pipe-clear">Nothing needs attention in this project.</p>
+        <p class="muted">Checked for: images the model refused, titles the
+        marketplace would reject, failed uploads, work claimed but never
+        finished, spending limits, and titles that will list with fewer
+        images than planned.</p>`;
       return;
     }
 
-    if (kind === 'processing') {
-      el.innerHTML = `
-        <table class="data-table">
-          <thead><tr><th style="width:34px"></th><th>TITLE</th><th>FILE</th><th>ATTEMPTS</th><th>ERROR</th></tr></thead>
-          <tbody>
-          ${failures.map((f) => `
-            <tr>
-              <td><input type="checkbox" data-fail-pick="${f.poster_id}"></td>
-              <td>${esc(f.title)} <span class="muted">(${esc(f.year)})</span></td>
-              <td class="mono">${esc(f.filename)}</td>
-              <td class="mono">${f.attempts}${f.exhausted ? ' <span class="status-pill status-error">EXHAUSTED</span>' : ''}</td>
-              <td class="mono pipe-error-cell">${esc(f.error || '')}</td>
-            </tr>`).join('')}
-          </tbody>
-        </table>`;
-    } else {
-      el.innerHTML = `
-        <table class="data-table">
-          <thead><tr><th style="width:34px"></th><th>LISTING TITLE</th><th>ACCOUNT</th><th>ATTEMPTS</th><th>ERROR</th><th>EVIDENCE</th></tr></thead>
-          <tbody>
-          ${failures.map((f) => `
-            <tr>
-              <td><input type="checkbox" data-fail-pick="${f.tracking_id}"></td>
-              <td>${esc(f.remote_title || f.title)}</td>
-              <td class="mono">${esc(f.account)}</td>
-              <td class="mono">${f.attempts}${f.exhausted ? ' <span class="status-pill status-error">EXHAUSTED</span>' : ''}</td>
-              <td class="mono pipe-error-cell">${esc(f.error || '')}</td>
-              <td>${f.screenshot
-                    ? `<button class="btn btn-ghost btn-tiny" data-shot="${esc(f.screenshot)}" data-shot-name="${esc(f.remote_title || '')}">SCREENSHOT</button>`
-                    : '<span class="muted">—</span>'}</td>
-            </tr>`).join('')}
-          </tbody>
-        </table>`;
+    el.innerHTML = attention.map((f) => `
+      <section class="attn-group attn-${esc(f.severity)}" data-attn-key="${esc(f.key)}">
+        <div class="attn-head">
+          <span class="attn-title">${esc(f.label)}
+            ${SEVERITY_PILL[f.severity] || ''}
+            <span class="attn-count mono">${f.count}</span>
+          </span>
+        </div>
+        <p class="attn-why">${esc(f.why)}</p>
+        <p class="attn-do"><strong>What to do:</strong> ${esc(f.action)}</p>
+        ${renderAttentionItems(f)}
+        ${f.note ? `<p class="muted mono">${esc(f.note)}</p>` : ''}
+        ${renderAttentionButtons(f)}
+      </section>`).join('');
 
-      el.querySelectorAll('[data-shot]').forEach((b) =>
-        b.addEventListener('click', () => {
-          const lb = q('[data-shot-lightbox]');
-          q('[data-shot-img]').src = `${API}/artifact?path=${encodeURIComponent(b.dataset.shot)}`;
-          q('[data-shot-title]').textContent = b.dataset.shotName || b.dataset.shot;
-          lb.hidden = false;
-        }));
+    wireAttention(el);
+  }
+
+  function renderAttentionItems(f) {
+    if (!f.items.length) return '';
+
+    if (f.key === 'spend_capped') {
+      const i = f.items[0];
+      return `<p class="mono">$${esc(i.spent)} spent · $${esc(i.cap)} cap</p>`;
     }
 
-    setStatus(q('[data-failures-summary]'), `${failures.length} shown`);
+    if (f.key === 'config_blocked') {
+      return `<table class="data-table"><tbody>${f.items.map((i) => `
+        <tr><td class="mono">${i.count}</td>
+            <td class="mono pipe-error-cell">${esc(i.error)}</td></tr>`).join('')}
+      </tbody></table>`;
+    }
+
+    // Held titles get an editable field rather than a row, because the fix IS
+    // the edit. The preview under it comes from the server so there is only
+    // ever one implementation of what the marketplace keeps.
+    if (f.key === 'title_held') {
+      return `<table class="data-table">
+        <thead><tr><th>ITEM</th><th>WHY</th><th>NEW TITLE</th><th></th></tr></thead>
+        <tbody>${f.items.map((i) => `
+          <tr data-attn-row="${i.tracking_id}">
+            <td>${esc(i.title)}</td>
+            <td class="mono pipe-error-cell">${esc(i.error)}</td>
+            <td>
+              <input type="text" class="attn-title-input" value="${esc(i.title)}"
+                     data-attn-retitle="${i.tracking_id}">
+              <span class="muted mono" data-attn-preview="${i.tracking_id}"></span>
+            </td>
+            <td><button class="btn btn-accent btn-tiny"
+                        data-attn-save="${i.tracking_id}">SAVE &amp; QUEUE</button></td>
+          </tr>`).join('')}
+        </tbody></table>`;
+    }
+
+    if (f.key === 'short_titles') {
+      return `<table class="data-table">
+        <thead><tr><th>TITLE</th><th>WILL LIST</th></tr></thead>
+        <tbody>${f.items.map((i) => `
+          <tr><td>${esc(i.title)}</td>
+              <td class="mono">${i.have} of ${i.expected}</td></tr>`).join('')}
+        </tbody></table>`;
+    }
+
+    if (f.key === 'unusable') {
+      return `<table class="data-table">
+        <thead><tr><th style="width:34px"></th><th>TITLE</th><th>REASON</th><th>RETIRED</th></tr></thead>
+        <tbody>${f.items.map((i) => `
+          <tr>
+            <td><input type="checkbox" data-attn-pick="${i.poster_id}" data-attn-kind="poster"></td>
+            <td>${esc(i.title)}</td>
+            <td>${esc(i.reason || '')}</td>
+            <td class="mono">${esc(i.at || '')} ${esc(i.by || '')}</td>
+          </tr>`).join('')}
+        </tbody></table>`;
+    }
+
+    if (f.key === 'stalled') {
+      return `<table class="data-table">
+        <thead><tr><th style="width:34px"></th><th>TITLE</th><th>STAGE</th><th>MACHINE</th><th>HELD</th></tr></thead>
+        <tbody>${f.items.map((i) => `
+          <tr>
+            <td><input type="checkbox"
+                       data-attn-pick="${i.kind === 'poster' ? i.poster_id : i.tracking_id}"
+                       data-attn-kind="${esc(i.kind)}"></td>
+            <td>${esc(i.title)}</td>
+            <td class="mono">${esc(i.stage)}</td>
+            <td class="mono">${esc(i.node || '—')}</td>
+            <td class="mono">${i.held_min} min</td>
+          </tr>`).join('')}
+        </tbody></table>`;
+    }
+
+    if (f.key === 'upload_failed') {
+      return `<table class="data-table">
+        <thead><tr><th style="width:34px"></th><th>LISTING TITLE</th><th>ACCOUNT</th><th>TRIES</th><th>ERROR</th><th>EVIDENCE</th></tr></thead>
+        <tbody>${f.items.map((i) => `
+          <tr>
+            <td><input type="checkbox" data-attn-pick="${i.tracking_id}" data-attn-kind="tracking"></td>
+            <td>${esc(i.remote_title || i.title)}</td>
+            <td class="mono">${esc(i.account)}</td>
+            <td class="mono">${i.attempts}${i.exhausted ? ' <span class="status-pill status-error">EXHAUSTED</span>' : ''}</td>
+            <td class="mono pipe-error-cell">${esc(i.error || '')}</td>
+            <td>${i.screenshot
+                  ? `<button class="btn btn-ghost btn-tiny" data-shot="${esc(i.screenshot)}" data-shot-name="${esc(i.remote_title || '')}">SCREENSHOT</button>`
+                  : '<span class="muted">—</span>'}</td>
+          </tr>`).join('')}
+        </tbody></table>`;
+    }
+
+    // Default: a poster-level problem (rejected, process_failed).
+    return `<table class="data-table">
+      <thead><tr><th style="width:34px"></th><th>TITLE</th><th>FILE</th><th>TRIES</th><th>WHAT THE STAGE SAID</th></tr></thead>
+      <tbody>${f.items.map((i) => `
+        <tr>
+          <td><input type="checkbox" data-attn-pick="${i.poster_id}" data-attn-kind="poster"></td>
+          <td>${esc(i.title)}</td>
+          <td class="mono">${esc(i.filename || '')}</td>
+          <td class="mono">${i.attempts == null ? '' : i.attempts}</td>
+          <td class="mono pipe-error-cell">
+            ${(i.categories && i.categories.length)
+              ? i.categories.map((c) => `<span class="status-pill status-error">${esc(c)}</span>`).join(' ') + ' '
+              : ''}${esc(i.error || '')}</td>
+        </tr>`).join('')}
+      </tbody></table>`;
   }
 
-  function selectedFailIds() {
-    return qa('[data-fail-pick]:checked').map((c) => parseInt(c.dataset.failPick, 10));
+  function renderAttentionButtons(f) {
+    const acts = (ATTENTION_ACTIONS[f.key] || []).filter((a) => ACTION_LABEL[a]);
+    if (!acts.length) return '';
+    return `<div class="filter-row attn-actions">
+      ${acts.map((a) => `<button class="btn ${a.startsWith('retry') ? 'btn-accent' : 'btn-ghost'} btn-tiny"
+                                 data-attn-action="${a}" data-attn-group="${esc(f.key)}">${ACTION_LABEL[a]}</button>`).join('')}
+      <span class="muted">applies to the ticked rows</span>
+    </div>`;
   }
 
-  async function failuresAction(action) {
-    const ids = selectedFailIds();
-    if (!ids.length) return toast('Nothing selected.', 'error');
-    const kind = q('[data-failures-kind]').value;
-    const key = kind === 'processing' ? 'poster_ids' : 'tracking_ids';
+  function wireAttention(root_) {
+    root_.querySelectorAll('[data-shot]').forEach((b) =>
+      b.addEventListener('click', () => {
+        q('[data-shot-img]').src = `${API}/artifact?path=${encodeURIComponent(b.dataset.shot)}`;
+        q('[data-shot-title]').textContent = b.dataset.shotName || b.dataset.shot;
+        q('[data-shot-lightbox]').hidden = false;
+      }));
+
+    // Live preview of what the marketplace would actually store. Debounced,
+    // because this is a keystroke handler hitting the server.
+    root_.querySelectorAll('[data-attn-retitle]').forEach((input) => {
+      let timer = null;
+      const preview = root_.querySelector(`[data-attn-preview="${input.dataset.attnRetitle}"]`);
+      const run = async () => {
+        try {
+          const d = await postJSON(API + '/attention/preview_title', { title: input.value });
+          preview.textContent = d.problem ? `✕ ${d.problem}` : `→ ${d.rendered}  (${d.length})`;
+          preview.style.color = d.problem ? 'var(--error)' : 'var(--success)';
+        } catch (e) { preview.textContent = ''; }
+      };
+      input.addEventListener('input', () => {
+        clearTimeout(timer);
+        timer = setTimeout(run, 300);
+      });
+      run();
+    });
+
+    root_.querySelectorAll('[data-attn-save]').forEach((b) =>
+      b.addEventListener('click', async () => {
+        const id = parseInt(b.dataset.attnSave, 10);
+        const input = root_.querySelector(`[data-attn-retitle="${id}"]`);
+        try {
+          const d = await postJSON(API + '/attention/retitle',
+                                   { tracking_id: id, title: input.value });
+          toast(`Queued as "${d.remote_title}".`);
+          loadAttention();
+          loadOverview();
+        } catch (e) { toast(e.message, 'error'); }
+      }));
+
+    root_.querySelectorAll('[data-attn-action]').forEach((b) =>
+      b.addEventListener('click', () => attentionAction(b.dataset.attnAction,
+                                                        b.dataset.attnGroup)));
+  }
+
+  function attentionPicks(groupKey) {
+    const group = document.querySelector(`[data-attn-key="${groupKey}"]`);
+    if (!group) return { posters: [], trackings: [] };
+    const picks = Array.from(group.querySelectorAll('[data-attn-pick]:checked'));
+    return {
+      posters:   picks.filter((c) => c.dataset.attnKind === 'poster')
+                      .map((c) => parseInt(c.dataset.attnPick, 10)),
+      trackings: picks.filter((c) => c.dataset.attnKind === 'tracking')
+                      .map((c) => parseInt(c.dataset.attnPick, 10)),
+    };
+  }
+
+  async function attentionAction(action, groupKey) {
+    const { posters, trackings } = attentionPicks(groupKey);
+    const group = attention.find((f) => f.key === groupKey) || { items: [] };
 
     try {
-      if (action === 'retry') {
-        const d = await postJSON(API + '/failures/retry', { kind, [key]: ids });
-        toast(`Requeued ${d.requeued} items.`);
-      } else if (action === 'skip') {
-        if (!confirm('Permanently exclude these from the pipeline?')) return;
-        const d = await postJSON(API + '/failures/skip', { [key]: ids });
-        toast(`Skipped ${d.skipped} items.`);
-      } else if (action === 'removed') {
-        if (kind === 'processing') return toast('Mark Removed only applies to uploads.', 'error');
+      if (action === 'retry_process_all') {
+        // The whole point of this group is that every row failed for ONE
+        // reason, so ticking them individually would be busywork.
+        // The server re-runs the same query and requeues everything it
+        // matches. Sending ids from here would only ever cover the rows this
+        // page happened to render, which is not what the button says.
+        if (!confirm('Retry every image affected by this? Fix the setting first.')) return;
+        const d = await postJSON(API + '/attention/retry_group', { key: groupKey });
+        toast(`Requeued ${d.requeued}.`);
+      } else if (!posters.length && !trackings.length) {
+        return toast('Tick the rows you want this to apply to.', 'error');
+      } else if (action === 'retry_process') {
+        const d = await postJSON(API + '/failures/retry',
+                                 { kind: 'processing', poster_ids: posters });
+        toast(`Requeued ${d.requeued}.`);
+      } else if (action === 'retry_upload') {
+        const d = await postJSON(API + '/failures/retry',
+                                 { kind: 'upload', tracking_ids: trackings });
+        toast(`Requeued ${d.requeued}.`);
+      } else if (action === 'return_to_worker') {
+        const comment = prompt(
+          'What should the worker be told?\n\n' +
+          'Leave blank for the default: "find a different picture of the same subject".'
+        );
+        if (comment === null) return;
+        const d = await postJSON(API + '/attention/return_to_worker',
+                                 { poster_ids: posters, comment });
+        toast(`Sent ${d.sent} back to the worker.`);
+      } else if (action === 'unusable') {
+        const reason = prompt('Why can this never be used? (kept permanently)');
+        if (!reason || !reason.trim()) return;
+        const d = await postJSON(API + '/images/unusable',
+                                 { poster_ids: posters, reason: reason.trim() });
+        toast(`Retired ${d.count}.`);
+      } else if (action === 'return_to_pipeline') {
+        const d = await postJSON(API + '/images/return_to_pipeline', { poster_ids: posters });
+        toast(`Returned ${d.count} to the pipeline.`);
+      } else if (action === 'mark_removed') {
         const reason = prompt('Reason for the takedown (optional):') || '';
         const d = await postJSON(API + '/failures/mark_removed',
-          { tracking_ids: ids, reason });
+                                 { tracking_ids: trackings, reason });
         toast(`Marked ${d.marked} as removed.`);
+      } else if (action === 'skip_upload') {
+        if (!confirm('Permanently exclude these from the pipeline?')) return;
+        const d = await postJSON(API + '/failures/skip', { tracking_ids: trackings });
+        toast(`Skipped ${d.skipped}.`);
+      } else if (action === 'release') {
+        const d = await postJSON(API + '/attention/release',
+                                 { poster_ids: posters, tracking_ids: trackings });
+        toast(`Freed ${d.freed}.`);
       }
-      loadFailures();
+      loadAttention();
       loadOverview();
     } catch (e) { toast(e.message, 'error'); }
   }
@@ -1674,16 +1973,14 @@
         break;
       }
 
-      case 'failures-load': loadFailures(); break;
-      case 'failures-retry': failuresAction('retry'); break;
-      case 'failures-skip': failuresAction('skip'); break;
-      case 'failures-removed': failuresAction('removed'); break;
+      case 'test-gpt': runGptTest(); break;
+
+      case 'attention-load': loadAttention(); break;
 
       case 'shot-close': q('[data-shot-lightbox]').hidden = true; break;
     }
   });
 
-  q('[data-failures-kind]').addEventListener('change', loadFailures);
   q('[data-titles-q]').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') loadTitles();
   });

@@ -175,10 +175,10 @@
   const LOADERS = {
     overview:   loadOverview,
     greenlight: loadGreenlight,
-    // The Processing tab owns both the settings and the spending panel that
-    // sits above them, so opening it loads both. Awaited and returned so a
-    // failure reaches showSection's error toast instead of vanishing into an
-    // unhandled rejection.
+    // NOTE: never actually called — boot sets loaded.processing = true and
+    // fetches these eagerly, because the settings feed four sections at once.
+    // Kept so the map stays a complete description of each section, and so
+    // that reaching this section by any other route still works.
     processing: async () => { await loadSettings(); await loadSpend(); },
     upload:     loadUploadSection,
     test:       loadTestSection,
@@ -2151,6 +2151,12 @@
   Promise.all([
     loadOverview().catch((e) => toast('Overview: ' + e.message, 'error')),
     loadSettings().catch((e) => { loaded.processing = false; }),
+    // Loaded here for the same reason as the settings, and because of the
+    // line above: `loaded.processing = true` means LOADERS.processing is
+    // NEVER invoked. Anything the Processing tab needs has to be fetched
+    // right here — putting it in the loader map looks correct and silently
+    // does nothing, which is exactly how the spend panel sat on "Loading…".
+    loadSpend(),
   ]).then(() => {
     showSection(initial, { silent: true });
   });

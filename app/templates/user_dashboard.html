@@ -185,36 +185,46 @@
      needs no popup.
      ───────────────────────────────────────────────────────────────────── #}
   <div class="search-box" data-search-box hidden>
-    {# One row: find images, then save them. The save controls are disabled
-       rather than hidden until something is selected, so the row never jumps
-       around under your thumb. #}
+    {#
+      One row, two ends. FINDING on the left, DOING SOMETHING WITH WHAT YOU
+      FOUND on the right — pushed to the far edge so the two jobs never read
+      as one list of four equal buttons.
+
+      CLEAR sits inboard of SAVE SELECTED deliberately: SAVE is the one
+      pressed every time and belongs at the outside edge where the thumb
+      lands, and putting the destructive one there instead would be asking
+      for it.
+
+      All four are disabled rather than hidden until they apply, so the row
+      never reflows under a thumb that is already moving.
+    #}
     <div class="search-head">
-      <button class="btn btn-accent" data-action="search-normal">SEARCH</button>
-      <button class="btn btn-ghost" data-action="search-deep">DEEP&nbsp;SEARCH</button>
-      <button class="btn btn-accent" data-action="search-save" disabled>SAVE&nbsp;SELECTED</button>
-      <button class="btn btn-ghost" data-action="search-clear" disabled>CLEAR</button>
-      <span class="search-bar-count mono"></span>
-      <span class="search-status mono"></span>
+      <div class="search-head-find">
+        <button class="btn btn-accent" data-action="search-normal">SEARCH</button>
+        <button class="btn btn-ghost" data-action="search-deep">DEEP&nbsp;SEARCH</button>
+        <span class="search-status mono"></span>
+      </div>
+      <div class="search-head-act">
+        <span class="search-bar-count mono"></span>
+        <button class="btn btn-ghost" data-action="search-clear" disabled>CLEAR</button>
+        <button class="btn btn-accent" data-action="search-save" disabled>SAVE&nbsp;SELECTED</button>
+      </div>
     </div>
     <div class="search-note muted" data-search-note hidden></div>
     <div class="search-grid" data-search-grid></div>
 
-    {# Jump back up to SAVE SELECTED / DONE / SKIP.
-       Appears only once you have picked as many images as this title takes
-       AND the buttons have scrolled off screen — on a phone the grid is long
-       and the alternative is a lot of thumb-work to reach a button you
-       already know you want. #}
+    {#
+      Back up to the buttons. Appears only once you have picked as many
+      images as this title takes AND the row has scrolled off screen — on a
+      phone the grid is long, and the alternative is a lot of thumb-work to
+      reach a button you already know you want.
+
+      It moves you; it does not press anything. Labelled for the movement so
+      it cannot be mistaken for the SAVE it scrolls to.
+    #}
     <button type="button" class="search-jump" data-search-jump hidden
             aria-label="Back up to the save and finish buttons">
-      <span aria-hidden="true">↑</span> SAVE
-    </button>
-
-    {# The same button in its other role. Before anything has been searched
-       it starts the search AND takes you to the results, because on a phone
-       those are one intention expressed as two gestures. #}
-    <button type="button" class="search-jump search-jump-find" data-search-find hidden
-            aria-label="Search for images and go to the results">
-      SEARCH <span aria-hidden="true">↓</span>
+      <span aria-hidden="true">↑</span> DONE PICKING
     </button>
   </div>
 </template>

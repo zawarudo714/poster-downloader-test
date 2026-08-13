@@ -1315,11 +1315,9 @@ function wireSearch(box, title) {
 
   const head    = box.querySelector('.search-head');
   const jump    = box.querySelector('[data-search-jump]');
-  const find    = box.querySelector('[data-search-find]');
 
   const limit    = title.images_per_title || 2;
   const selected = new Set();
-  let searching  = false;
   let probed     = false;   // has the free cached-results check come back yet
 
   // Is the button row actually off screen? Asking rather than assuming means
@@ -1344,41 +1342,19 @@ function wireSearch(box, title) {
     // Nothing floats until the opening cache probe has answered. Without
     // this, a title with cached results showed SEARCH for a frame and then
     // took it away again as the results landed.
-    if (!probed) { jump.hidden = true; if (find) find.hidden = true; return; }
+    if (!probed) { jump.hidden = true; return; }
     const room = Math.max(0, limit - alreadySaved());
     // Only once they have picked everything this title can take. Showing it
     // at one-of-two would interrupt someone mid-choice.
     jump.hidden = !(room > 0 && selected.size >= room && !headVisible);
-
-    // The two floating buttons are mutually exclusive — one offers to find
-    // images, the other to save them, and both at once would be a choice
-    // where there is only ever one sensible move.
-    if (find) {
-      find.hidden = jump.hidden === false
-                 || results.length > 0
-                 || searching
-                 || headVisible;
-    }
   }
 
-  if (jump) {
-    jump.addEventListener("click", async () => {
-      jump.hidden = true;
-      // saveSelected() scrolls back up itself once it succeeds. If nothing
-      // was selected it returns 0 without saving, and we still go up —
-      // pressing a button should always visibly do something.
-      const n = await saveSelected();
-      if (!n) backToActions();
-    });
-  }
+  // Scrolls, and does NOT save. Reverted deliberately: saving is
+  // irreversible from the worker's side, and a big button under the thumb
+  // that commits their picks the moment it is brushed is the wrong trade.
+  // It takes them TO the save button, and they press that.
+  if (jump) jump.addEventListener("click", () => { backToActions(); jump.hidden = true; });
 
-  if (find) {
-    find.addEventListener("click", () => {
-      find.hidden = true;
-      grid.scrollIntoView({ behavior: "smooth", block: "start" });
-      run("normal", false);
-    });
-  }
   let variant    = 'normal';
   let results    = [];
 
@@ -1439,7 +1415,6 @@ function wireSearch(box, title) {
   async function run(kind, force, cacheOnly) {
     variant = kind;
     selected.clear();
-    searching = !cacheOnly;
     refreshJump();
     if (!cacheOnly) {
       status.textContent = 'searching…';
@@ -1478,7 +1453,6 @@ function wireSearch(box, title) {
       grid.innerHTML = `<p class="error">Search failed: ${esc(e.message)}</p>`;
       status.textContent = '';
     } finally {
-      searching = false;
       probed = true;
       refreshJump();
     }

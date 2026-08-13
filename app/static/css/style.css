@@ -4529,7 +4529,33 @@ label.inline-check {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 .search-box { margin-top: 14px; }
-.search-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* Two jobs, two ends: finding on the left, acting on what you found pushed
+   to the right edge. `space-between` rather than a margin on the second
+   group, so it still sits correctly if the left group ever wraps. */
+.search-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.search-head-find,
+.search-head-act {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* On a phone the two groups get a line each — four buttons across a 360px
+   screen would shrink the labels to nothing. The action pair stays right
+   aligned so its position is the same on both, and the thumb learns one
+   place rather than two. */
+@media (max-width: 560px) {
+  .search-head { flex-direction: column; align-items: stretch; }
+  .search-head-act { justify-content: flex-end; }
+  .search-head-find .btn,
+  .search-head-act .btn { flex: 0 0 auto; }
+}
 
 /* Jump back to the save / done / skip row.
    Bottom-RIGHT and above the edge, where a thumb already rests. Fixed rather
@@ -4559,10 +4585,6 @@ label.inline-check {
 .search-jump:active { transform: translateY(1px); }
 .search-jump[hidden] { display: none !important; }
 
-/* The find-images role. A different colour because it does something
-   different — pressing it spends a search, where the save button only
-   moves you up the page. */
-.search-jump-find { background: var(--success); color: #05130c; }
 .search-status { font-size: 11px; color: var(--subtext); margin-left: auto; }
 .search-note { font-size: 11px; margin-top: 6px; }
 

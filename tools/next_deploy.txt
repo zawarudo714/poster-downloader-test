@@ -1,1 +1,1 @@
-Fix save history 500, spend panel render, floating save actually saves
+Search row: find on the left, clear and save pushed right; drop the floating search

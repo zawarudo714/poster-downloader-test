@@ -1320,6 +1320,7 @@ function wireSearch(box, title) {
   const limit    = title.images_per_title || 2;
   const selected = new Set();
   let searching  = false;
+  let probed     = false;   // has the free cached-results check come back yet
 
   // Is the button row actually off screen? Asking rather than assuming means
   // the jump button never appears pointing at something already visible —
@@ -1340,6 +1341,10 @@ function wireSearch(box, title) {
 
   function refreshJump() {
     if (!jump) return;
+    // Nothing floats until the opening cache probe has answered. Without
+    // this, a title with cached results showed SEARCH for a frame and then
+    // took it away again as the results landed.
+    if (!probed) { jump.hidden = true; if (find) find.hidden = true; return; }
     const room = Math.max(0, limit - alreadySaved());
     // Only once they have picked everything this title can take. Showing it
     // at one-of-two would interrupt someone mid-choice.
@@ -1356,7 +1361,16 @@ function wireSearch(box, title) {
     }
   }
 
-  if (jump) jump.addEventListener("click", () => { backToActions(); jump.hidden = true; });
+  if (jump) {
+    jump.addEventListener("click", async () => {
+      jump.hidden = true;
+      // saveSelected() scrolls back up itself once it succeeds. If nothing
+      // was selected it returns 0 without saving, and we still go up —
+      // pressing a button should always visibly do something.
+      const n = await saveSelected();
+      if (!n) backToActions();
+    });
+  }
 
   if (find) {
     find.addEventListener("click", () => {
@@ -1465,6 +1479,7 @@ function wireSearch(box, title) {
       status.textContent = '';
     } finally {
       searching = false;
+      probed = true;
       refreshJump();
     }
   }
@@ -1476,8 +1491,13 @@ function wireSearch(box, title) {
   box.querySelector('[data-action="search-clear"]')
      .addEventListener('click', () => { selected.clear(); refreshBar(); });
 
-  box.querySelector('[data-action="search-save"]').addEventListener('click', async () => {
+  // Extracted so the floating button and the toolbar button are the SAME
+  // action rather than two implementations that drift apart. The floating one
+  // previously only scrolled, which read as "save" and quietly did nothing —
+  // the worst possible split between what a button says and what it does.
+  async function saveSelected() {
     const btn = box.querySelector('[data-action="search-save"]');
+    if (btn.disabled || !selected.size) return 0;
     btn.disabled = true;
     const urls = [...selected];
     let saved = 0;
@@ -1501,7 +1521,11 @@ function wireSearch(box, title) {
     // in front of you. Without this you are left at the bottom of a long
     // grid having to scroll back to the only two buttons that matter next.
     if (saved) backToActions();
-  });
+    return saved;
+  }
+
+  box.querySelector('[data-action="search-save"]')
+     .addEventListener('click', () => saveSelected());
 
   // Do NOT search on open. Opening a title is not the same as wanting a
   // search: a worker reopening something to check what they saved would

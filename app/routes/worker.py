@@ -45,7 +45,7 @@ from ..config import (
     SOFT_LIMIT_PER_TITLE,
 )
 from ..db import get_db
-from ..models import ActivityLog, MasterTitle, Revision, SavedPoster, User
+from ..models import ActivityLog, MasterTitle, Project, Revision, SavedPoster, User
 from ..pipeline import resolve_project
 from ..projects import (
     active_project, allowed_projects, remember_project, scope_titles,

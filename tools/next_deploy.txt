@@ -1,1 +1,1 @@
-Spend panel, combined stats with project filter, review gate toggle, project-scoped setting saves
+Fix save history 500, spend panel render, floating save actually saves

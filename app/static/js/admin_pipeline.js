@@ -176,8 +176,10 @@
     overview:   loadOverview,
     greenlight: loadGreenlight,
     // The Processing tab owns both the settings and the spending panel that
-    // sits above them, so opening it loads both.
-    processing: () => { loadSettings(); loadSpend(); },
+    // sits above them, so opening it loads both. Awaited and returned so a
+    // failure reaches showSection's error toast instead of vanishing into an
+    // unhandled rejection.
+    processing: async () => { await loadSettings(); await loadSpend(); },
     upload:     loadUploadSection,
     test:       loadTestSection,
     attention:  loadAttention,
@@ -1424,48 +1426,62 @@
   // question actually being asked. A month-to-date figure on its own tells
   // you what has happened, not what is about to.
 
+  // Every number is coerced. The panel reads values from an endpoint that
+  // can legitimately return null (no cap set, no images yet, so no per-image
+  // figure), and calling .toFixed on one of those throws mid-template — which
+  // left the box showing "Loading…" for ever with nothing logged anywhere.
+  // A panel that lies about its own state is worse than one that says it
+  // failed.
+  const num = (v) => (typeof v === 'number' && isFinite(v) ? v : 0);
+
   async function loadSpend() {
     const box = q('[data-spend-summary]');
     if (!box) return;                       // not a project that spends money
 
-    let d;
     try {
-      d = await getJSON(withProject(`${API}/spend`));
+      await renderSpend(box);
     } catch (e) {
       box.innerHTML = `<p class="muted">Could not load spending: ${esc(e.message)}</p>`;
-      return;
+      console.error('spend panel:', e);
     }
+  }
 
+  async function renderSpend(box) {
+    const d = await getJSON(withProject(`${API}/spend`));
     const m = d.month || {};
-    const capped = m.cap > 0;
-    const pct = capped ? Math.min(100, (m.spent / m.cap) * 100) : 0;
+    const spent   = num(m.spent);
+    const cap     = num(m.cap);
+    const images  = num(m.images);
+    const backlog = num(m.backlog);
+    const capped  = cap > 0;
+    const pct     = capped ? Math.min(100, (spent / cap) * 100) : 0;
 
     box.innerHTML = `
       <div class="spend-figures">
         <div class="spend-fig">
-          <span class="spend-num">$${(m.spent || 0).toFixed(2)}</span>
+          <span class="spend-num">$${spent.toFixed(2)}</span>
           <span class="spend-lbl">this month</span>
         </div>
         <div class="spend-fig">
-          <span class="spend-num">${m.per_image != null ? '$' + m.per_image.toFixed(4) : '—'}</span>
+          <span class="spend-num">${m.per_image != null ? '$' + num(m.per_image).toFixed(4) : '—'}</span>
           <span class="spend-lbl">per image</span>
         </div>
         <div class="spend-fig">
-          <span class="spend-num">${(m.images || 0).toLocaleString()}</span>
+          <span class="spend-num">${images.toLocaleString()}</span>
           <span class="spend-lbl">images this month</span>
         </div>
         <div class="spend-fig">
-          <span class="spend-num">${m.backlog_cost != null ? '$' + m.backlog_cost.toFixed(2) : '—'}</span>
-          <span class="spend-lbl">to finish ${(m.backlog || 0).toLocaleString()} queued</span>
+          <span class="spend-num">${m.backlog_cost != null ? '$' + num(m.backlog_cost).toFixed(2) : '—'}</span>
+          <span class="spend-lbl">to finish ${backlog.toLocaleString()} queued</span>
         </div>
       </div>
       ${capped ? `
-        <div class="spend-bar" title="${(m.spent || 0).toFixed(2)} of ${m.cap.toFixed(2)}">
+        <div class="spend-bar" title="${spent.toFixed(2)} of ${cap.toFixed(2)}">
           <span style="width:${pct.toFixed(1)}%"
                 class="${m.over ? 'is-over' : ''}"></span>
         </div>
         <p class="muted">
-          $${(m.spent || 0).toFixed(2)} of the $${m.cap.toFixed(2)} monthly cap
+          $${spent.toFixed(2)} of the $${cap.toFixed(2)} monthly cap
           ${m.over
             ? (m.action === 'pause'
                 ? '— <strong class="error-text">reached, so generation is paused</strong>'
@@ -1489,10 +1505,10 @@
           <tbody>${days.map((x) => `
             <tr>
               <td class="mono">${esc(x.date)}</td>
-              <td class="mono">$${(x.openai || 0).toFixed(4)}</td>
-              <td class="mono">$${(x.brave || 0).toFixed(4)}</td>
-              <td class="mono">$${(x.total || 0).toFixed(4)}</td>
-              <td class="mono">${x.calls}</td>
+              <td class="mono">$${num(x.openai).toFixed(4)}</td>
+              <td class="mono">$${num(x.brave).toFixed(4)}</td>
+              <td class="mono">$${num(x.total).toFixed(4)}</td>
+              <td class="mono">${num(x.calls)}</td>
             </tr>`).join('')}
           </tbody></table>`;
   }

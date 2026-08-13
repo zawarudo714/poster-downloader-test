@@ -51,6 +51,7 @@ import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+from typing import Optional
 
 HERE = Path(__file__).resolve().parent
 SETTINGS_FILE = HERE / "settings.json"
@@ -79,7 +80,13 @@ DEFAULT_SERVER_CMDS = "cd /opt/poster && git pull && docker compose up -d --buil
 
 # Sent after the deploy commands, always, so the window can answer the
 # question you would otherwise SSH in to ask.
-VERIFY_CMDS = "cd /opt/poster && git log --oneline -1 && docker compose ps"
+VERIFY_CMDS = (
+    "cd /opt/poster && "
+    "echo '--- commit now on the server ---' && "
+    "git --no-pager log --no-color --oneline -1 && "
+    "echo '--- container ---' && "
+    "docker compose ps --format '{{.Name}}  {{.Status}}'"
+)
 
 
 # ── Parsing what you typed ──────────────────────────────────────────────────
@@ -118,6 +125,85 @@ def parse_ssh_target(text: str) -> tuple[str, str, int]:
     if not host:
         raise ValueError("Could not find a host in that SSH line.")
     return user, host, port
+
+
+# Colour codes, cursor moves, progress-bar redraws. Docker Compose and git
+# both emit these, and a Tk text widget has no idea what they mean — it prints
+# them literally, which turns "did my commit land?" into an unreadable wall.
+_ANSI = re.compile(r"\x1B\[[0-9;?]*[ -/]*[@-~]|\x1B[@-Z\\-_]|\x1B\][^\x07]*\x07")
+
+
+def strip_ansi(text: str) -> str:
+    """
+    Plain text out of terminal output.
+
+    Carriage returns are handled too, and deliberately by keeping only what
+    comes AFTER the last one: a progress line rewrites itself in place, so the
+    final state is the only part worth showing. Keeping all of it would print
+    every intermediate percentage on its own line.
+    """
+    text = _ANSI.sub("", text)
+    if "\r" in text:
+        text = text.split("\r")[-1]
+    return text.rstrip()
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  REMEMBERING THE PASSWORD
+# ════════════════════════════════════════════════════════════════════════════
+# Written through Windows DPAPI (CryptProtectData) rather than as plain text.
+#
+# The threat this actually addresses is not someone sitting at your desk —
+# if they are there, they have your session anyway. It is the file LEAVING:
+# settings.json sits inside a git repo, and a stray `git add -A` would put a
+# root password in a public GitHub history forever. DPAPI ciphertext can only
+# be decrypted by your Windows account on this machine, so the same accident
+# leaks nothing usable.
+#
+# Reached through ctypes so there is no extra dependency to install. If the
+# call is unavailable (not Windows), remembering is simply refused rather than
+# silently falling back to plain text — quietly storing a root password as
+# readable text is not a decision to make on someone's behalf.
+def _dpapi(encrypt: bool, data: bytes) -> Optional[bytes]:
+    import ctypes
+    from ctypes import wintypes
+
+    class BLOB(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD),
+                    ("pbData", ctypes.POINTER(ctypes.c_char))]
+
+    try:
+        crypt32 = ctypes.windll.crypt32
+        kernel32 = ctypes.windll.kernel32
+    except AttributeError:
+        return None
+
+    src = BLOB(len(data), ctypes.cast(ctypes.create_string_buffer(data),
+                                      ctypes.POINTER(ctypes.c_char)))
+    out = BLOB()
+    fn = crypt32.CryptProtectData if encrypt else crypt32.CryptUnprotectData
+    ok = fn(ctypes.byref(src), None, None, None, None, 0, ctypes.byref(out))
+    if not ok:
+        return None
+    try:
+        return ctypes.string_at(out.pbData, out.cbData)
+    finally:
+        kernel32.LocalFree(out.pbData)
+
+
+def protect_password(plain: str) -> Optional[str]:
+    blob = _dpapi(True, (plain or "").encode("utf-8"))
+    return blob.hex() if blob else None
+
+
+def unprotect_password(stored: str) -> str:
+    if not stored:
+        return ""
+    try:
+        blob = _dpapi(False, bytes.fromhex(stored))
+    except Exception:
+        return ""
+    return blob.decode("utf-8", "replace") if blob else ""
 
 
 def read_deploy_note() -> tuple[str, str]:
@@ -235,10 +321,13 @@ class DeployApp:
         pw_box = ttk.Frame(frm)
         pw_box.grid(row=row, column=1, sticky="ew", **pad)
         pw_box.columnconfigure(0, weight=1)
-        self.pw_var = tk.StringVar()
+        self.pw_var = tk.StringVar(value=unprotect_password(saved.get("password", "")))
         ttk.Entry(pw_box, textvariable=self.pw_var, show="•").grid(row=0, column=0, sticky="ew")
-        ttk.Label(pw_box, text="never saved to disk",
-                  foreground="#666").grid(row=0, column=1, padx=(10, 0))
+        self.remember_var = tk.BooleanVar(value=bool(saved.get("password")))
+        ttk.Checkbutton(pw_box, text="Remember", variable=self.remember_var
+                        ).grid(row=0, column=1, padx=(10, 0))
+        ttk.Label(pw_box, text="locked to this Windows account",
+                  foreground="#666").grid(row=0, column=2, padx=(6, 0))
         row += 1
 
         # ── Command boxes ───────────────────────────────────────────────
@@ -312,15 +401,27 @@ class DeployApp:
         return text
 
     def _save_settings(self) -> None:
-        # Note what is NOT here: the password.
+        payload = {
+            "repo": self.repo_var.get(),
+            "ssh": self.ssh_var.get(),
+            "remote": self.remote_var.get(),
+            "local_cmds": self.local_text.get("1.0", "end").strip(),
+            "server_cmds": self._server_cmds_to_remember(),
+        }
+
+        if self.remember_var.get() and self.pw_var.get():
+            sealed = protect_password(self.pw_var.get())
+            if sealed:
+                payload["password"] = sealed
+            else:
+                # DPAPI unavailable. The password is dropped rather than
+                # written in the clear, and you are told — a "Remember" tick
+                # that quietly did nothing would be worse than either.
+                self._emit("Could not encrypt the password on this machine, "
+                           "so it was not saved.", "err")
+
         try:
-            SETTINGS_FILE.write_text(json.dumps({
-                "repo": self.repo_var.get(),
-                "ssh": self.ssh_var.get(),
-                "remote": self.remote_var.get(),
-                "local_cmds": self.local_text.get("1.0", "end").strip(),
-                "server_cmds": self._server_cmds_to_remember(),
-            }, indent=2), encoding="utf-8")
+            SETTINGS_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         except Exception:
             pass
 
@@ -356,7 +457,7 @@ class DeployApp:
     # ── Logging ─────────────────────────────────────────────────────────
 
     def _emit(self, text: str, tag: str = "") -> None:
-        self.queue.put((text, tag))
+        self.queue.put((strip_ansi(text), tag))
 
     def _drain(self) -> None:
         try:
@@ -520,8 +621,15 @@ class DeployApp:
                 # over between lines. That is why the default is a single
                 # chained line — write `cd /opt/poster && ...` on every line
                 # that needs to be there.
-                _stdin, stdout, stderr = client.exec_command(command, timeout=900,
-                                                             get_pty=True)
+                #
+                # get_pty=False on purpose. With a pty, git and docker decide
+                # they are talking to a terminal and emit colour codes and
+                # progress-bar redraws; without one they print plain lines,
+                # which is what this window can actually display. TERM=dumb
+                # and --no-pager cover the tools that colour anyway.
+                _stdin, stdout, stderr = client.exec_command(
+                    f"export TERM=dumb GIT_PAGER=cat; {command}",
+                    timeout=900, get_pty=False)
                 for line in iter(stdout.readline, ""):
                     if line:
                         self._emit(line.rstrip())

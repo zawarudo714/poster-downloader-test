@@ -30,3 +30,16 @@ Thumbs.db
 
 # Runtime state — the Docker bind mount (db, workspace, backups)
 data/
+
+# Deploy tool local state.
+#
+# settings.json holds the SSH password (encrypted with Windows DPAPI, but
+# still a credential) alongside paths that are specific to one machine.
+# It was tracked at one point, so it also needs untracking once:
+#     git rm --cached tools/settings.json
+#
+# The .done note is a record of the last deploy and means nothing to anyone
+# else; next_deploy.txt IS committed on purpose, so the prepared message
+# travels with the change it describes.
+tools/settings.json
+tools/next_deploy.done.txt

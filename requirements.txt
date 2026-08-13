@@ -19,3 +19,7 @@ cryptography==43.0.1
 # headers by hand (worker_service/processor.py) because it has no other use
 # for an image library and Photoshop does its own resizing.
 Pillow==10.4.0
+# paramiko: SFTP from the Linux server to the Hetzner Storage Box. The GPT
+# stage runs here rather than on the Windows node, and this box has no S:
+# drive — see app/storage_remote.py for why SFTP rather than a mount.
+paramiko==3.4.1

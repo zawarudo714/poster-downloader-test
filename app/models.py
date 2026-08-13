@@ -348,6 +348,48 @@ class SearchCache(Base):
     )
 
 
+class ApiSpend(Base):
+    """
+    One row per paid external API call.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY WE METER OURSELVES
+    ════════════════════════════════════════════════════════════════════════
+    OpenAI's image endpoint returns the ACTUAL token usage for the call, so
+    the cost here is arithmetic on measured data, not an estimate. That gives
+    an instant per-image figure, drives the monthly cap, and answers "what did
+    today cost" without leaving the dashboard.
+
+    It is reconciled nightly against OpenAI's own Costs API when an admin key
+    is configured. The two can differ slightly — rounding, promotional
+    credits, and anything spent outside this pipeline — so the reconciliation
+    reports the gap rather than overwriting either number.
+
+    Brave returns no usage data, so its rows are query-count x configured rate.
+    That IS an estimate and is labelled as one.
+    """
+    __tablename__ = "api_spend"
+
+    id           = Column(Integer, primary_key=True)
+    service      = Column(String(24), nullable=False, index=True)   # 'openai' | 'brave'
+    operation    = Column(String(48), nullable=True)                # 'image_edit' | 'search'
+    project_id   = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    # What it was for, so a cost can be traced back to a specific image.
+    saved_poster_id = Column(Integer, ForeignKey("saved_posters.id"), nullable=True, index=True)
+
+    units        = Column(Integer, nullable=False, default=1)       # queries, or 1 image
+    input_tokens  = Column(Integer, nullable=True)
+    output_tokens = Column(Integer, nullable=True)
+    # Stored as a string to avoid float drift on money.
+    cost_usd     = Column(String(24), nullable=False, default="0")
+    estimated    = Column(Integer, nullable=False, default=0)       # 1 = not from real usage
+    created_at   = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    __table_args__ = (
+        Index("ix_spend_service_day", "service", "created_at"),
+    )
+
+
 # ── Import jobs (background CSV/XLSX import) ─────────────────────────────────
 
 class ImportJob(Base):
@@ -721,6 +763,23 @@ class ProcessedImage(Base):
     duration_ms     = Column(Integer, nullable=True)
     is_current      = Column(Integer, nullable=False, default=1, index=True)
     created_at      = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    # ── Admin review of AI output ────────────────────────────────────────
+    # Only meaningful for projects with has_review_gate. Photoshop output is
+    # deterministic and has always gone straight to upload.
+    #   NULL       — no gate, or not yet looked at
+    #   'pending'  — waiting for the admin
+    #   'approved' — released for upload
+    #   'rerun'    — rejected; a fresh generation is queued
+    review_status   = Column(String(16), nullable=True, index=True)
+    reviewed_at     = Column(DateTime, nullable=True)
+    reviewed_by     = Column(String(64), nullable=True)
+    # Web-sized copy for the review screens. Serving the 4000px print file
+    # would be ~6 MB per screen; this is ~120 KB. Relative to storage_root
+    # like storage_path.
+    preview_path    = Column(String(768), nullable=True)
+    # Which generation this was, for an image that has been rerun.
+    attempt         = Column(Integer, nullable=False, default=1)
 
     saved_poster = relationship("SavedPoster")
 

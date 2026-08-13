@@ -1369,19 +1369,31 @@ function wireSearch(box, title) {
     refreshBar();
   }
 
-  async function run(kind, force) {
+  async function run(kind, force, cacheOnly) {
     variant = kind;
     selected.clear();
-    status.textContent = 'searching…';
-    grid.innerHTML = '<p class="muted">Searching…</p>';
+    if (!cacheOnly) {
+      status.textContent = 'searching…';
+      grid.innerHTML = '<p class="muted">Searching…</p>';
+    }
     note.hidden = true;
     try {
-      const qs = `?deep=${kind === 'deep' ? 1 : 0}${force ? '&refresh=1' : ''}`;
+      const qs = `?deep=${kind === 'deep' ? 1 : 0}`
+               + (force ? '&refresh=1' : '')
+               + (cacheOnly ? '&cache_only=1' : '');
       const r  = await fetch(`/api/search/${title.id}${qs}`);
       const d  = await r.json();
       if (!r.ok || !d.ok) {
         grid.innerHTML = `<p class="error">${esc(d.message || 'Search failed.')}</p>`;
         status.textContent = '';
+        return;
+      }
+      if (d.not_searched) {
+        // Opened without searching. Nothing spent, nothing shown.
+        grid.innerHTML = '<p class="muted">Press SEARCH to look for images.</p>';
+        status.textContent = '';
+        results = [];
+        refreshBar();
         return;
       }
       results = d.results || [];
@@ -1430,7 +1442,9 @@ function wireSearch(box, title) {
     await refreshState();
   });
 
-  // Search on open — the worker's first action is always "show me images",
-  // so making them click for it is a tap they never wanted to make.
-  run('normal', false);
+  // Do NOT search on open. Opening a title is not the same as wanting a
+  // search: a worker reopening something to check what they saved would
+  // otherwise spend a paid query they never asked for. Cached results from
+  // an earlier search on this title still appear, because those are free.
+  run('normal', false, true);
 }

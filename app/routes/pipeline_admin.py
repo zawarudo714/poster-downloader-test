@@ -34,7 +34,9 @@ import json
 from datetime import date, datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, Form, HTTPException, Query, Request
+from fastapi import (
+    APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile,
+)
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
@@ -1516,6 +1518,155 @@ def api_create_project(
     db.commit()
     return JSONResponse({"ok": True, "project_id": project.id, "slug": slug})
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  GPT PROJECTS — prompt, style reference, spend
+# ═══════════════════════════════════════════════════════════════════════════
+
+@router.get("/api/gpt")
+def api_gpt_state(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Everything the PROCESSING tab needs for a GPT project in one call."""
+    from ..gpt_images import cap_state, month_to_date_usd
+    project = _project(request, admin, db)
+    style = str(P.get_setting(db, "openai_style_image", project=project) or "")
+    state = cap_state(db, project=project)
+    return JSONResponse({
+        "prompt": P.get_setting(db, "openai_prompt", project=project),
+        "style_image": style,
+        "style_url": f"/admin/pipeline/style_image?v={int(datetime.utcnow().timestamp())}" if style else "",
+        "spend": {
+            "month_to_date": str(state["spent"]),
+            "cap": str(state["cap"]),
+            "over": state["over"],
+            "action": state["action"],
+            "openai": str(month_to_date_usd(db, "openai")),
+            "brave": str(month_to_date_usd(db, "brave")),
+        },
+    })
+
+
+@router.post("/api/gpt/prompt")
+def api_save_gpt_prompt(
+    request: Request,
+    payload: dict = Body(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Save the generation prompt for this project.
+
+    Editing it does NOT affect images already processed — each ProcessedImage
+    records the model it was made with, and a rerun is the only thing that
+    regenerates.
+    """
+    project = _project(request, admin, db)
+    text = (payload.get("prompt") or "").strip()
+    if not text:
+        raise HTTPException(400, "The prompt cannot be empty.")
+    P.set_setting(db, "openai_prompt", text, project=project, by=admin.username)
+    log_activity(db, user=admin, action="pipeline_setting", target_type="pipeline",
+                 details={"key": "openai_prompt", "project": project.slug})
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
+@router.post("/api/gpt/style")
+async def api_upload_style(
+    request: Request,
+    file: UploadFile = File(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Replace the style reference sent as the FIRST image on every request.
+
+    Stored under the workspace rather than on the Storage Box because it is
+    read on every single generation — a local file avoids an SFTP round trip
+    per image, and it is small enough that backups don't care.
+    """
+    from ..imagefetch import sniff_format
+    from ..config import WORKSPACE_DIR
+
+    project = _project(request, admin, db)
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "Empty file.")
+    if sniff_format(raw[:16]) is None:
+        raise HTTPException(400, "That file is not an image.")
+
+    rel = f"_style/{project.slug}.png"
+    target = WORKSPACE_DIR / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(raw)
+
+    P.set_setting(db, "openai_style_image", rel, project=project, by=admin.username)
+    log_activity(db, user=admin, action="pipeline_setting", target_type="pipeline",
+                 details={"key": "openai_style_image", "project": project.slug,
+                          "bytes": len(raw)})
+    db.commit()
+    return JSONResponse({"ok": True, "path": rel})
+
+
+@router.get("/style_image")
+def serve_style_image(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    from ..config import WORKSPACE_DIR
+    project = _project(request, admin, db)
+    rel = str(P.get_setting(db, "openai_style_image", project=project) or "")
+    if not rel:
+        raise HTTPException(404, "No style reference set.")
+    path = WORKSPACE_DIR / rel
+    if not path.is_file():
+        raise HTTPException(404, "Style reference file is missing.")
+    return FileResponse(path)
+
+
+@router.get("/api/spend")
+def api_spend(
+    request: Request,
+    days: int = Query(30, ge=1, le=365),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Day-by-day spend, newest first, with today's figure first in the list.
+
+    Computed from our own metering — for OpenAI that is real token usage the
+    API reported, for Brave it is query count x the configured rate and is
+    flagged as estimated.
+    """
+    from ..models import ApiSpend
+    from datetime import timedelta
+
+    since = datetime.utcnow().date() - timedelta(days=days - 1)
+    rows = (
+        db.query(ApiSpend)
+          .filter(ApiSpend.created_at >= datetime.combine(since, datetime.min.time()))
+          .all()
+    )
+    by_day: dict[str, dict] = {}
+    for r in rows:
+        key = r.created_at.date().isoformat()
+        bucket = by_day.setdefault(key, {"date": key, "openai": 0.0,
+                                         "brave": 0.0, "total": 0.0, "calls": 0})
+        try:
+            amount = float(r.cost_usd or 0)
+        except ValueError:
+            amount = 0.0
+        bucket[r.service] = round(bucket.get(r.service, 0.0) + amount, 6)
+        bucket["total"] = round(bucket["total"] + amount, 6)
+        bucket["calls"] += 1
+
+    days_out = sorted(by_day.values(), key=lambda d: d["date"], reverse=True)
+    return JSONResponse({"days": days_out,
+                         "today": days_out[0] if days_out else None})
 
 @router.get("/api/stats")
 def api_stats(

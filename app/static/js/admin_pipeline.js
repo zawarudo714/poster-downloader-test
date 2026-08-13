@@ -1727,3 +1727,95 @@
     if (busy || overviewTick % 4 === 0) loadOverview();
   }, 8000);
 })();
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   GPT PROJECTS — prompt, style reference, spend
+   Only present when the project declares processor='gpt'; every lookup here
+   bails on a missing element, so a Photoshop project runs none of it.
+   ═══════════════════════════════════════════════════════════════════════════ */
+(function () {
+  'use strict';
+  const API = '/admin/pipeline/api';
+  const $ = (sel) => document.querySelector(sel);
+
+  const promptBox = $('[data-gpt-prompt]');
+  if (!promptBox) return;            // not a GPT project
+
+  const promptStatus = $('[data-gpt-prompt-status]');
+  const styleImg     = $('[data-gpt-style-preview]');
+  const styleEmpty   = $('[data-gpt-style-empty]');
+  const styleFile    = $('[data-gpt-style-file]');
+  const styleStatus  = $('[data-gpt-style-status]');
+
+  async function load() {
+    try {
+      const r = await fetch(`${API}/gpt`);
+      if (!r.ok) return;
+      const d = await r.json();
+      promptBox.value = d.prompt || '';
+      if (d.style_url) {
+        styleImg.src = d.style_url;
+        styleImg.hidden = false;
+        styleEmpty.hidden = true;
+      } else {
+        styleImg.hidden = true;
+        styleEmpty.hidden = false;
+      }
+      const s = d.spend || {};
+      const el = document.querySelector('[data-settings-status="spend"]');
+      if (el) {
+        el.textContent = `month to date $${Number(s.month_to_date || 0).toFixed(2)}`
+          + ` (OpenAI $${Number(s.openai || 0).toFixed(2)}`
+          + ` · Brave $${Number(s.brave || 0).toFixed(2)})`
+          + (s.over ? ' — CAP REACHED' : '');
+      }
+    } catch (e) { /* the tab still works without it */ }
+  }
+
+  document.addEventListener('click', async (e) => {
+    const action = e.target.dataset && e.target.dataset.action;
+
+    if (action === 'save-gpt-prompt') {
+      promptStatus.textContent = 'saving…';
+      const r = await fetch(`${API}/gpt/prompt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: promptBox.value }),
+      });
+      promptStatus.textContent = r.ok ? 'saved' : 'failed';
+      return;
+    }
+
+    if (action === 'reset-gpt-prompt') {
+      // Server-side default, so "reset" means the same thing here as it does
+      // for every other setting rather than a copy pasted into the JS.
+      const r = await fetch(`${API}/settings/reset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'openai_prompt' }),
+      });
+      if (r.ok) { await load(); promptStatus.textContent = 'reset to default'; }
+      return;
+    }
+
+    if (action === 'upload-gpt-style') {
+      if (!styleFile.files || !styleFile.files[0]) {
+        styleStatus.textContent = 'pick a file first';
+        return;
+      }
+      styleStatus.textContent = 'uploading…';
+      const fd = new FormData();
+      fd.append('file', styleFile.files[0]);
+      const r = await fetch(`${API}/gpt/style`, { method: 'POST', body: fd });
+      if (r.ok) { styleStatus.textContent = 'uploaded'; await load(); }
+      else {
+        let msg = 'failed';
+        try { const d = await r.json(); msg = d.detail || msg; } catch (err) {}
+        styleStatus.textContent = msg;
+      }
+    }
+  });
+
+  load();
+})();

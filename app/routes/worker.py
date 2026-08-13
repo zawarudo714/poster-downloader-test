@@ -590,6 +590,7 @@ def api_search(
     master_id: int,
     deep: int = Query(0),
     refresh: int = Query(0),
+    cache_only: int = Query(0),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -617,6 +618,15 @@ def api_search(
             payload = json.loads(cached.payload_json)
             payload["cached"] = True
             return JSONResponse(payload)
+
+    if cache_only:
+        # Opening a title must never spend a credit. A worker who reopens a
+        # title to check something they already saved would otherwise trigger
+        # a fresh paid query they never asked for. Cached results still show
+        # (they cost nothing); otherwise the grid says "press SEARCH".
+        return JSONResponse({"ok": True, "variant": variant, "results": [],
+                             "queries": [], "filtered_small": 0,
+                             "cached": False, "not_searched": True})
 
     project = resolve_project(db, t.project_id)
     try:

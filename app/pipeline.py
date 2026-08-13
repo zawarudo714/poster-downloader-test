@@ -427,6 +427,19 @@ DEFAULTS: dict[str, Any] = {
     # workspace. Changing it does NOT retroactively affect already-processed
     # images — each ProcessedImage records the script/style version it used.
     "openai_style_image": "",
+    # ── Storage access from THIS server ──────────────────────────────────
+    # The Windows node writes to the drive letter in `storage_root`. This
+    # server has no such drive, so the GPT stage pushes over SFTP to the same
+    # box — same relative storage_path, two ways in. See app/storage_remote.py.
+    # Leave the host blank to write to a local folder instead, which is what
+    # the dev setup does.
+    "storage_sftp_host":     "",
+    "storage_sftp_port":     22,
+    "storage_sftp_user":     "",
+    "storage_sftp_password": "",     # Fernet-encrypted, like account passwords
+    "storage_sftp_root":     "",     # subfolder on the box, usually blank
+    "storage_local_root":    "processed_local",
+
     # ── Upscaling to print size ──────────────────────────────────────────
     # GPT returns roughly 1024px. Print needs more, so the server resizes
     # after generation rather than paying for a larger generation — output

@@ -148,6 +148,12 @@ def on_startup():
         # both layouts — see the module docstring.
         from .workspace_migration import run_startup_migration
         run_startup_migration(db)
+
+        # GPT generation runs HERE, not on the Windows node — it is an HTTPS
+        # call, so it needs no desktop and keeps working when that box is
+        # down. Started only if a project actually declares processor='gpt'.
+        from .gpt_worker import start_background_worker
+        start_background_worker()
     except Exception as e:
         db.rollback()
         log.error("Could not sync projects: %s", e)

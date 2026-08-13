@@ -76,6 +76,12 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("projects",      "has_content_type",  "INTEGER NOT NULL DEFAULT 1"),
     ("projects",      "has_review_gate",   "INTEGER NOT NULL DEFAULT 0"),
     ("projects",      "search_mode",       "VARCHAR(16) NOT NULL DEFAULT 'external'"),
+    # ── AI review gate + spend metering ─────────────────────────────────
+    ("processed_images", "review_status", "VARCHAR(16)"),
+    ("processed_images", "reviewed_at",   "DATETIME"),
+    ("processed_images", "reviewed_by",   "VARCHAR(64)"),
+    ("processed_images", "preview_path",  "VARCHAR(768)"),
+    ("processed_images", "attempt",       "INTEGER NOT NULL DEFAULT 1"),
 ]
 
 NEW_INDEXES: list[tuple[str, str, str]] = [
@@ -87,6 +93,7 @@ NEW_INDEXES: list[tuple[str, str, str]] = [
     ("ix_upload_rotation",               "upload_accounts", "last_run_at, rotation_order"),
     ("ix_master_greenlit_source",        "master_titles", "greenlit_source"),
     ("ix_poster_project_folder",         "saved_posters", "project_folder"),
+    ("ix_processed_review",              "processed_images", "review_status"),
 ]
 
 

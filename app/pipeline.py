@@ -676,11 +676,14 @@ PROJECT_DEFS: list[dict] = [
         # every artist would be pure noise.
         "settings":         {
             "review_min_width_px": 0,
-            # "Carla Bruni - 1" / "Carla Bruni - 2". No year (artists have
-            # none) and digits rather than letters, because an artist called
-            # "Alison A" beside a plain "Alison" makes an A/B suffix
-            # ambiguous at a glance in a list of 500 listings.
-            "title_template": "{title} - {index}",
+            # "Carla Bruni #A" / "Carla Bruni #B". No year — artists have
+            # none.
+            #
+            # The '#' is doing real work: an artist called "Alison A" sitting
+            # beside a plain "Alison" makes a bare letter suffix ambiguous at
+            # a glance in a list of 500 listings. "Alison #A" cannot be read
+            # as part of a name.
+            "title_template": "{title} #{letter}",
         },
         # One column of artist names — no year, no movie/tv distinction.
         "has_year":         0,
@@ -821,9 +824,13 @@ def letter_for_index(index: int) -> str:
 #
 # THE RULES, AS MEASURED
 #   · Latin-1 letters and s/z carons fold to ASCII        é -> e   ß -> Ss
-#   · EVERYTHING else is deleted, including ALL punctuation:
-#     apostrophes, quotes, hyphens, Eastern European diacritics (ł ć š ż),
-#     Turkish dotless i, macrons, symbols, arrows, superscripts
+#   · Almost everything else is deleted: apostrophes, quotes, UNICODE hyphens
+#     and dashes, Eastern European diacritics (ł ć š ż), Turkish dotless i,
+#     macrons, symbols, arrows, superscripts
+#   · The exceptions are the ASCII hyphen '-' and '#', both of which survive.
+#     Neither appeared in the original test — it used the 165 non-ASCII
+#     characters found in the database, so no ASCII punctuation was covered.
+#     Both were confirmed separately by submitting them.
 #   · Max 100 characters, truncated silently
 #   · The first character is upper-cased
 #   · A title that comes out EMPTY is rejected with an HTML error page
@@ -853,8 +860,19 @@ _FAA_FOLD = {
 # deleted, so that name lists as "Blink182". Only this exact byte is safe,
 # which is why the MUSIK title template uses a typed "-" and nothing else.
 _MARKETPLACE_KEEP = set(
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -#"
 )
+
+# The ordinary hyphen and '#' both SURVIVE — confirmed by submitting them,
+# 2026-08-13. Neither was in the original character test, which covered the
+# 165 non-ASCII characters in the database and no ASCII punctuation at all.
+#
+# So the rule is not "all punctuation is deleted", as the first pass through
+# the test data suggested. It is closer to "most punctuation is deleted, and
+# these two are not". Anything else stays out of this set until it has been
+# submitted and read back — the cost of guessing wrong is that stored titles
+# stop matching live listings, and the reconciliation scanner reports
+# thousands of false mismatches.
 
 MARKETPLACE_TITLE_MAX = 100
 
@@ -1965,6 +1983,16 @@ def report_uploaded(
     poster = db.query(SavedPoster).filter_by(id=tracking.saved_poster_id).first()
     if poster is None:
         return
+
+    # REQUIRED, not defensive. SessionLocal is autoflush=False, so the count
+    # below reads what is on DISK — and on disk this very row is still
+    # 'uploading', because the assignment above lives only in the session.
+    # Every poster therefore counted itself as outstanding, never reached
+    # zero, and stayed 'uploading' forever: uploads succeeded, the account
+    # quota went up, and the funnel's UPLOADED column sat at 0.
+    #
+    # recompute_title_status() carries the same flush for the same reason.
+    db.flush()
 
     # A poster is 'uploaded' once it is live on every account that still
     # wants it; otherwise it stays in flight for the remaining accounts.

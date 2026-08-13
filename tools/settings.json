@@ -1,0 +1,7 @@
+{
+  "repo": "C:\\Users\\Administrator\\Documents\\Claude\\Projects\\Print On Demand\\poster_downloader_web",
+  "ssh": "ssh root@178.105.232.196",
+  "remote": "origin",
+  "local_cmds": "git add -A",
+  "server_cmds": "cd /opt/poster && git pull && docker compose up -d --build"
+}

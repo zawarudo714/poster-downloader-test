@@ -195,9 +195,20 @@ def _tmdb_search_url(title: str, content_type: Optional[str]) -> str:
 
 
 def _serialize_master(t: MasterTitle, db: Session) -> dict:
-    """Compact dict for the title list in the user's queue."""
+    """
+    Compact dict for a title in the worker's queue and for the open title.
+
+    Carries the project's UI declarations (`**_project_ui`) because EVERY
+    title the front end renders comes through here. An earlier version added
+    those fields to three other payloads and missed this one, so the open
+    title fell back to defaults: "Open TMDB" on a MUSIK artist, no search
+    grid, and "0 posters saved out of 3" when the target is 2.
+
+    If a worker-facing dict describes a title, it is built here.
+    """
     live = count_live_posters_for_master(db, t.id)
     return {
+        **_project_ui(db, t.project_id),
         "id": t.id,
         "external_id": t.external_id,
         "title": t.title,

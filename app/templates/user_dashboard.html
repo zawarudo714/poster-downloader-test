@@ -3,7 +3,7 @@
    so the admin doesn't appear to have left the project they're inspecting. #}
 {% set nav_scope = 'project' if peek_username is defined and peek_username else 'master' %}
 {% from "_macros.html" import info, status_pill %}
-{% block title %}Dashboard · Poster Downloader{% endblock %}
+{% block title %}Dashboard{% endblock %}
 
 {% block content %}
 {% if peek_username %}
@@ -19,19 +19,19 @@
   {# Stat row #}
   <section class="stat-row">
     <div class="stat-tile">
-      <div class="stat-label">SAVED TODAY {{ info("Posters you saved between midnight today and now (server time). Excludes deleted posters.") }}</div>
+      <div class="stat-label">SAVED TODAY {{ info("How many you saved between midnight today and now (server time). Excludes deleted ones.") }}</div>
       <div class="stat-value" data-stat="saved_today">{{ state.saved_today }}</div>
     </div>
     <div class="stat-tile stat-tile-pending" {% if not state.pending_today %}hidden{% endif %} data-pending-tile>
-      <div class="stat-label">NOT COUNTED YET {{ info("These posters have an open or awaiting-approval revision. They don't count toward pay until the revision is resolved or the poster is replaced.") }}</div>
+      <div class="stat-label">NOT COUNTED YET {{ info("These have an open or awaiting-approval change request. They don't count toward pay until it is resolved or the file is replaced.") }}</div>
       <div class="stat-value" data-stat="pending_today">{{ state.pending_today }}</div>
     </div>
     <div class="stat-tile">
-      <div class="stat-label">SAVED THIS WEEK {{ info("Posters you saved Mon–Sun of the current week. Excludes deleted posters.") }}</div>
+      <div class="stat-label">SAVED THIS WEEK {{ info("How many you saved Mon–Sun of the current week. Excludes deleted ones.") }}</div>
       <div class="stat-value" data-stat="saved_week">{{ state.saved_week }}</div>
     </div>
     <div class="stat-tile">
-      <div class="stat-label">TITLES TOUCHED TODAY {{ info("Distinct titles you saved at least one poster on today.") }}</div>
+      <div class="stat-label">TITLES TOUCHED TODAY {{ info("Distinct titles you saved at least one image on today.") }}</div>
       <div class="stat-value" data-stat="titles_today">{{ state.titles_today }}</div>
     </div>
     <div class="stat-tile">
@@ -53,7 +53,7 @@
   <section class="revisions-banner" data-revisions-banner hidden>
     <div class="revisions-banner-head">
       <strong data-banner-title>CHANGES REQUESTED</strong>
-      {{ info("An admin asked you to redo or fix a poster. Replace the file (preferred) or delete it; once admin approves your fix, this clears automatically. 'Awaiting approval' = you've sent it back for review.") }}
+      {{ info("An admin asked you to redo or fix one of your saves. Replace the file (preferred) or delete it; once admin approves your fix, this clears automatically. 'Awaiting approval' = you've sent it back for review.") }}
       <span class="muted" data-rev-count></span>
     </div>
     <div class="revisions-list" data-revisions-list></div>
@@ -107,7 +107,7 @@
       <div class="panel-body" data-active-panel>
         <div class="empty-hint" data-empty-hint>
           Click any title in your list on the left to open it.
-          Then click the <strong>Open TMDB</strong> link to find a poster.
+          Then use the search below to find images.
         </div>
       </div>
     </div>
@@ -134,7 +134,7 @@
     </div>
     <div class="att-active-flags-banner" hidden>
       <strong>⚠ <span class="att-active-flags-count">0</span> unresolved flag<span class="att-active-flags-plural">s</span></strong>
-      on this title. Scroll up to the CHANGES REQUESTED panel to act on them, or just delete/replace below — flags resolve automatically when you fix the underlying poster.
+      on this title. Scroll up to the CHANGES REQUESTED panel to act on them, or just delete/replace below — flags resolve automatically when you fix the underlying file.
     </div>
     <div class="att-actions">
       {# Only rendered when the project has an external source. A project that
@@ -170,19 +170,19 @@
 
   <div class="save-box">
     <div class="save-label">
-      Paste poster image URL ({{ info("On TMDB, click the poster thumbnail to open the full-size view, then right-click → Copy link address (NOT 'Copy image address'). Press Enter or click SAVE POSTER.") }})
+      Paste image URL ({{ info("Open the full-size view at the source, then right-click → Copy link address (NOT 'Copy image address'). Press Enter or click SAVE.") }})
     </div>
     <div class="flash-bar"></div>
     <div class="save-row">
       <input type="url" class="save-url" placeholder="https://image.tmdb.org/t/p/original/...jpg" autocomplete="off">
-      <button class="btn btn-accent" data-action="save">SAVE POSTER</button>
+      <button class="btn btn-accent" data-action="save">SAVE</button>
     </div>
     <div class="save-msg"></div>
   </div>
 
   <div class="posters-box">
     <div class="posters-head">
-      SAVED POSTERS {{ info("Posters saved on this title (live count). Hover one to delete or replace.") }}
+      SAVED <span data-nouns="upper">IMAGES</span> {{ info("Saved on this title (live count). Hover one to delete or replace.") }}
       <span class="mono posters-count"></span>
     </div>
     <div class="posters-grid"></div>
@@ -190,12 +190,12 @@
 
   <div class="title-actions">
     <div class="done-row">
-      <input type="text" class="done-comment" placeholder="(optional) note — e.g. 'only 2 HD posters available'">
+      <input type="text" class="done-comment" placeholder="(optional) note for the admin">
       <button class="btn btn-success" data-action="complete">DONE {{ info("Marks this title finished. Add an optional note for the admin if anything is unusual.") }}</button>
     </div>
     <div class="skip-row">
-      <input type="text" class="skip-reason" placeholder="(optional) reason — e.g. 'no posters on TMDB'">
-      <button class="btn btn-skip" data-action="skip">SKIP {{ info("Marks this title skipped. Use when no usable poster exists. Admin can review skipped titles and ask you to look again.") }}</button>
+      <input type="text" class="skip-reason" placeholder="(optional) reason">
+      <button class="btn btn-skip" data-action="skip">SKIP {{ info("Marks this title skipped. Use when nothing usable exists. Admin can review skipped titles and ask you to look again.") }}</button>
     </div>
     <button class="btn btn-ghost" data-action="reopen" hidden>REOPEN</button>
   </div>
@@ -223,7 +223,7 @@
       <span class="rev-file mono"></span>
       <span class="rev-status-pill"></span>
       <a class="btn btn-ghost btn-tiny rev-tmdb" target="_blank" rel="noopener">↗ Open TMDB</a>
-      <button type="button" class="btn btn-info btn-tiny rev-view-catalog">VIEW ALL POSTERS</button>
+      <button type="button" class="btn btn-info btn-tiny rev-view-catalog">VIEW ALL</button>
       <button type="button" class="btn btn-accent btn-tiny rev-go-to-title">GO TO TITLE</button>
     </div>
     <div class="rev-rejected-banner" hidden>

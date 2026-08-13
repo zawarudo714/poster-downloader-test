@@ -316,7 +316,10 @@
     const nouns = t.item_nouns || 'posters';
     const noun  = t.item_noun  || 'poster';
     node.querySelectorAll('[data-noun]').forEach((el) => { el.textContent = noun; });
-    node.querySelectorAll('[data-nouns]').forEach((el) => { el.textContent = nouns; });
+    node.querySelectorAll('[data-nouns]').forEach((el) => {
+      // Headings are upper-case in this UI; inline mentions are not.
+      el.textContent = el.dataset.nouns === 'upper' ? nouns.toUpperCase() : nouns;
+    });
 
     const urlInput = node.querySelector('.save-url');
     const saveBtn  = node.querySelector('[data-action="save"]');

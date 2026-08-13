@@ -71,6 +71,11 @@
             <a href="/admin/master"    class="navlink {% if active_tab == 'master' %}active{% endif %}">Title&nbsp;List</a>
             <a href="/admin/revisions" class="navlink {% if active_tab == 'revisions' %}active{% endif %}">Changes&nbsp;Requested</a>
             <a href="/admin/skipped"   class="navlink {% if active_tab == 'skipped' %}active{% endif %}">Skipped</a>
+            {# Only projects whose output needs judging get this. Photoshop is
+               deterministic; GPT is not. #}
+            {% if proj.has_review_gate %}
+              <a href="/admin/pipeline/review" class="navlink {% if active_tab == 'review' %}active{% endif %}">Review&nbsp;Images</a>
+            {% endif %}
             <a href="/admin/pipeline"  class="navlink {% if active_tab == 'pipeline' %}active{% endif %}">Pipeline</a>
             <a href="/admin/stats"     class="navlink {% if active_tab == 'stats' %}active{% endif %}">Stats</a>
             <a href="/admin/peek"      class="navlink {% if active_tab == 'peek' %}active{% endif %}">Peek</a>

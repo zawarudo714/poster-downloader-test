@@ -284,6 +284,21 @@
     {% if processor == 'gpt' %}
     <section class="panel">
       <div class="panel-head">
+        <span>API KEYS
+          {{ info("Nothing in this project works until these are filled in. Stored encrypted and never sent back to your browser — an empty box with 'saved' beside it means a value is stored; leave it blank to keep it.") }}
+        </span>
+      </div>
+      <div class="panel-body">
+        <div class="settings-grid" data-settings-group="keys"></div>
+        <div class="filter-row" style="margin-top:12px">
+          <button type="button" class="btn btn-accent" data-action="save-settings" data-group="keys">SAVE KEYS</button>
+          <span class="muted mono" data-settings-status="keys"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
         <span>IMAGE GENERATION
           {{ info("Runs on this server, not the Windows node — GPT Image 2 is an API call, so it needs no desktop and keeps working even when the node is down. Changes take effect on the next batch.") }}
         </span>

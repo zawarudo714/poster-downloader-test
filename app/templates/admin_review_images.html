@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{# Project-scoped page: the nav shows this project's links, not the master ones. #}
+{% set nav_scope = 'project' %}
+{% from "_macros.html" import info %}
+{% block title %}Review Images · Admin{% endblock %}
+
+{% block content %}
+<div class="admin-grid" data-no-global-scroll>
+
+  {#
+    Pick what to review, then review it. Two steps rather than one long list,
+    because the decision "how much am I doing right now" is different from
+    the decision "is this image good", and mixing them makes both worse.
+  #}
+  <section class="panel" data-review-picker>
+    <div class="panel-head">
+      <span>WAITING FOR REVIEW
+        {{ info("Generated images are held here until you release them. Turning the gate off on the Pipeline page lets NEW work skip this step — anything already waiting stays waiting, so nothing is released that you never looked at.") }}
+      </span>
+      <span class="muted mono" data-review-summary></span>
+    </div>
+    <div class="panel-body">
+      <div class="filter-row">
+        <label>FROM <input type="date" data-review-start></label>
+        <label>TO <input type="date" data-review-end></label>
+        <button class="btn btn-accent" data-action="review-start">REVIEW&nbsp;THIS&nbsp;RANGE</button>
+        <button class="btn btn-ghost" data-action="review-reruns">REVIEW&nbsp;RERUNS&nbsp;<span data-rerun-count>0</span></button>
+      </div>
+      <table class="data-table" style="margin-top:12px">
+        <thead><tr><th>SAVE DATE</th><th>TITLES</th><th>IMAGES</th><th></th></tr></thead>
+        <tbody data-review-dates>
+          <tr><td colspan="4" class="muted">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  {#
+    The reviewer. One title on screen, its images side by side, arrow keys to
+    move. Decisions are held locally and committed in one go at the end —
+    a network round trip per keypress would make it feel broken, and it lets
+    you change your mind about something three titles back.
+  #}
+  <section class="panel" data-review-stage hidden>
+    <div class="panel-head">
+      <span>REVIEWING <span class="mono" data-review-range></span></span>
+      <span class="filter-row" style="gap:8px">
+        <span class="muted mono" data-review-progress></span>
+        <button class="btn btn-ghost btn-tiny" data-action="review-exit">CLOSE</button>
+      </span>
+    </div>
+
+    <div class="panel-body">
+      <div class="review-head">
+        <div>
+          <span class="review-title" data-review-title>—</span>
+          <span class="muted mono" data-review-meta></span>
+        </div>
+        <div class="review-nav">
+          <button class="btn btn-ghost" data-action="review-prev">&larr; PREV</button>
+          <button class="btn btn-ghost" data-action="review-next">NEXT &rarr;</button>
+          <span class="muted">or use the &larr; &rarr; keys</span>
+        </div>
+      </div>
+
+      <div class="review-pair" data-review-pair></div>
+
+      <div class="review-actions">
+        <button class="btn btn-success" data-action="review-approve">APPROVE&nbsp;TITLE&nbsp;<span class="mono">(A)</span></button>
+        <span class="muted">or decide each image above</span>
+        <span class="review-tally mono" data-review-tally></span>
+      </div>
+
+      <div class="review-commit">
+        <button class="btn btn-accent" data-action="review-commit">SAVE&nbsp;DECISIONS</button>
+        <span class="muted mono" data-review-commit-status></span>
+      </div>
+    </div>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/admin_review_images.js?v={{ app_version }}"></script>
+{% endblock %}

@@ -131,6 +131,49 @@ def _mkdirs(sftp, directory: str) -> None:
                 pass
 
 
+def read_bytes(db: Session, rel_path: str, *, project=None) -> bytes:
+    """
+    Read a file back out of the archive.
+
+    Needed because the review screens display images this server wrote but
+    cannot see — there is no mounted drive here. Streaming them through the
+    app rather than exposing the Storage Box to the browser also means the
+    admin session is what authorises the view, not a guessable URL.
+    """
+    cfg = _settings(db, project)
+    rel_path = rel_path.replace("\\", "/").lstrip("/")
+
+    if not cfg["host"]:
+        base = Path(cfg["local_root"] or "processed_local").resolve()
+        target = base / rel_path
+        if not target.is_file():
+            raise StorageError(f"{rel_path} is not in the local archive.")
+        return target.read_bytes()
+
+    try:
+        import paramiko
+    except ImportError:
+        raise StorageError("paramiko is not installed on this server.")
+
+    transport = None
+    try:
+        transport = paramiko.Transport((cfg["host"], cfg["port"]))
+        transport.connect(username=cfg["user"], password=cfg["password"])
+        sftp = paramiko.SFTPClient.from_transport(transport)
+        full = posixpath.join(cfg["root"], rel_path) if cfg["root"] else rel_path
+        with sftp.file(full, "rb") as fh:
+            fh.prefetch()
+            return fh.read()
+    except Exception as e:
+        raise StorageError(f"Could not read {rel_path} from the Storage Box: {e}")
+    finally:
+        if transport is not None:
+            try:
+                transport.close()
+            except Exception:
+                pass
+
+
 def check(db: Session, project=None) -> tuple[bool, str]:
     """
     Can we write? Used by the pipeline's preflight and the Test & Debug panel.

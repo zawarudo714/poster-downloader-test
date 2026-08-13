@@ -70,8 +70,6 @@
     // template omits the containers entirely otherwise, and
     // renderSettingsGroup() skips a group whose container isn't present.
     gpt: [
-      ['openai_api_key',  'password', 'OpenAI API key',   'Used for image generation. Stored encrypted.'],
-      ['openai_admin_key','password', 'OpenAI admin key', 'Separate, higher-privilege credential used ONLY by the nightly cost reconciliation. Image generation never uses it. Leave blank to rely on our own metering.'],
       ['openai_model',    'text',   'Model',    'gpt-image-2 unless you have a reason.'],
       ['openai_size',     'select', 'Size',     'auto lets the model choose a ratio to suit the photo. Larger sizes cost proportionally more.', ['auto', '1024x1024', '1024x1536', '1536x1024']],
       ['openai_quality',  'select', 'Quality',  'low is roughly a fifth the price of medium and is upscaled afterwards anyway.', ['auto', 'low', 'medium', 'high']],
@@ -81,12 +79,19 @@
       ['upscale_sharpen',   'number', 'Sharpening (0-100)','Applied after the upscale. 0 is off. Raise it slowly and judge on a real print — sharpening artefacts are baked in and the review gate is your only chance to catch them.'],
       ['upscale_jpeg_quality','number','JPEG quality (1-100)','Quality of the saved print file. 92 is visually lossless for photographic work; higher mostly buys file size.'],
     ],
+    // Credentials live in their OWN panel. They were originally inside the
+    // SPENDING group, where nobody found them — "where do I put my API key"
+    // is not a question anyone should have to ask twice.
+    keys: [
+      ['brave_api_key_free', 'password','Brave key — free plan', 'Used for NORMAL searches. 1 request/second, 2,000 a month.'],
+      ['brave_api_key_paid', 'password','Brave key — paid plan', 'Used for DEEP searches, which fire two queries at once and would trip the free key\'s 1/second limit. Also the fallback when the free quota runs out.'],
+      ['openai_api_key',     'password','OpenAI key',            'Generates the images.'],
+      ['openai_admin_key',   'password','OpenAI admin key',      'Optional. Higher-privilege credential used ONLY by the nightly cost reconciliation — image generation never touches it. Leave blank to rely on our own metering.'],
+    ],
     spend: [
       ['spend_cap_usd_month','number','Monthly cap (USD)', '0 disables the cap. Counted from the token usage each API call reports.'],
       ['spend_cap_action',   'select','When the cap is hit','warn posts a dashboard alert. pause also stops dispatching new work.', ['warn', 'pause']],
-      ['brave_api_key_free', 'password','Brave key (free)',  'Used for normal searches. 1 request/second, 2,000 a month.'],
-      ['brave_api_key_paid', 'password','Brave key (paid)',  'Used for deep searches, which fire two queries at once and would trip the free key\'s 1/second limit. Also the fallback when the free quota runs out.'],
-      ['brave_daily_query_cap','number','Daily query cap',   '0 is off. A safety net against a bug looping, not a budget — Brave costs about half a cent a query.'],
+      ['brave_daily_query_cap','number','Brave daily query cap', '0 is off. A safety net against a bug looping, not a budget — Brave costs about half a cent a query.'],
     ],
     upload: [
       ['upload_batch_size',   'number', 'Batch size',        'Images per upload run, capped by the account\'s remaining daily quota.'],
@@ -983,8 +988,12 @@
 
     container.innerHTML = fields.map(([key, type, label, help, options]) => {
       const value = settings.settings[key];
-      const modified = settings.overrides[key] &&
-                       (settings.overrides[key].global || settings.overrides[key].project);
+      const ov = settings.overrides[key] || {};
+      const modified = ov.global || ov.project;
+      // A secret is never sent to the browser, so "is it set" has to be told
+      // to us separately — otherwise an empty box is ambiguous between "no
+      // key" and "key hidden".
+      const secretSet = ov.has_value === true;
       let input;
       if (type === 'bool') {
         input = `<input type="checkbox" data-setting="${key}" ${value ? 'checked' : ''}>`;
@@ -996,7 +1005,9 @@
       } else if (type === 'textarea') {
         input = `<textarea data-setting="${key}" rows="3">${esc(value)}</textarea>`;
       } else {
-        input = `<input type="${type}" data-setting="${key}" value="${esc(value)}"
+        input = `<input type="${type}" data-setting="${key}"
+                   value="${type === 'password' ? '' : esc(value)}"
+                   ${type === 'password' ? 'placeholder="leave blank to keep the saved value" autocomplete="new-password"' : ''}
                    ${type === 'number' ? 'step="any"' : ''}>`;
       }
       return `
@@ -1004,7 +1015,11 @@
           <label>
             <span class="setting-label">
               ${esc(label)}
-              ${modified ? '<span class="setting-badge" title="Overridden — not the code default">set</span>' : ''}
+              ${type === 'password'
+                  ? (secretSet
+                      ? '<span class="setting-badge" title="A value is stored. Leave blank to keep it.">saved</span>'
+                      : '<span class="setting-badge setting-badge-empty" title="No value stored yet.">not set</span>')
+                  : (modified ? '<span class="setting-badge" title="Overridden — not the code default">set</span>' : '')}
             </span>
             ${input}
           </label>

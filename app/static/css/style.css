@@ -4493,3 +4493,68 @@ label.inline-check {
   .search-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); max-height: 60vh; }
   .search-status { margin-left: 0; width: 100%; }
 }
+
+/* "not set" reads as a warning; "saved" reads as normal. A credential you
+   haven't entered is the single most common reason a stage does nothing. */
+.setting-badge-empty { border-color: var(--skip); color: var(--skip); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   REVIEW IMAGES
+   One title at a time, its images side by side, arrow keys to move. Sized so
+   a pair fits on screen without scrolling — scrolling between every decision
+   is what makes a review session feel like work.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.review-head {
+  display: flex; flex-wrap: wrap; align-items: center;
+  justify-content: space-between; gap: 12px; margin-bottom: 14px;
+}
+.review-title { font-family: Georgia, serif; font-size: 20px; color: var(--accent); }
+.review-nav { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+
+.review-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+.review-img {
+  margin: 0; padding: 10px;
+  border: 2px solid var(--border); border-radius: 4px;
+  background: var(--bg); position: relative;
+}
+/* The decision is the thing you scan for when you come back to a title. */
+.review-img.is-approve  { border-color: var(--success); }
+.review-img.is-rerun    { border-color: var(--skip); }
+.review-img.is-unusable { border-color: var(--error); }
+
+.review-img img {
+  width: 100%; height: auto; max-height: 55vh;
+  object-fit: contain; display: block; background: #111;
+}
+.review-img figcaption {
+  display: flex; justify-content: space-between; gap: 8px;
+  font-size: 11px; margin-top: 8px;
+}
+.review-img-actions { display: flex; gap: 6px; margin-top: 8px; }
+.review-img-state {
+  position: absolute; top: 14px; right: 14px;
+  font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 2px;
+  background: var(--card); border: 1px solid var(--border);
+}
+
+.review-actions {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+  margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border);
+}
+.review-tally { margin-left: auto; font-size: 11px; color: var(--subtext); }
+.review-commit {
+  display: flex; align-items: center; gap: 12px;
+  margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);
+}
+
+@media (max-width: 700px) {
+  .review-pair { grid-template-columns: 1fr; }
+  .review-img img { max-height: 40vh; }
+  .review-tally { margin-left: 0; width: 100%; }
+}

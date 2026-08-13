@@ -37,7 +37,7 @@ from typing import Optional
 from fastapi import (
     APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile,
 )
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
@@ -86,6 +86,18 @@ def pipeline_page(
          "item_nouns": project.item_noun_plural},
     )
 
+
+
+# Encrypted at rest with the same Fernet key that protects marketplace
+# passwords, and never echoed back to the browser. Listed explicitly rather
+# than guessed from the field name: a rule like "anything containing
+# 'password'" would silently stop protecting `openai_api_key`, which is just
+# as much a credential.
+SECRET_KEYS = {
+    "storage_sftp_password",
+    "openai_api_key", "openai_admin_key",
+    "brave_api_key_free", "brave_api_key_paid",
+}
 
 
 def _project(request: Request, admin: User, db: Session, explicit=None):
@@ -624,6 +636,18 @@ def api_get_settings(
     project = _project(request, admin, db, project_id)
     effective = P.all_settings(db, project=project)
 
+    # Secrets are NEVER sent to the browser. Two reasons, one of which was a
+    # real bug: the field rendered the stored value back into the form, so
+    # re-saving the panel encrypted the already-encrypted string a second time
+    # and the key silently stopped working. And a credential that never leaves
+    # the server cannot leak from a screenshot or a shoulder.
+    #
+    # The UI shows an empty box plus "a value is saved", and a blank
+    # submission means "leave it alone" (see api_set_settings).
+    for key in SECRET_KEYS:
+        if key in effective:
+            effective[key] = ""
+
     # Which keys have an explicit override, and at what scope — this is what
     # lets the UI distinguish "inherited" from "set for this project".
     overrides = {}
@@ -634,6 +658,11 @@ def api_get_settings(
         overrides[key] = {
             "global": global_row is not None,
             "project": project_row is not None,
+            # For secrets the UI cannot tell "set" from "empty" by looking at
+            # the value, because it never receives it.
+            "has_value": bool(
+                (project_row and project_row.value) or (global_row and global_row.value)
+            ) if key in SECRET_KEYS else None,
         }
 
     return JSONResponse({
@@ -670,17 +699,6 @@ def api_set_settings(
     scope = payload.get("scope", "global")
     project = _project(request, admin, db, payload.get("project_id"))
     target = project if scope == "project" else None
-
-    # Secrets are encrypted at rest with the same Fernet key that protects
-    # marketplace passwords. Listed explicitly rather than guessed from the
-    # field name: a rule like "anything containing 'password'" would silently
-    # stop protecting a key called `openai_api_key`, which is just as much a
-    # credential.
-    SECRET_KEYS = {
-        "storage_sftp_password",
-        "openai_api_key", "openai_admin_key",
-        "brave_api_key_free", "brave_api_key_paid",
-    }
 
     applied = []
     for key, value in updates.items():
@@ -1799,6 +1817,238 @@ def api_storage_test(
     from ..storage_remote import check
     ok, message = check(db, project=_project(request, admin, db))
     return JSONResponse({"ok": ok, "message": message})
+
+@router.get("/review", response_class=HTMLResponse)
+def review_page(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """The review screen. Only meaningful for projects with has_review_gate."""
+    project = _project(request, admin, db)
+    if not project.has_review_gate:
+        raise HTTPException(404, "This project has no review step.")
+    return templates.TemplateResponse(
+        request, "admin_review_images.html",
+        {"user": admin, "admin": admin, "active_tab": "review",
+         "project": project},
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  REVIEW GATE — admin approval of AI output
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Only for projects that declare has_review_gate. Photoshop output is
+# deterministic and has always gone straight to upload; GPT output varies, so
+# it gets a look before anything is listed.
+#
+# The unit of review is the TITLE, not the image. You judge an artist's pair
+# together — that is how a customer sees them, and it is the only way to spot
+# "these two are basically the same picture".
+
+@router.get("/api/review/dates")
+def api_review_dates(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Which save-dates have images waiting, and how many.
+
+    Grouped by date because that is how the work arrives and how you will
+    want to sit down to it — "everything since Monday", not "the next 40".
+    """
+    project = _project(request, admin, db)
+    rows = (
+        db.query(SavedPoster.original_save_date,
+                 func.count(func.distinct(MasterTitle.id)),
+                 func.count(ProcessedImage.id))
+          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+          .join(ProcessedImage, ProcessedImage.saved_poster_id == SavedPoster.id)
+          .filter(ProcessedImage.is_current == 1,
+                  ProcessedImage.review_status == "pending",
+                  ProcessedImage.project_id == project.id)
+          .group_by(SavedPoster.original_save_date)
+          .order_by(SavedPoster.original_save_date.desc())
+          .all()
+    )
+    return JSONResponse({
+        "dates": [
+            {"date": d.isoformat() if d else None, "titles": t, "images": i}
+            for d, t, i in rows
+        ],
+        "reruns": db.query(func.count(ProcessedImage.id))
+                    .filter(ProcessedImage.review_status == "rerun",
+                            ProcessedImage.project_id == project.id).scalar() or 0,
+    })
+
+
+@router.get("/api/review/queue")
+def api_review_queue(
+    request: Request,
+    start: str = Query(""),
+    end: str = Query(""),
+    status: str = Query("pending"),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Every title awaiting review in a date range, with its images.
+
+    Returns the WHOLE range in one call rather than paging. A review session
+    is arrow-keyed at a couple of seconds per title, and a network round trip
+    between each one would make it feel broken. Even 500 titles is a small
+    JSON payload — the images themselves are fetched lazily as previews.
+    """
+    project = _project(request, admin, db)
+    q = (
+        db.query(ProcessedImage, SavedPoster, MasterTitle)
+          .join(SavedPoster, ProcessedImage.saved_poster_id == SavedPoster.id)
+          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+          .filter(ProcessedImage.is_current == 1,
+                  ProcessedImage.project_id == project.id,
+                  ProcessedImage.review_status == status)
+    )
+    if start:
+        try:
+            q = q.filter(SavedPoster.original_save_date >= date.fromisoformat(start))
+        except ValueError:
+            raise HTTPException(400, "Bad start date.")
+    if end:
+        try:
+            q = q.filter(SavedPoster.original_save_date <= date.fromisoformat(end))
+        except ValueError:
+            raise HTTPException(400, "Bad end date.")
+
+    rows = q.order_by(SavedPoster.original_save_date.asc(),
+                      MasterTitle.external_id.asc().nullslast(),
+                      SavedPoster.id.asc()).all()
+
+    titles: dict = {}
+    for processed, poster, title in rows:
+        block = titles.setdefault(title.id, {
+            "title_id": title.id,
+            "external_id": title.external_id,
+            "title": title.title,
+            "date": poster.original_save_date.isoformat() if poster.original_save_date else "",
+            "images": [],
+        })
+        block["images"].append({
+            "processed_id": processed.id,
+            "poster_id": poster.id,
+            "filename": processed.filename,
+            "attempt": processed.attempt,
+            "width": processed.output_width,
+            "height": processed.output_height,
+            "preview_url": f"/admin/pipeline/review/image/{processed.id}",
+            "source_url": f"/admin/file/{poster.id}",
+        })
+
+    return JSONResponse({"titles": list(titles.values()),
+                         "count": len(titles), "status": status})
+
+
+@router.get("/review/image/{processed_id}")
+def serve_review_preview(
+    processed_id: int,
+    full: int = Query(0),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Stream a processed image for the review screen.
+
+    Serves the 1200px PREVIEW by default, not the 4000px print file: two
+    images per screen at full resolution is ~6 MB, which makes arrow-keying
+    through 250 titles unusable. `full=1` fetches the real thing for when you
+    want to look closely at one.
+    """
+    from ..storage_remote import read_bytes, StorageError
+
+    processed = db.query(ProcessedImage).filter_by(id=processed_id).first()
+    if processed is None:
+        raise HTTPException(404, "No such image.")
+    rel = processed.storage_path if full else (processed.preview_path or processed.storage_path)
+    try:
+        data = read_bytes(db, rel)
+    except StorageError as e:
+        raise HTTPException(404, str(e))
+    return Response(content=data, media_type="image/jpeg",
+                    headers={"Cache-Control": "private, max-age=3600"})
+
+
+@router.post("/api/review/decide")
+def api_review_decide(
+    request: Request,
+    payload: dict = Body(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Record decisions on one or more processed images.
+
+        approve  — release for upload
+        rerun    — discard and generate again; lands in the rerun list
+        unusable — permanently out of the pipeline, reason required
+
+    Batched because the reviewer approves a whole date range at the end of a
+    session rather than one title at a time.
+    """
+    decisions = payload.get("decisions") or []
+    if not decisions:
+        raise HTTPException(400, "decisions is required.")
+
+    now = datetime.utcnow()
+    counts = {"approved": 0, "rerun": 0, "unusable": 0}
+
+    for item in decisions:
+        processed = db.query(ProcessedImage).filter_by(id=item.get("processed_id")).first()
+        if processed is None:
+            continue
+        poster = db.query(SavedPoster).filter_by(id=processed.saved_poster_id).first()
+        title = db.query(MasterTitle).filter_by(id=poster.master_title_id).first() if poster else None
+        action = item.get("action")
+
+        if action == "approve":
+            processed.review_status = "approved"
+            counts["approved"] += 1
+
+        elif action == "rerun":
+            processed.review_status = "rerun"
+            # The rejected generation is superseded, never deleted — you may
+            # want to compare it against what replaces it, and it is evidence
+            # of what the model does with this source.
+            processed.is_current = 0
+            if poster:
+                poster.pipeline_status = "greenlit"
+                poster.process_attempts = 0
+                poster.process_error = None
+            counts["rerun"] += 1
+
+        elif action == "unusable":
+            reason = (item.get("reason") or "").strip()
+            if not reason:
+                raise HTTPException(400, "A reason is required to mark an image unusable.")
+            processed.review_status = "unusable"
+            if poster:
+                poster.pipeline_status = "unusable"
+                poster.unusable_reason = reason[:2000]
+                poster.unusable_at = now
+                poster.unusable_by = admin.username
+            counts["unusable"] += 1
+        else:
+            continue
+
+        processed.reviewed_at = now
+        processed.reviewed_by = admin.username
+        if title:
+            P.recompute_title_status(db, title)
+
+    log_activity(db, user=admin, action="pipeline_review", target_type="pipeline",
+                 details=counts)
+    db.commit()
+    return JSONResponse({"ok": True, **counts})
 
 @router.get("/api/stats")
 def api_stats(

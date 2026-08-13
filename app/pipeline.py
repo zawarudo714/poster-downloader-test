@@ -597,6 +597,23 @@ def all_settings(db: Session, *, project: Optional[Project | str] = None) -> dic
 
 DEFAULT_PROJECT_SLUG = "tell-a-vision"
 
+# WHICH PROCESSORS RUN ON THE WINDOWS NODE.
+#
+# A project declares how its images are made — 'photoshop' or 'gpt' — and the
+# stage that performs it must claim ONLY its own kind. Photoshop needs a
+# machine with Photoshop on it; generation runs in the web process and needs
+# nothing but an API key.
+#
+# This existed only as an assumption until MUSIK arrived, at which point the
+# node happily claimed its images, ran the movie project's painterly effect
+# over them, and filed the results under the movie project's folder. The
+# GPT worker was claiming the same rows from the other side at the same time.
+#
+# Add the new value here when a processor is added that the node performs.
+# A processor missing from this tuple is simply never handed to a node, which
+# is the safe direction to fail.
+NODE_PROCESSORS = ("photoshop",)
+
 
 # ═════════════════════════════════════════════════════════════════════════
 #  PROJECT REGISTRY
@@ -1443,6 +1460,22 @@ def claim_process_batch(
     limit = limit or int(get_setting(db, "process_batch_size", project=project))
     max_attempts = int(get_setting(db, "process_max_attempts", project=project))
 
+    # ── The node only does Photoshop ────────────────────────────────────
+    #
+    # This filter is not an optimisation, it is a correctness fix. Without
+    # it the Windows node claimed GREENLIT work from EVERY active project,
+    # including ones whose processor is 'gpt' — so MUSIK images were opened
+    # in Photoshop, run through the movie project's JSX, and filed under
+    # fineartamerica/GR(Movie&Series)/processed/.
+    #
+    # Worse, gpt_worker was claiming the same rows from the other side, so
+    # the two stages raced for them.
+    #
+    # Asking the PROJECT what its processor is keeps this correct for
+    # project three without another edit here.
+    if project_id and project.processor not in NODE_PROCESSORS:
+        return []
+
     def pending_query(only_project: Optional[int]):
         q = (
             db.query(SavedPoster, MasterTitle)
@@ -1477,9 +1510,34 @@ def claim_process_batch(
         #
         # With a single project this is identical to the simple query above.
         active = [
-            p for p in db.query(Project).filter(Project.is_active == 1).all()
+            p for p in db.query(Project)
+                         .filter(Project.is_active == 1,
+                                 Project.processor.in_(NODE_PROCESSORS))
+                         .all()
             if pending_query(p.id).limit(1).first() is not None
         ]
+
+        # ── A batch may only mix projects that run the SAME script ──────
+        #
+        # The node fetches one script per batch and rewrites its local .jsx
+        # when the version changes. Handing it images from two projects with
+        # different scripts would silently process half of them with the
+        # wrong effect — and the output would look plausible, which is the
+        # worst kind of wrong.
+        #
+        # Today every Photoshop project shares one script, so this changes
+        # nothing. It becomes load-bearing the moment a second one has its
+        # own effect, which is exactly when nobody would think to check.
+        if len(active) > 1:
+            # Compared as RENDERED, not as the stored template. Two projects
+            # can share one script and still differ in output width or
+            # sharpening, and those are substituted in at render time — so
+            # the template being equal proves nothing.
+            lead_script = render_process_script(db, project=active[0])
+            active = [
+                p for p in active
+                if render_process_script(db, project=p) == lead_script
+            ]
 
         if len(active) <= 1:
             rows = pending_query(active[0].id if active else None).limit(limit).all()
@@ -1507,7 +1565,13 @@ def claim_process_batch(
         poster.pipeline_status = "processing"
         poster.claimed_at = now
         poster.claimed_by = node
-        rel_path, filename = storage_path_for(db, title, poster, project=project)
+        # The path must come from the project THIS TITLE belongs to, not from
+        # the batch-level `project`. That one is resolve_project(None) when a
+        # node asks for shared work, which is the DEFAULT project — so every
+        # image in a mixed batch was filed under the movie project's folder
+        # regardless of where it came from.
+        row_project = project_for_title(db, title)
+        rel_path, filename = storage_path_for(db, title, poster, project=row_project)
         batch.append({
             "poster_id":     poster.id,
             "master_id":     title.id,
@@ -1779,6 +1843,15 @@ def claim_upload_batch(
               .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
               .join(ProcessedImage, UploadTracking.processed_image_id == ProcessedImage.id)
               .filter(UploadTracking.account_id == account.id,
+                      # Belt and braces on the account's project. Rows are
+                      # seeded per project, so account and tracking should
+                      # always agree — but "should always" is exactly what
+                      # was true of the Photoshop dispatcher too. If they
+                      # ever disagree, the consequence here is uploading a
+                      # celebrity image to the movie account under the movie
+                      # project's title template, which is a public mistake
+                      # on a real marketplace.
+                      UploadTracking.project_id == account.project_id,
                       UploadTracking.status.in_(("pending", "failed")),
                       UploadTracking.attempts < max_attempts,
                       SavedPoster.deleted_at.is_(None))

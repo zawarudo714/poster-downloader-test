@@ -198,6 +198,16 @@
     </div>
     <div class="search-note muted" data-search-note hidden></div>
     <div class="search-grid" data-search-grid></div>
+
+    {# Jump back up to SAVE SELECTED / DONE / SKIP.
+       Appears only once you have picked as many images as this title takes
+       AND the buttons have scrolled off screen — on a phone the grid is long
+       and the alternative is a lot of thumb-work to reach a button you
+       already know you want. #}
+    <button type="button" class="search-jump" data-search-jump hidden
+            aria-label="Back up to the save and finish buttons">
+      <span aria-hidden="true">↑</span> SAVE
+    </button>
   </div>
 </template>
 

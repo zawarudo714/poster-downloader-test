@@ -4494,6 +4494,34 @@ label.inline-check {
 
 .search-box { margin-top: 14px; }
 .search-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+/* Jump back to the save / done / skip row.
+   Bottom-RIGHT and above the edge, where a thumb already rests. Fixed rather
+   than sticky so it stays put while the grid scrolls under it. */
+.search-jump {
+  position: fixed;
+  right: 16px;
+  bottom: 24px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 18px;
+  border: none;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: .06em;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0,0,0,.45);
+  /* Comfortably past the 44px minimum touch target — this is pressed with a
+     thumb, one-handed, usually while walking. */
+  min-height: 48px;
+}
+.search-jump:active { transform: translateY(1px); }
+.search-jump[hidden] { display: none !important; }
 .search-status { font-size: 11px; color: var(--subtext); margin-left: auto; }
 .search-note { font-size: 11px; margin-top: 6px; }
 

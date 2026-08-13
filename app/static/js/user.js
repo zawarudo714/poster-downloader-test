@@ -1313,8 +1313,40 @@ function wireSearch(box, title) {
   const status  = box.querySelector('.search-status');
   const note    = box.querySelector('[data-search-note]');
 
+  const head    = box.querySelector('.search-head');
+  const jump    = box.querySelector('[data-search-jump]');
+
   const limit    = title.images_per_title || 2;
   const selected = new Set();
+
+  // Is the button row actually off screen? Asking rather than assuming means
+  // the jump button never appears pointing at something already visible —
+  // which is what would happen on a desktop, or on a short result list.
+  let headVisible = true;
+  if (head && 'IntersectionObserver' in window) {
+    new IntersectionObserver(([entry]) => {
+      headVisible = entry.isIntersecting;
+      refreshJump();
+    }, { threshold: 0.6 }).observe(head);
+  }
+
+  function refreshJump() {
+    if (!jump) return;
+    const room = Math.max(0, limit - alreadySaved());
+    // Only once they have picked everything this title can take. Showing it
+    // at one-of-two would interrupt someone mid-choice.
+    jump.hidden = !(room > 0 && selected.size >= room && !headVisible);
+  }
+
+  if (jump) {
+    jump.addEventListener('click', () => {
+      // scrollIntoView with a block of 'center' rather than 'start': the
+      // DONE and SKIP buttons sit just ABOVE the save row, and the request
+      // was to reach all three.
+      head.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      jump.hidden = true;
+    });
+  }
   let variant    = 'normal';
   let results    = [];
 
@@ -1340,6 +1372,7 @@ function wireSearch(box, title) {
       // Grey out the rest once the worker has picked their quota.
       card.classList.toggle('is-blocked', !on && selected.size >= room);
     });
+    refreshJump();
   }
 
   function render() {

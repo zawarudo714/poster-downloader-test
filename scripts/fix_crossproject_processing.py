@@ -45,6 +45,9 @@ USAGE
     python scripts/fix_crossproject_processing.py             # report only
     python scripts/fix_crossproject_processing.py --apply     # make changes
 
+    # after deleting the wrong listings from the marketplace by hand:
+    python scripts/fix_crossproject_processing.py --apply --include-uploaded
+
 Dry run is the default, deliberately. Read the report first.
 """
 
@@ -84,6 +87,11 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true",
                     help="Actually make the changes. Without it, report only.")
+    ap.add_argument("--include-uploaded", action="store_true",
+                    help="Also reset images that already reached the marketplace. "
+                         "ONLY after you have deleted those listings by hand — "
+                         "otherwise a live listing is left with nothing in the "
+                         "database describing it.")
     args = ap.parse_args()
 
     db = SessionLocal()
@@ -118,10 +126,21 @@ def main() -> int:
             print("Nothing misfiled. Every derivative is under its own project.")
             return 0
 
+        if protected and args.include_uploaded:
+            # Taken on trust that the listings are gone. Recorded loudly here
+            # because it is the one step nothing can verify from this side —
+            # the marketplace scanner that WOULD check does not exist yet.
+            print(f"\n!! --include-uploaded: also resetting {len(protected)} "
+                  f"image(s) that reached the marketplace.")
+            print("   This assumes you have already deleted those listings.")
+            misfiled.extend(protected)
+            protected = []
+
         if protected:
             print(f"\n!! {len(protected)} image(s) were misfiled AND are already "
                   f"live on a marketplace.")
-            print("   Left alone. Take these down by hand, then re-run:")
+            print("   Left alone. Delete the listings, then re-run with "
+                  "--include-uploaded:")
             for _pr, poster, title, owner, path, _want in protected:
                 print(f"   · {owner.name}: {title.title} (image {poster.id}) -> {path}")
 
@@ -140,12 +159,41 @@ def main() -> int:
             return 0
 
         for processed, poster, title, _owner, _path, _want in misfiled:
+            # An 'uploaded' row is not deleted even under --include-uploaded.
+            # It is marked REMOVED with a reason, which is the state that
+            # already exists for a marketplace takedown. Deleting it would
+            # erase the only evidence that the listing was ever made — and
+            # that record is what the reconciliation scanner will need to
+            # explain a gap between the site and the database.
+            db.query(UploadTracking).filter(
+                UploadTracking.processed_image_id == processed.id,
+                UploadTracking.status == "uploaded",
+            ).update({
+                UploadTracking.status: "removed",
+                UploadTracking.removed_reason:
+                    "processed by the wrong stage (cross-project dispatch bug); "
+                    "listing deleted by hand",
+            }, synchronize_session=False)
+
             db.query(UploadTracking).filter(
                 UploadTracking.processed_image_id == processed.id,
                 UploadTracking.status.in_(("pending", "failed")),
             ).delete(synchronize_session=False)
 
-            db.delete(processed)
+            # If anything still points at this derivative — a removed listing
+            # keeps its pointer — the row is superseded rather than deleted.
+            # Deleting it would leave that tracking row referencing an id that
+            # no longer exists, and "what was actually listed?" becomes
+            # unanswerable. Only a derivative nothing references is removed.
+            still_referenced = (
+                db.query(UploadTracking)
+                  .filter(UploadTracking.processed_image_id == processed.id)
+                  .count()
+            )
+            if still_referenced:
+                processed.is_current = 0
+            else:
+                db.delete(processed)
 
             poster.pipeline_status = "greenlit"
             poster.process_attempts = 0

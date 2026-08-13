@@ -1539,8 +1539,18 @@ def claim_process_batch(
                 if render_process_script(db, project=p) == lead_script
             ]
 
-        if len(active) <= 1:
-            rows = pending_query(active[0].id if active else None).limit(limit).all()
+        if not active:
+            # NOTHING for a node to do. Returned explicitly, because the
+            # obvious-looking `pending_query(None)` means "do not filter by
+            # project at all" — so an empty list of eligible projects became
+            # a query over EVERY project, and the node was handed the GPT
+            # project's queue the moment Photoshop ran out of work.
+            #
+            # "No projects match" and "no project specified" are opposite
+            # instructions that looked identical at the call site.
+            rows = []
+        elif len(active) == 1:
+            rows = pending_query(active[0].id).limit(limit).all()
         else:
             total_weight = sum(max(1, p.process_weight or 1) for p in active)
             rows = []

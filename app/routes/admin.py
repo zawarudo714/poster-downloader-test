@@ -3194,6 +3194,9 @@ def admin_stats_page(
          "active_tab": "stats",
          "stats_scope": "project",
          "workers": workers,
+         # Offered as a FILTER, not applied. Even standing inside a project,
+         # "how is this worker doing" is usually the whole-person question.
+         "projects": db.query(Project).order_by(Project.id.asc()).all(),
          "selected_worker_id": worker_id},
     )
 
@@ -3228,6 +3231,7 @@ def admin_master_stats_page(
          "active_tab": "master_stats",
          "stats_scope": "master",
          "workers": workers,
+         "projects": db.query(Project).order_by(Project.id.asc()).all(),
          "selected_worker_id": worker_id},
     )
 
@@ -3235,10 +3239,15 @@ def admin_master_stats_page(
 @router.get("/api/stats/{worker_id}")
 def api_admin_stats(
     worker_id: int,
+    project_id: int = Query(0),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """JSON stats for one worker — admin view (includes admin_only block)."""
     from ..stats import compute_worker_stats
-    data = compute_worker_stats(db, worker_id=worker_id, is_admin_view=True)
+    # No project_id means every project, which is what the page asks for by
+    # default: a worker's throughput is one number regardless of how many
+    # niches they cover. The filter narrows it when you want to compare.
+    data = compute_worker_stats(db, worker_id=worker_id, is_admin_view=True,
+                                project_id=project_id or None)
     return JSONResponse(data)

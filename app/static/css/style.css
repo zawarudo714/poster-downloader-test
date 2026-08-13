@@ -3920,6 +3920,42 @@ body:has(#ib-bulk-bar:not([hidden])) { padding-bottom: 88px; }
 .pipe-subrow td { padding-top: 0 !important; border-top: none !important; }
 .pipe-subrow    { background: rgba(232,85,75,0.04); }
 
+/* ── Spending ───────────────────────────────────────────────────────────
+   Four figures on one line, with the numbers set large. Reading order is
+   what it has cost, what each image costs, how many, what finishing the
+   queue would cost — the last one being the figure that actually decides
+   whether to keep going. */
+.spend-figures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 26px;
+  margin-bottom: 14px;
+}
+.spend-fig { display: flex; flex-direction: column; }
+.spend-num { font-size: 22px; font-weight: 700; }
+.spend-lbl {
+  font-size: 11px;
+  letter-spacing: .06em;
+  color: var(--subtext);
+  text-transform: uppercase;
+}
+
+.spend-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.07);
+  overflow: hidden;
+  margin: 4px 0 8px;
+}
+.spend-bar span { display: block; height: 100%; background: var(--success); }
+.spend-bar span.is-over { background: var(--error); }
+.error-text { color: var(--error); }
+
+@media (max-width: 700px) {
+  .spend-figures { gap: 18px; }
+  .spend-num { font-size: 18px; }
+}
+
 /* ── Needs Attention ────────────────────────────────────────────────────
    One block per finding. The left border carries the severity so the page
    can be read by scanning down the edge — a stopped stage should not look
@@ -4522,6 +4558,11 @@ label.inline-check {
 }
 .search-jump:active { transform: translateY(1px); }
 .search-jump[hidden] { display: none !important; }
+
+/* The find-images role. A different colour because it does something
+   different — pressing it spends a search, where the save button only
+   moves you up the page. */
+.search-jump-find { background: var(--success); color: #05130c; }
 .search-status { font-size: 11px; color: var(--subtext); margin-left: auto; }
 .search-note { font-size: 11px; margin-top: 6px; }
 

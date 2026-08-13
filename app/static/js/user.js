@@ -1315,9 +1315,11 @@ function wireSearch(box, title) {
 
   const head    = box.querySelector('.search-head');
   const jump    = box.querySelector('[data-search-jump]');
+  const find    = box.querySelector('[data-search-find]');
 
   const limit    = title.images_per_title || 2;
   const selected = new Set();
+  let searching  = false;
 
   // Is the button row actually off screen? Asking rather than assuming means
   // the jump button never appears pointing at something already visible —
@@ -1330,21 +1332,37 @@ function wireSearch(box, title) {
     }, { threshold: 0.6 }).observe(head);
   }
 
+  function backToActions() {
+    // 'center' rather than 'start': DONE and SKIP sit just ABOVE the save
+    // row, and the point is to reach all three at once.
+    head.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
   function refreshJump() {
     if (!jump) return;
     const room = Math.max(0, limit - alreadySaved());
     // Only once they have picked everything this title can take. Showing it
     // at one-of-two would interrupt someone mid-choice.
     jump.hidden = !(room > 0 && selected.size >= room && !headVisible);
+
+    // The two floating buttons are mutually exclusive — one offers to find
+    // images, the other to save them, and both at once would be a choice
+    // where there is only ever one sensible move.
+    if (find) {
+      find.hidden = jump.hidden === false
+                 || results.length > 0
+                 || searching
+                 || headVisible;
+    }
   }
 
-  if (jump) {
-    jump.addEventListener('click', () => {
-      // scrollIntoView with a block of 'center' rather than 'start': the
-      // DONE and SKIP buttons sit just ABOVE the save row, and the request
-      // was to reach all three.
-      head.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      jump.hidden = true;
+  if (jump) jump.addEventListener("click", () => { backToActions(); jump.hidden = true; });
+
+  if (find) {
+    find.addEventListener("click", () => {
+      find.hidden = true;
+      grid.scrollIntoView({ behavior: "smooth", block: "start" });
+      run("normal", false);
     });
   }
   let variant    = 'normal';
@@ -1407,6 +1425,8 @@ function wireSearch(box, title) {
   async function run(kind, force, cacheOnly) {
     variant = kind;
     selected.clear();
+    searching = !cacheOnly;
+    refreshJump();
     if (!cacheOnly) {
       status.textContent = 'searching…';
       grid.innerHTML = '<p class="muted">Searching…</p>';
@@ -1443,6 +1463,9 @@ function wireSearch(box, title) {
     } catch (e) {
       grid.innerHTML = `<p class="error">Search failed: ${esc(e.message)}</p>`;
       status.textContent = '';
+    } finally {
+      searching = false;
+      refreshJump();
     }
   }
 
@@ -1473,6 +1496,11 @@ function wireSearch(box, title) {
     btn.textContent = 'SAVE SELECTED';
     selected.clear();
     await refreshState();
+
+    // Saving is the end of the picking, so it ends by putting DONE and SKIP
+    // in front of you. Without this you are left at the bottom of a long
+    // grid having to scroll back to the only two buttons that matter next.
+    if (saved) backToActions();
   });
 
   // Do NOT search on open. Opening a title is not the same as wanting a

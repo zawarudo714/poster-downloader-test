@@ -72,6 +72,7 @@
       ['openai_model',    'text',   'Model',    'gpt-image-2 unless you have a reason.'],
       ['openai_size',     'select', 'Size',     'auto lets the model choose a ratio to suit the photo. Larger sizes cost proportionally more.', ['auto', '1024x1024', '1024x1536', '1536x1024']],
       ['openai_quality',  'select', 'Quality',  'low is roughly a fifth the price of medium and is upscaled afterwards anyway.', ['auto', 'low', 'medium', 'high']],
+      ['gpt_review_required', 'bool', 'Review images before upload', 'On, every generated image waits for you on the Review Images tab. Off, they go straight to the upload queue. Turning it OFF does not release what is already waiting — those still need approving, so nothing is ever listed that you never looked at.'],
     ],
     upscale: [
       ['upscale_width_px',  'number', 'Output width (px)', 'The processed image is resized to this width; height scales in proportion, so 1000x2000 becomes 4000x8000. Lanczos resampling.'],
@@ -174,7 +175,9 @@
   const LOADERS = {
     overview:   loadOverview,
     greenlight: loadGreenlight,
-    processing: loadSettings,
+    // The Processing tab owns both the settings and the spending panel that
+    // sits above them, so opening it loads both.
+    processing: () => { loadSettings(); loadSpend(); },
     upload:     loadUploadSection,
     test:       loadTestSection,
     attention:  loadAttention,
@@ -1044,6 +1047,24 @@
     return out;
   }
 
+  // ── WHICH SCOPE A SAVE WRITES TO ─────────────────────────────────────────
+  //
+  // Everything on this page is edited while standing INSIDE a project, so a
+  // save writes a project-scoped override. It used to send scope:'global'
+  // for everything, which produced a save that silently did nothing:
+  // sync_projects() had already written pipeline.musik.title_template, the
+  // save wrote pipeline.title_template, and the project override still won
+  // on read. The field reverted on refresh with no error anywhere.
+  //
+  // MARKETPLACE_WIDE is the exception. Selectors and timings describe
+  // FineArtAmerica's DOM, not a niche — when the site moves a button, it
+  // moves for every project, and fixing it once should fix it everywhere.
+  const MARKETPLACE_WIDE = new Set(['selectors', 'timings']);
+
+  function scopeFor(key) {
+    return MARKETPLACE_WIDE.has(key) ? 'global' : 'project';
+  }
+
   async function saveGroup(group) {
     const statusEl = q(`[data-settings-status="${group}"]`);
     setStatus(statusEl, 'Saving…');
@@ -1051,7 +1072,7 @@
       const d = await postJSON(API + '/settings', {
         settings: collectGroup(group),
         project_id: projectId,
-        scope: 'global',
+        scope: 'project',
       });
       setStatus(statusEl, `Saved ${d.applied.length} settings.`, 'ok');
       toast('Settings saved — the worker node picks these up on its next run.');
@@ -1095,7 +1116,8 @@
     setStatus(statusEl, 'Saving…');
     try {
       await postJSON(API + '/settings', {
-        settings: { selectors: map }, project_id: projectId, scope: 'global',
+        // Marketplace-wide on purpose — see MARKETPLACE_WIDE above.
+        settings: { selectors: map }, project_id: projectId, scope: scopeFor('selectors'),
       });
       setStatus(statusEl, 'Saved. Use Test Upload on one image to confirm.', 'ok');
       toast('Selectors saved.');
@@ -1138,7 +1160,7 @@
     setStatus(statusEl, 'Saving…');
     try {
       await postJSON(API + '/settings', {
-        settings: { timings: map }, project_id: projectId, scope: 'global',
+        settings: { timings: map }, project_id: projectId, scope: scopeFor('timings'),
       });
       setStatus(statusEl, 'Saved.', 'ok');
       toast('Timings saved.');
@@ -1155,7 +1177,7 @@
     try {
       const d = await postJSON(API + '/settings', {
         settings: { process_script: q('[data-script-editor]').value },
-        project_id: projectId, scope: 'global',
+        project_id: projectId, scope: 'project',
       });
       setStatus(statusEl, 'Saved. Run a Test Process to verify.', 'ok');
       q('[data-script-version]').textContent = d.script_version || '—';
@@ -1181,7 +1203,7 @@
     if (!confirm('Reset the script to the built-in default? Your current version will be lost.')) return;
     try {
       await postJSON(API + '/settings/reset',
-        { key: 'process_script', scope: 'global', project_id: projectId });
+        { key: 'process_script', scope: 'project', project_id: projectId });
       await loadSettings();
       toast('Script reset to default.');
     } catch (e) { toast(e.message, 'error'); }
@@ -1393,6 +1415,86 @@
     } catch (e) {
       setStatus(statusEl, e.message, 'error');
     }
+  }
+
+  // ── Spending ─────────────────────────────────────────────────────────────
+  //
+  // The headline is COST PER IMAGE, not the monthly total. The backlog is
+  // counted in images, so "$0.021 each · 3,161 left · about $66" answers the
+  // question actually being asked. A month-to-date figure on its own tells
+  // you what has happened, not what is about to.
+
+  async function loadSpend() {
+    const box = q('[data-spend-summary]');
+    if (!box) return;                       // not a project that spends money
+
+    let d;
+    try {
+      d = await getJSON(withProject(`${API}/spend`));
+    } catch (e) {
+      box.innerHTML = `<p class="muted">Could not load spending: ${esc(e.message)}</p>`;
+      return;
+    }
+
+    const m = d.month || {};
+    const capped = m.cap > 0;
+    const pct = capped ? Math.min(100, (m.spent / m.cap) * 100) : 0;
+
+    box.innerHTML = `
+      <div class="spend-figures">
+        <div class="spend-fig">
+          <span class="spend-num">$${(m.spent || 0).toFixed(2)}</span>
+          <span class="spend-lbl">this month</span>
+        </div>
+        <div class="spend-fig">
+          <span class="spend-num">${m.per_image != null ? '$' + m.per_image.toFixed(4) : '—'}</span>
+          <span class="spend-lbl">per image</span>
+        </div>
+        <div class="spend-fig">
+          <span class="spend-num">${(m.images || 0).toLocaleString()}</span>
+          <span class="spend-lbl">images this month</span>
+        </div>
+        <div class="spend-fig">
+          <span class="spend-num">${m.backlog_cost != null ? '$' + m.backlog_cost.toFixed(2) : '—'}</span>
+          <span class="spend-lbl">to finish ${(m.backlog || 0).toLocaleString()} queued</span>
+        </div>
+      </div>
+      ${capped ? `
+        <div class="spend-bar" title="${(m.spent || 0).toFixed(2)} of ${m.cap.toFixed(2)}">
+          <span style="width:${pct.toFixed(1)}%"
+                class="${m.over ? 'is-over' : ''}"></span>
+        </div>
+        <p class="muted">
+          $${(m.spent || 0).toFixed(2)} of the $${m.cap.toFixed(2)} monthly cap
+          ${m.over
+            ? (m.action === 'pause'
+                ? '— <strong class="error-text">reached, so generation is paused</strong>'
+                : '— <strong class="error-text">reached; generation continues because the action is set to warn</strong>')
+            : ''}
+        </p>`
+        : '<p class="muted">No monthly cap set. Generation will keep running whatever it costs.</p>'}
+      ${m.per_image != null
+        ? '<p class="muted">Cost per image is measured from the token usage each call reports, '
+          + 'and the finish-the-queue figure assumes the same rate holds — the model picks a size '
+          + 'per photo, so treat it as a guide.</p>'
+        : ''}`;
+
+    const daysEl = q('[data-spend-days]');
+    if (!daysEl) return;
+    const days = (d.days || []).filter((x) => x.total > 0);
+    daysEl.innerHTML = !days.length
+      ? '<p class="muted" style="margin-top:14px">Nothing spent in this period.</p>'
+      : `<table class="data-table" style="margin-top:14px">
+          <thead><tr><th>DAY</th><th>OPENAI</th><th>BRAVE</th><th>TOTAL</th><th>CALLS</th></tr></thead>
+          <tbody>${days.map((x) => `
+            <tr>
+              <td class="mono">${esc(x.date)}</td>
+              <td class="mono">$${(x.openai || 0).toFixed(4)}</td>
+              <td class="mono">$${(x.brave || 0).toFixed(4)}</td>
+              <td class="mono">$${(x.total || 0).toFixed(4)}</td>
+              <td class="mono">${x.calls}</td>
+            </tr>`).join('')}
+          </tbody></table>`;
   }
 
   // ── Generation test ──────────────────────────────────────────────────────
@@ -1864,7 +1966,7 @@
         try {
           await postJSON(API + '/settings', {
             settings: { greenlight_mode: q('[data-greenlight-mode]').value },
-            project_id: projectId, scope: 'global',
+            project_id: projectId, scope: 'project',
           });
           setStatus(statusEl, 'Saved.', 'ok');
         } catch (e) { setStatus(statusEl, e.message, 'error'); }
@@ -1931,7 +2033,7 @@
         if (!confirm('Reset every selector to the built-in defaults?')) return;
         try {
           await postJSON(API + '/settings/reset',
-            { key: 'selectors', scope: 'global', project_id: projectId });
+            { key: 'selectors', scope: scopeFor('selectors'), project_id: projectId });
           await loadSettings();
           toast('Selectors reset.');
         } catch (e) { toast(e.message, 'error'); }

@@ -1874,13 +1874,18 @@ def api_spend(
     API reported, for Brave it is query count x the configured rate and is
     flagged as estimated.
     """
+    from .. import gpt_images as G
     from ..models import ApiSpend
-    from datetime import timedelta
+
+    project = _project(request, admin, db)
 
     since = datetime.utcnow().date() - timedelta(days=days - 1)
     rows = (
         db.query(ApiSpend)
-          .filter(ApiSpend.created_at >= datetime.combine(since, datetime.min.time()))
+          .filter(ApiSpend.created_at >= datetime.combine(since, datetime.min.time()),
+                  # Scoped like everything else on this page. Unscoped, MUSIK
+                  # would be shown the movie project's bill.
+                  ApiSpend.project_id == project.id)
           .all()
     )
     by_day: dict[str, dict] = {}
@@ -1897,8 +1902,53 @@ def api_spend(
         bucket["calls"] += 1
 
     days_out = sorted(by_day.values(), key=lambda d: d["date"], reverse=True)
-    return JSONResponse({"days": days_out,
-                         "today": days_out[0] if days_out else None})
+
+    # ── Month to date, against the cap ───────────────────────────────────
+    cap = G.cap_state(db, project=project)
+    month_start = datetime.utcnow().date().replace(day=1)
+
+    # Cost PER IMAGE is the number that actually predicts the bill: the
+    # backlog is counted in images, not dollars, and "$0.02 each" answers
+    # "what will the remaining 3,000 cost" in a way a monthly total cannot.
+    images_this_month = (
+        db.query(func.count(ProcessedImage.id))
+          .filter(ProcessedImage.project_id == project.id,
+                  ProcessedImage.created_at >= datetime.combine(
+                      month_start, datetime.min.time()))
+          .scalar() or 0
+    )
+    spent_month = float(cap["spent"])
+    per_image = round(spent_month / images_this_month, 4) if images_this_month else None
+
+    remaining_backlog = (
+        db.query(func.count(SavedPoster.id))
+          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+          .filter(SavedPoster.pipeline_status.in_(("greenlit", "processing")),
+                  SavedPoster.deleted_at.is_(None),
+                  _title_scope(db, project))
+          .scalar() or 0
+    )
+
+    return JSONResponse({
+        "ok": True,
+        "project": {"id": project.id, "name": project.name},
+        "month": {
+            "spent": round(spent_month, 4),
+            "cap": float(cap["cap"]),
+            "over": cap["over"],
+            "action": cap["action"],
+            "images": images_this_month,
+            "per_image": per_image,
+            # What finishing the queue would cost at the rate seen so far.
+            # An estimate, and labelled as one — the model's price varies
+            # with the size it picks for each source photo.
+            "backlog": remaining_backlog,
+            "backlog_cost": (round(per_image * remaining_backlog, 2)
+                             if per_image and remaining_backlog else None),
+        },
+        "days": days_out,
+        "today": days_out[0] if days_out else None,
+    })
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  NEEDS ATTENTION
@@ -2624,7 +2674,15 @@ def review_page(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """The review screen. Only meaningful for projects with has_review_gate."""
+    """
+    The review screen.
+
+    Gated on the project's CAPABILITY, not on whether the gate is currently
+    switched on. Turning it off releases nothing that was already waiting, so
+    the page has to stay reachable to clear that backlog — the nav hides the
+    tab once the backlog is empty, which is a display decision, not an
+    access one.
+    """
     project = _project(request, admin, db)
     if not project.has_review_gate:
         raise HTTPException(404, "This project has no review step.")

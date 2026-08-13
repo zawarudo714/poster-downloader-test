@@ -28,6 +28,27 @@
 
   <main class="stats-admin-main">
     {% if selected_worker_id %}
+      {#
+        Combined by default, narrowable on demand — a worker's throughput,
+        streak and flag rate are facts about the PERSON, and splitting them
+        by default would answer a question nobody asked. Only shown when
+        there is more than one project to choose between; a filter with one
+        option is just furniture.
+      #}
+      {% if projects and projects | length > 1 %}
+        <div class="filter-row stats-project-filter">
+          <label>SHOWING
+            <select data-stats-project>
+              <option value="0">All projects combined</option>
+              {% for p in projects %}
+                <option value="{{ p.id }}">{{ p.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <span class="muted" data-stats-scope-note></span>
+        </div>
+      {% endif %}
+
       <section class="stats-hero" id="stats-hero">
         <div class="stats-hero-loading muted">Loading…</div>
       </section>

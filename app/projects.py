@@ -242,4 +242,37 @@ def project_context(request, db: Session, user: Optional[User]) -> dict:
         # The project's own vocabulary, so no template hardcodes "poster".
         "item_noun": (proj.item_noun if proj else "poster"),
         "item_nouns": (proj.item_noun_plural if proj else "posters"),
+        # Whether the Review Images tab should appear at all. Resolved here
+        # rather than from proj.has_review_gate in the template, because the
+        # gate is now a switch as well as a capability — and a nav that keeps
+        # showing a tab you have turned off is the kind of leftover this
+        # project keeps having to clean up.
+        #
+        # The tab survives being switched off while images are still waiting,
+        # since those must still be approved by hand; see _review_backlog().
+        "review_gate": _review_visible(db, proj),
     }
+
+
+def _review_visible(db: Session, proj) -> bool:
+    """
+    Show the Review Images tab?
+
+    Yes if the gate is on. Also yes if it is OFF but images are still held
+    behind it — turning the gate off releases nothing retroactively, so
+    hiding the tab would leave that work with no way to reach it.
+    """
+    if proj is None or not proj.has_review_gate:
+        return False
+
+    from .pipeline import review_gate_enabled
+    if review_gate_enabled(db, proj):
+        return True
+
+    from .models import ProcessedImage
+    return bool(
+        db.query(ProcessedImage.id)
+          .filter(ProcessedImage.project_id == proj.id,
+                  ProcessedImage.review_status.in_(("pending", "rerun")))
+          .first()
+    )

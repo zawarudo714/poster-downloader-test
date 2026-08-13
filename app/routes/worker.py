@@ -2070,7 +2070,9 @@ def api_history_days(
 
     # All this worker's live poster rows: id + save_date.
     rows = (
-        db.query(SavedPoster.id, SavedPoster.original_save_date)
+        db.query(SavedPoster.id, SavedPoster.original_save_date,
+                 MasterTitle.project_id)
+          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
           .filter(
               SavedPoster.user_id == user.id,
               SavedPoster.deleted_at.is_(None),
@@ -2080,7 +2082,7 @@ def api_history_days(
     if not rows:
         return JSONResponse({"ok": True, "days": [], "rate_kes": str(rate_dec)})
 
-    all_ids = {pid for pid, _d in rows}
+    all_ids = {pid for pid, _d, _p in rows}
 
     # Block list: posters under any open / awaiting-approval revision.
     blocked = set()
@@ -2114,16 +2116,23 @@ def api_history_days(
             pass
 
     # Bucket by date.
+    from ..pipeline import _default_project_id
+    default_pid = _default_project_id(db)
+    names = {p.id: p.name for p in db.query(Project).all()}
+
     by_day: dict[str, dict] = {}
-    for pid, d in rows:
+    for pid, d, proj_id in rows:
         key = d.isoformat()
-        b = by_day.setdefault(key, {"date": key, "paid": 0, "eligible": 0, "pending": 0})
+        b = by_day.setdefault(key, {"date": key, "paid": 0, "eligible": 0,
+                                    "pending": 0, "by_project": {}})
         if pid in paid_ids:
             b["paid"] += 1
         elif pid in blocked:
             b["pending"] += 1
         else:
             b["eligible"] += 1
+        name = names.get(proj_id or default_pid, "")
+        b["by_project"][name] = b["by_project"].get(name, 0) + 1
 
     days = sorted(by_day.values(), key=lambda r: r["date"], reverse=True)
     # Compute amounts.
@@ -2133,6 +2142,14 @@ def api_history_days(
         # amount is on the PaymentRun row, which we surface elsewhere).
         d["eligible_amount_kes"] = str(rate_dec * d["eligible"])
         d["paid_amount_kes"]     = str(rate_dec * d["paid"])
+        # Rendered only when a day actually spans more than one project.
+        # On a single-project day it would restate the total in words.
+        split = d.pop("by_project", {})
+        d["project_split"] = (
+            " · ".join(f"{name} {n}" for name, n in
+                       sorted(split.items(), key=lambda kv: -kv[1]))
+            if len(split) > 1 else ""
+        )
 
     return JSONResponse({
         "ok": True,
@@ -2161,8 +2178,13 @@ def api_history_day(
     paid_ids = _already_paid_poster_ids(db, user.id)
 
     # Posters this worker saved that day, joined to their MasterTitle.
+    # Project comes along for the ride. A worker covering two niches sees
+    # both in one day's list, and "Adele" next to "Pulp Fiction" with nothing
+    # distinguishing them is confusing in exactly the moment they are
+    # checking their own pay.
     rows = (
-        db.query(SavedPoster.id, SavedPoster.master_title_id, MasterTitle.title, MasterTitle.year)
+        db.query(SavedPoster.id, SavedPoster.master_title_id,
+                 MasterTitle.title, MasterTitle.year, MasterTitle.project_id)
           .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
           .filter(
               SavedPoster.user_id == user.id,
@@ -2207,10 +2229,17 @@ def api_history_day(
             pass
 
     # Aggregate per master title.
+    from ..pipeline import _default_project_id
+    default_pid = _default_project_id(db)
+    names = {p.id: p.name for p in db.query(Project).all()}
+
     by_title: dict[int, dict] = {}
-    for pid, mid, title, year in rows:
+    for pid, mid, title, year, proj_id in rows:
         b = by_title.setdefault(mid, {
             "master_id": mid, "title": title, "year": year,
+            # NULL project_id means the DEFAULT project, not "no project" —
+            # the 101,605 imported rows are all NULL.
+            "project": names.get(proj_id or default_pid, ""),
             "paid": 0, "eligible": 0, "pending": 0, "total": 0,
         })
         b["total"] += 1

@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import func
+from sqlalchemy import func, true as sa_true
 from sqlalchemy.orm import Session
 
 from .models import MasterTitle, PaymentRun, Revision, SavedPoster, User
@@ -25,6 +25,42 @@ from .payments import (
 from .timeutil import local_today
 
 
+# ════════════════════════════════════════════════════════════════════════════
+#  PROJECT SCOPING
+# ════════════════════════════════════════════════════════════════════════════
+# Worker output is a PERSON-level fact: someone covering two niches has one
+# throughput, one streak and one flag rate, and splitting them by default
+# would answer a question nobody asked. So combined is the default and the
+# filter is opt-in — which is also what was asked for.
+#
+# Scoped through master_titles rather than SavedPoster.project_folder. That
+# column is a denormalised PATH, kept for building file paths cheaply; using
+# it as an identity would break the moment a project is renamed, and quietly,
+# because the numbers would simply get smaller.
+
+
+def _poster_scope(db: Session, project_id: Optional[int]):
+    """Criterion limiting saved posters to one project, or everything."""
+    if not project_id:
+        return sa_true()
+
+    from .pipeline import _default_project_id, project_scope
+    titles = (
+        db.query(MasterTitle.id)
+          .filter(project_scope(project_id,
+                                default_project_id=_default_project_id(db)))
+    )
+    return SavedPoster.master_title_id.in_(titles.scalar_subquery())
+
+
+def _title_scope(db: Session, project_id: Optional[int]):
+    """The same, for queries that count titles rather than images."""
+    if not project_id:
+        return sa_true()
+    from .pipeline import _default_project_id, project_scope
+    return project_scope(project_id, default_project_id=_default_project_id(db))
+
+
 def _week_start(d: date, week_start_dow: int) -> date:
     """Return the Monday-or-whatever date for the week containing d."""
     # weekday(): Monday=0..Sunday=6. week_start_dow uses same convention.
@@ -32,7 +68,7 @@ def _week_start(d: date, week_start_dow: int) -> date:
     return d - timedelta(days=offset)
 
 
-def _saves_on(db: Session, *, username: str, d: date) -> int:
+def _saves_on(db: Session, *, username: str, d: date, scope=None) -> int:
     """Number of non-deleted saves by this worker on this calendar date."""
     return (
         db.query(func.count(SavedPoster.id))
@@ -40,18 +76,20 @@ def _saves_on(db: Session, *, username: str, d: date) -> int:
               SavedPoster.username == username,
               SavedPoster.original_save_date == d,
               SavedPoster.deleted_at.is_(None),
+              scope if scope is not None else sa_true(),
           )
           .scalar()
         or 0
     )
 
 
-def _save_dates(db: Session, *, username: str) -> list[date]:
+def _save_dates(db: Session, *, username: str, scope=None) -> list[date]:
     """All distinct calendar dates this worker saved at least one live poster."""
     rows = (
         db.query(SavedPoster.original_save_date)
           .filter(SavedPoster.username == username,
-                  SavedPoster.deleted_at.is_(None))
+                  SavedPoster.deleted_at.is_(None),
+                  scope if scope is not None else sa_true())
           .distinct()
           .all()
     )
@@ -81,13 +119,14 @@ def _longest_streak(dates: list[date]) -> tuple[int, Optional[date], Optional[da
     return best_len, best_start, best_end
 
 
-def _best_day(db: Session, *, username: str) -> tuple[int, Optional[date]]:
+def _best_day(db: Session, *, username: str, scope=None) -> tuple[int, Optional[date]]:
     """The single day with the highest count of live saves."""
     row = (
         db.query(SavedPoster.original_save_date,
                  func.count(SavedPoster.id).label("n"))
           .filter(SavedPoster.username == username,
-                  SavedPoster.deleted_at.is_(None))
+                  SavedPoster.deleted_at.is_(None),
+                  scope if scope is not None else sa_true())
           .group_by(SavedPoster.original_save_date)
           .order_by(func.count(SavedPoster.id).desc())
           .first()
@@ -98,7 +137,7 @@ def _best_day(db: Session, *, username: str) -> tuple[int, Optional[date]]:
 
 
 def _best_week(
-    db: Session, *, username: str, week_start_dow: int
+    db: Session, *, username: str, week_start_dow: int, scope=None
 ) -> tuple[int, Optional[date]]:
     """Best 7-day window (week-aligned to admin's configured week start)."""
     # Per-day counts, then bucket by week_start.
@@ -106,7 +145,8 @@ def _best_week(
         db.query(SavedPoster.original_save_date,
                  func.count(SavedPoster.id).label("n"))
           .filter(SavedPoster.username == username,
-                  SavedPoster.deleted_at.is_(None))
+                  SavedPoster.deleted_at.is_(None),
+                  scope if scope is not None else sa_true())
           .group_by(SavedPoster.original_save_date)
           .all()
     )
@@ -149,6 +189,7 @@ def _eligible_unpaid_count(db: Session, *, worker_id: int) -> int:
 
 def compute_worker_stats(
     db: Session, *, worker_id: int, is_admin_view: bool = False,
+    project_id: Optional[int] = None,
 ) -> dict:
     """
     Heavy-lifting stats query — used by both worker and admin endpoints.
@@ -168,6 +209,10 @@ def compute_worker_stats(
     rate_dec = parse_decimal(get_rate_kes(db))
     week_start_dow = get_week_start_day(db)
 
+    # None means every project, which is the default and the common case.
+    scope = _poster_scope(db, project_id)
+    tscope = _title_scope(db, project_id)
+
     # ── 30-day chart series (most recent days, oldest → newest) ─────────
     series: list[dict] = []
     start_30 = today - timedelta(days=29)
@@ -177,7 +222,8 @@ def compute_worker_stats(
           .filter(SavedPoster.username == u.username,
                   SavedPoster.deleted_at.is_(None),
                   SavedPoster.original_save_date >= start_30,
-                  SavedPoster.original_save_date <= today)
+                  SavedPoster.original_save_date <= today,
+                  scope)
           .group_by(SavedPoster.original_save_date)
           .all()
     )
@@ -196,13 +242,15 @@ def compute_worker_stats(
     total_saved = (
         db.query(func.count(SavedPoster.id))
           .filter(SavedPoster.username == u.username,
-                  SavedPoster.deleted_at.is_(None))
+                  SavedPoster.deleted_at.is_(None),
+                  scope)
           .scalar() or 0
     )
     total_completed = (
         db.query(func.count(MasterTitle.id))
           .filter(MasterTitle.claimed_by_id == u.id,
-                  MasterTitle.status == "complete")
+                  MasterTitle.status == "complete",
+                  tscope)
           .scalar() or 0
     )
     total_paid_str = _total_paid_kes(db, worker_id=u.id)
@@ -229,7 +277,8 @@ def compute_worker_stats(
               .filter(SavedPoster.username == u.username,
                       SavedPoster.deleted_at.is_(None),
                       SavedPoster.original_save_date >= start_d,
-                      SavedPoster.original_save_date <= end_d)
+                      SavedPoster.original_save_date <= end_d,
+                      scope)
               .scalar() or 0
         )
 
@@ -252,11 +301,11 @@ def compute_worker_stats(
     projected_week_kes = str(rate_dec * projected_week)
 
     # ── Records ─────────────────────────────────────────────────────────
-    best_day_n, best_day_date = _best_day(db, username=u.username)
+    best_day_n, best_day_date = _best_day(db, username=u.username, scope=scope)
     best_week_n, best_week_start_d = _best_week(
-        db, username=u.username, week_start_dow=week_start_dow,
+        db, username=u.username, week_start_dow=week_start_dow, scope=scope,
     )
-    all_dates = _save_dates(db, username=u.username)
+    all_dates = _save_dates(db, username=u.username, scope=scope)
     streak_len, streak_start, streak_end = _longest_streak(all_dates)
 
     out = {
@@ -266,6 +315,9 @@ def compute_worker_stats(
         "today":       today.isoformat(),
         "rate_kes":    str(rate_dec),
         "week_start_day": week_start_dow,
+        # Echoed back so the page can state what it is showing. A stats
+        # screen that silently filters is worse than one that cannot.
+        "project_id":  project_id,
 
         "totals": {
             "saved":            total_saved,
@@ -331,7 +383,8 @@ def compute_worker_stats(
             db.query(func.count(func.distinct(Revision.saved_poster_id)))
               .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
               .filter(SavedPoster.username == u.username,
-                      SavedPoster.deleted_at.is_(None))
+                      SavedPoster.deleted_at.is_(None),
+                      scope)
               .scalar() or 0
         )
         flag_rate = (flagged_n / total_saved * 100.0) if total_saved > 0 else None
@@ -343,7 +396,8 @@ def compute_worker_stats(
               .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
               .filter(SavedPoster.username == u.username,
                       Revision.status == "resolved",
-                      Revision.resolved_at.isnot(None))
+                      Revision.resolved_at.isnot(None),
+                      scope)
               .all()
         )
         if resolved:

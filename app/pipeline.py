@@ -784,6 +784,31 @@ def project_for_title(db: Session, title: MasterTitle) -> Project:
     return resolve_project(db, title.project_id)
 
 
+def review_gate_enabled(db: Session, project: Optional[Project]) -> bool:
+    """
+    Is the image review gate active for this project right now?
+
+    Two separate questions, deliberately kept apart:
+
+      Project.has_review_gate  — CAN this project have one. A structural fact
+                                 about the pipeline: Photoshop is
+                                 deterministic and has nothing to judge, so
+                                 the movie project has no gate to switch on.
+
+      gpt_review_required      — is it currently ON. A dashboard setting, so
+                                 you can stop reviewing once you trust the
+                                 output and start again if it drifts.
+
+    Anything asking "should this image wait for approval" must come through
+    here rather than reading either half on its own — a check that consults
+    only the column ignores the switch, and one that consults only the
+    setting would invent a review queue for a project that has no reviewer.
+    """
+    if project is None or not project.has_review_gate:
+        return False
+    return bool(int(get_setting(db, "gpt_review_required", project=project) or 0))
+
+
 # ═════════════════════════════════════════════════════════════════════════
 #  TEXT RENDERING (title / keywords / description templates)
 # ═════════════════════════════════════════════════════════════════════════
@@ -2121,7 +2146,16 @@ def requeue_for_account(
         # image including the ones still waiting to be looked at and the ones
         # judged unusable — quietly undoing the gate from a button labelled
         # "requeue back catalogue".
-        query = query.filter(ProcessedImage.review_status == "approved")
+        #
+        # Excluded by verdict rather than required to equal 'approved',
+        # because an image generated while the gate was OFF has review_status
+        # NULL — it was legitimately released without review, and demanding
+        # 'approved' would strand it forever. Keyed on has_review_gate, not
+        # on whether the gate is on TODAY: images from both eras coexist.
+        query = query.filter(
+            or_(ProcessedImage.review_status.is_(None),
+                ProcessedImage.review_status == "approved")
+        )
     if source_account_id:
         query = query.join(
             UploadTracking,

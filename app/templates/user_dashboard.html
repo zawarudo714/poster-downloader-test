@@ -208,6 +208,14 @@
             aria-label="Back up to the save and finish buttons">
       <span aria-hidden="true">↑</span> SAVE
     </button>
+
+    {# The same button in its other role. Before anything has been searched
+       it starts the search AND takes you to the results, because on a phone
+       those are one intention expressed as two gestures. #}
+    <button type="button" class="search-jump search-jump-find" data-search-find hidden
+            aria-label="Search for images and go to the results">
+      SEARCH <span aria-hidden="true">↓</span>
+    </button>
   </div>
 </template>
 

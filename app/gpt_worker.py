@@ -160,7 +160,10 @@ def process_one(db: Session, poster, title, project) -> bool:
     ).update({ProcessedImage.is_current: 0}, synchronize_session=False)
 
     prior = db.query(ProcessedImage).filter_by(saved_poster_id=poster.id).count()
-    gate = bool(project.has_review_gate)
+    # Read per image, not once at startup: turning the gate off should take
+    # effect on the next image, not on the next restart of the server.
+    from .pipeline import review_gate_enabled
+    gate = review_gate_enabled(db, project)
 
     processed = ProcessedImage(
         saved_poster_id=poster.id,

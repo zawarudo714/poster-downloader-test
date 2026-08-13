@@ -1,3 +1,1 @@
-MUSIK #A titles, uploaded-counter fix, readable deploy log, saved password
----
-cd /opt/poster && docker compose exec -T web python scripts/backfill_upload_status.py --apply
+Spend panel, combined stats with project filter, review gate toggle, project-scoped setting saves

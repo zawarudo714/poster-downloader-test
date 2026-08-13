@@ -84,9 +84,15 @@ VERIFY_CMDS = (
     "cd /opt/poster && "
     "echo '--- commit now on the server ---' && "
     "git --no-pager log --no-color --oneline -1 && "
+    "echo 'SERVER_SHA=' $(git rev-parse HEAD) && "
     "echo '--- container ---' && "
     "docker compose ps --format '{{.Name}}  {{.Status}}'"
 )
+
+# Printed by the verify step so the tool can compare what the server is
+# running against what was just pushed, rather than assuming that commands
+# exiting zero means a deploy happened.
+SERVER_SHA_MARKER = "SERVER_SHA="
 
 
 # ── Parsing what you typed ──────────────────────────────────────────────────
@@ -578,7 +584,15 @@ class DeployApp:
         if code != 0:
             return False
 
-        self._emit("\nLocal half done.", "ok")
+        # Recorded so the server half can prove it actually arrived.
+        try:
+            self.pushed_sha = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=str(repo),
+                capture_output=True, text=True, timeout=15).stdout.strip()
+        except Exception:
+            self.pushed_sha = ""
+
+        self._emit(f"\nLocal half done — pushed {self.pushed_sha[:8]}.", "ok")
         return True
 
     # ── Server half ─────────────────────────────────────────────────────
@@ -614,6 +628,7 @@ class DeployApp:
         try:
             commands = split_commands(self.server_text.get("1.0", "end"))
             commands.append(VERIFY_CMDS)
+            server_sha = ""
 
             for command in commands:
                 self._emit(f"\n$ {command}", "step")
@@ -631,8 +646,13 @@ class DeployApp:
                     f"export TERM=dumb GIT_PAGER=cat; {command}",
                     timeout=900, get_pty=False)
                 for line in iter(stdout.readline, ""):
-                    if line:
-                        self._emit(line.rstrip())
+                    if not line:
+                        continue
+                    clean = strip_ansi(line)
+                    if SERVER_SHA_MARKER in clean:
+                        server_sha = clean.split(SERVER_SHA_MARKER, 1)[1].strip()
+                        continue          # bookkeeping, not output worth showing
+                    self._emit(line.rstrip())
                 code = stdout.channel.recv_exit_status()
                 err = stderr.read().decode("utf-8", "replace").strip()
                 if err:
@@ -642,10 +662,33 @@ class DeployApp:
                     return
 
             self._emit("\nDeploy finished.", "ok")
-            self._emit("Check above: the commit line should be the one you just "
-                       "pushed, and the container's status should read seconds, "
-                       "not hours.", "dim")
-            self._consume_note()
+
+            # ── Did the server actually move? ────────────────────────────
+            # Commands exiting zero is not the same as a deploy happening.
+            # `git pull` prints "Already up to date" and exits 0 when you
+            # have pushed to a repo the server does not follow, and the
+            # rebuild then runs happily on unchanged code — which is exactly
+            # how a whole evening went out to the wrong remote while every
+            # line on screen said success.
+            pushed = getattr(self, "pushed_sha", "")
+            if pushed and server_sha:
+                if server_sha.startswith(pushed[:8]) or pushed.startswith(server_sha[:8]):
+                    self._emit(f"Server is running {server_sha[:8]} — matches "
+                               f"what you pushed.", "ok")
+                    self._consume_note()
+                else:
+                    self._emit(
+                        f"\nWARNING: you pushed {pushed[:8]} but the server is "
+                        f"running {server_sha[:8]}.", "err")
+                    self._emit(
+                        "Your changes are NOT live. The usual cause is pushing "
+                        "to a remote the server does not pull from — check the "
+                        "remote dropdown against `git remote -v` on the server.",
+                        "err")
+            else:
+                # Server-only run, or nothing to compare. The note is left
+                # alone rather than guessed at.
+                self._emit("Container status should read seconds, not hours.", "dim")
         finally:
             client.close()
 

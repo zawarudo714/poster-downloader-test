@@ -297,21 +297,26 @@
       fb.querySelector('.att-active-flags-plural').textContent = myRevs.length === 1 ? '' : 's';
     }
 
-    // An external source link, or the in-page grid — never both. A project
-    // that searches inside the site returns an empty tmdb_search, and showing
-    // a link to nowhere is worse than showing nothing.
+    // An external source link, or the in-page grid — never both, decided by
+    // the project's declared search_mode rather than by guessing from whether
+    // some URL happens to be blank.
     const tmdb = node.querySelector('.att-tmdb');
     const searchBox = node.querySelector('[data-search-box]');
-    if (t.tmdb_search) {
-      tmdb.href = t.tmdb_search;
-      if (searchBox) searchBox.hidden = true;
-    } else {
+    if (t.search_mode === 'inpage') {
       tmdb.hidden = true;
-      if (searchBox) {
-        searchBox.hidden = false;
-        wireSearch(searchBox, t);
-      }
+      if (searchBox) { searchBox.hidden = false; wireSearch(searchBox, t); }
+    } else {
+      tmdb.href = t.tmdb_search || '#';
+      tmdb.hidden = !t.tmdb_search;
+      if (searchBox) searchBox.hidden = true;
     }
+
+    // The project's own word for what is being saved — "posters" for movies,
+    // "images" for MUSIK. Every worker-facing label reads this.
+    const nouns = t.item_nouns || 'posters';
+    const noun  = t.item_noun  || 'poster';
+    node.querySelectorAll('[data-noun]').forEach((el) => { el.textContent = noun; });
+    node.querySelectorAll('[data-nouns]').forEach((el) => { el.textContent = nouns; });
 
     const urlInput = node.querySelector('.save-url');
     const saveBtn  = node.querySelector('[data-action="save"]');
@@ -1141,15 +1146,24 @@
     let comment = (doneCommentEl.value || '').trim();
     let reason_source = comment ? 'manual' : '';
     const liveCount = (live.posters || []).length;
-    if (liveCount < 3 && !comment) {
+    // The target comes from the project, not a hardcoded 3. A MUSIK title
+    // with 2 images is COMPLETE and must not be interrogated about it.
+    const limit = live.images_per_title || 3;
+    const noun  = live.item_noun  || 'poster';
+    const nouns = live.item_nouns || 'posters';
+    if (liveCount < limit && !comment) {
       const result = await pickReason({
         title: 'Confirm completion',
-        sub: `This title only has ${liveCount} poster${liveCount === 1 ? '' : 's'} saved. ` +
-             `Pick a reason — or click "no reason" if 1–2 is just fine here.`,
-        presets: [
-          `Only ${liveCount} usable poster${liveCount === 1 ? '' : 's'} available`,
-          'All the posters available are similar',
-        ],
+        sub: `This title only has ${liveCount} ${liveCount === 1 ? noun : nouns} saved ` +
+             `out of ${limit}. Pick a reason — or confirm anyway if that's fine here.`,
+        // "Only N usable" is a one-click excuse. It made sense when a movie
+        // needed 3 posters and TMDB sometimes only had 1. For a 2-image
+        // project with abundant sources it is almost always laziness, so it
+        // is offered only where the target is 3 or more.
+        presets: (limit >= 3
+          ? [`Only ${liveCount} usable ${liveCount === 1 ? noun : nouns} available`,
+             `All the ${nouns} available are similar`]
+          : [`Both ${nouns} available are too similar`]),
         allowEmpty: true,
         emptyLabel: 'No reason — confirm anyway',
       });
@@ -1187,9 +1201,10 @@
       const result = await pickReason({
         title: 'Why are you skipping this title?',
         sub:   'Pick a common reason or type your own. Skipped titles go to the admin for review.',
-        presets: [
-          'No appropriate posters available',
-        ],
+        // Free text only, deliberately. A preset here is a one-click way to
+        // skip without thinking; for an artist you genuinely want to know
+        // WHY — obscure act, no photos, wrong person entirely.
+        presets: [],
         allowEmpty: false,
       });
       if (result === null) return;

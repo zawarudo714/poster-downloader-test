@@ -621,6 +621,7 @@ PROJECT_DEFS: list[dict] = [
         "has_year":         1,
         "has_content_type": 1,
         "has_review_gate":  0,
+        "search_mode":      "external",
     },
     {
         "slug":             "musik",
@@ -632,10 +633,8 @@ PROJECT_DEFS: list[dict] = [
         "item_noun":        "image",
         "item_noun_plural": "images",
         "processor":        "gpt",
-        # No external source link: this project searches in-page, so the
-        # worker never leaves the site and the "Open TMDB" button is hidden.
-        # Set as a per-project override on first sync (see sync_projects).
-        "settings":         {"source_search_url": ""},
+        # Searches inside the site, so no "Open TMDB" button.
+        "search_mode":      "inpage",
         # One column of artist names — no year, no movie/tv distinction.
         "has_year":         0,
         "has_content_type": 0,
@@ -651,7 +650,7 @@ PROJECT_DEFS: list[dict] = [
 # a project you turned off or re-weighted.
 _SYNCED_FIELDS = ("name", "source_site", "target_site", "images_per_title", "notes",
                   "item_noun", "item_noun_plural", "processor",
-                  "has_year", "has_content_type", "has_review_gate")
+                  "has_year", "has_content_type", "has_review_gate", "search_mode")
 
 
 def sync_projects(db: Session) -> list[str]:
@@ -671,7 +670,10 @@ def sync_projects(db: Session) -> list[str]:
             db.add(proj)
             db.flush()
             changes.append(f"created project '{spec['slug']}' ({spec['name']})")
-            continue
+            # NOTE: no `continue` here. An earlier version skipped straight to
+            # the next spec, so a project created on one deploy never received
+            # the setting overrides declared alongside it — they only landed on
+            # the SECOND deploy, if at all.
 
         # Per-project setting overrides declared alongside the project. Only
         # written when absent, so a value you later change in the dashboard is

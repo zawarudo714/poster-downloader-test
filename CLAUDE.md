@@ -170,6 +170,21 @@ Rules that matter:
   inherit the movie backlog.
 - Workers are scoped by the `user_projects` table. **No rows = no restriction**,
   because that's the state every existing worker is in.
+- **A worker's queue scopes to the ONE project they are standing in**, via
+  `worker._worker_project()` — never to the union of their projects. The first
+  version used the union and, the moment a worker had two projects, GET pulled
+  a mixture, Browse All Titles listed 201,133 rows, and RETURN UNWORKED handed
+  back titles from a project they weren't looking at. `user_projects` says what
+  they MAY touch; the active project says what they ARE touching.
+- **Projects declare their UI**, they are not sniffed. `search_mode`
+  ('external' vs 'inpage'), `processor`, `has_year`, `has_content_type`,
+  `has_review_gate`, `item_noun`. An earlier version decided "does this
+  project search in-page" by checking whether a settings row happened to be
+  blank, which meant a project could end up showing both an Open TMDB button
+  and a search grid, or neither.
+- `sync_projects()` applies a spec's `settings` overrides on the SAME deploy
+  that creates the project. It used to `continue` after creating the row, so
+  overrides only landed on the second deploy — if at all.
 - **A new project is a conversation, not a copy.** Do not clone the movie or
   MUSIK definition and hope. Ask what the niche actually needs, and say
   explicitly which existing pieces would be DEAD for it — a project that

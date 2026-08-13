@@ -48,7 +48,8 @@ from ..db import get_db
 from ..models import ActivityLog, MasterTitle, Revision, SavedPoster, User
 from ..pipeline import resolve_project
 from ..projects import (
-    allowed_projects, remember_project, scope_titles_multi, set_project_cookie,
+    active_project, allowed_projects, remember_project, scope_titles,
+    set_project_cookie,
 )
 from ..timeutil import fmt_local, local_today
 from ..parsing import IMAGE_EXT_RE, filename_for, folder_name_for, sanitize
@@ -69,27 +70,86 @@ router = APIRouter()
 
 def _my_projects(db: Session, user: User):
     """
-    The projects this worker is allowed to draw work from.
+    Every project this worker is allowed to touch. Used for the switcher and
+    for permission checks — NOT for scoping the queue. See _worker_project().
 
-    EVERY query that can hand a worker a new title must go through
-    `_scope_to_my_projects`. Without it, the day a celebrity project is added
-    a movie worker's GET button starts pulling celebrity titles — silently,
-    with no error, and you'd only find out when the wrong images arrived.
-
-    A worker with no assignment at all falls back to the default project, so
-    the existing install keeps working untouched through this upgrade.
+    A worker with no assignment falls back to the default project, so the
+    existing install keeps working untouched.
     """
     return allowed_projects(db, user)
 
 
-def _scope_to_my_projects(q, db: Session, user: User):
-    return scope_titles_multi(q, _my_projects(db, user))
+def _project_ui(db: Session, project_id) -> dict:
+    """
+    The bits of a project the worker's screen needs to render itself.
+
+    Sent with every title so the front end never assumes a niche: whether to
+    show an external source link or the in-page grid, how many images are
+    expected, and what this project calls the thing being saved. A third
+    project changes these by declaring them, not by editing templates.
+    """
+    proj = resolve_project(db, project_id)
+    return {
+        "search_mode":      proj.search_mode,
+        "images_per_title": proj.images_per_title,
+        "item_noun":        proj.item_noun,
+        "item_nouns":       proj.item_noun_plural,
+    }
 
 
-def _my_queue(db: Session, user: User):
-    """All MasterTitle rows currently claimed by `user` (any active status)."""
+def _default_project_id_cached(db: Session):
+    """The default project's id — NULL project_id means this one."""
+    from ..pipeline import _default_project_id
+    return _default_project_id(db)
+
+
+def _worker_project(request, db: Session, user: User):
+    """
+    The ONE project a worker is currently standing in.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY NOT "ALL THEIR PROJECTS AT ONCE"
+    ════════════════════════════════════════════════════════════════════════
+    The first version of this scoped the queue to the UNION of a worker's
+    projects, on the theory that they draw from everything assigned to them.
+    That was wrong, and wrong in a way that only shows up once a worker has
+    two projects:
+
+      · GET pulled a mixture — movie titles interleaved with artists, because
+        both number from 1 and the query ordered by external_id across both.
+      · Browse All Titles listed 201,133 rows: every movie AND every artist.
+      · RETURN UNWORKED handed back titles from a project the worker wasn't
+        even looking at.
+
+    The worker's screen has a project switcher and a project name in the
+    header. They are IN a project; the queue must mean the same thing the
+    header says. Everything worker-facing scopes through here.
+
+    Falls back to their first permitted project so a worker who has never
+    switched still gets a coherent queue rather than an empty one.
+    """
+    proj = active_project(request, db, user)
+    if proj is not None:
+        return proj
+    permitted = _my_projects(db, user)
+    return permitted[0] if permitted else None
+
+
+def _scope_to_project(q, project):
+    """Restrict a MasterTitle query to the worker's current project."""
+    return scope_titles(q, project)
+
+
+def _my_queue(db: Session, user: User, project=None):
+    """
+    MasterTitle rows claimed by `user` in the project they are standing in.
+
+    Scoped, because a worker covering two niches holding 50 movie titles and
+    50 artists should see 50 in each — not 100 interleaved in one list with
+    no way to tell which is which.
+    """
     return (
-        db.query(MasterTitle)
+        scope_titles(db.query(MasterTitle), project)
           .filter(MasterTitle.claimed_by_id == user.id)
           .order_by(MasterTitle.external_id.asc().nullslast(), MasterTitle.id.asc())
           .all()
@@ -169,7 +229,7 @@ def _serialize_poster(p: SavedPoster) -> dict:
     }
 
 
-def _active_revisions_for_user(db: Session, user: User):
+def _active_revisions_for_user(db: Session, user: User, project=None):
     """
     Open + awaiting-approval revisions on this user's posters.
 
@@ -183,7 +243,7 @@ def _active_revisions_for_user(db: Session, user: User):
     """
     import json as _json
     rows = (
-        db.query(Revision, SavedPoster, MasterTitle)
+        scope_titles(db.query(Revision, SavedPoster, MasterTitle), project)
           .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
           .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
           .filter(
@@ -243,20 +303,27 @@ def _active_revisions_for_user(db: Session, user: User):
             "master_id": mt.id,
             "tmdb_search": _source_search_url(db, mt.title, mt.content_type,
                                               resolve_project(db, mt.project_id)),
-            "images_per_title": resolve_project(db, mt.project_id).images_per_title,
+            **_project_ui(db, mt.project_id),
         })
     return out
 
 
-def _state_payload(db: Session, user: User) -> dict:
+def _state_payload(db: Session, user: User, project=None) -> dict:
     today = local_today()
-    queue = _my_queue(db, user)
+    queue = _my_queue(db, user, project)
     queue_dicts = [_serialize_master(t, db) for t in queue]
 
     locked_id = user.locked_master_id
     locked = None
     if locked_id:
         lt = db.query(MasterTitle).filter_by(id=locked_id).first()
+        # A worker who switches project mid-title would otherwise see a movie
+        # open on the MUSIK screen. The lock is kept — switching back restores
+        # it — but it is not shown outside its own project.
+        if lt is not None and project is not None:
+            lt_project_id = lt.project_id or _default_project_id_cached(db)
+            if lt_project_id != project.id:
+                lt = None
         if lt and lt.claimed_by_id == user.id:
             locked = _serialize_master(lt, db)
             locked["tmdb_search"] = _source_search_url(
@@ -330,7 +397,7 @@ def _state_payload(db: Session, user: User) -> dict:
     # confirmation their DONE click was received (instead of the title
     # silently vanishing from the queue while it's complete_pending).
     pending_complete_titles = (
-        db.query(MasterTitle)
+        scope_titles(db.query(MasterTitle), project)
           .filter(MasterTitle.status == "complete_pending",
                   MasterTitle.claimed_by_id == user.id)
           .order_by(MasterTitle.updated_at.desc().nullslast())
@@ -357,7 +424,7 @@ def _state_payload(db: Session, user: User) -> dict:
         "pending_today": pending_count,    # "X not counted until revised"
         "queue": queue_dicts,
         "locked": locked,
-        "revisions": _active_revisions_for_user(db, user),
+        "revisions": _active_revisions_for_user(db, user, project),
         "receipts": receipts,
         "chat_unread": chat_unread,
         "pending_complete_titles": pending_complete_for_worker,
@@ -371,7 +438,7 @@ def _state_payload(db: Session, user: User) -> dict:
 def dashboard(request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)):
     if user.role == "admin":
         return RedirectResponse("/admin", status_code=302)
-    state = _state_payload(db, user)
+    state = _state_payload(db, user, _worker_project(request, db, user))
     return templates.TemplateResponse(
         request,
         "user_dashboard.html",
@@ -397,8 +464,9 @@ def worker_view(user: User = Depends(require_user)):
 
 
 @router.get("/api/state")
-def api_state(user: User = Depends(require_user), db: Session = Depends(get_db)):
-    return JSONResponse(_state_payload(db, user))
+def api_state(request: Request, user: User = Depends(require_user),
+              db: Session = Depends(get_db)):
+    return JSONResponse(_state_payload(db, user, _worker_project(request, db, user)))
 
 
 @router.get("/switch_project/{slug}")
@@ -438,6 +506,7 @@ def master_browse_page(request: Request, user: User = Depends(require_user)):
 
 @router.get("/api/master")
 def api_master(
+    request: Request,
     page: int = Query(1, ge=1),
     page_size: int = Query(MASTER_PAGE_SIZE, ge=10, le=500),
     q: str = Query(""),
@@ -451,7 +520,8 @@ def api_master(
     Paginated, filtered master browse for the user's manual-select view.
     Read-only — users cannot edit master content here.
     """
-    query = _scope_to_my_projects(db.query(MasterTitle), db, user)
+    project = _worker_project(request, db, user)
+    query = _scope_to_project(db.query(MasterTitle), project)
 
     if status in ("pending", "in_progress", "complete", "complete_pending", "skipped"):
         query = query.filter(MasterTitle.status == status)
@@ -664,6 +734,7 @@ def api_search_save(
 
 @router.post("/pull_next")
 def pull_next(
+    request: Request,
     n: int = Form(DEFAULT_PULL_SIZE),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
@@ -677,8 +748,9 @@ def pull_next(
         raise HTTPException(400, "Pull size must be at least 1.")
     n = min(n, MAX_PULL_SIZE)
 
+    project = _worker_project(request, db, user)
     rows = (
-        _scope_to_my_projects(db.query(MasterTitle), db, user)
+        _scope_to_project(db.query(MasterTitle), project)
           .filter(
               MasterTitle.status == "pending",
               MasterTitle.claimed_by_id.is_(None),
@@ -711,6 +783,7 @@ def pull_next(
 
 @router.post("/select_titles")
 def select_titles(
+    request: Request,
     ids: str = Form(...),  # comma-separated
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
@@ -729,8 +802,9 @@ def select_titles(
     # Scoped as well as filtered by id: the id list comes from the browser, so
     # a worker could otherwise claim any title in the database by posting ids
     # their own master browse would never have shown them.
+    project = _worker_project(request, db, user)
     rows = (
-        _scope_to_my_projects(db.query(MasterTitle), db, user)
+        _scope_to_project(db.query(MasterTitle), project)
           .filter(
               MasterTitle.id.in_(wanted),
               MasterTitle.status == "pending",
@@ -760,15 +834,21 @@ def select_titles(
 
 @router.post("/release")
 def release(
+    request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """
     Release back to the pool any of my claims that have NO saved posters yet.
     Things I've actually started (started_at set) stay mine.
+
+    Scoped to the project the worker is standing in: pressing RETURN UNWORKED
+    on the MUSIK screen must not hand back movie titles they can't even see
+    from there.
     """
+    project = _worker_project(request, db, user)
     rows = (
-        db.query(MasterTitle)
+        _scope_to_project(db.query(MasterTitle), project)
           .filter(
               MasterTitle.claimed_by_id == user.id,
               MasterTitle.status == "in_progress",
@@ -826,7 +906,7 @@ def lock_title(
         "description": (t.description or "")[:600],
         "tmdb_search": _source_search_url(db, t.title, t.content_type,
                                           resolve_project(db, t.project_id)),
-        "images_per_title": resolve_project(db, t.project_id).images_per_title,
+        **_project_ui(db, t.project_id),
     })
 
 
@@ -966,7 +1046,7 @@ def go_to_title(
         "description":  (t.description or "")[:600],
         "tmdb_search":  _source_search_url(db, t.title, t.content_type,
                                            resolve_project(db, t.project_id)),
-        "images_per_title": resolve_project(db, t.project_id).images_per_title,
+        **_project_ui(db, t.project_id),
         "reopened":     reopened,
     })
 

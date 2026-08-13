@@ -589,6 +589,14 @@ class Project(Base):
     # go straight from Photoshop to upload and always have.
     has_review_gate  = Column(Integer, nullable=False, default=0)
 
+    # Where the worker finds source images.
+    #   'external' — a link out to TMDB/whatever; the worker pastes a URL back
+    #   'inpage'   — the search grid inside the site (Brave)
+    # Declared rather than inferred from whether some setting happens to be
+    # blank: a project must never end up showing BOTH an "Open TMDB" button
+    # and a search grid, or neither.
+    search_mode      = Column(String(16), nullable=False, default="external")
+
     is_active       = Column(Integer, nullable=False, default=1)
     notes           = Column(Text, nullable=True)
     created_at      = Column(DateTime, default=datetime.utcnow, nullable=False)

@@ -3130,8 +3130,11 @@ def peek_worker(
     worker = db.query(User).filter_by(username=username, role="worker").first()
     if not worker:
         raise HTTPException(404, "Worker not found.")
+    # Peek is a project-level page, so it shows the worker's state WITHIN the
+    # project the admin is currently in — not a merged view of every project
+    # that worker touches.
     from .worker import _state_payload
-    state = _state_payload(db, worker)
+    state = _state_payload(db, worker, current_project(request, admin, db))
     return templates.TemplateResponse(
         request,
         "user_dashboard.html",
@@ -3142,6 +3145,7 @@ def peek_worker(
 
 @router.get("/api/peek/{username}")
 def api_peek_worker(
+    request: Request,
     username: str,
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -3151,7 +3155,7 @@ def api_peek_worker(
     if not worker:
         raise HTTPException(404, "Worker not found.")
     from .worker import _state_payload
-    return JSONResponse(_state_payload(db, worker))
+    return JSONResponse(_state_payload(db, worker, current_project(request, admin, db)))
 
 
 # ── Per-worker stats panel ──────────────────────────────────────────────────

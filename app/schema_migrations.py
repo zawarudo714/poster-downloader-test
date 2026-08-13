@@ -75,6 +75,7 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("projects",      "has_year",          "INTEGER NOT NULL DEFAULT 1"),
     ("projects",      "has_content_type",  "INTEGER NOT NULL DEFAULT 1"),
     ("projects",      "has_review_gate",   "INTEGER NOT NULL DEFAULT 0"),
+    ("projects",      "search_mode",       "VARCHAR(16) NOT NULL DEFAULT 'external'"),
 ]
 
 NEW_INDEXES: list[tuple[str, str, str]] = [

@@ -153,14 +153,30 @@ Rules that matter:
 - A template declares its level with `{% set nav_scope = 'project' %}` at the
   top level, right after `{% extends %}`. Anything that doesn't say is master.
 - Any query that can show or hand out a title goes through
-  `projects.scope_titles()` (admin) or `scope_titles_multi()` (worker).
-  Nothing filters on `project_id` by hand.
+  `projects.scope_titles()` (admin), `scope_titles_multi()` (worker) or
+  `pipeline_admin._title_scope()`. **Nothing filters on `project_id` by hand.**
+  Three endpoints once hand-rolled `or_(project_id == X, project_id IS NULL)`,
+  which reads as "this project plus anything unassigned" and is only correct
+  for the DEFAULT project — MUSIK inherited all 101,605 NULL movie rows.
+- Every pipeline API endpoint resolves its project through
+  `pipeline_admin._project()`, which falls back to the ACTIVE project. They
+  used to call `P.resolve_project(db, project_id)` with a query parameter the
+  dashboard never sent, so every one of them silently operated on the movie
+  project — the Greenlight tab inside MUSIK listed Inception, and pressing
+  the button there would have promoted movie posters.
 - **`project_id IS NULL` means the DEFAULT project, not "any project".** The
   101,605 imported rows are all NULL. `pipeline.project_scope()` takes a
   `default_project_id` for exactly this — omitting it made every project
   inherit the movie backlog.
 - Workers are scoped by the `user_projects` table. **No rows = no restriction**,
   because that's the state every existing worker is in.
+- **A new project is a conversation, not a copy.** Do not clone the movie or
+  MUSIK definition and hope. Ask what the niche actually needs, and say
+  explicitly which existing pieces would be DEAD for it — a project that
+  doesn't use Photoshop shouldn't inherit the JSX editor and the sharpen
+  radius, one whose sheet has no year shouldn't inherit the YEAR column.
+  `Project.processor` / `has_year` / `has_content_type` / `has_review_gate`
+  exist so the answer is data, not a template edit.
 - **Projects are declared in code**, in `pipeline.PROJECT_DEFS`, and reconciled
   into the database by `sync_projects()` on every startup. There is no UI to
   create or rename one, by the owner's explicit instruction — he states the

@@ -85,12 +85,55 @@ def pipeline_page(
     )
 
 
+
+def _project(request: Request, admin: User, db: Session, explicit=None):
+    """
+    Which project a pipeline API call operates on.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY NOT _project(request, admin, db, project_id)
+    ════════════════════════════════════════════════════════════════════════
+    Every endpoint here used to do exactly that, with `project_id` coming
+    from a query parameter the dashboard never actually sends. So it always
+    resolved to None -> ensure_default_project() -> the MOVIE project.
+
+    The visible symptom: standing inside MUSIK, the Greenlight tab listed
+    Inception and Fight Club. The dangerous version of the same bug: pressing
+    GREENLIGHT there would have promoted movie posters from a page that said
+    MUSIK at the top.
+
+    Falling back to the ACTIVE project instead of the default fixes every
+    endpoint at once, because they all funnel through here. An explicit
+    project_id still wins, so a caller that genuinely wants another project
+    (or a future cross-project view) can still ask for one.
+    """
+    if explicit:
+        return P.resolve_project(db, explicit)
+    from ..routes.admin import current_project
+    return current_project(request, admin, db)
+
+
+def _title_scope(db: Session, project):
+    """
+    Scope a MasterTitle query to one project, honouring the NULL rule.
+
+    Three endpoints here hand-rolled `or_(project_id == X, project_id IS
+    NULL)`, which reads as "this project plus anything unassigned" and is
+    wrong for every project except the default one — MUSIK would have
+    inherited all 101,605 NULL movie rows. `P.project_scope()` already knows
+    the rule; use it rather than repeating it.
+    """
+    from ..pipeline import _default_project_id
+    return P.project_scope(project.id, default_project_id=_default_project_id(db))
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  OVERVIEW
 # ═══════════════════════════════════════════════════════════════════════════
 
 @router.get("/api/overview")
 def api_overview(
+    request: Request,
     project_id: Optional[int] = Query(None),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -102,7 +145,7 @@ def api_overview(
     One endpoint rather than five so the page has a single source of truth
     per refresh and can't display internally inconsistent numbers.
     """
-    project = P.resolve_project(db, project_id)
+    project = _project(request, admin, db, project_id)
     funnel = P.funnel_counts(db, project_id=project.id)
 
     accounts = []
@@ -262,6 +305,7 @@ def _job_summary(job: PipelineJob) -> dict:
 
 @router.get("/api/greenlight/queue")
 def api_greenlight_queue(
+    request: Request,
     project_id: Optional[int] = Query(None),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -274,7 +318,7 @@ def api_greenlight_queue(
     picking 200 titles by hand. Also reports whether each date is fully
     paid, so auto-greenlight and manual greenlight agree on what's safe.
     """
-    project = P.resolve_project(db, project_id)
+    project = _project(request, admin, db, project_id)
 
     # Poster-based (not MasterTitle.greenlit_at) so this agrees exactly with
     # what greenlight_titles would promote, including a title that was already
@@ -289,8 +333,7 @@ def api_greenlight_queue(
                            (SavedPoster.deleted_at.is_(None)))
         .filter(MasterTitle.status == "complete",
                 P.awaiting_greenlight_poster_filter(),
-                or_(MasterTitle.project_id == project.id,
-                    MasterTitle.project_id.is_(None)))
+                _title_scope(db, project))
         .group_by(MasterTitle.original_save_date)
         .order_by(MasterTitle.original_save_date.asc())
         .all()
@@ -336,6 +379,7 @@ def api_greenlight_queue(
 
 @router.post("/api/greenlight")
 def api_greenlight(
+    request: Request,
     payload: dict = Body(...),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -346,7 +390,7 @@ def api_greenlight(
     Idempotent: already-greenlit titles are counted as skipped, so
     double-clicking or re-running a payment hook is harmless.
     """
-    project = P.resolve_project(db, payload.get("project_id"))
+    project = _project(request, admin, db, payload.get("project_id"))
     result = {"greenlit": 0, "skipped": 0, "posters": 0}
 
     if payload.get("title_ids"):
@@ -423,6 +467,7 @@ def api_ungreenlight(
 
 @router.get("/api/titles")
 def api_titles(
+    request: Request,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=10, le=200),
     status: str = Query(""),
@@ -448,11 +493,10 @@ def api_titles(
     promote — used so the greenlight buttons can't act on rows where every
     poster is already in the pipeline.
     """
-    project = P.resolve_project(db, project_id)
+    project = _project(request, admin, db, project_id)
     query = (
         db.query(MasterTitle)
-          .filter(or_(MasterTitle.project_id == project.id,
-                      MasterTitle.project_id.is_(None)))
+          .filter(_title_scope(db, project))
     )
 
     # "Awaiting greenlight" is poster-based, matching greenlight_titles'
@@ -566,6 +610,7 @@ def api_titles(
 
 @router.get("/api/settings")
 def api_get_settings(
+    request: Request,
     project_id: Optional[int] = Query(None),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -574,7 +619,7 @@ def api_get_settings(
     Every knob with its effective value, plus the code defaults so the UI can
     show "modified" badges and offer a per-field reset.
     """
-    project = P.resolve_project(db, project_id)
+    project = _project(request, admin, db, project_id)
     effective = P.all_settings(db, project=project)
 
     # Which keys have an explicit override, and at what scope — this is what
@@ -601,6 +646,7 @@ def api_get_settings(
 
 @router.post("/api/settings")
 def api_set_settings(
+    request: Request,
     payload: dict = Body(...),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -620,7 +666,7 @@ def api_set_settings(
         raise HTTPException(400, "settings object is required.")
 
     scope = payload.get("scope", "global")
-    project = P.resolve_project(db, payload.get("project_id"))
+    project = _project(request, admin, db, payload.get("project_id"))
     target = project if scope == "project" else None
 
     applied = []
@@ -642,6 +688,7 @@ def api_set_settings(
 
 @router.post("/api/settings/reset")
 def api_reset_setting(
+    request: Request,
     payload: dict = Body(...),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -651,7 +698,7 @@ def api_reset_setting(
     if not key:
         raise HTTPException(400, "key is required.")
     scope = payload.get("scope", "global")
-    project = P.resolve_project(db, payload.get("project_id"))
+    project = _project(request, admin, db, payload.get("project_id"))
     P.clear_setting(db, key, project=project if scope == "project" else None)
     db.commit()
     return JSONResponse({"ok": True})
@@ -659,6 +706,7 @@ def api_reset_setting(
 
 @router.get("/api/settings/script_preview")
 def api_script_preview(
+    request: Request,
     project_id: Optional[int] = Query(None),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -668,7 +716,7 @@ def api_script_preview(
     substituted. Lets you confirm a template edit produced valid-looking
     script before spending a Photoshop run on it.
     """
-    project = P.resolve_project(db, project_id)
+    project = _project(request, admin, db, project_id)
     return JSONResponse({
         "ok": True,
         "script": P.render_process_script(db, project=project),
@@ -682,11 +730,12 @@ def api_script_preview(
 
 @router.get("/api/accounts")
 def api_accounts(
+    request: Request,
     project_id: Optional[int] = Query(None),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    project = P.resolve_project(db, project_id)
+    project = _project(request, admin, db, project_id)
     out = []
     for account in (
         db.query(UploadAccount)
@@ -712,6 +761,7 @@ def api_accounts(
 
 @router.post("/api/accounts")
 def api_create_account(
+    request: Request,
     payload: dict = Body(...),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -730,7 +780,7 @@ def api_create_account(
     if not name or not email or not password:
         raise HTTPException(400, "name, email and password are required.")
 
-    project = P.resolve_project(db, payload.get("project_id"))
+    project = _project(request, admin, db, payload.get("project_id"))
     if db.query(UploadAccount).filter_by(project_id=project.id, name=name).first():
         raise HTTPException(400, f"An account named '{name}' already exists in this project.")
 
@@ -981,6 +1031,7 @@ def api_release_inflight(
 
 @router.get("/api/failures")
 def api_failures(
+    request: Request,
     kind: str = Query("upload"),
     project_id: Optional[int] = Query(None),
     admin: User = Depends(require_admin),
@@ -991,7 +1042,7 @@ def api_failures(
     the error text, attempt count, and the failure screenshot the node
     captured at the moment things broke.
     """
-    project = P.resolve_project(db, project_id)
+    project = _project(request, admin, db, project_id)
 
     if kind == "processing":
         rows = (
@@ -999,8 +1050,7 @@ def api_failures(
               .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
               .filter(SavedPoster.pipeline_status == "failed_processing",
                       SavedPoster.deleted_at.is_(None),
-                      or_(MasterTitle.project_id == project.id,
-                          MasterTitle.project_id.is_(None)))
+                      _title_scope(db, project))
               .order_by(SavedPoster.claimed_at.desc().nullslast())
               .limit(200)
               .all()
@@ -1184,6 +1234,7 @@ def api_artifact(
 
 @router.post("/api/test/{kind}")
 def api_test(
+    request: Request,
     kind: str,
     payload: dict = Body(default={}),
     admin: User = Depends(require_admin),
@@ -1208,7 +1259,7 @@ def api_test(
         raise HTTPException(400, "kind must be download, process or upload.")
 
     job_kind = f"test_{kind}"
-    project = P.resolve_project(db, payload.get("project_id"))
+    project = _project(request, admin, db, payload.get("project_id"))
 
     if kind == "download":
         if not payload.get("master_id"):
@@ -1290,6 +1341,7 @@ def api_job_detail(
 
 @router.post("/api/jobs/{job_id}/cancel")
 def api_cancel_job(
+    request: Request,
     job_id: int,
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -1312,6 +1364,7 @@ def api_cancel_job(
 
 @router.post("/api/run")
 def api_trigger_run(
+    request: Request,
     payload: dict = Body(default={}),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -1325,7 +1378,7 @@ def api_trigger_run(
     kind = payload.get("kind", "process")
     if kind not in ("process", "upload"):
         raise HTTPException(400, "kind must be process or upload.")
-    project = P.resolve_project(db, payload.get("project_id"))
+    project = _project(request, admin, db, payload.get("project_id"))
     job = P.create_job(db, kind=kind, payload=payload,
                        project_id=project.id, requested_by=admin.username)
     P.append_job_log(db, job, f"Manual {kind} run requested by {admin.username}")
@@ -1466,13 +1519,14 @@ def api_create_project(
 
 @router.get("/api/stats")
 def api_stats(
+    request: Request,
     project_id: Optional[int] = Query(None),
     days: int = Query(30, ge=7, le=365),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Aggregates for the pipeline charts — per-day uploads plus all-time totals."""
-    project = P.resolve_project(db, project_id)
+    project = _project(request, admin, db, project_id)
     history = P.upload_history(db, days=days)
 
     totals = {

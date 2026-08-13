@@ -302,12 +302,18 @@
     // some URL happens to be blank.
     const tmdb = node.querySelector('.att-tmdb');
     const searchBox = node.querySelector('[data-search-box]');
+    const saveBox = node.querySelector('.save-box');
     if (t.search_mode === 'inpage') {
+      // No external source, so no link and no paste-a-URL box. The worker
+      // picks from the grid; a URL field they can never sensibly fill is
+      // clutter, and on a phone it is what summons the keyboard.
       tmdb.hidden = true;
+      if (saveBox) saveBox.hidden = true;
       if (searchBox) { searchBox.hidden = false; wireSearch(searchBox, t); }
     } else {
       tmdb.href = t.tmdb_search || '#';
       tmdb.hidden = !t.tmdb_search;
+      if (saveBox) saveBox.hidden = false;
       if (searchBox) searchBox.hidden = true;
     }
 
@@ -354,7 +360,15 @@
 
     activePanel.appendChild(node);
     renderedLockedId = t.id;
-    requestAnimationFrame(() => { try { urlInput.focus({ preventScroll: false }); } catch (e) {} });
+
+    // Deliberately NOT focusing the URL box. On a phone, focusing an input
+    // opens the on-screen keyboard, which covered half the screen every time
+    // a worker opened a title. Nobody types a URL first — they go to the
+    // source, or (in-page projects) tap a thumbnail — so the focus was only
+    // ever costing a tap to dismiss.
+    //
+    // Desktop users lose nothing: the field is one click away and Enter still
+    // saves once you are in it.
   }
 
   // Passive update — same locked title, refresh dynamic bits without

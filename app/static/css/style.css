@@ -751,6 +751,17 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 }
 
 /* Buttons */
+/* ═══════════════════════════════════════════════════════════════════════════
+   [hidden] MUST WIN
+   The HTML `hidden` attribute only works because the UA stylesheet says
+   `[hidden] { display: none }` — which ANY class setting an explicit display
+   overrides. `.btn { display: inline-block }` meant `tmdb.hidden = true` did
+   nothing, so a MUSIK artist kept showing an "Open TMDB" button. The same
+   trap bit `.pipe-section { display: contents }` earlier in this project.
+   One global rule, so `hidden` means hidden everywhere.
+   ═══════════════════════════════════════════════════════════════════════════ */
+[hidden] { display: none !important; }
+
 .btn {
   display: inline-block; padding: 6px 12px;
   background: var(--card); color: var(--text);
@@ -4427,21 +4438,25 @@ label.inline-check {
 .search-status { font-size: 11px; color: var(--subtext); margin-left: auto; }
 .search-note { font-size: 11px; margin-top: 6px; }
 
+/* Masonry via CSS columns rather than a grid of squares. A grid forces one
+   aspect ratio on every result, and object-fit: cover then crops the top and
+   bottom off a portrait — which is exactly the part of a photo the worker is
+   judging. Columns let each thumbnail keep its own shape. */
 .search-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 10px;
+  columns: 5 150px;
+  column-gap: 10px;
   margin-top: 12px;
-  /* Capped so the grid never pushes the saved-images list off the screen;
-     the worker scrolls inside it instead of scrolling the whole page. */
-  max-height: 60vh;
+  max-height: 65vh;
   overflow-y: auto;
   padding-right: 4px;
 }
 
 .sr-card {
   position: relative;
-  aspect-ratio: 1 / 1;
+  display: inline-block;
+  width: 100%;
+  margin: 0 0 10px;
+  break-inside: avoid;          /* never split a card across columns */
   border: 2px solid var(--border);
   border-radius: 4px;
   overflow: hidden;
@@ -4453,7 +4468,8 @@ label.inline-check {
 /* Already at the cap: still visible for comparison, clearly not clickable. */
 .sr-card.is-blocked { opacity: 0.35; cursor: not-allowed; }
 
-.sr-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* height:auto — the whole point. No cropping, no letterboxing. */
+.sr-img { width: 100%; height: auto; display: block; }
 
 .sr-badge {
   position: absolute; top: 6px; left: 6px;
@@ -4481,6 +4497,6 @@ label.inline-check {
 .search-bar-count { font-size: 12px; margin-right: auto; }
 
 @media (max-width: 640px) {
-  .search-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); max-height: 55vh; }
+  .search-grid { columns: 2 110px; max-height: 60vh; }
   .search-status { margin-left: 0; width: 100%; }
 }

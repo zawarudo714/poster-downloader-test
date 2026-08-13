@@ -1208,8 +1208,16 @@ def api_browse(
             "worker_note": rev.worker_note if rev else "",
         })
 
+    from ..pipeline import get_setting
+    try:
+        min_width = int(get_setting(db, "review_min_width_px",
+                                    project=current_project(request, admin, db)) or 0)
+    except Exception:
+        min_width = 800
+
     return JSONResponse({
         "worker": worker, "date": date,
+        "min_width": min_width,
         "title_count": len(titles),
         "poster_count": sum(len(t["posters"]) for t in titles.values()),
         "titles": list(titles.values()),

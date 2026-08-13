@@ -125,7 +125,9 @@
   if (!gallery) return;
 
   // Threshold for sub-800 highlighting. Posters under 800px wide get a red border.
-  const MIN_WIDTH = 800;
+  // Per project, delivered by /admin/api/browse. 0 disables the warning —
+  // which is what a project whose sources are meant to be small wants.
+  let MIN_WIDTH = 800;
 
   let titles = [];
   let titleIdx = 0;
@@ -151,6 +153,8 @@
     const r = await fetch('/admin/api/browse?' + params.toString() + '&_t=' + Date.now(), { cache: 'no-store' });
     if (!r.ok) { gallery.innerHTML = '<div class="empty-hint">Load failed.</div>'; return; }
     const data = await r.json();
+    // The project decides its own quality threshold; 0 means "don't warn".
+    if (typeof data.min_width === 'number') MIN_WIDTH = data.min_width;
     titles = data.titles || [];
     // Restore title index from URL if available and valid, else 0.
     titleIdx = (restoredIdx > 0 && restoredIdx < titles.length) ? restoredIdx : 0;
@@ -218,7 +222,7 @@
     btn.querySelector('.g-poster-name').textContent = p.filename;
 
     // Quality classes/badges.
-    const isSub800 = (p.image_width != null && p.image_width < MIN_WIDTH);
+    const isSub800 = (MIN_WIDTH > 0 && p.image_width != null && p.image_width < MIN_WIDTH);
     if (isSub800) btn.classList.add('p-sub800');
     if (p.low_quality_url) btn.classList.add('p-lq-bypass');
 

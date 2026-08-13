@@ -382,6 +382,12 @@ DEFAULTS: dict[str, Any] = {
     "source_search_url":  "https://www.themoviedb.org/search?query={query}",
     # Hosts a worker may download from. Empty means unrestricted.
     "allowed_download_hosts": "",
+    # Below this width the admin gallery outlines an image in red. It exists
+    # because a movie poster under 800px prints badly. MUSIK sources are
+    # deliberately small — GPT redraws them and the result is upscaled — so
+    # the warning would fire on every single image and mean nothing.
+    # 0 turns it off.
+    "review_min_width_px": 800,
 
     # ── Brave image search (MUSIK) ───────────────────────────────────────
     # Two keys. Normal searches use the free key; deep searches go straight to
@@ -635,6 +641,10 @@ PROJECT_DEFS: list[dict] = [
         "processor":        "gpt",
         # Searches inside the site, so no "Open TMDB" button.
         "search_mode":      "inpage",
+        # Source resolution is irrelevant here: GPT redraws the image and the
+        # result is upscaled to print size, so a red "640px wide" warning on
+        # every artist would be pure noise.
+        "settings":         {"review_min_width_px": 0},
         # One column of artist names — no year, no movie/tv distinction.
         "has_year":         0,
         "has_content_type": 0,

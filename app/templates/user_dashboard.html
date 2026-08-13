@@ -145,29 +145,6 @@
     </div>
   </div>
 
-  {# ─────────────────────────────────────────────────────────────────────
-     IN-PAGE IMAGE SEARCH
-     Shown only for projects that search inside the site. Tap an image to
-     select it, tap again to deselect; the bar at the bottom saves the lot.
-     One tap per image, and the count is always visible so "2 is the max"
-     needs no popup.
-     ───────────────────────────────────────────────────────────────────── #}
-  <div class="search-box" data-search-box hidden>
-    <div class="search-head">
-      <button class="btn btn-accent" data-action="search-normal">SEARCH</button>
-      <button class="btn btn-ghost" data-action="search-deep">DEEP&nbsp;SEARCH</button>
-      <button class="btn btn-ghost btn-tiny" data-action="search-refresh" title="Fetch fresh results">↻</button>
-      <span class="search-status mono"></span>
-    </div>
-    <div class="search-note muted" data-search-note hidden></div>
-    <div class="search-grid" data-search-grid></div>
-    <div class="search-bar" data-search-bar hidden>
-      <span class="search-bar-count mono"></span>
-      <button class="btn btn-accent" data-action="search-save">SAVE SELECTED</button>
-      <button class="btn btn-ghost btn-tiny" data-action="search-clear">CLEAR</button>
-    </div>
-  </div>
-
   <div class="save-box">
     <div class="save-label">
       Paste image URL ({{ info("Open the full-size view at the source, then right-click → Copy link address (NOT 'Copy image address'). Press Enter or click SAVE.") }})
@@ -198,6 +175,29 @@
       <button class="btn btn-skip" data-action="skip">SKIP {{ info("Marks this title skipped. Use when nothing usable exists. Admin can review skipped titles and ask you to look again.") }}</button>
     </div>
     <button class="btn btn-ghost" data-action="reopen" hidden>REOPEN</button>
+  </div>
+
+  {# ─────────────────────────────────────────────────────────────────────
+     IN-PAGE IMAGE SEARCH
+     Shown only for projects that search inside the site. Tap an image to
+     select it, tap again to deselect; the bar at the bottom saves the lot.
+     One tap per image, and the count is always visible so "2 is the max"
+     needs no popup.
+     ───────────────────────────────────────────────────────────────────── #}
+  <div class="search-box" data-search-box hidden>
+    <div class="search-head">
+      <button class="btn btn-accent" data-action="search-normal">SEARCH</button>
+      <button class="btn btn-ghost" data-action="search-deep">DEEP&nbsp;SEARCH</button>
+      <button class="btn btn-ghost btn-tiny" data-action="search-refresh" title="Fetch fresh results">↻</button>
+      <span class="search-status mono"></span>
+    </div>
+    <div class="search-note muted" data-search-note hidden></div>
+    <div class="search-grid" data-search-grid></div>
+    <div class="search-bar" data-search-bar hidden>
+      <span class="search-bar-count mono"></span>
+      <button class="btn btn-accent" data-action="search-save">SAVE SELECTED</button>
+      <button class="btn btn-ghost btn-tiny" data-action="search-clear">CLEAR</button>
+    </div>
   </div>
 </template>
 

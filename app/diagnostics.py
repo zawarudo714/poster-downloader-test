@@ -145,11 +145,25 @@ def check_missing_files(db: Session) -> CheckResult:
 
 
 def check_orphan_files(db: Session) -> CheckResult:
-    """Files sitting in the workspace with no database row pointing at them."""
+    """
+    Files sitting in the workspace with no database row pointing at them.
+
+    The known-file set is built by ASKING saved_poster_path() where each row
+    lives, not by re-deriving the path from columns. That mattered the moment
+    the workspace gained a project level: this check used to rebuild
+    "{worker}/{date}/{title}/{file}" by hand, so after the split every single
+    real file looked orphaned — the check was looking for `worker1/...` while
+    the files sat at `GR(Movie&Series)/worker1/...`.
+
+    One source of truth for where a file is. If the layout changes again,
+    this check follows automatically instead of crying wolf.
+    """
     known: set[str] = set()
     for sp in db.query(SavedPoster).all():
-        known.add(f"{sp.username}/{sp.original_save_date}/"
-                  f"{sp.title_folder_path}/{sp.filename}")
+        try:
+            known.add(saved_poster_path(sp).resolve().as_posix())
+        except Exception:
+            continue
 
     orphans: list[Finding] = []
     total = 0
@@ -157,12 +171,12 @@ def check_orphan_files(db: Session) -> CheckResult:
         for path in WORKSPACE_DIR.rglob("*"):
             if not path.is_file():
                 continue
+            if path.resolve().as_posix() in known:
+                continue
             try:
                 rel = path.relative_to(WORKSPACE_DIR).as_posix()
             except ValueError:
-                continue
-            if rel in known:
-                continue
+                rel = path.as_posix()
             total += 1
             if len(orphans) < MAX_ROWS:
                 orphans.append(Finding(rel, f"{path.stat().st_size} bytes"))

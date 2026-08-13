@@ -67,9 +67,21 @@ def pipeline_page(
 ):
     P.ensure_default_project(db)
     db.commit()
+
+    # Which processing panel this project gets. A GPT project has no
+    # Photoshop executable, no JSX script and no sharpen radius; showing
+    # those to it is worse than clutter, it implies settings that do nothing.
+    from ..routes.admin import current_project
+    project = current_project(request, admin, db)
+
     return templates.TemplateResponse(
         request, "admin_pipeline.html",
-        {"user": admin, "active_tab": "pipeline"},
+        {"user": admin, "active_tab": "pipeline",
+         "project": project,
+         "processor": project.processor,
+         "has_review_gate": bool(project.has_review_gate),
+         "item_noun": project.item_noun,
+         "item_nouns": project.item_noun_plural},
     )
 
 

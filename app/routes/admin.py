@@ -596,12 +596,20 @@ def master_page(
     db: Session = Depends(get_db),
 ):
     """Initial render of the master page; the JS app pages further via /admin/api/master."""
+    proj = current_project(request, admin, db)
     return templates.TemplateResponse(
         request,
         "admin_master.html",
         {"user": admin, "admin": admin,
             "page": page, "page_size": page_size, "q": q, "status": status,
             "content_type": content_type, "needs_revision": needs_revision,
+            # A one-column artist sheet has no year and no movie/tv split, so
+            # those column headers and the TYPE filter are dead controls.
+            # Declared by the project rather than branched on its slug.
+            "has_year": bool(proj.has_year),
+            "has_content_type": bool(proj.has_content_type),
+            "item_noun": proj.item_noun,
+            "item_nouns": proj.item_noun_plural,
             "active_tab": "master",
         },
     )

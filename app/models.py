@@ -535,6 +535,28 @@ class Project(Base):
     item_noun        = Column(String(32), nullable=False, default="poster")
     item_noun_plural = Column(String(32), nullable=False, default="posters")
 
+    # ── What this project HAS ────────────────────────────────────────────
+    # The UI renders from these instead of branching on slug. `if slug ==
+    # 'musik': hide the year column` is a rewrite waiting for project three;
+    # a project that describes itself costs nothing to add a fourth to.
+    #
+    # 'photoshop' — Real Paint FX on the Windows node (movies)
+    # 'gpt'       — OpenAI image edit on the Linux server (MUSIK)
+    # Decides which processing settings panel the Pipeline page shows, and
+    # which dispatcher picks the work up.
+    processor        = Column(String(24), nullable=False, default="photoshop")
+
+    # Whether the master sheet carries these at all. MUSIK's sheet is one
+    # column of artist names, so a YEAR column and a TYPE filter are dead
+    # controls that only add noise.
+    has_year         = Column(Integer, nullable=False, default=1)
+    has_content_type = Column(Integer, nullable=False, default=1)
+
+    # Whether processed images wait for admin approval before uploading.
+    # Adds the "Review Images" nav entry for projects that use it. Movies
+    # go straight from Photoshop to upload and always have.
+    has_review_gate  = Column(Integer, nullable=False, default=0)
+
     is_active       = Column(Integer, nullable=False, default=1)
     notes           = Column(Text, nullable=True)
     created_at      = Column(DateTime, default=datetime.utcnow, nullable=False)

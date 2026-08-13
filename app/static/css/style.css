@@ -4398,3 +4398,20 @@ label.inline-check {
   border-radius: 2px;
   color: var(--subtext);
 }
+
+/* ── Per-project table columns ─────────────────────────────────────────────
+   A project declares whether its master sheet has a year or a content type
+   (Project.has_year / has_content_type). Hiding via CSS rather than removing
+   cells in JS keeps the header and the body in step automatically — the two
+   are built in different files, and a mismatch there shifts every column. */
+.master-table.no-year .col-year,
+.master-table.no-type .col-type,
+.data-table.no-year   .col-year,
+.data-table.no-type   .col-type { display: none; }
+
+/* Style reference preview on the GPT project's Pipeline page. */
+.gpt-style-row { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.gpt-style-img {
+  width: 160px; height: 160px; object-fit: cover;
+  border: 1px solid var(--border); border-radius: 4px; background: var(--bg);
+}

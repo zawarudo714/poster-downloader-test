@@ -239,4 +239,7 @@ def project_context(request, db: Session, user: Optional[User]) -> dict:
         "active_project": proj,
         "user_projects": permitted,
         "worker_label": worker_label(proj),
+        # The project's own vocabulary, so no template hardcodes "poster".
+        "item_noun": (proj.item_noun if proj else "poster"),
+        "item_nouns": (proj.item_noun_plural if proj else "posters"),
     }

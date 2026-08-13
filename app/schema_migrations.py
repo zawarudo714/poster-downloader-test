@@ -70,6 +70,11 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("projects",      "item_noun",         "VARCHAR(32) NOT NULL DEFAULT 'poster'"),
     ("projects",      "item_noun_plural",  "VARCHAR(32) NOT NULL DEFAULT 'posters'"),
     ("saved_posters", "project_folder",    "VARCHAR(64)"),
+    # ── What a project HAS, so the UI can render per project ────────────
+    ("projects",      "processor",         "VARCHAR(24) NOT NULL DEFAULT 'photoshop'"),
+    ("projects",      "has_year",          "INTEGER NOT NULL DEFAULT 1"),
+    ("projects",      "has_content_type",  "INTEGER NOT NULL DEFAULT 1"),
+    ("projects",      "has_review_gate",   "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 NEW_INDEXES: list[tuple[str, str, str]] = [

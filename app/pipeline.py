@@ -421,6 +421,19 @@ DEFAULTS: dict[str, Any] = {
     # workspace. Changing it does NOT retroactively affect already-processed
     # images — each ProcessedImage records the script/style version it used.
     "openai_style_image": "",
+    # ── Upscaling to print size ──────────────────────────────────────────
+    # GPT returns roughly 1024px. Print needs more, so the server resizes
+    # after generation rather than paying for a larger generation — output
+    # size drives the token bill directly, and Lanczos costs nothing.
+    #
+    # Height scales in proportion: 1000x2000 at width 4000 becomes 4000x8000.
+    "upscale_width_px":   4000,
+    # Applied AFTER the upscale. 0 = off, which is the default deliberately:
+    # sharpening artefacts are permanent and the review gate is the only
+    # place they would be caught. Raise it once you have seen a real print.
+    "upscale_sharpen":    0,
+    "upscale_jpeg_quality": 92,
+
     # Spend guard. 'warn' posts a dashboard alert; 'pause' also stops
     # dispatching. Default warn — a hard stop on a bad estimate is worse than
     # a message you can act on.
@@ -604,6 +617,10 @@ PROJECT_DEFS: list[dict] = [
         "notes":            "Original workflow: TMDB posters -> Real Paint FX -> FineArtAmerica.",
         "item_noun":        "poster",
         "item_noun_plural": "posters",
+        "processor":        "photoshop",
+        "has_year":         1,
+        "has_content_type": 1,
+        "has_review_gate":  0,
     },
     {
         "slug":             "musik",
@@ -614,6 +631,13 @@ PROJECT_DEFS: list[dict] = [
         "notes":            "Music artists: Brave image search -> GPT Image 2 restyle -> FineArtAmerica.",
         "item_noun":        "image",
         "item_noun_plural": "images",
+        "processor":        "gpt",
+        # One column of artist names — no year, no movie/tv distinction.
+        "has_year":         0,
+        "has_content_type": 0,
+        # GPT output varies in a way Photoshop's deterministic effect does
+        # not, so it gets an approval step before anything is listed.
+        "has_review_gate":  1,
     },
 ]
 
@@ -622,7 +646,8 @@ PROJECT_DEFS: list[dict] = [
 # operational levers the dashboard owns, and a deploy must not silently reset
 # a project you turned off or re-weighted.
 _SYNCED_FIELDS = ("name", "source_site", "target_site", "images_per_title", "notes",
-                  "item_noun", "item_noun_plural")
+                  "item_noun", "item_noun_plural", "processor",
+                  "has_year", "has_content_type", "has_review_gate")
 
 
 def sync_projects(db: Session) -> list[str]:

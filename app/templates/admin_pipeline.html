@@ -231,10 +231,16 @@
   </div>
 
   {# ═══════════════════════════════════════════════════════════════ #}
-  {#  PROCESSING (Photoshop)                                         #}
+  {#  PROCESSING — the panel matches the project's processor.
+      'photoshop' renders the Real Paint FX settings + JSX editor.
+      'gpt'       renders the OpenAI settings + prompt + style image.
+      Declared on the Project, never branched on its slug, so a third
+      project picks whichever of these it needs with no template edit.  #}
   {# ═══════════════════════════════════════════════════════════════ #}
-  <div class="pipe-section" data-section-panel="processing" hidden>
+  <div class="pipe-section" data-section-panel="processing" hidden
+       data-processor="{{ processor }}">
 
+    {% if processor == 'photoshop' %}
     <section class="panel">
       <div class="panel-head">
         <span>PHOTOSHOP SETTINGS
@@ -273,6 +279,89 @@
         </details>
       </div>
     </section>
+    {% endif %}
+
+    {% if processor == 'gpt' %}
+    <section class="panel">
+      <div class="panel-head">
+        <span>IMAGE GENERATION
+          {{ info("Runs on this server, not the Windows node — GPT Image 2 is an API call, so it needs no desktop and keeps working even when the node is down. Changes take effect on the next batch.") }}
+        </span>
+      </div>
+      <div class="panel-body">
+        <div class="settings-grid" data-settings-group="gpt"></div>
+        <div class="filter-row" style="margin-top:12px">
+          <button type="button" class="btn btn-accent" data-action="save-settings" data-group="gpt">SAVE GENERATION SETTINGS</button>
+          <span class="muted mono" data-settings-status="gpt"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>PROMPT
+          {{ info("Sent with every image. The style reference is the FIRST image and the worker's photo is the SECOND, so the prompt refers to them in that order. Editing this does not change images already processed.") }}
+        </span>
+      </div>
+      <div class="panel-body">
+        <textarea class="pipe-code-editor" data-gpt-prompt spellcheck="false" rows="8"></textarea>
+        <div class="filter-row" style="margin-top:10px">
+          <button type="button" class="btn btn-accent" data-action="save-gpt-prompt">SAVE PROMPT</button>
+          <button type="button" class="btn btn-ghost" data-action="reset-gpt-prompt">RESET TO DEFAULT</button>
+          <span class="muted mono" data-gpt-prompt-status></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>STYLE REFERENCE
+          {{ info("The look every image is transformed towards. Sent as the first image on every request. Replacing it affects only images processed from that point on — anything already done keeps the style it was made with.") }}
+        </span>
+      </div>
+      <div class="panel-body">
+        <div class="gpt-style-row">
+          <img data-gpt-style-preview alt="Current style reference" class="gpt-style-img" hidden>
+          <div>
+            <p class="muted" data-gpt-style-empty>No style reference uploaded yet.</p>
+            <input type="file" accept="image/*" data-gpt-style-file>
+            <button type="button" class="btn btn-accent btn-tiny" data-action="upload-gpt-style">UPLOAD</button>
+            <span class="muted mono" data-gpt-style-status></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>OUTPUT SIZE
+          {{ info("GPT returns roughly 1024px. These upscale it to print size on this server. Sharpening is applied after the upscale — leave it at 0 until you have seen a real print, because sharpening artefacts are permanent and the review gate is where you would have to catch them.") }}
+        </span>
+      </div>
+      <div class="panel-body">
+        <div class="settings-grid" data-settings-group="upscale"></div>
+        <div class="filter-row" style="margin-top:12px">
+          <button type="button" class="btn btn-accent" data-action="save-settings" data-group="upscale">SAVE OUTPUT SETTINGS</button>
+          <span class="muted mono" data-settings-status="upscale"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>SPENDING
+          {{ info("Recorded from the token usage each API call reports, so these are measured rather than estimated. Reconciled nightly against OpenAI's own Costs API when an admin key is set.") }}
+        </span>
+      </div>
+      <div class="panel-body">
+        <div class="settings-grid" data-settings-group="spend"></div>
+        <div class="filter-row" style="margin-top:12px">
+          <button type="button" class="btn btn-accent" data-action="save-settings" data-group="spend">SAVE SPEND SETTINGS</button>
+          <span class="muted mono" data-settings-status="spend"></span>
+        </div>
+      </div>
+    </section>
+    {% endif %}
 
     <section class="panel">
       <div class="panel-head">

@@ -47,7 +47,9 @@
           <option value="complete" {% if status=='complete' %}selected{% endif %}>Complete</option>
           <option value="skipped" {% if status=='skipped' %}selected{% endif %}>Skipped</option>
         </select>
-        <select id="ms-type" class="filter-input">
+        {# A one-column artist sheet has no movie/tv split — the filter would
+           match nothing. Declared by the project, not branched on its slug. #}
+        <select id="ms-type" class="filter-input" {% if not has_content_type %}hidden{% endif %}>
           <option value="" {% if not content_type %}selected{% endif %}>All types</option>
           <option value="movie" {% if content_type=='movie' %}selected{% endif %}>Movie</option>
           <option value="tvSeries" {% if content_type=='tvSeries' %}selected{% endif %}>TV Series</option>
@@ -75,11 +77,14 @@
       </div>
 
       <div class="master-table-wrap">
-        <table class="master-table">
+        <table class="master-table{% if not has_year %} no-year{% endif %}{% if not has_content_type %} no-type{% endif %}">
           <thead>
             <tr>
               <th class="col-cb"><input type="checkbox" id="ms-cb-all" title="Select page"></th>
-              <th>#</th><th>Type</th><th>Title</th><th>Year</th>
+              <th>#</th>
+              <th class="col-type">Type</th>
+              <th>Title</th>
+              <th class="col-year">Year</th>
               <th>Status</th><th>Claimed</th><th>Started</th><th>Set status</th>
             </tr>
           </thead>

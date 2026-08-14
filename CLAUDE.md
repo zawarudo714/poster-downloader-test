@@ -1,6 +1,21 @@
 # Project brief for AI sessions
 
-Read this first. Then read `PIPELINE.md` if the work touches post-production.
+Read this first. Then:
+
+- **`MULTIPROJECT.md` — read it before writing ANY code.** This app runs
+  several niches side by side. Nearly every bug it has had came from code
+  assuming there was only one. That file is the contract: how to say the
+  right words, how to scope a query, which stage claims what, and the traps
+  already hit in production.
+- `PIPELINE.md` if the work touches post-production.
+
+**The single most important thing to understand:** this is a MULTI-PROJECT
+system. Two niches exist today (movie/series posters, MUSIK music artists)
+and more are planned. When the owner asks for a new feature or a new niche,
+it must not inherit mechanisms from another project that do nothing for it,
+and it must not inherit that project's vocabulary either. Ask which pieces
+would be dead for it and say so explicitly, rather than copying an existing
+project's definition.
 
 ---
 
@@ -8,16 +23,19 @@ Read this first. Then read `PIPELINE.md` if the work touches post-production.
 
 A print-on-demand operation. Two halves:
 
-1. **Poster sourcing** (built, in production) — a FastAPI + SQLite + vanilla-JS
-   app where paid workers claim movie/TV titles from a 101,605-row master list,
-   find HD posters on TMDB, and save them into an audit-trailed folder tree.
-   The admin reviews quality, flags bad images, approves completions, and pays
-   weekly.
+1. **Sourcing** (built, in production) — a FastAPI + SQLite + vanilla-JS
+   app where paid workers claim titles from a master list, find high-quality
+   images for them, and save them into an audit-trailed folder tree. The
+   admin reviews quality, flags bad images, approves completions, and pays
+   weekly. Where the images come from depends on the project: the movie
+   project sends workers to TMDB in another tab; MUSIK searches Brave inside
+   the page.
 
-2. **Post-production** (built, not yet deployed) — automates what the owner
-   used to do by hand on his laptop: run each poster through a Photoshop
-   painterly effect, archive it, and upload it to FineArtAmerica. See
-   `PIPELINE.md`.
+2. **Post-production** (built, in production) — automates what the owner used
+   to do by hand: process each image, archive it, and upload it to the
+   marketplace. HOW it is processed is a property of the project — the movie
+   project runs a Photoshop painterly effect on a Windows node; MUSIK
+   generates a new image with OpenAI on the server itself. See `PIPELINE.md`.
 
 Live at `178.105.34.144` (Hetzner, Docker). The owner is a solo operator, not
 a developer — he reads code but does not want to edit it to change behaviour.

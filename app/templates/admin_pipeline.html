@@ -51,7 +51,7 @@
     <section class="panel">
       <div class="panel-head">
         <span>PIPELINE FUNNEL
-          {{ info("Live poster counts at each stage. 'Awaiting greenlight' is completed work not yet approved for processing — that's your actionable backlog. Click any stage to see the titles in it.") }}
+          {{ info("Live " ~ noun ~ " counts at each stage. 'Awaiting greenlight' is completed work not yet approved for processing — that's your actionable backlog. Click any stage to see the titles in it.") }}
         </span>
         <button type="button" class="btn btn-ghost btn-tiny" data-action="refresh-overview">REFRESH</button>
       </div>
@@ -68,7 +68,7 @@
     <section class="panel" data-inflight-panel>
       <div class="panel-head">
         <span>IN FLIGHT NOW
-          {{ info("Exactly which images a worker node is holding this second, and how long it has held them. A Photoshop run of several minutes is normal; anything marked STALE has exceeded the claim timeout and will be automatically returned to the queue on the next dispatch.") }}
+          {{ info("Exactly which images a worker node is holding this second, and how long it has held them. A " ~ processor_label ~ " run of several minutes is normal; anything marked STALE has exceeded the claim timeout and will be automatically returned to the queue on the next dispatch.") }}
         </span>
         <span class="muted mono" data-inflight-updated></span>
       </div>
@@ -124,7 +124,7 @@
     <section class="panel">
       <div class="panel-head">
         <span>GREENLIGHT MODE
-          {{ info("'Payment' auto-greenlights posters when you mark a payment run as paid — so paying for a week releases that week into the pipeline. 'Manual' means only the buttons below promote work. 'Both' gives you the auto behaviour plus manual control.") }}
+          {{ info("'Payment' auto-greenlights work when you mark a payment run as paid — so paying for a week releases that week into the pipeline. 'Manual' means only the buttons below promote work. 'Both' gives you the auto behaviour plus manual control.") }}
         </span>
       </div>
       <div class="panel-body">
@@ -145,7 +145,7 @@
     <section class="panel">
       <div class="panel-head">
         <span>AWAITING GREENLIGHT — BY SAVE DATE
-          {{ info("Completed titles not yet approved for processing, grouped by the date the worker saved them. 'PAID' means every poster on that date is already covered by a payment run, so it's safe to release. Select dates and greenlight them together.") }}
+          {{ info("Completed titles not yet approved for processing, grouped by the date the worker saved them. 'PAID' means everything saved on that date is already covered by a payment run, so it's safe to release. Select dates and greenlight them together.") }}
         </span>
         <span class="filter-row" style="gap:6px">
           <button type="button" class="btn btn-ghost btn-tiny" data-action="gl-select-paid">SELECT ALL PAID</button>
@@ -181,7 +181,7 @@
     <section class="panel">
       <div class="panel-head">
         <span>TITLE BROWSER
-          {{ info("Drill into any pipeline stage. Click a row to select it, shift-click for a range, or drag down the list. Selection survives paging, so you can select across pages before acting. Greenlighting only ever promotes posters that aren't already in the pipeline, so nothing gets processed twice.") }}
+          {{ info("Drill into any pipeline stage. Click a row to select it, shift-click for a range, or drag down the list. Selection survives paging, so you can select across pages before acting. Greenlighting only ever promotes work that isn't already in the pipeline, so nothing gets processed twice.") }}
         </span>
       </div>
       <div class="panel-body">
@@ -271,7 +271,7 @@
     <section class="panel">
       <div class="panel-head">
         <span>PHOTOSHOP SCRIPT (JSX)
-          {{ info("The script the worker node runs on each image, edited here like a text file. It handles ONE image — batching, retries and folder walking are the pipeline's job. The node injects INPUT_FILE and OUTPUT_FILE; {{PLACEHOLDERS}} are filled from the settings above. Save, then use Test & Debug to run it on a single image.") }}
+          {{ info("The script the worker node runs on each image, edited here like a text file. It handles ONE image — batching, retries and folder walking are the pipeline's job. The node injects INPUT_FILE and OUTPUT_FILE; " ~ PLACEHOLDERS ~ " are filled from the settings above. Save, then use Test & Debug to run it on a single image.") }}
         </span>
         <span class="filter-row" style="gap:6px">
           <span class="muted mono">version <span data-script-version>—</span></span>
@@ -566,7 +566,7 @@
       </div>
       <div class="panel-body">
         <div class="filter-row">
-          <label>POSTER ID <input type="number" data-test-poster-id placeholder="e.g. 1234"></label>
+          <label>{{ NOUN | default('POSTER', true) }} ID <input type="number" data-test-poster-id placeholder="e.g. 1234"></label>
           <button type="button" class="btn btn-accent btn-tiny" data-action="test-process">RUN TEST PROCESS</button>
           <span class="muted mono" data-test-status="process"></span>
         </div>
@@ -604,7 +604,7 @@
       </div>
       <div class="panel-body">
         <div class="filter-row">
-          <label>POSTER ID <input type="number" data-test-upload-poster placeholder="e.g. 1234"></label>
+          <label>{{ NOUN | default('POSTER', true) }} ID <input type="number" data-test-upload-poster placeholder="e.g. 1234"></label>
           <label>ACCOUNT
             <select data-test-upload-account><option value="">—</option></select>
           </label>
@@ -673,7 +673,7 @@
     <section class="panel">
       <div class="panel-head">
         <span>WORKER NODES
-          {{ info("Machines allowed to run pipeline work — normally one Windows VPS with Photoshop and Chrome. A node holds no configuration: it fetches the script, selectors, timings and credentials on every run. Rebuild it any time; only the token needs restoring.") }}
+          {{ info("Machines allowed to run pipeline work — normally one Windows VPS with the processing software and Chrome. A node holds no configuration: it fetches the script, selectors, timings and credentials on every run. Rebuild it any time; only the token needs restoring.") }}
         </span>
         <button type="button" class="btn btn-accent btn-tiny" data-action="node-new">REGISTER NODE</button>
       </div>

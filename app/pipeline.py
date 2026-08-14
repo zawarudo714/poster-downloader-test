@@ -614,6 +614,30 @@ DEFAULT_PROJECT_SLUG = "tell-a-vision"
 # is the safe direction to fail.
 NODE_PROCESSORS = ("photoshop",)
 
+# ════════════════════════════════════════════════════════════════════════════
+#  HUMAN LABELS FOR THE THINGS A PROJECT PLUGS INTO
+# ════════════════════════════════════════════════════════════════════════════
+# A project stores machine keys — 'tmdb', 'brave', 'fineartamerica' — because
+# those are stable and safe in a path. Screens need words. Keeping the mapping
+# HERE means adding a marketplace is one line, and no template ever hardcodes
+# the name of a site it happens to know about today.
+#
+# An unknown key falls back to itself rather than to a movie-project default,
+# so a missing entry reads as an odd label rather than as a confident lie.
+SITE_LABELS = {
+    "tmdb":           "TMDB",
+    "brave":          "Brave image search",
+    "pinterest":      "Pinterest",
+    "fineartamerica": "FineArtAmerica",
+    "teepublic":      "TeePublic",
+    "redbubble":      "Redbubble",
+}
+
+PROCESSOR_LABELS = {
+    "photoshop": "Photoshop",
+    "gpt":       "AI image generation",
+}
+
 
 # ═════════════════════════════════════════════════════════════════════════
 #  PROJECT REGISTRY

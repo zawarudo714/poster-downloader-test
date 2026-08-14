@@ -125,7 +125,7 @@
     const rate  = parseFloat(sourceRow._rate || rateKes) || 0;
     const dates = Object.keys(byDay).sort();
     if (!dates.length) {
-      cell.innerHTML = '<span class="muted">No eligible posters in this range.</span>';
+      cell.innerHTML = `<span class="muted">No eligible ${PD.nouns} in this range.</span>`;
       return;
     }
     // Day-by-day breakdown: date · count × rate = amount

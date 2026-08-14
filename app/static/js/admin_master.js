@@ -193,7 +193,7 @@
 
   // Clear all
   $('ms-clear-all').addEventListener('click', async () => {
-    if (!confirm('Clear ALL titles from the list? This cannot be undone (already-saved posters keep their files).')) return;
+    if (!confirm(`Clear ALL titles from the list? This cannot be undone (anything already saved keeps its files).`)) return;
     if (!confirm('REALLY clear everything? Last chance.')) return;
     const r = await fetch('/admin/master/clear', { method: 'POST' });
     if (r.ok) load();

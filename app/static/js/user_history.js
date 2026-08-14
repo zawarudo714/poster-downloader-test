@@ -30,7 +30,7 @@
     const data = await r.json();
     rateEl.textContent = data.rate_kes || '?';
     if (!data.days || data.days.length === 0) {
-      listEl.innerHTML = '<div class="empty-hint">No saved posters yet — your history will show up here once you start saving.</div>';
+      listEl.innerHTML = `<div class="empty-hint">No saved ${PD.nouns} yet — your history will show up here once you start saving.</div>`;
       return;
     }
     allDays = data.days;

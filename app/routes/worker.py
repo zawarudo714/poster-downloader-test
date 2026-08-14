@@ -88,12 +88,23 @@ def _project_ui(db: Session, project_id) -> dict:
     expected, and what this project calls the thing being saved. A third
     project changes these by declaring them, not by editing templates.
     """
+    from ..pipeline import SITE_LABELS
+
     proj = resolve_project(db, project_id)
     return {
         "search_mode":      proj.search_mode,
         "images_per_title": proj.images_per_title,
         "item_noun":        proj.item_noun,
         "item_nouns":       proj.item_noun_plural,
+        # The source's NAME, so no button is labelled "Open TMDB" in a
+        # project that has never heard of TMDB. Sent as a label rather than
+        # the raw key because it is displayed, never compared.
+        "source_label":     SITE_LABELS.get(proj.source_site, proj.source_site or "the source"),
+        # Whether a year is meaningful. Artists have none, films do — and a
+        # blank "(N/A)" beside every name is noise the worker learns to
+        # ignore, which is how real warnings get ignored too.
+        "has_year":         bool(proj.has_year),
+        "has_content_type": bool(proj.has_content_type),
     }
 
 
@@ -2264,16 +2275,37 @@ def stats_page(
         return RedirectResponse("/", status_code=302)
     return templates.TemplateResponse(
         request, "user_stats.html",
-        {"user": user, "active_tab": "stats"},
+        {"user": user, "active_tab": "stats",
+         # Only the projects this worker actually covers. A filter listing
+         # niches they have never touched would be a list of zeroes.
+         "projects": allowed_projects(db, user)},
     )
 
 
 @router.get("/api/stats/me")
 def api_stats_me(
+    request: Request,
+    project_id: int = Query(0),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """JSON stats for the current worker. Drives the /stats page."""
+    """
+    JSON stats for the current worker. Drives the /stats page.
+
+    Combined across every project by default — a worker's throughput is one
+    number, and a two-niche worker being shown half of their own output is
+    both wrong and demoralising. `project_id` narrows it.
+
+    The filter is checked against the worker's OWN projects rather than
+    trusted: without that, editing the query string would let anyone read
+    how much work exists in a niche they have no part in.
+    """
     from ..stats import compute_worker_stats
-    data = compute_worker_stats(db, worker_id=user.id, is_admin_view=False)
+
+    allowed = {p.id for p in allowed_projects(db, user)}
+    if project_id and project_id not in allowed:
+        raise HTTPException(403, "That project is not assigned to you.")
+
+    data = compute_worker_stats(db, worker_id=user.id, is_admin_view=False,
+                                project_id=project_id or None)
     return JSONResponse(data)

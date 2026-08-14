@@ -6,7 +6,7 @@ THE SHAPE
 ════════════════════════════════════════════════════════════════════════════
 There are two levels of navigation:
 
-  MASTER  — the account as a whole. Payments, chat, users, backups, email,
+  MASTER  — the account as a whole. Payments, chat, users, backups,
             the master activity log, cross-project stats. One of everything.
   PROJECT — one niche on one marketplace. Review Posters, Title List, Changes
             Requested, Skipped, Pipeline, project stats, CSV import. One of

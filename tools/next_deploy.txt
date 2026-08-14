@@ -1,1 +1,1 @@
-Search row: find on the left, clear and save pushed right; drop the floating search
+Multi-project vocabulary everywhere, remove email, worker stats filter, search row

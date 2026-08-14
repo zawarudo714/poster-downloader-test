@@ -6,11 +6,11 @@
 <div class="admin-grid">
   <section class="panel">
     <div class="panel-head">
-      <span>SAVE HISTORY {{ info("Every day you saved at least one poster, with the per-day count broken into paid (already settled), eligible (counts toward your next payment), and pending (waiting on a fix). Click any row to see which titles those posters belong to.") }}</span>
+      <span>SAVE HISTORY {{ info("Every day you saved at least one " ~ noun ~ ", with the per-day count broken into paid (already settled), eligible (counts toward your next payment), and pending (waiting on a fix). Click any row to see which titles they belong to.") }}</span>
     </div>
     <div class="panel-body">
       <p class="muted history-rate-line">
-        Current rate: <strong class="mono" id="history-rate">…</strong> KES per poster.
+        Current rate: <strong class="mono" id="history-rate">…</strong> KES per {{ noun }}.
         Amounts on this page are based on this rate. Past payments use the rate that was in effect at the time.
       </p>
       <div class="history-search-row">

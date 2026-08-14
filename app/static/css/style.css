@@ -3920,6 +3920,15 @@ body:has(#ib-bulk-bar:not([hidden])) { padding-bottom: 88px; }
 .pipe-subrow td { padding-top: 0 !important; border-top: none !important; }
 .pipe-subrow    { background: rgba(232,85,75,0.04); }
 
+/* Project filter above a stats page. Deliberately plain and set apart from
+   the panels below it — it changes what every number underneath means, so
+   it should read as a control over the page rather than part of one card. */
+.stats-project-filter {
+  margin-bottom: 14px;
+  gap: 12px;
+  align-items: center;
+}
+
 /* ── Spending ───────────────────────────────────────────────────────────
    Four figures on one line, with the numbers set large. Reading order is
    what it has cost, what each image costs, how many, what finishing the
@@ -4529,13 +4538,17 @@ label.inline-check {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 .search-box { margin-top: 14px; }
-/* Two jobs, two ends: finding on the left, acting on what you found pushed
-   to the right edge. `space-between` rather than a margin on the second
-   group, so it still sits correctly if the left group ever wraps. */
+/* Two jobs, one row: finding, and acting on what you found.
+   BOTH groups are right-aligned, and within each the primary action sits at
+   the outside edge — SEARCH and SAVE SELECTED end up in the same corner as
+   each other. That corner is where a thumb rests one-handed, so the two
+   buttons pressed on every single title are the two easiest to reach, and
+   the secondary ones (DEEP SEARCH, CLEAR) sit inboard where a mis-tap is
+   less likely and less costly. */
 .search-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
 }
@@ -4543,15 +4556,20 @@ label.inline-check {
 .search-head-act {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
 }
+/* Pushes the two groups apart on a wide screen while both stay right-anchored
+   as the row narrows. */
+.search-head-find { margin-right: auto; }
 
-/* On a phone the two groups get a line each — four buttons across a 360px
-   screen would shrink the labels to nothing. The action pair stays right
-   aligned so its position is the same on both, and the thumb learns one
-   place rather than two. */
+/* On a phone the groups take a line each — four buttons across 360px would
+   shrink the labels to nothing. Both stay right-aligned, so SEARCH and SAVE
+   land in the same column on both lines and the thumb learns one place. */
 @media (max-width: 560px) {
   .search-head { flex-direction: column; align-items: stretch; }
+  .search-head-find { margin-right: 0; }
+  .search-head-find,
   .search-head-act { justify-content: flex-end; }
   .search-head-find .btn,
   .search-head-act .btn { flex: 0 0 auto; }

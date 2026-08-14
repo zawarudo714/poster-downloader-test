@@ -6,10 +6,10 @@
 <div class="admin-grid">
 
   <section class="panel">
-    <div class="panel-head"><span>SETTINGS {{ info("Per-poster rate (KES) and the start day of your pay week. Changes don't affect past payment runs — those captured the rate at the time they were created.") }}</span></div>
+    <div class="panel-head"><span>SETTINGS {{ info("Per-" ~ noun ~ " rate (KES) and the start day of your pay week. Changes don't affect past payment runs — those captured the rate at the time they were created.") }}</span></div>
     <div class="panel-body">
       <form class="inline-form" method="post" action="/admin/payments/settings">
-        <label class="filter-label">RATE (KES per poster)
+        <label class="filter-label">RATE (KES per {{ noun }})
           <input type="text" name="rate_kes" value="{{ rate_kes }}" pattern="[0-9]+(\.[0-9]+)?" required>
         </label>
         <label class="filter-label">WEEK STARTS ON
@@ -29,7 +29,7 @@
   </section>
 
   <section class="panel">
-    <div class="panel-head"><span>EARNINGS BY WORKER {{ info("Numbers update live as you change the date range. The 'eligible' count excludes deleted posters and any poster currently under an open or awaiting-approval revision. Already-paid posters from past runs are also excluded.") }}</span></div>
+    <div class="panel-head"><span>EARNINGS BY WORKER {{ info("Numbers update live as you change the date range. The 'eligible' count excludes deleted work and anything currently under an open or awaiting-approval revision. Already-paid items from past runs are also excluded.") }}</span></div>
     <div class="panel-body">
 
       <div class="filter-row pay-filter-row">
@@ -88,7 +88,7 @@
   </section>
 
   <section class="panel">
-    <div class="panel-head"><span>PAYMENT HISTORY ({{ runs|length }}) {{ info("Past payment runs. Each row's 'COUNT × RATE' is frozen at the time of payment. PUSH sends a receipt to the worker for acknowledgement; DELETE undoes a run (its posters become eligible again — only use to fix mistakes).") }}</span></div>
+    <div class="panel-head"><span>PAYMENT HISTORY ({{ runs|length }}) {{ info("Past payment runs. Each row's 'COUNT × RATE' is frozen at the time of payment. PUSH sends a receipt to the worker for acknowledgement; DELETE undoes a run (its items become eligible again — only use to fix mistakes).") }}</span></div>
     <div class="panel-body">
       {% if runs %}
         <table class="data-table pay-history-table">
@@ -130,7 +130,7 @@
                   {% else %}
                     <button class="btn btn-ghost btn-tiny" data-action="push" title="Re-push receipt (clears worker's previous ack if any)">RE-PUSH</button>
                   {% endif %}
-                  <button class="btn btn-error btn-tiny" data-action="delete" title="Undo this run — its posters become eligible again">DELETE</button>
+                  <button class="btn btn-error btn-tiny" data-action="delete" title="Undo this run — its items become eligible again">DELETE</button>
                 </td>
               </tr>
               {% if r.note %}

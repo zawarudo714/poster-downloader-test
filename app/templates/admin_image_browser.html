@@ -2,13 +2,13 @@
 {# Project-scoped page: the nav shows this project's links, not the master ones. #}
 {% set nav_scope = 'project' %}
 {% from "_macros.html" import info %}
-{% block title %}Review Posters · Admin{% endblock %}
+{% block title %}Review {{ Nouns | default('Posters', true) }} · Admin{% endblock %}
 
 {% block content %}
 <div class="admin-grid" data-no-global-scroll>
 
   <section class="panel">
-    <div class="panel-head"><span>REVIEW POSTERS {{ info("Each title shows all its saved posters side-by-side so you can scan them in one glance. Use ← / → arrow keys to step through titles. Click any poster to enlarge it and flag for changes.") }}</span></div>
+    <div class="panel-head"><span>REVIEW {{ NOUNS | default('POSTERS', true) }} {{ info("Each title shows everything saved on it side-by-side so you can scan them in one glance. Use ← / → arrow keys to step through titles. Click one to enlarge it and flag for changes.") }}</span></div>
     <div class="panel-body">
 
       <form class="filter-row" id="ib-filter">
@@ -21,7 +21,7 @@
         </label>
         <input type="hidden" id="ib-date" value="{{ selected_date }}">
         <div class="date-nav">
-          <span class="muted">DATE {{ info("This is the title's original-save-date — the folder a poster lives in. It does NOT change when the file is replaced later.") }}</span>
+          <span class="muted">DATE {{ info("This is the title's original-save-date — the folder it lives in. It does NOT change when the file is replaced later.") }}</span>
           <button type="button" class="btn btn-ghost btn-tiny" id="ib-date-prev" title="Previous date">‹</button>
           <span class="date-nav-current mono" id="ib-date-label">{{ selected_date }}</span>
           <button type="button" class="btn btn-ghost btn-tiny" id="ib-date-next" title="Next date">›</button>
@@ -69,7 +69,7 @@
         <span class="gallery-controls-spacer"></span>
         <button class="btn btn-ghost" id="ib-density-toggle"
                 data-tooltip="Switch between 1-column and 2-column title layout. Preference is saved locally.">⊞ 1-UP</button>
-        <span class="muted small ib-help">Tick 2 or more posters to mark them similar — the action bar appears at the bottom.</span>
+        <span class="muted small ib-help">Tick 2 or more to mark them similar — the action bar appears at the bottom.</span>
       </div>
 
       <div id="ib-gallery" class="gallery"></div>
@@ -120,7 +120,7 @@
     </header>
     <div class="g-title-posters"></div>
     <div class="g-title-admin-add">
-      <input type="url" class="g-add-url" placeholder="Paste URL to add a poster…">
+      <input type="url" class="g-add-url" placeholder="Paste URL to add one…">
       <button class="btn btn-info btn-tiny g-add-btn">+ ADD</button>
     </div>
   </section>

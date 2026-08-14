@@ -140,7 +140,9 @@
       {# Only rendered when the project has an external source. A project that
          searches in-page (see the SEARCH box below) has no link to offer, and
          JS hides this rather than showing a dead button. #}
-      <a class="btn btn-accent att-tmdb" target="_blank" rel="noopener">↗ Open TMDB</a>
+      {# Label is set by JS from the project's source. The text here is only
+         what shows for the half-second before the payload lands. #}
+      <a class="btn btn-accent att-tmdb" target="_blank" rel="noopener">↗ Open source</a>
       <button class="btn btn-ghost" data-action="unlock">CLOSE</button>
     </div>
   </div>
@@ -151,7 +153,7 @@
     </div>
     <div class="flash-bar"></div>
     <div class="save-row">
-      <input type="url" class="save-url" placeholder="https://image.tmdb.org/t/p/original/...jpg" autocomplete="off">
+      <input type="url" class="save-url" placeholder="Paste the full-size image URL" autocomplete="off">
       <button class="btn btn-accent" data-action="save">SAVE</button>
     </div>
     <div class="save-msg"></div>
@@ -159,7 +161,7 @@
 
   <div class="posters-box">
     <div class="posters-head">
-      SAVED <span data-nouns="upper">IMAGES</span> {{ info("Saved on this title (live count). Hover one to delete or replace.") }}
+      SAVED <span data-nouns="upper">{{ NOUNS | default('POSTERS', true) }}</span> {{ info("Saved on this title (live count). Hover one to delete or replace.") }}
       <span class="mono posters-count"></span>
     </div>
     <div class="posters-grid"></div>
@@ -200,9 +202,9 @@
     #}
     <div class="search-head">
       <div class="search-head-find">
-        <button class="btn btn-accent" data-action="search-normal">SEARCH</button>
-        <button class="btn btn-ghost" data-action="search-deep">DEEP&nbsp;SEARCH</button>
         <span class="search-status mono"></span>
+        <button class="btn btn-ghost" data-action="search-deep">DEEP&nbsp;SEARCH</button>
+        <button class="btn btn-accent" data-action="search-normal">SEARCH</button>
       </div>
       <div class="search-head-act">
         <span class="search-bar-count mono"></span>
@@ -250,7 +252,7 @@
       <span class="rev-title"></span>
       <span class="rev-file mono"></span>
       <span class="rev-status-pill"></span>
-      <a class="btn btn-ghost btn-tiny rev-tmdb" target="_blank" rel="noopener">↗ Open TMDB</a>
+      <a class="btn btn-ghost btn-tiny rev-tmdb" target="_blank" rel="noopener">↗ Open source</a>
       <button type="button" class="btn btn-info btn-tiny rev-view-catalog">VIEW ALL</button>
       <button type="button" class="btn btn-accent btn-tiny rev-go-to-title">GO TO TITLE</button>
     </div>
@@ -261,7 +263,7 @@
     <div class="rev-comment"></div>
     <div class="rev-flagged"></div>
 
-    <!-- 'simple' single-poster controls -->
+    <!-- 'simple' single-image controls -->
     <div class="rev-actions" data-mode="simple">
       <img class="rev-thumb" alt="" loading="lazy">
       <input type="url" placeholder="Paste replacement image URL" data-replace-url>
@@ -270,7 +272,7 @@
       <button class="btn btn-ghost"  data-action="resolve">SEND FOR APPROVAL</button>
     </div>
 
-    <!-- 'similar' multi-poster controls (worker picks one to redo) -->
+    <!-- 'similar' multi-image controls (worker picks one to redo) -->
     <div class="rev-similar-grid" data-mode="similar" hidden></div>
   </div>
 </template>
@@ -287,7 +289,7 @@
   </div>
 </template>
 
-<!-- Catalog modal: read-only grid of all posters on a title -->
+<!-- Catalog modal: read-only grid of everything saved on a title -->
 <div id="catalog-modal" class="lightbox" hidden>
   <div class="lightbox-bg" data-catalog-close></div>
   <div class="lightbox-card catalog-card">
@@ -308,7 +310,7 @@
   </div>
 </div>
 
-<!-- Reason-picker modal: complete-with-few-posters / skip preset reasons -->
+<!-- Reason-picker modal: complete-with-too-few / skip preset reasons -->
 <div id="reason-modal" class="lightbox" hidden>
   <div class="lightbox-bg" data-reason-close></div>
   <div class="lightbox-card reason-card">

@@ -67,7 +67,7 @@
           {% if user.role == 'admin' and scope == 'project' and proj %}
             {# ── Inside a project ─────────────────────────────────────── #}
             <a href="/admin" class="navlink navlink-exit">&larr;&nbsp;All&nbsp;Projects</a>
-            <a href="/admin/browse"    class="navlink {% if active_tab == 'browse' %}active{% endif %}">Review&nbsp;Posters</a>
+            <a href="/admin/browse"    class="navlink {% if active_tab == 'browse' %}active{% endif %}">Review&nbsp;{{ Nouns | default('Posters', true) }}</a>
             <a href="/admin/master"    class="navlink {% if active_tab == 'master' %}active{% endif %}">Title&nbsp;List</a>
             <a href="/admin/revisions" class="navlink {% if active_tab == 'revisions' %}active{% endif %}">Changes&nbsp;Requested</a>
             <a href="/admin/skipped"   class="navlink {% if active_tab == 'skipped' %}active{% endif %}">Skipped</a>
@@ -86,7 +86,6 @@
             <a href="/admin/chat"      class="navlink chat-nav {% if active_tab == 'chat' %}active{% endif %}">Chat<span class="nav-badge" id="nav-chat-badge" hidden>0</span></a>
             <a href="/admin/users"     class="navlink {% if active_tab == 'users' %}active{% endif %}">Users</a>
             <a href="/admin/backups"   class="navlink {% if active_tab == 'backups' %}active{% endif %}">Backups</a>
-            <a href="/admin/email"     class="navlink {% if active_tab == 'email' %}active{% endif %}">Email</a>
             <a href="/admin/audit"     class="navlink {% if active_tab == 'audit' %}active{% endif %}">Activity&nbsp;Log</a>
             <a href="/admin/master_stats" class="navlink {% if active_tab == 'master_stats' %}active{% endif %}">Stats</a>
             <a href="/admin/diagnostics"   class="navlink {% if active_tab == 'diagnostics' %}active{% endif %}">Diagnostics</a>
@@ -128,6 +127,32 @@
   </main>
 
   <div id="tooltip" role="tooltip" hidden></div>
+
+  {#
+    THE PROJECT'S VOCABULARY, AVAILABLE TO EVERY SCRIPT.
+
+    Templates get these words injected by app/templating.py; this is the same
+    thing for JavaScript, so a script never has to invent a fallback like
+    `t.item_noun || 'poster'` — a fallback that is silently WRONG on every
+    project except the movie one, and which had already spread to four files.
+
+    Use PD.noun / PD.nouns / PD.Noun / PD.NOUNS in any script.
+  #}
+  <script>
+    window.PD = Object.freeze({
+      noun:  {{ noun  | default('poster',  true) | tojson }},
+      nouns: {{ nouns | default('posters', true) | tojson }},
+      Noun:  {{ Noun  | default('Poster',  true) | tojson }},
+      Nouns: {{ Nouns | default('Posters', true) | tojson }},
+      NOUN:  {{ NOUN  | default('POSTER',  true) | tojson }},
+      NOUNS: {{ NOUNS | default('POSTERS', true) | tojson }},
+      sourceLabel: {{ source_label | default('the source', true) | tojson }},
+      targetLabel: {{ target_label | default('the marketplace', true) | tojson }},
+      hasYear: {{ (has_year | default(true, true)) | tojson }},
+      hasContentType: {{ (has_content_type | default(true, true)) | tojson }},
+      projectName: {{ project_name | default('', true) | tojson }}
+    });
+  </script>
 
   <script src="/static/js/tooltip.js?v={{ app_version }}"></script>
   <script src="/static/js/theme.js?v={{ app_version }}"></script>

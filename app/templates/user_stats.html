@@ -5,15 +5,35 @@
 {% block content %}
 <div class="stats-page">
 
+  {#
+    Only rendered for workers covering more than one project. Everything is
+    combined by default: your total output is your total output, and being
+    shown a fraction of it because you happen to work two niches would be
+    both wrong and discouraging.
+  #}
+  {% if projects and projects | length > 1 %}
+    <div class="filter-row stats-project-filter">
+      <label>SHOWING
+        <select data-stats-project>
+          <option value="0">All projects combined</option>
+          {% for p in projects %}
+            <option value="{{ p.id }}">{{ p.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <span class="muted" data-stats-scope-note></span>
+    </div>
+  {% endif %}
+
   <section class="stats-hero" id="stats-hero">
     <div class="stats-hero-loading muted">Loading your stats…</div>
   </section>
 
   <section class="panel">
     <div class="panel-head">
-      <span>RECENT ACTIVITY {{ info("Your save activity for the last 30 days. Switch between poster counts and KES earned.") }}</span>
+      <span>RECENT ACTIVITY {{ info("Your save activity for the last 30 days. Switch between " ~ noun ~ " counts and KES earned.") }}</span>
       <div class="stats-chart-toggle">
-        <button type="button" class="btn btn-ghost btn-tiny stats-toggle-btn active" data-metric="count">POSTERS</button>
+        <button type="button" class="btn btn-ghost btn-tiny stats-toggle-btn active" data-metric="count">{{ NOUNS | default('POSTERS', true) }}</button>
         <button type="button" class="btn btn-ghost btn-tiny stats-toggle-btn" data-metric="kes">KES</button>
       </div>
     </div>

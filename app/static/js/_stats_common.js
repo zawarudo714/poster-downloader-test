@@ -8,6 +8,16 @@
    Exposed: window.PDStats.render(data) re-renders all panels. */
 
 (function () {
+  // The project's own word for what is counted, set in base.html. Every
+  // label below reads it rather than saying "posters" — this file is shared
+  // by the worker page and the admin page, so a hardcoded noun here was
+  // wrong on both at once for every project except the movie one.
+  const PDW = (window.PD || {});
+  const NOUNS = PDW.nouns || 'posters';
+  const NOUN  = PDW.noun  || 'poster';
+  const NOUNS_UP = (PDW.NOUNS || NOUNS.toUpperCase());
+  const Nouns = (PDW.Nouns || (NOUNS.charAt(0).toUpperCase() + NOUNS.slice(1)));
+
   function fmtKes(n) {
     if (typeof n !== 'number') n = parseFloat(n) || 0;
     if (!isFinite(n)) return '0';
@@ -33,7 +43,7 @@
     const t = data.totals;
     hostEl.innerHTML = `
       <div class="stat-pill stat-pill-blue">
-        <div class="stat-pill-label">TOTAL POSTERS SAVED</div>
+        <div class="stat-pill-label">TOTAL ${NOUNS_UP} SAVED</div>
         <div class="stat-pill-num mono">${t.saved}</div>
       </div>
       <div class="stat-pill stat-pill-green">
@@ -47,7 +57,7 @@
       </div>
       <div class="stat-pill stat-pill-orange">
         <div class="stat-pill-label">THIS WEEK (PROJECTED)</div>
-        <div class="stat-pill-num mono">${data.this_week.projected_count} <span class="stat-pill-unit">posters</span></div>
+        <div class="stat-pill-num mono">${data.this_week.projected_count} <span class="stat-pill-unit">${NOUNS}</span></div>
         <div class="stat-pill-sub muted">≈ ${fmtKes(data.this_week.projected_kes)} KES at current rate</div>
       </div>
     `;
@@ -64,7 +74,7 @@
         <div class="record-icon">🏆</div>
         <div class="record-body">
           <div class="record-label">BEST DAY</div>
-          <div class="record-value mono"><strong>${r.best_day.count}</strong> posters
+          <div class="record-value mono"><strong>${r.best_day.count}</strong> ${NOUNS}
             <span class="record-when muted">on ${bestDayDate}</span></div>
         </div>
       </div>
@@ -72,7 +82,7 @@
         <div class="record-icon">📅</div>
         <div class="record-body">
           <div class="record-label">BEST WEEK</div>
-          <div class="record-value mono"><strong>${r.best_week.count}</strong> posters
+          <div class="record-value mono"><strong>${r.best_week.count}</strong> ${NOUNS}
             <span class="record-when muted">week of ${bestWeekStart}</span></div>
         </div>
       </div>
@@ -93,15 +103,15 @@
     hostEl.innerHTML = `
       <div class="pace-row">
         <div class="pace-period muted">THIS WEEK</div>
-        <div class="pace-current mono"><strong>${data.this_week.count}</strong> posters · ${fmtKes(data.this_week.kes)} KES</div>
+        <div class="pace-current mono"><strong>${data.this_week.count}</strong> ${NOUNS} · ${fmtKes(data.this_week.kes)} KES</div>
         <div class="pace-delta ${paceCls(wd)} mono">${fmtPct(wd)} vs last week</div>
-        <div class="pace-prev muted">(last week: ${data.last_week.count} posters · ${fmtKes(data.last_week.kes)} KES)</div>
+        <div class="pace-prev muted">(last week: ${data.last_week.count} ${NOUNS} · ${fmtKes(data.last_week.kes)} KES)</div>
       </div>
       <div class="pace-row">
         <div class="pace-period muted">THIS MONTH</div>
-        <div class="pace-current mono"><strong>${data.this_month.count}</strong> posters · ${fmtKes(data.this_month.kes)} KES</div>
+        <div class="pace-current mono"><strong>${data.this_month.count}</strong> ${NOUNS} · ${fmtKes(data.this_month.kes)} KES</div>
         <div class="pace-delta ${paceCls(md)} mono">${fmtPct(md)} vs last month</div>
-        <div class="pace-prev muted">(last month: ${data.last_month.count} posters · ${fmtKes(data.last_month.kes)} KES)</div>
+        <div class="pace-prev muted">(last month: ${data.last_month.count} ${NOUNS} · ${fmtKes(data.last_month.kes)} KES)</div>
       </div>
     `;
   }
@@ -151,7 +161,7 @@
       data: {
         labels,
         datasets: [{
-          label: metric === 'kes' ? 'KES' : 'Posters',
+          label: metric === 'kes' ? 'KES' : Nouns,
           data: values,
           backgroundColor: accent + 'cc',
           borderColor: accent,
@@ -169,7 +179,8 @@
               title: (items) => 'Day ' + items[0].label,
               label: (item) => {
                 const v = item.raw;
-                return metric === 'kes' ? fmtKes(v) + ' KES' : v + ' poster' + (v === 1 ? '' : 's');
+                return metric === 'kes' ? fmtKes(v) + ' KES'
+                                        : v + ' ' + (v === 1 ? NOUN : NOUNS);
               },
             },
           },

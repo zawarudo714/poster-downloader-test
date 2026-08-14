@@ -241,7 +241,7 @@
       <div class="ti-line1">
         <span class="ti-num mono">${t.external_id ?? '–'}.</span>
         <span class="ti-title"></span>
-        <span class="ti-year mono">(${t.year})</span>
+        ${t.year ? `<span class="ti-year mono">(${t.year})</span>` : ''}
         ${t.content_type ? `<span class="ti-type mono">${t.content_type}</span>` : ''}
       </div>
       <div class="ti-line2">
@@ -270,8 +270,25 @@
     const node = tplActive.content.cloneNode(true);
     node.querySelector('.att-num').textContent  = (t.external_id != null ? t.external_id + '.' : '');
     node.querySelector('.att-title').textContent = t.title;
-    node.querySelector('.att-year').textContent  = '(' + t.year + ')';
-    if (t.content_type) node.querySelector('.att-type').textContent = t.content_type;
+    // Year and type are shown only by projects that HAVE them. A music
+    // artist has no release year and no movie/tv distinction, and rendering
+    // "(N/A)" beside every name trains the eye to skip that whole line.
+    const yearEl = node.querySelector('.att-year');
+    const typeEl = node.querySelector('.att-type');
+    if (t.has_year !== false && t.year) {
+      yearEl.textContent = '(' + t.year + ')';
+      yearEl.hidden = false;
+    } else {
+      yearEl.textContent = '';
+      yearEl.hidden = true;
+    }
+    if (t.has_content_type !== false && t.content_type) {
+      typeEl.textContent = t.content_type;
+      typeEl.hidden = false;
+    } else {
+      typeEl.textContent = '';
+      typeEl.hidden = true;
+    }
     node.querySelector('.att-desc').textContent  = t.description || '';
 
     if (t.admin_note) {
@@ -313,6 +330,10 @@
     } else {
       tmdb.href = t.tmdb_search || '#';
       tmdb.hidden = !t.tmdb_search;
+      // The button is named by the project, not by the markup. A worker on
+      // a niche that has never heard of TMDB should never be told to open
+      // it — and the day a third source appears, this needs no edit.
+      tmdb.textContent = `↗ Open ${t.source_label || 'source'}`;
       if (saveBox) saveBox.hidden = false;
       if (searchBox) searchBox.hidden = true;
     }
@@ -599,12 +620,12 @@
           return;
         }
         document.getElementById('catalog-title').textContent =
-          `${data.title} (${data.year})`;
+          data.year ? `${data.title} (${data.year})` : data.title;
         document.getElementById('catalog-sub').textContent =
           `${data.posters.length} poster${data.posters.length === 1 ? '' : 's'} on this title · status: ${data.status.replace('_', ' ')}`;
         const grid = document.getElementById('catalog-grid');
         if (data.posters.length === 0) {
-          grid.innerHTML = '<div class="empty-hint">No posters saved on this title.</div>';
+          grid.innerHTML = `<div class="empty-hint">No ${PD.nouns} saved on this title.</div>`;
           return;
         }
         grid.innerHTML = '';
@@ -691,13 +712,17 @@
     if (r.was_rejected) wrap.classList.add('rev-rejected');
     if (r.revision_type === 'similar') wrap.classList.add('rev-similar');
 
-    const titleStr = `${r.title} (${r.year})`;
+    // "(N/A)" after every artist name is noise, and noise is what teaches
+    // people to stop reading labels. Projects without a year show none.
+    const titleStr = r.year ? `${r.title} (${r.year})` : r.title;
     wrap.querySelector('.rev-title').textContent = titleStr;
     wrap.querySelector('.rev-file').textContent  = `/ ${r.title_folder} / ${r.filename}`;
 
-    // TMDB link for this title
+    // Source link, named and shown by the project rather than assumed.
     const tmdbA = wrap.querySelector('.rev-tmdb');
     tmdbA.href = r.tmdb_search || '#';
+    tmdbA.hidden = !r.tmdb_search;
+    if (r.tmdb_search) tmdbA.textContent = `↗ Open ${r.source_label || 'source'}`;
 
     // VIEW ALL POSTERS — opens the catalog modal so the worker can see
     // the rest of their saves on this title without leaving the flag list.
@@ -813,7 +838,7 @@
         info.textContent =
           'Admin sent back your deletion. Read the note above — you may need to upload a new poster on this title.';
       } else {
-        info.textContent = 'Poster deleted — admin reviewing.';
+        info.textContent = `${PD.Noun} deleted — admin reviewing.`;
       }
       simpleControls.appendChild(info);
     }
@@ -992,7 +1017,8 @@
         <div class="pci-meta mono muted"></div>
         ${t.comment ? '<div class="pci-comment"></div>' : ''}
       `;
-      row.querySelector('.pci-title').textContent = `${t.title} (${t.year})`;
+      row.querySelector('.pci-title').textContent =
+        t.year ? `${t.title} (${t.year})` : t.title;
       row.querySelector('.pci-meta').textContent = `submitted ${t.submitted_at}`;
       if (t.comment) row.querySelector('.pci-comment').textContent = `Your note: ${t.comment}`;
       list.appendChild(row);
@@ -1124,7 +1150,7 @@
       : '💡 Downloaded by mistake? Use REPLACE instead — paste a new URL above.';
 
     const result = await pickReason({
-      title: 'Delete this poster?',
+      title: `Delete this ${PD.noun}?`,
       sub:   fromRevision
         ? 'The admin flagged this poster. Pick a reason for deletion (admin will be notified).'
         : 'This will permanently remove the file. Pick a reason or type your own.',

@@ -167,7 +167,7 @@
   function renderGallery() {
     gallery.innerHTML = '';
     if (titles.length === 0) {
-      gallery.innerHTML = '<div class="empty-hint">No saved posters for this user / date.</div>';
+      gallery.innerHTML = `<div class="empty-hint">No saved ${PD.nouns} for this user / date.</div>`;
       $('ib-title-counter').textContent = '— / —';
       return;
     }
@@ -177,7 +177,9 @@
       section.id = `g-title-${i}`;
       if (i === titleIdx) section.classList.add('current');
       if (t.needs_revision) section.classList.add('flagged');
-      node.querySelector('.g-title-name').textContent = `${t.title} (${t.year})`;
+      // Projects without a year render the name alone rather than "(N/A)".
+      node.querySelector('.g-title-name').textContent =
+        t.year ? `${t.title} (${t.year})` : t.title;
       node.querySelector('.g-title-meta').textContent =
         `${t.posters.length} poster${t.posters.length === 1 ? '' : 's'} · ${t.title_folder}`;
       const grid = node.querySelector('.g-title-posters');
@@ -408,7 +410,8 @@
     lbImg.alt = p.filename;
     const dims = (p.image_width && p.image_height) ? ` · ${p.image_width}×${p.image_height}` : '';
     const lq   = p.low_quality_url ? ' · ⚠ LQ-URL bypassed' : '';
-    lbMeta.textContent = `${t.title} (${t.year}) — ${p.filename}${dims}${lq}`;
+    lbMeta.textContent =
+      `${t.title}${t.year ? ` (${t.year})` : ''} — ${p.filename}${dims}${lq}`;
     if (p.flagged) {
       lbFlag.hidden = false;
       const pill = lbFlag.querySelector('.lb-status-pill');
@@ -770,9 +773,9 @@ async function openTimeline(posterId) {
     host.hidden = true;
     host.innerHTML =
       '<div class="pd-modal-backdrop" data-close="1"></div>' +
-      '<div class="pd-modal-panel" role="dialog" aria-modal="true" aria-label="Poster history">' +
+      '<div class="pd-modal-panel" role="dialog" aria-modal="true" aria-label="History">' +
         '<div class="pd-modal-head">' +
-          '<span class="pd-modal-title">POSTER HISTORY</span>' +
+          `<span class="pd-modal-title">${PD.NOUN} HISTORY</span>` +
           '<button type="button" class="pd-modal-close" data-close="1" aria-label="Close">✕</button>' +
         '</div>' +
         '<div class="pd-modal-body"><p class="muted">Loading…</p></div>' +

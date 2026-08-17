@@ -41,6 +41,7 @@ from selenium.common.exceptions import (
     NoSuchElementException, TimeoutException, WebDriverException,
 )
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
@@ -57,6 +58,95 @@ BOT_MARKERS = (
     "are you human", "unusual traffic", "verify you are human",
     "rate limit", "too many requests",
 )
+
+
+def _drive_root(root: Path) -> Path:
+    """
+    Make a bare Windows drive letter mean the ROOT of that drive.
+
+    `Path("S:") / "fineartamerica"` produces `S:fineartamerica`, which is not
+    a mistake Windows rejects — it is a legal DRIVE-RELATIVE path, resolved
+    against whatever the current directory happens to be on S:. So the
+    uploader was quietly looking in the wrong place whenever that directory
+    was not the root, and the path in the error message looked almost right,
+    which is the worst kind of wrong.
+
+    `storage_root` is stored as "S:" in the dashboard, so this is the normal
+    case rather than an edge one.
+    """
+    text = str(root)
+    if re.fullmatch(r"[A-Za-z]:", text):
+        return Path(text + "\\")
+    return root
+
+
+def _clone_options(source: Options, profile_dir: str) -> Options:
+    """
+    The same Chrome options, pointed at a different profile.
+
+    Rebuilt rather than mutated: Selenium's Options object accumulates
+    arguments and has no way to remove one, so editing the original would
+    leave TWO --user-data-dir flags and Chrome would silently use the first.
+    """
+    clone = Options()
+    for arg in source.arguments:
+        if arg.startswith("--user-data-dir="):
+            continue
+        clone.add_argument(arg)
+    clone.add_argument(f"--user-data-dir={profile_dir}")
+    for key, value in (source.experimental_options or {}).items():
+        clone.add_experimental_option(key, value)
+    return clone
+
+
+def _tail(path: Path, lines: int = 25) -> str:
+    """Last few lines of a log file, or '' if there isn't one."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except Exception:
+        return ""
+    return "\n".join(text[-lines:])
+
+
+def _startup_error(original: Exception, profile_dir: str,
+                   driver_log: Path) -> "UploadError":
+    """
+    Turn chromedriver's stack dump into something that names the problem.
+
+    Everything here is chosen to be readable on the DASHBOARD, because that
+    is the only place the owner can see it — the node is an unattended box he
+    does not normally have a session on.
+    """
+    hints: list[str] = []
+
+    found = _find_chrome_binary()
+    if found:
+        hints.append(f"Chrome found at {found}")
+    else:
+        hints.append("Chrome was NOT found in any standard location — install it, "
+                     "or set its path in the account settings")
+
+    if " " in str(profile_dir):
+        hints.append(f"profile path contains a space: {profile_dir}")
+
+    if (Path(profile_dir) / "SingletonLock").exists():
+        hints.append("a stale SingletonLock exists in the profile — a previous "
+                     "Chrome is still holding it, or crashed while holding it")
+
+    hints.append("a fresh profile was tried too and also failed, so this is "
+                 "Chrome or chromedriver itself, not the saved session")
+    hints.append("verify by hand with: "
+                 f'& "{found or "chrome.exe"}" --headless=new --disable-gpu '
+                 f'--no-sandbox --dump-dom https://example.com')
+
+    tail = _tail(driver_log)
+    detail = f"\n--- chromedriver log ---\n{tail}" if tail else ""
+
+    return UploadError(
+        "Could not start Chrome. " + "; ".join(hints) +
+        f". Original: {original}{detail}",
+        fatal=True,
+    )
 
 
 def _find_chrome_binary() -> Optional[str]:
@@ -117,11 +207,18 @@ class UploadError(RuntimeError):
     """
 
     def __init__(self, message: str, *, pause_minutes: int = 0,
-                 pause_reason: Optional[str] = None, fatal: bool = False):
+                 pause_reason: Optional[str] = None, fatal: bool = False,
+                 pause_immediate: bool = True):
         super().__init__(message)
         self.pause_minutes = pause_minutes
         self.pause_reason = pause_reason or message
         self.fatal = fatal
+        # False means "this MIGHT be systemic". The server then waits for a
+        # run of them before parking the account, instead of stopping on the
+        # first. Used for a missing form field, because FineArtAmerica serves
+        # two versions of its upload form and one miss usually means we got
+        # the other page rather than that the form has changed.
+        self.pause_immediate = pause_immediate
 
 
 def parse_selector(raw: str) -> tuple[str, str]:
@@ -275,17 +372,44 @@ class MarketplaceUploader:
             except WebDriverException:
                 pass
 
+            # ── What IS on the page ──────────────────────────────────────
+            #
+            # When a marketplace changes its form, the question is always
+            # "what is the field called now", and the answer was only
+            # obtainable by opening the saved HTML and reading it. Listing
+            # the field names here turns a selector break into a
+            # copy-and-paste fix: read the name, put it in Page Selectors,
+            # re-test. FineArtAmerica has more than one version of the
+            # upload form live at once (updateartwork.html and
+            # updateartwork2025.html), so this is not a rare event.
+            fields = ""
+            try:
+                names = []
+                for tag in ("input", "select", "textarea"):
+                    for el in self.driver.find_elements(By.TAG_NAME, tag):
+                        name = (el.get_attribute("name")
+                                or el.get_attribute("id") or "").strip()
+                        if name and name not in names:
+                            names.append(name)
+                if names:
+                    fields = ("\n  fields on the page : "
+                              + ", ".join(names[:40])
+                              + (" …" if len(names) > 40 else ""))
+            except WebDriverException:
+                pass
+
             raise UploadError(
                 f"Element '{key}' not found within "
                 f"{timeout or self.t('element_timeout', 30):.0f}s.\n"
                 f"  selector : {self.sel(key)}\n"
                 f"  page now : {current}\n"
-                f"  title    : {title}{frame_hint}\n"
+                f"  title    : {title}{frame_hint}{fields}\n"
                 f"  If the page above isn't the one you expected, an earlier "
                 f"step failed to navigate and the selector is fine. Otherwise "
                 f"update it under Pipeline → Upload → Page Selectors and re-test.",
                 pause_minutes=45,
                 pause_reason=f"Selector '{key}' no longer matches",
+                pause_immediate=False,
             )
 
     # ── Bot detection ──────────────────────────────────────────────────────
@@ -402,42 +526,70 @@ class MarketplaceUploader:
         options.add_argument("--disable-infobars")
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
 
+        # ── chromedriver's own log, which is where the real reason lives ──
+        #
+        # "Chrome instance exited. Examine ChromeDriver verbose log to
+        # determine the cause" is the most common failure on this box, and
+        # until now that log was never written — so the one line that says
+        # WHY did not exist anywhere. It is written to the node's temp dir
+        # and its tail is attached to the error we send to the server,
+        # because an error only readable on an unattended VPS is an error
+        # nobody will ever read.
+        driver_log = Path(self.config.get("temp_dir", "C:/faa/temp")) / "chromedriver.log"
         try:
-            self.driver = webdriver.Chrome(options=options)
-        except WebDriverException as e:
-            # chromedriver's own message is a stack dump that says nothing
-            # useful. Work out what's actually wrong and say that instead.
-            hints: list[str] = []
+            driver_log.parent.mkdir(parents=True, exist_ok=True)
+            service = ChromeService(log_output=str(driver_log),
+                                    service_args=["--verbose"])
+        except Exception:
+            service = None            # older Selenium: carry on without it
 
-            found = _find_chrome_binary()
-            if found:
-                hints.append(f"Chrome found at {found}")
-            else:
-                hints.append(
-                    "Chrome was NOT found in any standard location — install it, "
-                    "or set its path in the account settings"
+        def _launch(opts, svc):
+            return (webdriver.Chrome(options=opts, service=svc) if svc
+                    else webdriver.Chrome(options=opts))
+
+        try:
+            self.driver = _launch(options, service)
+        except WebDriverException as first_error:
+            # ── One retry on a throwaway profile ─────────────────────────
+            #
+            # The persistent profile is an OPTIMISATION — it carries the
+            # session cookie so most runs skip the login form. It is
+            # explicitly disposable, so it must never be able to stop
+            # uploading altogether. A profile left inconsistent by a hard
+            # reboot (which is exactly how this box gets restarted) is the
+            # most likely cause of an instant exit, and retrying without it
+            # both proves that and gets the night's work out.
+            self.emit(f"Chrome would not start ({first_error.__class__.__name__}) — "
+                      f"retrying once with a fresh profile", level="warn")
+            try:
+                spare = Path(self.config.get("temp_dir", "C:/faa/temp")) / "profiles" / f"{slug}_retry"
+                if spare.exists():
+                    import shutil
+                    shutil.rmtree(spare, ignore_errors=True)
+                spare.mkdir(parents=True, exist_ok=True)
+
+                retry_opts = _clone_options(options, str(spare))
+                self.driver = _launch(retry_opts, service)
+
+                # ── Actually throw the bad profile away ──────────────────
+                #
+                # An earlier version of this message said the saved profile
+                # "will be rebuilt on the next login" and then rebuilt
+                # nothing, so every single run paid the failed launch, the
+                # retry and a full login — forever, while claiming to have
+                # recovered. Deleting it is what makes that sentence true:
+                # the profile is disposable by design, and the next run
+                # recreates it from scratch and gets its cookie back.
+                import shutil
+                shutil.rmtree(profile_dir, ignore_errors=True)
+                self.emit(
+                    "Started on a fresh profile. The saved one was unusable and "
+                    "has been deleted, so the next run rebuilds it and goes back "
+                    "to skipping the login form.",
+                    level="warn",
                 )
-
-            if " " in str(profile_dir):
-                hints.append(f"profile path contains a space: {profile_dir}")
-
-            lock = Path(profile_dir) / "SingletonLock"
-            if lock.exists():
-                hints.append(
-                    "a stale SingletonLock exists in the profile — a previous "
-                    "Chrome is still holding it, or crashed while holding it"
-                )
-
-            hints.append(
-                "verify by hand with: "
-                f'& "{found or "chrome.exe"}" --headless=new --disable-gpu '
-                f'--no-sandbox --dump-dom https://example.com'
-            )
-
-            raise UploadError(
-                "Could not start Chrome. " + "; ".join(hints) + f". Original: {e}",
-                fatal=True,
-            )
+            except WebDriverException:
+                raise _startup_error(first_error, profile_dir, driver_log)
 
         self.driver.set_page_load_timeout(90)
         self.wait = WebDriverWait(self.driver, self.t("element_timeout", 30))
@@ -451,6 +603,7 @@ class MarketplaceUploader:
             )
         except Exception:
             pass
+
 
     def stop(self) -> None:
         """
@@ -816,12 +969,31 @@ class UploadStage:
         all. Falls back to an HTTP fetch if the mount is missing, so a
         misconfigured drive letter makes uploads slow rather than impossible.
         """
-        candidate = storage_root / item["storage_path"]
-        if candidate.is_file():
-            return candidate
+        candidate = _drive_root(storage_root) / item["storage_path"]
+
+        # ── Any failure to LOOK at the file means "not available" ─────────
+        #
+        # `is_file()` does not merely return False on a network drive that
+        # cannot be reached: it RAISES. An unmapped or unauthenticated S:
+        # gives WinError 1326 ("user name or password is incorrect"), which
+        # escaped this method, escaped the per-item handler as an unexpected
+        # error, and reported every image as failed — while the HTTP fallback
+        # sitting three lines below was never reached.
+        #
+        # The fallback only counts if nothing can jump over it. So the test
+        # is wrapped, and the reason is carried into the message: "the mount
+        # is broken" and "the file genuinely is not there" need different
+        # fixes and must not read the same.
+        reason = ""
+        try:
+            if candidate.is_file():
+                return candidate
+        except OSError as e:
+            reason = f" ({e.strerror or e})"
 
         self.log(
-            f"Not on the storage mount ({candidate}) — fetching over HTTP instead",
+            f"Not readable on the storage mount ({candidate}){reason} — "
+            f"fetching over HTTP instead",
             level="warn",
         )
         fallback = self.temp_dir / "upload_cache" / item["filename"]
@@ -924,6 +1096,7 @@ class UploadStage:
                         tracking_id=item["tracking_id"], error=str(e),
                         screenshot=shot, pause_minutes=e.pause_minutes,
                         pause_reason=e.pause_reason,
+                        pause_immediate=e.pause_immediate,
                     )
                     if e.fatal:
                         uploader.emit(

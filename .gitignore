@@ -43,3 +43,9 @@ data/
 # travels with the change it describes.
 tools/settings.json
 tools/next_deploy.done.txt
+
+# The worker node's own config — holds the server URL and its bearer TOKEN.
+# Never commit it: the token is the node's whole authentication to the
+# machine API, and the repo is the one place it must not appear.
+# worker_service/config.example.json is the template that IS tracked.
+worker_service/config.json

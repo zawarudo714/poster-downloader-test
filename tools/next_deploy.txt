@@ -1,1 +1,1 @@
-Fix 500 on the Earnings page — declare its two settings keys in DEFAULTS
+Pause an upload account only after a RUN of selector failures, not the first one; Earnings 500 fix; storage mount falls back to HTTP; drive-root path fix

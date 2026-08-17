@@ -162,11 +162,17 @@ class PipelineClient:
     def report_upload_failure(self, *, tracking_id: int, error: str,
                               screenshot: Optional[str] = None,
                               pause_minutes: int = 0,
-                              pause_reason: Optional[str] = None) -> dict:
+                              pause_reason: Optional[str] = None,
+                              pause_immediate: bool = True) -> dict:
         """
-        Report a failure. `pause_minutes` signals a systemic problem (bot
-        check, bad credentials, missing form field) so the server parks the
-        whole account instead of burning attempts on every queued image.
+        Report a failure. `pause_minutes` signals a problem affecting the
+        whole account rather than this one image, so the server can park it
+        instead of burning attempts on every queued image.
+
+        `pause_immediate=False` says "this MIGHT be systemic" — the server
+        then waits for a run of them before parking. A missing form field is
+        the case that matters: FineArtAmerica serves two versions of its
+        upload form, so one miss usually means we got the other page.
         """
         return self.post("/upload/report", {
             "ok": False,
@@ -175,6 +181,7 @@ class PipelineClient:
             "screenshot": screenshot,
             "pause_minutes": pause_minutes,
             "pause_reason": pause_reason,
+            "pause_immediate": pause_immediate,
         })
 
     def download_processed(self, tracking_id: int, target: Path) -> int:

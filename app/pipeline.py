@@ -521,6 +521,17 @@ DEFAULTS: dict[str, Any] = {
     # something" are different questions, and after a failure they differ.
     "earnings_last_run_day": "",
     "earnings_last_run_at":  "",
+
+    # ── How many failures in a row before an account is parked ───────────
+    # Only applies to failures the node marks as "might be systemic" — a
+    # missing form field. A bot wall or rejected credentials still parks the
+    # account on the first one, because those are certain.
+    #
+    # 3 because FineArtAmerica serves two versions of its upload form at
+    # random: one miss means we got the other page, three in a row means the
+    # form really has changed. Raise it if FAA's split gets more even; set it
+    # to 1 to restore the old pause-immediately behaviour.
+    "upload_pause_after_failures": 3,
 }
 
 
@@ -2230,9 +2241,14 @@ def report_uploaded(
     # dashboard in red with no button to remove it. Stale alarms train you to
     # ignore real ones.
     account = db.query(UploadAccount).filter_by(id=tracking.account_id).first()
-    if account is not None and (account.pause_reason or account.paused_until):
-        account.pause_reason = None
-        account.paused_until = None
+    if account is not None:
+        if account.pause_reason or account.paused_until:
+            account.pause_reason = None
+            account.paused_until = None
+        # This is what makes the counter mean "in a ROW". Without it, three
+        # selector misses spread across a week of successful uploads would
+        # eventually park a perfectly healthy account.
+        account.consecutive_failures = 0
     if remote_id:
         tracking.remote_id = remote_id[:128]
 
@@ -2268,14 +2284,38 @@ def report_uploaded(
 def report_upload_failure(
     db: Session, *, tracking_id: int, node: str, error: str,
     screenshot: Optional[str] = None, pause_minutes: int = 0,
-    pause_reason: Optional[str] = None,
+    pause_reason: Optional[str] = None, pause_immediate: bool = True,
 ) -> None:
     """
     Record an upload failure and let the row be retried on a later run.
 
-    `pause_minutes` is how the node reports a *systemic* problem — bot check,
-    rejected credentials, a missing form field — which should stop the whole
-    account rather than burning attempts on every queued image.
+    `pause_minutes` is how the node reports a problem it believes affects the
+    whole account rather than this one image.
+
+    ════════════════════════════════════════════════════════════════════════
+    CERTAIN vs SUSPECTED, AND WHY THAT DISTINCTION EXISTS
+    ════════════════════════════════════════════════════════════════════════
+    Two very different things used to be treated identically:
+
+      · A bot wall, or credentials the marketplace rejected. CERTAIN. Every
+        remaining image will fail the same way, so the account is parked on
+        the first one. `pause_immediate=True`.
+
+      · A form field that could not be found. SUSPECTED — and, as it turns
+        out, usually wrong. FineArtAmerica serves TWO versions of its upload
+        form (updateartwork.html and updateartwork2025.html) and picks one
+        per request, so a missing field normally means "this request got the
+        other page", not "the form has changed".
+
+    Parking the account on the first selector miss cost forty-five minutes of
+    a hundred-image day to punish ninety-nine images that would have landed
+    on the good page. So a suspected-systemic failure now increments a
+    counter and only parks the account once `upload_pause_after_failures` of
+    them happen IN A ROW. A genuine redesign trips that within a few images;
+    an intermittent variant costs one image and the run continues.
+
+    The counter is reset by any success (see `report_uploaded`), which is
+    what makes it mean "a run of failures" rather than "failures ever".
     """
     tracking = db.query(UploadTracking).filter_by(id=tracking_id).first()
     if tracking is None:
@@ -2302,11 +2342,40 @@ def report_upload_failure(
         if title:
             recompute_title_status(db, title)
 
-    if pause_minutes > 0:
-        account = db.query(UploadAccount).filter_by(id=tracking.account_id).first()
-        if account is not None:
-            pause_account(db, account, minutes=pause_minutes,
-                          reason=pause_reason or error)
+    account = db.query(UploadAccount).filter_by(id=tracking.account_id).first()
+    if account is None:
+        return
+
+    if pause_minutes <= 0:
+        # An ordinary one-image failure. It says nothing about the account,
+        # so the run of suspected-systemic failures is untouched.
+        return
+
+    if pause_immediate:
+        account.consecutive_failures = 0
+        pause_account(db, account, minutes=pause_minutes,
+                      reason=pause_reason or error)
+        return
+
+    # ── Suspected systemic: pause only on a RUN of them ──────────────────
+    threshold = max(1, int(get_setting(db, "upload_pause_after_failures")))
+    account.consecutive_failures = (account.consecutive_failures or 0) + 1
+
+    if account.consecutive_failures >= threshold:
+        pause_account(
+            db, account, minutes=pause_minutes,
+            reason=f"{pause_reason or error} "
+                   f"({account.consecutive_failures} in a row)",
+        )
+        account.consecutive_failures = 0
+    else:
+        # Deliberately NOT a pause, and deliberately still recorded: the
+        # admin should be able to see that something intermittent is
+        # happening before it becomes a stoppage.
+        account.pause_reason = (
+            f"{pause_reason or error} — {account.consecutive_failures} of "
+            f"{threshold} in a row; still uploading"
+        )[:1000]
 
 
 def retry_uploads(db: Session, tracking_ids: Iterable[int]) -> int:

@@ -371,6 +371,10 @@ def upload_report(
         screenshot=payload.get("screenshot"),
         pause_minutes=int(payload.get("pause_minutes") or 0),
         pause_reason=payload.get("pause_reason"),
+        # Defaults to True so an OLDER node, which does not send this field,
+        # keeps the previous pause-immediately behaviour rather than silently
+        # getting a new policy it was never tested against.
+        pause_immediate=bool(payload.get("pause_immediate", True)),
     )
     db.commit()
     return JSONResponse({"ok": True, "recorded": "failure"})

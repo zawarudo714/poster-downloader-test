@@ -767,6 +767,11 @@ class UploadAccount(Base):
     # per-account question — one bad password must be visible as one bad
     # account, not as a silent gap in the totals.
     last_earnings_read_at = Column(DateTime, nullable=True)
+    # How many uploads in a row have failed for a reason that MIGHT be
+    # systemic. Reset to zero by any success, so it measures a run of
+    # failures rather than a total. See pipeline.report_upload_failure for
+    # why a single one is no longer enough to park the account.
+    consecutive_failures  = Column(Integer, nullable=False, default=0)
     created_at        = Column(DateTime, default=datetime.utcnow, nullable=False)
     created_by        = Column(String(64), nullable=True)
 

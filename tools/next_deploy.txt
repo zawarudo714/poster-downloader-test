@@ -1,1 +1,1 @@
-Multi-project vocabulary everywhere, remove email, worker stats filter, search row
+Ban recovery, pause/drain, node reboot survival, project-aware diagnostics, deploy log

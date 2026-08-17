@@ -359,6 +359,25 @@ DEFAULTS: dict[str, Any] = {
     # 'daily'      — only start a run after daily_start_hour (node local time)
     "schedule_mode":      "continuous",
     "daily_start_hour":   6,
+
+    # ── Stopping the pipeline on purpose ─────────────────────────────────
+    # 'run'   — normal
+    # 'drain' — hand out NO new work, but let whatever is already claimed
+    #           finish and report back. This is what you want before a
+    #           reboot, a deploy or a settings change: the queue empties
+    #           itself and nothing is left half-done.
+    # 'halt'  — hand out nothing. Same as drain from the dispatcher's point
+    #           of view; kept as a distinct word because "I am stopping for
+    #           five minutes" and "I am stopping until further notice" are
+    #           different intentions and the dashboard says which.
+    #
+    # There is deliberately no mode that kills work in flight. Both stages
+    # cost real money or real minutes per item, and abandoning an image
+    # mid-generation would pay for something nobody receives. Stopping the
+    # INTAKE and waiting is always the cheaper stop.
+    "run_mode":           "run",
+    # Why it was stopped, shown wherever the paused state is displayed.
+    "run_mode_reason":    "",
     # How long a claim may sit untouched before reap_stale_claims() frees it.
     "claim_timeout_min":  45,
     # ── Per-project behaviour that used to be hardcoded ──────────────────
@@ -1524,6 +1543,13 @@ def claim_process_batch(
     """
     reap_stale_claims(db)
     project = resolve_project(db, project_id)
+
+    # Drained or halted: hand out nothing. Work already claimed is NOT
+    # recalled — the node finishes what it holds and reports back, which is
+    # the whole point of draining rather than stopping.
+    if not intake_open(db, project):
+        return []
+
     limit = limit or int(get_setting(db, "process_batch_size", project=project))
     max_attempts = int(get_setting(db, "process_max_attempts", project=project))
 
@@ -1846,13 +1872,166 @@ def account_quota(db: Session, account: UploadAccount, *, day: Optional[date] = 
     return {"used": used, "limit": limit, "remaining": max(0, limit - used)}
 
 
+def intake_open(db: Session, project: Optional[Project] = None) -> bool:
+    """
+    May the dispatcher hand out NEW work right now?
+
+    One question asked in one place, by every stage — the node's process
+    claim, the node's upload claim, and the generation worker. A stop that
+    only some stages honoured would be worse than none, because the queue
+    would look stopped while something quietly kept spending.
+
+    Per-project, so one niche can be paused while another keeps running.
+    """
+    return str(get_setting(db, "run_mode", project=project) or "run") == "run"
+
+
+def run_mode_state(db: Session, project: Optional[Project] = None) -> dict:
+    mode = str(get_setting(db, "run_mode", project=project) or "run")
+    return {
+        "mode": mode,
+        "running": mode == "run",
+        "reason": str(get_setting(db, "run_mode_reason", project=project) or ""),
+    }
+
+
 def account_is_available(account: UploadAccount) -> bool:
     """False while an account is paused (bot-check, bad credentials, etc.)."""
     if not account.is_enabled:
         return False
+    # A ban is permanent. Checked separately from is_enabled so that
+    # re-enabling a banned account by mistake cannot start uploading into an
+    # account the marketplace has closed.
+    if account.banned_at is not None:
+        return False
     if account.paused_until and account.paused_until > datetime.utcnow():
         return False
     return True
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  BAN RECOVERY
+# ════════════════════════════════════════════════════════════════════════════
+# When a marketplace closes an account, two things are true at once:
+#
+#   1. Nothing can be uploaded there again. Ever. Not after a cooling-off
+#      period, which is what separates this from `paused_until`.
+#   2. Everything it had already listed is GONE from the marketplace. The
+#      files still exist in our archive and the database still knows what
+#      they were — but the public listings vanished with the account.
+#
+# Point 2 is the one that matters and the one that is easy to miss. Marking
+# the account disabled and moving on would leave the database asserting that
+# several thousand images are live on a site where they no longer are, and
+# every one of them would be skipped by future dispatch because their
+# tracking rows still say 'uploaded'.
+#
+# So a ban does three things, and the middle one is the point:
+#
+#   · the account is marked banned and can never be handed work again
+#   · its 'uploaded' rows become 'removed', with the reason recorded —
+#     the same state a copyright takedown produces, because the outcome is
+#     identical: it was listed, and now it is not
+#   · its pending/failed rows are dropped, since they describe intent to
+#     upload somewhere that no longer exists
+#
+# Nothing is deleted. `removed` rows keep their remote_id and their history,
+# which is what lets you answer "where did this listing used to live".
+
+
+def ban_account(
+    db: Session, account: UploadAccount, *, reason: str, by: str = "",
+) -> dict[str, int]:
+    """
+    Mark an account destroyed and retire everything it had listed.
+
+    Returns counts so the caller can say what actually happened rather than
+    "done" — the number of listings written off is the fact worth seeing.
+    """
+    now = datetime.utcnow()
+    account.banned_at = now
+    account.banned_reason = (reason or "")[:1000]
+    account.is_enabled = 0
+
+    uploaded = (
+        db.query(UploadTracking)
+          .filter(UploadTracking.account_id == account.id,
+                  UploadTracking.status == "uploaded")
+          .all()
+    )
+    for row in uploaded:
+        row.status = "removed"
+        row.removed_at = now
+        row.removed_reason = (f"account banned: {reason}" if reason
+                              else "account banned")[:1000]
+
+    dropped = (
+        db.query(UploadTracking)
+          .filter(UploadTracking.account_id == account.id,
+                  UploadTracking.status.in_(("pending", "failed", "uploading")))
+          .delete(synchronize_session=False)
+    )
+
+    # Posters that were only ever live on this account are no longer live
+    # anywhere, so they go back to 'processed' — ready to be queued onto a
+    # replacement. One that is still uploaded elsewhere is left alone.
+    restored = 0
+    for row in uploaded:
+        still_live = (
+            db.query(func.count(UploadTracking.id))
+              .filter(UploadTracking.saved_poster_id == row.saved_poster_id,
+                      UploadTracking.status == "uploaded")
+              .scalar() or 0
+        )
+        if still_live:
+            continue
+        poster = db.query(SavedPoster).filter_by(id=row.saved_poster_id).first()
+        if poster is not None and poster.pipeline_status == "uploaded":
+            poster.pipeline_status = "processed"
+            title = db.query(MasterTitle).filter_by(id=poster.master_title_id).first()
+            if title:
+                recompute_title_status(db, title)
+            restored += 1
+
+    return {"listings_lost": len(uploaded), "queued_work_dropped": int(dropped or 0),
+            "images_needing_relisting": restored}
+
+
+def hand_over_account(
+    db: Session, *, dead_id: int, replacement_id: int,
+) -> dict[str, int]:
+    """
+    Rebuild a banned account's catalogue on a replacement.
+
+    Deliberately a SEPARATE step from the ban. Banning is urgent and factual —
+    it happened, record it. Choosing where the work goes is a decision, and
+    may not even be possible yet: the replacement account often does not
+    exist at the moment the ban is discovered.
+
+    Both accounts must be in the same project. Rebuilding a movie catalogue
+    on the celebrity account would be a very public mistake, and the check
+    costs nothing.
+    """
+    dead = db.query(UploadAccount).filter_by(id=dead_id).first()
+    new = db.query(UploadAccount).filter_by(id=replacement_id).first()
+    if dead is None or new is None:
+        raise ValueError("Account not found")
+    if dead.id == new.id:
+        raise ValueError("An account cannot replace itself.")
+    if dead.project_id != new.project_id:
+        raise ValueError(
+            f"{dead.name} belongs to a different project than {new.name}. "
+            f"Listings cannot move between projects."
+        )
+    if new.banned_at is not None:
+        raise ValueError(f"{new.name} is itself banned.")
+
+    # requeue_for_account already does exactly this: seed pending rows on the
+    # target for every processed image the source had listed. Reused rather
+    # than reimplemented so the review-gate rules it enforces apply here too.
+    created = requeue_for_account(db, account_id=new.id, source_account_id=dead.id)
+    dead.replaced_by_id = new.id
+    return {"queued": created}
 
 
 def pause_account(db: Session, account: UploadAccount, *, minutes: int, reason: str) -> None:
@@ -1898,6 +2077,11 @@ def claim_upload_batch(
 
     for account in accounts:
         if not account_is_available(account):
+            continue
+
+        # Checked per account, because run_mode is per PROJECT and one
+        # project may be paused while another keeps uploading.
+        if not intake_open(db, resolve_project(db, account.project_id)):
             continue
 
         quota = account_quota(db, account)
@@ -2282,6 +2466,13 @@ def account_payload(
         "pause_active":       bool(account.paused_until
                                    and account.paused_until > datetime.utcnow()),
         "last_run_at":        account.last_run_at.isoformat() if account.last_run_at else None,
+        # Banned is a separate, permanent state — never inferred from
+        # is_enabled, because "switched off" and "closed by the marketplace,
+        # its listings gone" need very different actions.
+        "banned":             bool(account.banned_at),
+        "banned_at":          account.banned_at.isoformat() if account.banned_at else None,
+        "banned_reason":      account.banned_reason,
+        "replaced_by_id":     account.replaced_by_id,
         "timings":            timings,
         "selectors":          selectors,
     }

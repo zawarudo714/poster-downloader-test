@@ -232,12 +232,20 @@ def _seconds_until_next_midnight() -> float:
 
 def _scheduler_loop():
     """
-    Run forever. Wake once per minute and, if today's auto-backup is missing,
-    run one — which also covers the catch-up case where the server was off at
-    midnight.
+    Run forever. Wake once per minute and:
 
-    Idempotent by construction: the check is "does today's backup file
-    exist", so a restart mid-day cannot double-fire it.
+      - if today's auto-backup is missing, run one (this also covers the
+        catch-up case where the server was off at midnight)
+      - make sure the image-generation worker is still running
+
+    Both are idempotent. The backup check asks "does today's file exist", and
+    the worker check asks "is the thread alive", so a restart mid-day cannot
+    double-fire either.
+
+    The generation check lives HERE rather than in its own thread on the
+    principle that a watchdog needing its own watchdog has not helped. This
+    loop already exists, already runs every minute, and is the simplest thing
+    in the app.
 
     (This loop also used to send a daily summary email. That feature was
     never used and has been removed.)
@@ -254,6 +262,16 @@ def _scheduler_loop():
         try:
             now = local_now()
             today_local = local_today()
+
+            # ── Is image generation still running? ───────────────────────
+            # Wrapped in its own try so a failure here can never stop the
+            # backups. Losing a day's backup to a watchdog would be a poor
+            # trade.
+            try:
+                from .gpt_worker import supervise
+                supervise()
+            except Exception:
+                log.exception("Generation worker supervision failed")
 
             # ── Backup check ─────────────────────────────────────────────
             today_backup = BACKUPS_DIR / f"auto-{today_local.isoformat()}.db"

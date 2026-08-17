@@ -126,25 +126,36 @@ def current_project(request: Request, admin: User, db: Session) -> Project:
 # ── Diagnostics ──────────────────────────────────────────────────────────────
 
 @router.get("/diagnostics", response_class=HTMLResponse)
-def diagnostics_page(request: Request, admin: User = Depends(require_admin)):
-    """Master-level: the checks span every project by design."""
+def diagnostics_page(request: Request, admin: User = Depends(require_admin),
+                     db: Session = Depends(get_db)):
+    """
+    Master-level: spans every project by default.
+
+    That is the useful default — the question this page answers is "is
+    anything wrong anywhere", and having to visit each niche in turn to ask
+    it would guarantee the quiet one goes unchecked. The filter narrows it
+    when you already know where you are looking.
+    """
     return templates.TemplateResponse(
         request, "admin_diagnostics.html",
-        {"user": admin, "admin": admin, "active_tab": "diagnostics"},
+        {"user": admin, "admin": admin, "active_tab": "diagnostics",
+         "projects": db.query(Project).order_by(Project.id.asc()).all()},
     )
 
 
 @router.get("/api/diagnostics")
-def api_diagnostics(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+def api_diagnostics(project_id: int = Query(0),
+                    admin: User = Depends(require_admin),
+                    db: Session = Depends(get_db)):
     """
-    Run the consistency scan.
+    Run the consistency scan, optionally for one project only.
 
     Fetched on demand rather than on page load: the disk walk is the slow part
     and it should be something the admin chooses to start, not something that
     fires every time they land on the page.
     """
     from ..diagnostics import run_all
-    return JSONResponse(run_all(db))
+    return JSONResponse(run_all(db, project_id=project_id or None))
 
 
 # ── Dashboard ────────────────────────────────────────────────────────────────

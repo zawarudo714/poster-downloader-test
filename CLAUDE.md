@@ -1,6 +1,15 @@
 # Project brief for AI sessions
 
-Read this first. Then:
+Read this first — including **"HOW TO WORK HERE"** near the bottom, which
+sets out what is expected of you before, during and after any change. Then:
+
+- **`tools/DEPLOY_LOG.md` — what is actually LIVE on the server.** One line
+  per deploy, newest first, written by the deploy tool only when the server
+  was confirmed to be running what was pushed. Read that file rather than
+  running `git log`, `git diff` or `git status` to work it out: those cost
+  far more to read and answer a different question (what is committed, not
+  what shipped). If the repo contains work newer than the top line, that
+  work has not been deployed.
 
 - **`MULTIPROJECT.md` — read it before writing ANY code.** This app runs
   several niches side by side. Nearly every bug it has had came from code
@@ -418,6 +427,123 @@ Full sequence, including the legacy import and the Windows node, is in
 
 ---
 
+## HOW TO WORK HERE — the standing rules
+
+These are not optional and they are not something the owner should have to
+ask for. He is not a coder; his only way to check your work is to click
+around afterwards, which means every miss costs him a deploy cycle and an
+evening. So the burden is on you to make your method visible BEFORE it is
+expensive, and to speak in plain terms rather than implementation detail.
+
+### 1. Audit before you build
+
+Anything that touches a screen, or a mechanism more than one thing uses,
+starts with an inventory — not with code:
+
+> screen → control → what it does → **does it do anything in THIS project?**
+
+For plumbing: what reads this, what writes it, what breaks if it is wrong.
+
+Why this and not a search: searching finds WORDS. Only enumerating forces
+the question "should this exist here at all". A real failure caused by
+skipping it: MUSIK's flag card had an "Open source" button that had been
+correctly RENAMED and still linked to TMDB — a project that never touches
+TMDB. Renaming made it worse, because now it looked right.
+
+**Walk it as the user, including states you only reach by acting.** Claim a
+title, save an image, tap the saved image, flag it, then look at the worker's
+view. Most dead mechanisms are not on the page at load; they appear after a
+click, which is exactly where a text search cannot go.
+
+### 2. When you implement something, revise everything it touches
+
+Not just the thing asked for. Anything that even remotely interacts with it:
+
+- Fix bad interactions yourself, and **tell him plainly which ones you
+  fixed** — one line each, in normal language.
+- Only stop to ask when it is a genuine CHOICE (two defensible answers, or
+  it changes what he sees or pays). Do not ask about things that have one
+  correct answer; just do them and report.
+- If a mechanism has become obsolete for this project, REMOVE it. Do not
+  rename it, hide it, or leave it disabled. A control that cannot do
+  anything useful here is not a label problem.
+
+### 3. Say what you verified — and what you did not
+
+State it without being asked, every time:
+
+- what you checked by READING the code
+- what you checked by RUNNING something
+- what you did not check at all
+
+"It compiles" is not verification. `py_compile` does not catch an undefined
+name; a missing import once 500'd a whole page after being called "verified".
+If you claim something is verified, name the test.
+
+### 4. Declare the blast radius
+
+Before building: what else touches this, and what could break that he would
+not think to test? "Nothing" is a claim he can hold you to. A list tells him
+what to click after deploying.
+
+### 5. Prefer impossible over detectable
+
+1. **Impossible** — the wrong state cannot be represented. Best.
+2. **Loud** — it fails immediately, at the right moment, saying why.
+3. **Detectable** — Diagnostics or Needs Attention finds it later.
+
+Every check on tier 3 is an admission that 1 and 2 were skipped. He would
+rather have well-formed flows than a growing list of warnings. Before adding
+a diagnostic, ask: why can this state not simply be impossible? Sometimes the
+honest answer is "the marketplace is outside our control" — that is fine.
+Often it is laziness.
+
+### 6. The third-project test
+
+For every change: **would this still be right for a third project?** If the
+answer needs "well, for MUSIK…", it is not finished. See `MULTIPROJECT.md`.
+
+---
+
+## Adding a new project — what is expected of you
+
+The owner will describe a workflow, roughly like:
+
+> worker >> gettyimages.com >> save >> admin greenlight >> photoshop >> upload
+
+That is the whole specification of what the project DOES. Your job is to
+work out what it therefore does NOT do.
+
+**Inherit nothing by default.** Start from the stated flow and add only what
+it needs. Then go through the other projects' mechanisms one at a time and
+say out loud which are DEAD for this one — before building. Examples of the
+reasoning expected:
+
+- Its images come from an external site, so it needs the paste-a-URL box and
+  an "Open <source>" link — and NOT the in-page search grid, the Brave keys,
+  or the deep-search button.
+- It uses Photoshop, so it needs the JSX editor, the sharpen settings and a
+  Windows node — and NOT the OpenAI key, the prompt box, the style reference
+  or the spend cap.
+- It has an admin greenlight but no mention of judging output, so no review
+  gate — Photoshop is deterministic and there is nothing to approve.
+
+The converse trap is just as real: MUSIK searches in-page and saves by
+tapping, so a "paste replacement URL" field on a saved image is obsolete
+there — the worker would delete and re-pick, never paste. It survived
+because it was inherited rather than justified. Apply that judgement.
+
+**Ask about the gaps.** The owner normally states the specifics, but where
+his description implies a step without pinning it down, ask — openly, not
+with a leading guess. If he describes a worker "getting images" without
+saying from where, ask how the worker finds them: another tab at a named
+site, a search grid inside the page, an upload from their own machine? The
+answer changes the source field, the search mode, half the worker UI and
+which settings are dead. Better one question now than a project that
+inherits the wrong half of another one.
+
+---
+
 ## Working with this owner
 
 - He wants to understand the system, not just receive it. Explain trade-offs.
@@ -426,3 +552,6 @@ Full sequence, including the legacy import and the Windows node, is in
 - He is cost-conscious and picks cheap, simple, mainstream hosting.
 - **Anything he might want to tweak belongs in the dashboard.** He has said
   this more than once. Treat a hardcoded value as a defect.
+- He is not a coder. Explain in plain language what a thing DOES and what it
+  costs him, not how it is implemented — unless he asks, and he often will.
+- He notices the thing you glossed over. Say the uncomfortable part first.

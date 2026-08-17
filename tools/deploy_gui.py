@@ -74,6 +74,37 @@ SETTINGS_FILE = HERE / "settings.json"
 DEPLOY_NOTE = HERE / "next_deploy.txt"
 DEPLOY_NOTE_DONE = HERE / "next_deploy.done.txt"
 
+# ════════════════════════════════════════════════════════════════════════════
+#  THE DEPLOY LOG
+# ════════════════════════════════════════════════════════════════════════════
+# One line per successful deploy, newest first, written only when the server
+# is confirmed to be running what was pushed.
+#
+# It exists so a later session can answer "what is actually live?" by reading
+# ONE SMALL FILE, instead of running git commands and reading their output.
+# That is the whole design constraint: this file must stay cheap to read, so
+# it is one line per deploy and capped — an unbounded log would eventually
+# cost more to read than the thing it replaced.
+#
+# Nothing writes here on a failed deploy. A line in this file means the code
+# reached the server; if the last line is older than the last change, the
+# difference is exactly what has not shipped.
+DEPLOY_LOG = HERE / "DEPLOY_LOG.md"
+DEPLOY_LOG_KEEP = 30
+
+DEPLOY_LOG_HEADER = """# Deploy log
+
+What is actually live on the server, newest first. Written automatically by
+the deploy tool, and only when the server was confirmed to be running the
+commit that was just pushed.
+
+**For a future session: read THIS file to see what shipped. Do not run git
+log or diff to work it out — that costs far more to read than these lines.**
+If the top entry looks older than the work in the repo, the difference is
+what has not been deployed yet.
+
+"""
+
 DEFAULT_REPO = r"C:\Users\Administrator\Documents\Claude\Projects\Print On Demand\poster_downloader_web"
 DEFAULT_SSH = "ssh root@178.105.232.196"
 DEFAULT_SERVER_CMDS = "cd /opt/poster && git pull && docker compose up -d --build"
@@ -435,6 +466,36 @@ class DeployApp:
         self._save_settings()
         self.root.destroy()
 
+    def _record_deploy(self, sha: str, message: str) -> None:
+        """
+        Append one line for a deploy that is confirmed live.
+
+        Newest first so the useful line is the first one read, and capped at
+        DEPLOY_LOG_KEEP so the file cannot grow into something expensive.
+        """
+        from datetime import datetime
+
+        line = (f"- **{datetime.now():%Y-%m-%d %H:%M}** · `{sha[:8]}` · "
+                f"{message or '(no message)'}")
+        try:
+            existing = DEPLOY_LOG.read_text(encoding="utf-8")
+            entries = [l for l in existing.splitlines() if l.startswith("- ")]
+        except Exception:
+            entries = []
+
+        # Same commit deployed twice (a rebuild, say) replaces its own entry
+        # rather than adding a duplicate that says nothing new.
+        entries = [e for e in entries if f"`{sha[:8]}`" not in e]
+        entries.insert(0, line)
+
+        try:
+            DEPLOY_LOG.write_text(
+                DEPLOY_LOG_HEADER + "\n".join(entries[:DEPLOY_LOG_KEEP]) + "\n",
+                encoding="utf-8")
+            self._emit(f"Logged to {DEPLOY_LOG.name}.", "dim")
+        except Exception as e:
+            self._emit(f"Could not write the deploy log: {e}", "err")
+
     def _consume_note(self) -> None:
         """
         Retire the deploy note once its deploy has actually succeeded.
@@ -675,6 +736,11 @@ class DeployApp:
                 if server_sha.startswith(pushed[:8]) or pushed.startswith(server_sha[:8]):
                     self._emit(f"Server is running {server_sha[:8]} — matches "
                                f"what you pushed.", "ok")
+                    # Recorded only here, inside the branch that PROVED the
+                    # server moved. A log that also recorded failed attempts
+                    # would be worse than none — it would answer "what is
+                    # live?" with things that are not.
+                    self._record_deploy(server_sha, self.msg_var.get().strip())
                     self._consume_note()
                 else:
                     self._emit(

@@ -323,6 +323,8 @@ def api_overview(
         "jobs": jobs,
         "failures": {"processing": process_failures, "upload": upload_failures},
         "greenlight_mode": P.get_setting(db, "greenlight_mode", project=project),
+        # Whether this project is running, draining or halted, plus why.
+        "run_mode": P.run_mode_state(db, project),
         "history": P.upload_history(db, days=30),
         "today": local_today().isoformat(),
     })
@@ -942,6 +944,129 @@ def api_resume_account(
                  target_type="upload_account", target_id=account.id)
     db.commit()
     return JSONResponse({"ok": True})
+
+
+@router.post("/api/run_mode")
+def api_set_run_mode(
+    request: Request,
+    payload: dict = Body(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Stop or resume this project's pipeline.
+
+    'drain' and 'halt' both stop NEW work being handed out and both let work
+    already claimed finish — the difference is only what the dashboard tells
+    you, and that difference matters at 2am when you are trying to remember
+    whether you stopped this on purpose.
+
+    There is no mode that abandons work in flight. An image mid-generation
+    has already been paid for and an image mid-upload is halfway into a form;
+    stopping the intake and waiting a few minutes is always cheaper than
+    unpicking either.
+    """
+    mode = str(payload.get("mode") or "run").strip()
+    if mode not in ("run", "drain", "halt"):
+        raise HTTPException(400, "mode must be run, drain or halt.")
+
+    project = _project(request, admin, db, payload.get("project_id"))
+    reason = (payload.get("reason") or "").strip()
+
+    P.set_setting(db, "run_mode", mode, project=project, by=admin.username)
+    P.set_setting(db, "run_mode_reason",
+                  "" if mode == "run" else reason, project=project, by=admin.username)
+
+    log_activity(db, user=admin, action="pipeline_run_mode", target_type="pipeline",
+                 details={"mode": mode, "reason": reason, "project": project.slug})
+    db.commit()
+
+    # What is still out there, so the UI can say "draining — 3 to go" rather
+    # than implying everything has already stopped.
+    in_flight = (
+        db.query(func.count(SavedPoster.id))
+          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+          .filter(SavedPoster.pipeline_status == "processing",
+                  SavedPoster.deleted_at.is_(None), _title_scope(db, project))
+          .scalar() or 0
+    ) + (
+        db.query(func.count(UploadTracking.id))
+          .filter(UploadTracking.status == "uploading",
+                  UploadTracking.project_id == project.id)
+          .scalar() or 0
+    )
+    return JSONResponse({"ok": True, "mode": mode, "in_flight": in_flight})
+
+
+@router.post("/api/accounts/{account_id}/ban")
+def api_ban_account(
+    account_id: int,
+    payload: dict = Body(default={}),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Record that a marketplace has closed this account.
+
+    This is the destructive one, and the destruction has already happened
+    elsewhere — the button only makes the database agree with reality. What
+    it changes is that several thousand rows stop claiming to be live on a
+    site where the listings no longer exist.
+
+    A reason is required. In a year the only thing distinguishing "banned for
+    copyright" from "banned for uploading too fast" will be this field, and
+    they lead to completely different decisions about the replacement.
+    """
+    account = db.query(UploadAccount).filter_by(id=account_id).first()
+    if account is None:
+        raise HTTPException(404, "Account not found.")
+    if account.banned_at is not None:
+        raise HTTPException(400, f"{account.name} is already marked banned.")
+
+    reason = (payload.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(400, "A reason is required — it is the only record of why.")
+
+    counts = P.ban_account(db, account, reason=reason, by=admin.username)
+    log_activity(db, user=admin, action="pipeline_account_banned",
+                 target_type="upload_account", target_id=account.id,
+                 details={"reason": reason, **counts})
+    db.commit()
+    return JSONResponse({"ok": True, "account": account.name, **counts})
+
+
+@router.post("/api/accounts/{account_id}/handover")
+def api_handover_account(
+    account_id: int,
+    payload: dict = Body(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Rebuild a banned account's catalogue on a replacement account.
+
+    Separate from the ban on purpose: the replacement usually does not exist
+    yet when the ban is discovered, and forcing both decisions at once would
+    mean either delaying the ban or picking the wrong destination.
+
+    Safe to run more than once — the underlying requeue skips images the
+    target already has a row for, so a second press adds only what is new.
+    """
+    replacement_id = payload.get("replacement_id")
+    if not replacement_id:
+        raise HTTPException(400, "replacement_id is required.")
+
+    try:
+        counts = P.hand_over_account(db, dead_id=account_id,
+                                     replacement_id=int(replacement_id))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    log_activity(db, user=admin, action="pipeline_account_handover",
+                 target_type="upload_account", target_id=account_id,
+                 details={"replacement_id": replacement_id, **counts})
+    db.commit()
+    return JSONResponse({"ok": True, **counts})
 
 
 @router.post("/api/accounts/{account_id}/requeue")
@@ -2035,6 +2160,89 @@ def api_attention(
                 "Raise or clear the cap under Processing → Spending.",
                 severity="stop" if cap["action"] == "pause" else "warn",
                 items=[{"kind": "note", "spent": cap["spent"], "cap": cap["cap"]}],
+            ))
+
+    # ── Is the stage that does the work actually running? ───────────────
+    # Checked BEFORE the per-image failures, because when the answer is no,
+    # every other number on this page is explained by it. Nothing is marked
+    # failed when a worker stops — the queue just stops moving, which is the
+    # hardest kind of stoppage to notice.
+    if project.processor == "gpt":
+        from .. import gpt_worker as GW
+
+        h = GW.health()
+        waiting = (
+            db.query(func.count(SavedPoster.id))
+              .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+              .filter(SavedPoster.pipeline_status == "greenlit",
+                      SavedPoster.deleted_at.is_(None), scope)
+              .scalar() or 0
+        )
+        # Only a problem if there is work it should be doing. A stopped
+        # worker with an empty queue is just a quiet afternoon.
+        if waiting and (not h["alive"] or h["stale"]):
+            if not h["alive"]:
+                why = ("The image generation worker is not running. It is "
+                       "restarted automatically within a minute, so if this "
+                       "persists it is failing to start rather than having "
+                       "stopped.")
+            else:
+                why = (f"The worker is running but has done nothing for "
+                       f"{h['age_s']} seconds. It is most likely stuck waiting "
+                       f"on a request that never came back. It is NOT restarted "
+                       f"automatically, because it may still be inside a call "
+                       f"you have already paid for and a second worker could "
+                       f"pay for the same image twice.")
+            findings.append(_attention_finding(
+                "generation_stopped",
+                f"Image generation has stopped with {waiting} waiting",
+                why + (f" Last error: {h['last_error']}" if h["last_error"] else ""),
+                "Usually nothing — it revives itself. If it keeps happening, "
+                "restart the server and tell whoever maintains this.",
+                severity="stop",
+                items=[{"kind": "worker", "alive": h["alive"], "age_s": h["age_s"],
+                        "restarts": h["restarts"], "processed": h["processed"],
+                        "waiting": waiting}],
+                note=(f"Restarted {h['restarts']} time(s) since the server "
+                      f"started." if h["restarts"] else ""),
+            ))
+
+    # ── Is there a machine to do the work? ──────────────────────────────
+    # The Photoshop equivalent of the check above. A rebooted Windows box
+    # comes back with no agent unless autologon and the scheduled task are
+    # both set up, and the symptom is identical to a healthy quiet period:
+    # nothing fails, nothing moves.
+    if project.processor in P.NODE_PROCESSORS:
+        stale_node_after = datetime.utcnow() - timedelta(minutes=10)
+        capable = [
+            n for n in db.query(WorkerNode).filter(WorkerNode.is_enabled == 1).all()
+            if "process" in (n.capabilities or "")
+        ]
+        online = [n for n in capable if n.last_seen_at and n.last_seen_at > stale_node_after]
+        waiting_node = (
+            db.query(func.count(SavedPoster.id))
+              .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+              .filter(SavedPoster.pipeline_status == "greenlit",
+                      SavedPoster.deleted_at.is_(None), scope)
+              .scalar() or 0
+        )
+        if waiting_node and capable and not online:
+            last = max((n.last_seen_at for n in capable if n.last_seen_at), default=None)
+            findings.append(_attention_finding(
+                "node_offline",
+                f"No worker machine is running, with {waiting_node} waiting",
+                "Every machine that can process work is offline. The usual cause "
+                "is that the Windows box rebooted — Windows updates do this on "
+                "their own schedule — and came back without starting the agent.",
+                "Log into the machine and start the agent. To stop it happening "
+                "again, follow SURVIVING A REBOOT on the Nodes tab.",
+                severity="stop",
+                items=[{"kind": "node", "name": n.name,
+                        "last_seen": fmt_local(n.last_seen_at, "%Y-%m-%d %H:%M")
+                                     if n.last_seen_at else "never"}
+                       for n in capable],
+                note=(f"Last contact {fmt_local(last, '%Y-%m-%d %H:%M')}." if last
+                      else "No machine has ever checked in."),
             ))
 
     # A configuration failure repeats identically on every image. Group by the

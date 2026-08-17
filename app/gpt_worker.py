@@ -55,6 +55,55 @@ _stop = threading.Event()
 
 IDLE_SLEEP_S = 20
 
+# ════════════════════════════════════════════════════════════════════════════
+#  HEARTBEAT
+# ════════════════════════════════════════════════════════════════════════════
+# This stage has no node, no job rows and no queue of its own — it is a thread
+# inside the web process. That makes it the quietest thing in the system when
+# it fails: if it dies, or never starts, generation simply stops. Greenlit
+# work piles up, nothing is marked failed, and the only visible symptom is a
+# number that stops moving. You would notice in a day, maybe.
+#
+# So the loop stamps the time on every pass, idle or not, and something else
+# watches that stamp. The state is deliberately in MEMORY rather than in the
+# database: it describes a thread in THIS process, and a value surviving a
+# restart would report a worker that is no longer running.
+_health = {
+    "started_at": None,     # when the thread was (re)started
+    "last_tick": None,      # end of the most recent pass, busy or idle
+    "last_error": "",       # last unhandled loop error, if any
+    "processed": 0,         # images generated since this thread started
+    "restarts": 0,          # times the supervisor had to revive it
+}
+
+# How stale the heartbeat may get before it counts as stopped. Generation
+# takes ~60s per image and the idle wait is 20s, so a healthy loop stamps at
+# least every couple of minutes even mid-image. Five gives real headroom
+# without letting a dead worker sit unnoticed for long.
+STALE_AFTER_S = 300
+
+
+def health() -> dict:
+    """
+    Is generation actually running? Read by the dashboard and the supervisor.
+
+    `alive` is the thread object's own view; `stale` is whether it has done
+    anything recently. Both matter: a thread can be alive and wedged on a
+    network call that never returns, which looks identical to working from
+    the outside and is exactly the case a plain is-it-alive check misses.
+    """
+    alive = bool(_thread is not None and _thread.is_alive())
+    last = _health["last_tick"]
+    age = int((datetime.utcnow() - last).total_seconds()) if last else None
+    return {
+        **_health,
+        "alive": alive,
+        "age_s": age,
+        "stale": bool(age is not None and age > STALE_AFTER_S),
+        # "Should there be a worker at all" is answered by the caller, which
+        # knows whether any project uses this processor.
+    }
+
 
 # ── One image ───────────────────────────────────────────────────────────────
 
@@ -259,7 +308,15 @@ def _cycle() -> bool:
               .filter(Project.is_active == 1, Project.processor == "gpt")
               .all()
         )
+        from .pipeline import intake_open
+
         for project in projects:
+            # Paused or draining. The loop keeps ticking (so the heartbeat
+            # stays fresh and the watchdog does not "revive" a worker that is
+            # deliberately idle) — it simply claims nothing.
+            if not intake_open(db, project):
+                continue
+
             state = G.cap_state(db, project=project)
             if state["over"] and state["action"] == "pause":
                 log.warning("GPT stage paused: month-to-date spend $%s has reached "
@@ -282,13 +339,83 @@ def _cycle() -> bool:
 
 def _run() -> None:
     log.info("GPT image worker started")
+    _health["started_at"] = datetime.utcnow()
+    _health["last_tick"] = datetime.utcnow()
     while not _stop.is_set():
         try:
-            if not _cycle():
+            did = _cycle()
+            # Stamped on EVERY pass, including idle ones. A heartbeat that
+            # only moved when there was work would read as "dead" during any
+            # quiet period, which is most of the time.
+            _health["last_tick"] = datetime.utcnow()
+            _health["last_error"] = ""
+            if did:
+                _health["processed"] += 1
+            else:
                 _stop.wait(IDLE_SLEEP_S)
         except Exception as e:
+            # The loop keeps going, but the reason is kept so the dashboard
+            # can say WHY rather than just "not running".
+            _health["last_error"] = str(e)[:400]
+            _health["last_tick"] = datetime.utcnow()
             log.error("GPT worker loop error: %s", e)
             _stop.wait(IDLE_SLEEP_S)
+    log.warning("GPT image worker loop exited")
+
+
+def wanted(db) -> bool:
+    """Does any ACTIVE project actually generate images here?"""
+    from .models import Project
+    try:
+        return bool(
+            db.query(Project)
+              .filter(Project.is_active == 1, Project.processor == "gpt")
+              .count()
+        )
+    except Exception:
+        return False
+
+
+def supervise() -> Optional[str]:
+    """
+    Called once a minute by the scheduler. Restarts the loop if it is gone.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY REVIVE RATHER THAN JUST REPORT
+    ════════════════════════════════════════════════════════════════════════
+    A warning that generation has stopped is only useful if someone is
+    looking. The owner checks the dashboard when he thinks to, so a stopped
+    worker could sit for a day behind a message nobody read. Restarting it
+    turns "silent stoppage" into "brief pause", and the restart COUNT is
+    what gets reported — a worker that keeps needing revival is a real
+    problem, where one that was revived once at 3am is not.
+
+    It also covers a case that is not a failure at all: a project switched
+    to processor='gpt' after the server booted. At startup there was nothing
+    to run, so no thread was made; this notices and starts one.
+
+    Returns a short reason when it intervened, else None. Deliberately does
+    NOT restart a thread that is merely stale — a wedged thread may still be
+    inside a paid API call, and starting a second one could pay twice for the
+    same image. That case is reported instead, which is the honest trade.
+    """
+    from .db import SessionLocal
+
+    db = SessionLocal()
+    try:
+        if not wanted(db):
+            return None
+    finally:
+        db.close()
+
+    if _thread is not None and _thread.is_alive():
+        return None
+
+    _health["restarts"] += 1
+    log.warning("GPT image worker was not running — restarting it (restart #%s)",
+                _health["restarts"])
+    start_background_worker()
+    return f"restarted (#{_health['restarts']})"
 
 
 def start_background_worker() -> None:
@@ -303,16 +430,9 @@ def start_background_worker() -> None:
         return
 
     from .db import SessionLocal
-    from .models import Project
     db = SessionLocal()
     try:
-        needed = (
-            db.query(Project)
-              .filter(Project.is_active == 1, Project.processor == "gpt")
-              .count()
-        )
-    except Exception:
-        needed = 0
+        needed = wanted(db)
     finally:
         db.close()
 

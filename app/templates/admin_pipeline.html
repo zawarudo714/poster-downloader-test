@@ -48,6 +48,19 @@
   {# ═══════════════════════════════════════════════════════════════ #}
   <div class="pipe-section" data-section-panel="overview">
 
+    {#
+      Shown only while this project is stopped. A banner that is always
+      there becomes wallpaper; one that only appears when something is
+      deliberately halted is read every time.
+    #}
+    <section class="panel pipe-halted" data-run-banner hidden>
+      <div class="panel-body">
+        <strong data-run-title></strong>
+        <span data-run-detail></span>
+        <button type="button" class="btn btn-accent btn-tiny" data-action="run-resume">RESUME</button>
+      </div>
+    </section>
+
     <section class="panel">
       <div class="panel-head">
         <span>PIPELINE FUNNEL
@@ -107,6 +120,16 @@
         <span class="filter-row" style="gap:6px">
           <button type="button" class="btn btn-ghost btn-tiny" data-action="run-process">RUN PROCESS NOW</button>
           <button type="button" class="btn btn-ghost btn-tiny" data-action="run-upload">RUN UPLOAD NOW</button>
+          {#
+            Stops new work being handed out while letting anything already
+            claimed finish. This is what to press before rebooting the node,
+            deploying, or changing a setting mid-run — the alternative is
+            killing the agent and leaving claims to be reaped.
+          #}
+          <button type="button" class="btn btn-error btn-tiny" data-action="run-drain">
+            PAUSE&nbsp;NEW&nbsp;WORK
+            {{ info("Stops handing out new work. Anything a machine has already claimed keeps going and reports back normally — nothing is abandoned half-done, because a part-finished image has already cost money or minutes. Press RESUME when you're ready.") }}
+          </button>
         </span>
       </div>
       <div class="panel-body" data-jobs-list>
@@ -693,11 +716,61 @@
               and run <code>pip install -r requirements.txt</code>.</li>
           <li>Register a node above and copy the token it shows once.</li>
           <li>Create <code>worker_service/config.json</code> with the server URL and that token.</li>
-          <li>Run <code>python -m worker_service.agent</code> to verify, then install it as a
-              scheduled task set to run at startup.</li>
+          <li>Run <code>python -m worker_service.agent</code> once to verify it connects.</li>
+          <li><strong>Make it survive a reboot</strong> — see below. Without this, every
+              restart of that machine leaves the pipeline with no worker until
+              someone logs in and starts it by hand.</li>
         </ol>
         <p class="muted">Full detail, including the one-time migration of your existing
         processed files and upload history, is in <code>PIPELINE.md</code> in the repo.</p>
+      </div>
+    </section>
+
+    {#
+      The reboot problem, written out where it will actually be read.
+
+      Photoshop needs a real interactive desktop session — it will not run as
+      a Windows service, and a scheduled task set to "run whether the user is
+      logged on or not" gets a non-interactive session where Photoshop fails
+      in confusing ways. So the machine has to log itself in, and the task has
+      to run inside that session. Both halves are required; one without the
+      other silently does nothing.
+    #}
+    <section class="panel">
+      <div class="panel-head">
+        <span>SURVIVING A REBOOT
+          {{ info("Windows updates reboot this machine on their own schedule. Without these two steps the agent stops and nothing processes or uploads until someone notices — which is usually the next morning.") }}
+        </span>
+      </div>
+      <div class="panel-body">
+        <p><strong>1 · Log the machine in automatically.</strong> Photoshop needs a real
+        desktop session, so the VPS must reach the desktop without you. In an
+        <em>administrator</em> Command Prompt:</p>
+        <pre class="pipe-log">reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v AutoAdminLogon /t REG_SZ /d 1 /f
+reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v DefaultUserName /t REG_SZ /d Administrator /f
+reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v DefaultPassword /t REG_SZ /d YOUR_WINDOWS_PASSWORD /f</pre>
+        <p class="muted">The password is stored in the registry in plain text — that is how
+        Windows autologon works, and it is why this is only acceptable on a machine
+        that does nothing else. Anyone who can read that registry key can already
+        log in as you.</p>
+
+        <p><strong>2 · Start the agent inside that session.</strong> Still as administrator,
+        with the path adjusted to where you put <code>worker_service</code>:</p>
+        <pre class="pipe-log">schtasks /create /tn "PosterAgent" /tr "cmd /c cd /d C:\poster\worker_service && python -m worker_service.agent" /sc onlogon /rl highest /f</pre>
+        <p class="muted">
+          <code>/sc onlogon</code> is deliberate — <em>not</em> <code>/sc onstart</code>.
+          A task that runs at boot gets a session with no desktop, and Photoshop
+          fails there in ways that look like a broken script rather than a missing
+          screen.
+        </p>
+
+        <p><strong>3 · Check it.</strong> Reboot the machine, wait two minutes, and look at
+        NODES above — the node should come back online on its own. If it does not,
+        run <code>schtasks /run /tn "PosterAgent"</code> and read the console window.</p>
+
+        <p class="muted">Before a planned reboot, press <strong>PAUSE NEW WORK</strong> on the
+        Overview tab and wait for it to say nothing is in flight. That way the
+        machine goes down between items instead of halfway through one.</p>
       </div>
     </section>
 

@@ -264,9 +264,31 @@
     renderNodes();
     renderHistoryChart();
     renderBadges();
+    renderRunMode();
 
     const modeSel = q('[data-greenlight-mode]');
     if (modeSel) modeSel.value = overview.greenlight_mode;
+  }
+
+  // ── Stopped on purpose ──────────────────────────────────────────────
+  // Rendered from the overview payload so it stays honest as the page
+  // polls: while draining, the count of work still in flight ticks down
+  // and you can see the queue actually emptying rather than guessing.
+  function renderRunMode() {
+    const box = q('[data-run-banner]');
+    if (!box) return;
+    const rm = (overview && overview.run_mode) || { running: true };
+    if (rm.running) { box.hidden = true; return; }
+
+    const flying = (overview.in_flight || []).length;
+    box.hidden = false;
+    q('[data-run-title]').textContent =
+      rm.mode === 'halt' ? 'PIPELINE HALTED' : 'PAUSED — DRAINING';
+    q('[data-run-detail]').textContent =
+      (rm.reason ? rm.reason + ' · ' : '')
+      + (flying
+          ? `${flying} item(s) still finishing — nothing new is being started.`
+          : 'Nothing in flight. Safe to reboot the node or deploy.');
   }
 
   function renderBadges() {
@@ -405,6 +427,13 @@
           <div class="pipe-progress">
             <div class="pipe-progress-bar pipe-bar-${tone}" style="width:${pct}%"></div>
           </div>
+          ${a.banned ? `<div class="quota-note">
+              <span class="quota-note-tag">BANNED ${esc((a.banned_at || '').slice(0, 10))}</span>
+              ${esc(a.banned_reason || '')}
+              ${a.replaced_by_id
+                ? ' · catalogue moved to ' + esc((accounts.find((x) => x.id === a.replaced_by_id) || {}).name || ('#' + a.replaced_by_id))
+                : ' · <strong>its listings are gone and have not been rebuilt anywhere</strong>'}
+            </div>` : ''}
           ${a.pause_reason ? `<div class="quota-note ${a.pause_active ? '' : 'quota-note-stale'}">
               ${a.pause_active ? '' : '<span class="quota-note-tag">LAST ISSUE</span>'}
               ${esc(a.pause_reason)}
@@ -1251,8 +1280,9 @@
           <div class="account-head">
             <strong>${esc(a.name)}</strong>
             <span class="status-pill status-${esc(a.target_site)}">${esc(a.target_site)}</span>
-            ${a.is_enabled ? '' : '<span class="status-pill">DISABLED</span>'}
-            ${a.available ? '' : '<span class="status-pill status-error">PAUSED</span>'}
+            ${a.banned ? '<span class="status-pill status-error">BANNED</span>' : ''}
+            ${a.is_enabled || a.banned ? '' : '<span class="status-pill">DISABLED</span>'}
+            ${a.available || a.banned ? '' : '<span class="status-pill status-error">PAUSED</span>'}
             <span class="muted mono">${esc(a.email)}</span>
           </div>
           <div class="account-stats mono">
@@ -1264,6 +1294,13 @@
             removed ${s.removed || 0}
             ${a.last_run_at ? ' · last run ' + esc(a.last_run_at.slice(0, 16).replace('T', ' ')) : ''}
           </div>
+          ${a.banned ? `<div class="quota-note">
+              <span class="quota-note-tag">BANNED ${esc((a.banned_at || '').slice(0, 10))}</span>
+              ${esc(a.banned_reason || '')}
+              ${a.replaced_by_id
+                ? ' · catalogue moved to ' + esc((accounts.find((x) => x.id === a.replaced_by_id) || {}).name || ('#' + a.replaced_by_id))
+                : ' · <strong>its listings are gone and have not been rebuilt anywhere</strong>'}
+            </div>` : ''}
           ${a.pause_reason ? `<div class="quota-note ${a.pause_active ? '' : 'quota-note-stale'}">
               ${a.pause_active ? '' : '<span class="quota-note-tag">LAST ISSUE</span>'}
               ${esc(a.pause_reason)}
@@ -1274,6 +1311,9 @@
               ? (a.pause_reason ? `<button class="btn btn-ghost btn-tiny" data-acc-resume="${a.id}">CLEAR MESSAGE</button>` : '')
               : `<button class="btn btn-accent btn-tiny" data-acc-resume="${a.id}">RESUME</button>`}
             <button class="btn btn-ghost btn-tiny" data-acc-requeue="${a.id}">REQUEUE BACK CATALOGUE</button>
+            ${a.banned
+              ? `<button class="btn btn-accent btn-tiny" data-acc-handover="${a.id}">HAND OVER TO…</button>`
+              : `<button class="btn btn-error btn-tiny" data-acc-ban="${a.id}">MARK BANNED</button>`}
             <button class="btn btn-error btn-tiny" data-acc-delete="${a.id}">DELETE</button>
           </div>
         </div>`;
@@ -1292,6 +1332,55 @@
           // was actually looking at.
           toast(b.textContent.trim() === 'CLEAR MESSAGE'
                 ? 'Message cleared.' : 'Account resumed.');
+          loadAccounts(); loadOverview();
+        } catch (e) { toast(e.message, 'error'); }
+      }));
+
+    // ── Banned ──────────────────────────────────────────────────────────
+    // Two steps, never one. Banning is a fact to record now; choosing where
+    // the catalogue goes is a decision, and the replacement account usually
+    // does not exist yet at the moment a ban is discovered.
+    el.querySelectorAll('[data-acc-ban]').forEach((b) =>
+      b.addEventListener('click', async () => {
+        const acc = accounts.find((a) => a.id === parseInt(b.dataset.accBan, 10)) || {};
+        const live = (acc.stats || {}).uploaded || 0;
+        const reason = prompt(
+          `Mark ${acc.name} as BANNED by the marketplace?\n\n`
+          + `This records that its ${live} live listing(s) no longer exist, so they `
+          + `can be rebuilt on another account. Nothing is deleted and no files are `
+          + `touched.\n\nWhy was it banned? (kept permanently)`);
+        if (reason === null || !reason.trim()) return;
+        try {
+          const d = await postJSON(`${API}/accounts/${acc.id}/ban`, { reason: reason.trim() });
+          toast(`${d.account} marked banned — ${d.listings_lost} listing(s) written off, `
+                + `${d.images_needing_relisting} image(s) need re-listing.`);
+          loadAccounts(); loadOverview();
+        } catch (e) { toast(e.message, 'error'); }
+      }));
+
+    el.querySelectorAll('[data-acc-handover]').forEach((b) =>
+      b.addEventListener('click', async () => {
+        const dead = accounts.find((a) => a.id === parseInt(b.dataset.accHandover, 10)) || {};
+        // Only accounts that could actually take the work: same project,
+        // not itself, not also banned.
+        const options = accounts.filter((a) =>
+          a.id !== dead.id && !a.banned && a.project_id === dead.project_id);
+        if (!options.length) {
+          toast('No other account in this project to hand over to. Add one first.', 'error');
+          return;
+        }
+        const list = options.map((a, i) => `${i + 1}. ${a.name}`).join('\n');
+        const pick = prompt(
+          `Rebuild ${dead.name}'s catalogue on which account?\n\n${list}\n\n`
+          + `Enter a number. Everything it had listed is queued for upload there; `
+          + `nothing is uploaded immediately.`);
+        if (pick === null) return;
+        const chosen = options[parseInt(pick, 10) - 1];
+        if (!chosen) return toast('No account picked.', 'error');
+        try {
+          const d = await postJSON(`${API}/accounts/${dead.id}/handover`,
+                                   { replacement_id: chosen.id });
+          toast(`${d.queued} image(s) queued on ${chosen.name}.`);
           loadAccounts(); loadOverview();
         } catch (e) { toast(e.message, 'error'); }
       }));
@@ -1608,6 +1697,8 @@
     unusable:      ['return_to_pipeline'],
     short_titles:  [],
     spend_capped:  [],
+    generation_stopped: [],
+    node_offline:       [],
   };
 
   const ACTION_LABEL = {
@@ -1679,6 +1770,27 @@
     if (f.key === 'spend_capped') {
       const i = f.items[0];
       return `<p class="mono">$${esc(i.spent)} spent · $${esc(i.cap)} cap</p>`;
+    }
+
+    // The generation worker's own state. There is nothing to tick or act on
+    // here — the useful content is WHY it is stopped and whether it keeps
+    // happening, so it renders as one line of facts.
+    if (f.key === 'node_offline') {
+      return `<table class="data-table">
+        <thead><tr><th>MACHINE</th><th>LAST SEEN</th></tr></thead>
+        <tbody>${f.items.map((i) => `
+          <tr><td class="mono">${esc(i.name)}</td>
+              <td class="mono">${esc(i.last_seen)}</td></tr>`).join('')}
+        </tbody></table>`;
+    }
+
+    if (f.key === 'generation_stopped') {
+      const i = f.items[0] || {};
+      return `<p class="mono">${i.alive ? 'running but idle' : 'not running'}`
+           + `${i.age_s != null ? ` · last activity ${i.age_s}s ago` : ''}`
+           + ` · ${i.waiting || 0} waiting`
+           + ` · ${i.processed || 0} generated since start`
+           + `${i.restarts ? ` · ${i.restarts} restart(s)` : ''}</p>`;
     }
 
     if (f.key === 'config_blocked') {
@@ -2092,6 +2204,32 @@
       }
 
       case 'test-gpt': runGptTest(); break;
+
+      case 'run-drain': {
+        const reason = prompt(
+          'Pause this project?\n\n'
+          + 'No new work is handed out. Anything already claimed finishes and '
+          + 'reports back as normal.\n\nWhy? (shown on the dashboard while paused)');
+        if (reason === null) return;
+        try {
+          const d = await postJSON(`${API}/run_mode`,
+                                   { mode: 'drain', reason: reason.trim(), project_id: projectId });
+          toast(d.in_flight
+                ? `Paused. ${d.in_flight} item(s) still finishing.`
+                : 'Paused. Nothing was in flight.');
+          loadOverview();
+        } catch (e) { toast(e.message, 'error'); }
+        break;
+      }
+
+      case 'run-resume': {
+        try {
+          await postJSON(`${API}/run_mode`, { mode: 'run', project_id: projectId });
+          toast('Resumed.');
+          loadOverview();
+        } catch (e) { toast(e.message, 'error'); }
+        break;
+      }
 
       case 'attention-load': loadAttention(); break;
 

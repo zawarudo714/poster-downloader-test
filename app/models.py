@@ -737,6 +737,26 @@ class UploadAccount(Base):
     paused_until      = Column(DateTime, nullable=True)
     pause_reason      = Column(Text, nullable=True)
     last_run_at       = Column(DateTime, nullable=True)
+
+    # ── Banned ──────────────────────────────────────────────────────────
+    # A pause is temporary and self-clearing; a ban is neither. When a
+    # marketplace closes an account its listings go with it, so this is not
+    # just "stop uploading here" — it means everything this account ever put
+    # live is gone from the internet and has to be rebuilt somewhere else.
+    #
+    # Kept as its own state rather than reusing is_enabled=0, because
+    # "switched off" and "destroyed, and its work needs re-listing" call for
+    # completely different actions, and conflating them would make the
+    # difference invisible a year later.
+    #
+    # The row is never deleted. It is the only record of where several
+    # thousand listings used to live, and the reconciliation scanner will
+    # need it to explain what it finds on the marketplace.
+    banned_at         = Column(DateTime, nullable=True)
+    banned_reason     = Column(Text, nullable=True)
+    # Which account took over its catalogue, if any. Answers "where did this
+    # artist's listing go" in one hop.
+    replaced_by_id    = Column(Integer, ForeignKey("upload_accounts.id"), nullable=True)
     created_at        = Column(DateTime, default=datetime.utcnow, nullable=False)
     created_by        = Column(String(64), nullable=True)
 

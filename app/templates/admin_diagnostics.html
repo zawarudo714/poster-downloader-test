@@ -8,7 +8,18 @@
   <section class="panel">
     <div class="panel-head">
       <span>SYSTEM CHECK {{ info("Compares the database against the files on disk and against the pipeline's own records, and reports anything that disagrees. It never changes anything — every fix is a deliberate action on the page that owns it.") }}</span>
-      <button class="btn btn-accent btn-tiny" id="diag-run" type="button">RUN&nbsp;SCAN</button>
+      <span class="filter-row" style="gap:8px">
+        {# Everything by default. "Is anything wrong anywhere" is the question
+           this page exists to answer, and making you pick a project first
+           would guarantee the quiet niche never gets looked at. #}
+        <label>SCAN
+          <select id="diag-project">
+            <option value="0">All projects</option>
+            {% for p in projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+          </select>
+        </label>
+        <button class="btn btn-accent btn-tiny" id="diag-run" type="button">RUN&nbsp;SCAN</button>
+      </span>
     </div>
     <div class="panel-body">
       <p class="muted diag-intro">

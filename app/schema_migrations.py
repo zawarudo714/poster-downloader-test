@@ -85,6 +85,13 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("saved_posters",    "unusable_reason", "TEXT"),
     ("saved_posters",    "unusable_at",     "DATETIME"),
     ("saved_posters",    "unusable_by",     "VARCHAR(64)"),
+    # ── Ban recovery ────────────────────────────────────────────────────
+    # A banned account is not a disabled one: its listings are gone from the
+    # marketplace and have to be rebuilt elsewhere. `replaced_by_id` records
+    # where they went.
+    ("upload_accounts",  "banned_at",       "DATETIME"),
+    ("upload_accounts",  "banned_reason",   "TEXT"),
+    ("upload_accounts",  "replaced_by_id",  "INTEGER"),
 ]
 
 NEW_INDEXES: list[tuple[str, str, str]] = [

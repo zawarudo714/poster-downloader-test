@@ -3920,6 +3920,33 @@ body:has(#ib-bulk-bar:not([hidden])) { padding-bottom: 88px; }
 .pipe-subrow td { padding-top: 0 !important; border-top: none !important; }
 .pipe-subrow    { background: rgba(232,85,75,0.04); }
 
+/* Which niche a diagnostic finding came from. Small and inline — it is a
+   qualifier on the finding, not a heading, and a mixed list is unreadable
+   without it. */
+.diag-project {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 10px;
+  letter-spacing: .04em;
+  color: var(--subtext);
+}
+
+/* Deliberately stopped. Loud, because the failure mode this prevents is
+   forgetting it is paused and concluding the pipeline is broken. */
+.pipe-halted {
+  border-color: var(--error);
+  background: rgba(232, 85, 75, 0.08);
+}
+.pipe-halted .panel-body {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 /* Project filter above a stats page. Deliberately plain and set apart from
    the panels below it — it changes what every number underneath means, so
    it should read as a control over the page rather than part of one card. */

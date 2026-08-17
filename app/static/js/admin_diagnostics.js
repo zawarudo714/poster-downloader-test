@@ -10,6 +10,7 @@
   'use strict';
 
   var runBtn  = document.getElementById('diag-run');
+  var project = document.getElementById('diag-project');
   var results = document.getElementById('diag-results');
   var summary = document.getElementById('diag-summary');
   if (!runBtn) return;
@@ -28,7 +29,8 @@
 
     var data;
     try {
-      var r = await fetch('/admin/api/diagnostics');
+      var pid = project ? (parseInt(project.value, 10) || 0) : 0;
+      var r = await fetch('/admin/api/diagnostics?project_id=' + pid);
       if (!r.ok) throw new Error('HTTP ' + r.status);
       data = await r.json();
     } catch (e) {
@@ -45,19 +47,25 @@
         '<span class="diag-chip diag-error">' + (t.errors || 0) + ' needing attention</span>' +
         '<span class="diag-chip diag-warn">' + (t.warnings || 0) + ' worth a look</span>' +
         '<span class="diag-chip diag-info">' + (t.info || 0) + ' informational</span>' +
-        '<span class="muted mono">scanned ' + esc((data.generated_at || '').replace('T', ' ')) + ' UTC</span>' +
+        '<span class="muted mono">' + esc((data.project || {}).name || 'all projects') +
+          ' · scanned ' + esc((data.generated_at || '').replace('T', ' ')) + ' UTC</span>' +
       '</div>';
 
     var html = '';
     (data.checks || []).forEach(function (c) {
-      var clean = !c.error && c.count === 0;
+      // "Not applicable here" is not the same as "checked, all clear", and
+      // showing both as a green tick would be quietly misleading.
+      var skipped = !!c.skipped;
+      var clean = !c.error && !skipped && c.count === 0;
       html +=
         '<details class="diag-check diag-' + esc(c.severity) + (clean ? ' is-clean' : '') + '"' +
           (clean ? '' : ' open') + '>' +
           '<summary>' +
             '<span class="diag-check-title">' + esc(c.title) + '</span>' +
             '<span class="diag-count mono">' +
-              (c.error ? 'could not run' : (clean ? 'clean' : c.count + (c.truncated ? '+' : ''))) +
+              (c.error ? 'could not run'
+                : skipped ? 'n/a here'
+                : (clean ? 'clean' : c.count + (c.truncated ? '+' : ''))) +
             '</span>' +
           '</summary>' +
           '<div class="diag-check-body">' +
@@ -65,6 +73,8 @@
 
       if (c.error) {
         html += '<p class="error mono">' + esc(c.error) + '</p>';
+      } else if (skipped) {
+        html += '<p class="muted">Not checked: ' + esc(c.skipped) + '</p>';
       } else if (clean) {
         html += '<p class="ok">Nothing found.</p>';
       } else {
@@ -75,6 +85,7 @@
               (f.link
                 ? '<a href="' + esc(f.link) + '">' + esc(f.what) + '</a>'
                 : '<span>' + esc(f.what) + '</span>') +
+              (f.project ? '<span class="diag-project mono">' + esc(f.project) + '</span>' : '') +
               (f.detail ? '<div class="diag-detail mono muted">' + esc(f.detail) + '</div>' : '') +
             '</li>';
         });

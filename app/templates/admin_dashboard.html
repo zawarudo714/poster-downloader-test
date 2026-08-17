@@ -6,6 +6,71 @@
 <div class="admin-grid">
 
   {#
+    ══════════════════════════════════════════════════════════════════════
+    IS THERE A MACHINE RUNNING?
+    ══════════════════════════════════════════════════════════════════════
+    First thing on the first page, and deliberately loud.
+
+    A worker node is SHARED — one Windows box does Photoshop for the movie
+    project and marketplace uploads for every project including MUSIK. So
+    this is an account-wide fact, not a per-project one, and burying it
+    inside a project tab means the other projects never see it.
+
+    Only rendered when something is actually wrong. A banner that is always
+    present becomes part of the wallpaper within a week, and then it stops
+    working on the day it matters.
+  #}
+  {% if offline_nodes %}
+  <section class="panel node-alarm">
+    <div class="panel-body">
+      <div class="node-alarm-head">
+        <span class="node-alarm-mark">■</span>
+        <strong>
+          {% if node_total == offline_nodes | length %}
+            NO WORKER MACHINE IS RUNNING
+          {% else %}
+            A WORKER MACHINE IS OFFLINE
+          {% endif %}
+        </strong>
+      </div>
+
+      <p class="node-alarm-body">
+        {% for n in offline_nodes %}
+          <span class="mono">{{ n.name }}</span> last checked in
+          {% if n.age_s is not none %}
+            {{ (n.age_s // 3600) ~ 'h' if n.age_s >= 3600 else (n.age_s // 60) ~ ' min' }} ago
+            <span class="muted">({{ n.last_seen }})</span>
+          {% else %}
+            never
+          {% endif %}{% if not loop.last %} · {% endif %}
+        {% endfor %}
+      </p>
+
+      {# The consequence, not just the status. "Offline" means nothing until
+         you know what has stopped because of it. #}
+      {% if node_waiting.processing or node_waiting.uploads %}
+        <p class="node-alarm-body">
+          Held up by this:
+          {% if node_waiting.processing %}
+            <strong>{{ node_waiting.processing }}</strong> waiting to be processed{% endif %}{% if node_waiting.processing and node_waiting.uploads %} · {% endif %}{% if node_waiting.uploads %}
+            <strong>{{ node_waiting.uploads }}</strong> waiting to upload{% endif %}.
+        </p>
+      {% else %}
+        <p class="node-alarm-body muted">
+          Nothing is queued for it right now, so nothing is being lost yet.
+        </p>
+      {% endif %}
+
+      <p class="node-alarm-body muted">
+        Log into the Windows machine over Remote Desktop — the agent starts
+        itself once you do. See <em>Surviving a reboot</em> on any project's
+        Pipeline&nbsp;→&nbsp;Nodes tab.
+      </p>
+    </div>
+  </section>
+  {% endif %}
+
+  {#
     PROJECTS — the master dashboard's main job.
 
     Title counts used to live here as six flat tiles, which only worked while

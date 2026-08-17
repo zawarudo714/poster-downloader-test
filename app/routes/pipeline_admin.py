@@ -2219,43 +2219,62 @@ def api_attention(
                       f"started." if h["restarts"] else ""),
             ))
 
-    # ── Is there a machine to do the work? ──────────────────────────────
-    # The Photoshop equivalent of the check above. A rebooted Windows box
-    # comes back with no agent unless autologon and the scheduled task are
-    # both set up, and the symptom is identical to a healthy quiet period:
-    # nothing fails, nothing moves.
-    if project.processor in P.NODE_PROCESSORS:
-        stale_node_after = datetime.utcnow() - timedelta(minutes=10)
-        capable = [
-            n for n in db.query(WorkerNode).filter(WorkerNode.is_enabled == 1).all()
-            if "process" in (n.capabilities or "")
-        ]
-        online = [n for n in capable if n.last_seen_at and n.last_seen_at > stale_node_after]
-        waiting_node = (
-            db.query(func.count(SavedPoster.id))
-              .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
-              .filter(SavedPoster.pipeline_status == "greenlit",
-                      SavedPoster.deleted_at.is_(None), scope)
-              .scalar() or 0
-        )
-        if waiting_node and capable and not online:
-            last = max((n.last_seen_at for n in capable if n.last_seen_at), default=None)
-            findings.append(_attention_finding(
-                "node_offline",
-                f"No worker machine is running, with {waiting_node} waiting",
-                "Every machine that can process work is offline. The usual cause "
-                "is that the Windows box rebooted — Windows updates do this on "
-                "their own schedule — and came back without starting the agent.",
-                "Log into the machine and start the agent. To stop it happening "
-                "again, follow SURVIVING A REBOOT on the Nodes tab.",
-                severity="stop",
-                items=[{"kind": "node", "name": n.name,
-                        "last_seen": fmt_local(n.last_seen_at, "%Y-%m-%d %H:%M")
-                                     if n.last_seen_at else "never"}
-                       for n in capable],
-                note=(f"Last contact {fmt_local(last, '%Y-%m-%d %H:%M')}." if last
-                      else "No machine has ever checked in."),
-            ))
+    # ── Is there a machine to do this project's node work? ──────────────
+    #
+    # The node is SHARED and does two jobs: Photoshop processing, and
+    # marketplace uploads for every project. So a project depends on it if it
+    # processes there OR has anything queued to upload — MUSIK generates its
+    # images on this server but still uploads through that Windows box.
+    #
+    # This originally checked `processor == 'photoshop'` only, which meant
+    # standing inside MUSIK said nothing at all while the node its uploads
+    # depend on was dead. The account-wide version of this lives on the
+    # master dashboard; this one explains what it means for THIS project.
+    stale_node_after = datetime.utcnow() - timedelta(minutes=10)
+    nodes = db.query(WorkerNode).filter(WorkerNode.is_enabled == 1).all()
+    online_nodes = [n for n in nodes
+                    if n.last_seen_at and n.last_seen_at > stale_node_after]
+
+    waiting_process = (
+        db.query(func.count(SavedPoster.id))
+          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+          .filter(SavedPoster.pipeline_status == "greenlit",
+                  SavedPoster.deleted_at.is_(None), scope)
+          .scalar() or 0
+    ) if project.processor in P.NODE_PROCESSORS else 0
+
+    waiting_upload = (
+        db.query(func.count(UploadTracking.id))
+          .filter(UploadTracking.status.in_(("pending", "failed")),
+                  UploadTracking.project_id == project.id)
+          .scalar() or 0
+    )
+
+    if nodes and not online_nodes and (waiting_process or waiting_upload):
+        held = []
+        if waiting_process:
+            held.append(f"{waiting_process} waiting to be processed")
+        if waiting_upload:
+            held.append(f"{waiting_upload} waiting to upload")
+        last = max((n.last_seen_at for n in nodes if n.last_seen_at), default=None)
+        findings.append(_attention_finding(
+            "node_offline",
+            "No worker machine is running — " + " and ".join(held),
+            "Every machine that can do this work is offline. The usual cause "
+            "is that the Windows box rebooted — Windows updates do this on "
+            "their own schedule — and came back without starting the agent. "
+            + ("Image generation is unaffected; that runs on this server."
+               if project.processor == "gpt" else ""),
+            "Log into the machine over Remote Desktop. The agent starts itself "
+            "once you do.",
+            severity="stop",
+            items=[{"kind": "node", "name": n.name,
+                    "last_seen": fmt_local(n.last_seen_at, "%Y-%m-%d %H:%M")
+                                 if n.last_seen_at else "never"}
+                   for n in nodes],
+            note=(f"Last contact {fmt_local(last, '%Y-%m-%d %H:%M')}." if last
+                  else "No machine has ever checked in."),
+        ))
 
     # A configuration failure repeats identically on every image. Group by the
     # error text so a wrong API key reads as one problem with a count, rather

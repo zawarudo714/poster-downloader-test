@@ -280,11 +280,57 @@ def admin_dashboard(request: Request, admin: User = Depends(require_admin), db: 
         for p in projects
     ]
 
+    # ── Shared machines, checked at MASTER level ─────────────────────────
+    #
+    # A worker node is not per-project. One Windows box does the Photoshop
+    # work for the movie project AND the marketplace uploads for every
+    # project, MUSIK included. So "is there a machine running" is an
+    # account-wide question and belongs on the first page you land on, not
+    # inside one project's tab where the other projects would never see it.
+    #
+    # This was originally written as a per-project check gated on
+    # processor == 'photoshop'. Standing in MUSIK, whose processor is 'gpt',
+    # it therefore stayed silent while the very node MUSIK uploads through
+    # was dead.
+    from ..models import WorkerNode
+
+    node_stale_after = datetime.utcnow() - timedelta(minutes=5)
+    all_nodes = db.query(WorkerNode).filter(WorkerNode.is_enabled == 1).all()
+    offline_nodes = [
+        {
+            "name": n.name,
+            "last_seen": fmt_local(n.last_seen_at, "%Y-%m-%d %H:%M") if n.last_seen_at else None,
+            "age_s": (int((datetime.utcnow() - n.last_seen_at).total_seconds())
+                      if n.last_seen_at else None),
+        }
+        for n in all_nodes
+        if not (n.last_seen_at and n.last_seen_at > node_stale_after)
+    ]
+
+    # What is actually held up by it, so the banner states a consequence
+    # rather than just a status.
+    node_waiting = {
+        "processing": (
+            db.query(func.count(SavedPoster.id))
+              .filter(SavedPoster.pipeline_status == "greenlit",
+                      SavedPoster.deleted_at.is_(None))
+              .scalar() or 0
+        ),
+        "uploads": (
+            db.query(func.count(UploadTracking.id))
+              .filter(UploadTracking.status.in_(("pending", "failed")))
+              .scalar() or 0
+        ),
+    }
+
     return templates.TemplateResponse(
         request,
         "admin_dashboard.html",
         {"user": admin, "admin": admin, "today": today.isoformat(),
             "projects": project_cards,
+            "node_total": len(all_nodes),
+            "offline_nodes": offline_nodes,
+            "node_waiting": node_waiting,
             "users": user_stats, "open_revisions": open_revs,
             "awaiting_revisions": awaiting_revs,
             "master_pending": pending_master, "master_in_progress": in_progress,

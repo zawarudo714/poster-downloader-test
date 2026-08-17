@@ -1,1 +1,1 @@
-Show how long ago a node last checked in
+Node-offline alarm on the master dashboard; count uploads, not just processing

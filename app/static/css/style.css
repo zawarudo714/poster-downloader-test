@@ -3920,6 +3920,26 @@ body:has(#ib-bulk-bar:not([hidden])) { padding-bottom: 88px; }
 .pipe-subrow td { padding-top: 0 !important; border-top: none !important; }
 .pipe-subrow    { background: rgba(232,85,75,0.04); }
 
+/* ── No machine running ─────────────────────────────────────────────────
+   First panel on the master dashboard, and unmissable on purpose: this is
+   the one condition where the whole pipeline is stopped and nothing else on
+   the page hints at it. Only rendered when it is true — a permanent banner
+   becomes wallpaper, and then fails on the day it matters. */
+.node-alarm {
+  border: 2px solid var(--error);
+  background: rgba(232, 85, 75, 0.12);
+}
+.node-alarm-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  letter-spacing: .06em;
+  margin-bottom: 10px;
+}
+.node-alarm-mark { color: var(--error); font-size: 18px; line-height: 1; }
+.node-alarm-body { margin: 4px 0; line-height: 1.55; }
+
 /* How long since a node checked in. Sits beside the ONLINE/OFFLINE pill,
    quiet when healthy and amber once a beat has been missed — the point is to
    contradict a stale "ONLINE" before the five-minute window expires. */

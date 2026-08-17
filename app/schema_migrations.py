@@ -92,6 +92,8 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("upload_accounts",  "banned_at",       "DATETIME"),
     ("upload_accounts",  "banned_reason",   "TEXT"),
     ("upload_accounts",  "replaced_by_id",  "INTEGER"),
+    # ── Earnings ────────────────────────────────────────────────────────
+    ("upload_accounts",  "last_earnings_read_at", "DATETIME"),
 ]
 
 # ════════════════════════════════════════════════════════════════════════════

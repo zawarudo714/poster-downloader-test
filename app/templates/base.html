@@ -83,6 +83,11 @@
             {# ── Master level ─────────────────────────────────────────── #}
             <a href="/admin"           class="navlink {% if active_tab == 'dashboard' %}active{% endif %}">Dashboard</a>
             <a href="/admin/payments"  class="navlink {% if active_tab == 'payments' %}active{% endif %}">Payments</a>
+            {# Earnings sits beside Payments deliberately: one is money going
+               out to workers, the other money coming in from marketplaces.
+               Master level, because an account belongs to a marketplace and
+               may belong to no project at all. #}
+            <a href="/admin/earnings"  class="navlink {% if active_tab == 'earnings' %}active{% endif %}">Earnings</a>
             <a href="/admin/chat"      class="navlink chat-nav {% if active_tab == 'chat' %}active{% endif %}">Chat<span class="nav-badge" id="nav-chat-badge" hidden>0</span></a>
             <a href="/admin/users"     class="navlink {% if active_tab == 'users' %}active{% endif %}">Users</a>
             <a href="/admin/backups"   class="navlink {% if active_tab == 'backups' %}active{% endif %}">Backups</a>

@@ -506,6 +506,61 @@ The general form: **a per-project screen may only report a per-project
 fact.** If the underlying thing is shared, the alarm belongs on the master
 dashboard, and the per-project view explains what it means locally.
 
+### 3c. Check the FILE, not your intention
+
+Every deletion and every move is a structural edit, and the thing you must
+check is the file that now exists — not the change you meant to make. These
+are not code review opinions, they are mechanical checks a script can do in
+seconds, and skipping them has already cost a deploy cycle.
+
+Whenever you cut, move or reorder a block, run the check that matches the
+file type before saying you are done:
+
+| You edited | Prove |
+|---|---|
+| a Jinja template | `<div>`/`<section>`/`<form>` opens == closes, and the template still parses |
+| a JS file | it parses (`node --check`) and every `data-` hook it queries still exists in the template |
+| Python | no undefined names (AST or `pyflakes`), not just `py_compile` |
+| a settings key | it is read somewhere, and something writes it |
+
+**Deleting is the dangerous edit, not adding.** Removing a panel means
+removing its opening tag, its body AND its closing tags — a slice that starts
+at the right place and ends one tag early leaves markup that still renders,
+still parses as a template, and quietly reparents everything below it.
+Browsers do not report this; they "repair" it by closing containers early,
+so the visible symptom lands somewhere unrelated to the edit. That is exactly
+how removing finished instructions from the NODES tab made the ADD ACCOUNT
+box on the UPLOAD tab stop appearing.
+
+**A page that loads is not a page that works.** There is no compiler for HTML.
+The only honest check is to parse the tree and assert the thing you care about
+is where you think it is — in particular that no modal, panel or control has
+ended up inside a `hidden` ancestor, because unhiding a child of a hidden
+parent does nothing and produces the perfect silent failure: a button that
+responds to every click by doing nothing at all.
+
+**When the owner reports "X does nothing", suspect the last structural edit to
+that page BEFORE suspecting X's logic.** The handler is usually fine. Check
+what shipped most recently against `tools/DEPLOY_LOG.md` and diff the region
+you touched.
+
+### 3d. A symptom on one screen is not a fault in that screen's code
+
+"The uploads stopped" is a statement about a PIPELINE, and a pipeline runs
+across machines. Before reading the upload code, establish where the work
+physically stops:
+
+1. **Which machine performs this step?** Processing is per project — MUSIK
+   generates on the Linux server, movies run Photoshop on the Windows node.
+   **Uploading is ALWAYS the Windows node, for every project.**
+2. **Is that machine alive?** A project whose processing happens on the server
+   will sail through processing and stop dead at upload the moment the node is
+   down, which reads as "the upload feature is broken" and is not.
+3. **Only then, the code.**
+
+Ask "what does this design need next, and who provides it" before you ask
+"what is wrong with the uploader". Say which of the three you checked.
+
 ### 4. Declare the blast radius
 
 Before building: what else touches this, and what could break that he would
@@ -528,6 +583,57 @@ Often it is laziness.
 
 For every change: **would this still be right for a third project?** If the
 answer needs "well, for MUSIK…", it is not finished. See `MULTIPROJECT.md`.
+
+### 7. Every bug becomes a rule — this file is the memory
+
+**Standing instruction from the owner: whenever a bug is found — whether he
+reports it or you trip over it yourself — you update this file before you
+finish.** Not a note about that one bug: the GENERAL shape of it, written so
+that the next session catches the next instance of that shape while building,
+instead of after a deploy.
+
+A future session starts with no memory of this one. The only thing that
+carries forward is what is written down, so a fix that leaves no rule behind
+guarantees the same class of defect comes back.
+
+Write the rule at the right altitude. Too specific and it never fires again:
+*"check the marketplace account modal"* is worthless. Too vague and it is
+noise: *"be careful"* is worthless too. The test is whether the rule, applied
+blind to a DIFFERENT part of the system, would have caught this. Each rule
+above earned its place that way — 3c came from a deleted panel breaking an
+unrelated button, 3d from reading upload code when a whole machine was the
+problem.
+
+**The rule goes in the section it belongs to, and it names the real incident
+in one line.** The incident is what makes it believable enough to obey. A
+rule with no story behind it reads like generic advice and gets skipped.
+
+### 8. Claimed work must always end in a reported state
+
+Anything that takes work off a queue owns it until it says what happened. The
+pipeline is a chain of claims — a node claims images, marks them 'processing'
+or 'uploading', and the server waits. Silence is not a state.
+
+So for any claim/report pair, check all THREE exits, not just the happy one:
+
+1. it succeeded → reported
+2. it failed in a way you anticipated → reported
+3. **it threw somewhere you did not wrap** → reported, or the item is
+   stranded and nothing will ever say why
+
+Number 3 is the one that keeps happening, and it has a signature: work that
+is claimed BEFORE the risky setup step. `run_batch` claimed a whole batch,
+then called `start()` and `login()` outside any handler. Chrome failing to
+launch left every item at 'uploading' with the reason written only to a
+console on an unattended VPS. The reaper released them, the next cycle
+claimed them, and it stranded them again — forever, looking alive the whole
+time.
+
+Concretely: **an exception must never be able to escape past the point where
+the work was claimed.** If setup can fail, either claim after it, or catch it
+and report the claim as failed with the real error text. And an error that is
+only written to the node's local log does not exist — the owner cannot read
+that machine.
 
 ---
 

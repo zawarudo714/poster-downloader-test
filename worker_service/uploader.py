@@ -866,8 +866,42 @@ class UploadStage:
         gap = float(account["timings"].get("between_images", 3))
 
         try:
-            uploader.start()
-            uploader.login()
+            # ── Getting as far as a logged-in browser ────────────────────
+            #
+            # This is reported per ITEM even though it is one account-wide
+            # problem, because the items are already CLAIMED by the time we
+            # get here. If this raises and we simply let it propagate, every
+            # one of them is left sitting at 'uploading' with nothing said
+            # about why — the error goes to this node's local console, which
+            # on an unattended VPS nobody ever reads.
+            #
+            # The visible result was a pipeline that looked alive and moved
+            # nothing: the stale-claim reaper would release the batch after
+            # the timeout, the next cycle would claim it again, fail here
+            # again, and strand it again, forever. Chrome failing to launch
+            # and a wrong marketplace password both look exactly like that
+            # from the dashboard.
+            #
+            # Paused rather than retried, because nothing about the next
+            # attempt would be different.
+            try:
+                uploader.start()
+                uploader.login()
+            except Exception as e:
+                detail = f"{type(e).__name__}: {e}"
+                shot = uploader.capture_evidence("fail_startup")
+                uploader.emit(f"Could not start an upload session — {detail}",
+                              level="error")
+                for item in items:
+                    self.client.report_upload_failure(
+                        tracking_id=item["tracking_id"],
+                        error=f"Upload session could not start — {detail}",
+                        screenshot=shot,
+                        pause_minutes=30,
+                        pause_reason="Could not open or log in to the marketplace",
+                    )
+                return {"claimed": len(items), "uploaded": 0,
+                        "failed": len(items), "account": account["name"]}
 
             for index, item in enumerate(items, start=1):
                 progress = 10 + int(index / len(items) * 88)

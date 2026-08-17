@@ -278,6 +278,21 @@ def _scheduler_loop():
             except Exception:
                 log.exception("OpenAI cost reconciliation failed")
 
+            # ── What did the marketplaces earn? ──────────────────────────
+            # Once per local day, first tick after midnight. Its own try for
+            # the usual reason: FineArtAmerica being unreachable, or one
+            # account's password being wrong, must not cost a backup.
+            try:
+                from .db import SessionLocal
+                from .earnings.service import run_daily_if_due
+                _db = SessionLocal()
+                try:
+                    run_daily_if_due(_db)
+                finally:
+                    _db.close()
+            except Exception:
+                log.exception("Earnings read failed")
+
             # ── Is image generation still running? ───────────────────────
             # Wrapped in its own try so a failure here can never stop the
             # backups. Losing a day's backup to a watchdog would be a poor

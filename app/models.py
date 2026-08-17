@@ -762,6 +762,11 @@ class UploadAccount(Base):
     # Which account took over its catalogue, if any. Answers "where did this
     # artist's listing go" in one hop.
     replaced_by_id    = Column(Integer, ForeignKey("upload_accounts.id"), nullable=True)
+    # When the earnings reader last got through to this account. Kept on the
+    # account rather than in settings because "which one is stale" is a
+    # per-account question — one bad password must be visible as one bad
+    # account, not as a silent gap in the totals.
+    last_earnings_read_at = Column(DateTime, nullable=True)
     created_at        = Column(DateTime, default=datetime.utcnow, nullable=False)
     created_by        = Column(String(64), nullable=True)
 

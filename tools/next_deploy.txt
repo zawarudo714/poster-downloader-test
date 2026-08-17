@@ -1,1 +1,1 @@
-Fix ADD ACCOUNT modal (broken markup in v61) and release uploads queued against a deleted account
+Earnings tab (filters, per-design sales, manual matching, nightly read); report upload-session startup failures instead of stranding the batch; fix ADD ACCOUNT modal

@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% from "_macros.html" import info %}
+{% block title %}Earnings · Admin{% endblock %}
+
+{% block content %}
+{#
+   Master level — no `nav_scope`, deliberately. A sale belongs to an ACCOUNT,
+   and an account may serve several projects or none, so scoping this page to
+   the active project would hide most of the money.
+#}
+<div class="admin-grid" data-no-global-scroll>
+
+  <section class="panel">
+    <div class="panel-head">
+      <span>EARNINGS
+        {{ info("What the marketplaces say you have earned. Read from their own pages once a day and stored line by line, so every total here can be traced back to the sales that make it up. Nothing on this page changes anything on a marketplace.") }}
+      </span>
+      <span class="filter-row" style="gap:8px">
+        <span class="muted mono" data-last-run>
+          {% if last_run %}last read {{ last_run }}{% else %}never read{% endif %}
+        </span>
+        <button class="btn btn-accent btn-tiny" data-action="read-now" type="button">READ&nbsp;NOW</button>
+      </span>
+    </div>
+
+    <div class="panel-body">
+      {# ── Filters ─────────────────────────────────────────────────────
+         Marketplace, then accounts, then window. Any subset — the nine
+         TeePublic accounts are meant to be totalled together or read one
+         at a time, and both have to be one click apart. #}
+      <div class="filter-row" style="gap:12px; flex-wrap:wrap; margin-bottom:10px">
+        <label>SITE
+          <select data-filter-marketplace>
+            <option value="">All sites</option>
+          </select>
+        </label>
+        <label>PERIOD
+          <select data-filter-days>
+            <option value="1">Today</option>
+            <option value="7">Last 7 days</option>
+            <option value="30" selected>Last 30 days</option>
+            <option value="90">Last 90 days</option>
+            <option value="365">Last year</option>
+            <option value="3650">All time</option>
+          </select>
+        </label>
+        <span class="muted" data-account-filter-summary></span>
+        <button class="btn btn-ghost btn-tiny" data-action="toggle-accounts" type="button">
+          CHOOSE ACCOUNTS
+        </button>
+      </div>
+
+      <div data-account-filter hidden style="margin-bottom:12px"></div>
+
+      <div data-figures>
+        <div class="muted">Loading…</div>
+      </div>
+    </div>
+  </section>
+
+  {# ── Next payout ───────────────────────────────────────────────────────
+     Its own panel because it is the one figure that is NOT a fact. FAA pays
+     on the date an order ships and does not publish which orders have
+     shipped, so this is an estimate and is worded as one everywhere. #}
+  <section class="panel">
+    <div class="panel-head">
+      <span>NEXT PAYOUT — ESTIMATE
+        {{ info("They pay on the date an order ships, and they do not publish which orders have shipped. So this is everything credited since your last payout: some of it will land in the next one, some later. Treat it as a direction, not a figure.") }}
+      </span>
+    </div>
+    <div class="panel-body" data-next-payout>
+      <div class="muted">Loading…</div>
+    </div>
+  </section>
+
+  {# ── Per design ────────────────────────────────────────────────────────
+     Sorted by money by default, because two sales of a framed print and two
+     of a sticker are not the same result, and deciding what to make more of
+     is the only reason this list exists. #}
+  <section class="panel">
+    <div class="panel-head">
+      <span>WHAT SOLD
+        {{ info("Every design that has earned anything in the period, best first. Refunds are subtracted, so a design can show less than it sold. Rows marked UNMATCHED are sales we could not tie to one of your titles — match them below and they join the totals here.") }}
+      </span>
+      <span class="filter-row" style="gap:8px">
+        <label>SORT
+          <select data-filter-sort>
+            <option value="amount" selected>Most earned</option>
+            <option value="sales">Most sales</option>
+            <option value="recent">Most recent</option>
+          </select>
+        </label>
+      </span>
+    </div>
+    <div class="panel-body" data-designs>
+      <div class="muted">Loading…</div>
+    </div>
+  </section>
+
+  {# ── Manual matching ───────────────────────────────────────────────────
+     The matcher refuses to guess: a sale credited to the wrong design is
+     worse than one credited to nothing, because you would act on it. So
+     whatever it could not prove lands here for a human. #}
+  <section class="panel">
+    <div class="panel-head">
+      <span>SALES WE COULD NOT PLACE
+        {{ info("Listings whose name does not match any title we hold — usually the oldest ones, uploaded by hand before the pipeline existed. Matching one is permanent and fixes every past and future sale of that design at once.") }}
+      </span>
+      <button class="btn btn-ghost btn-tiny" data-action="reload-unmatched" type="button">RELOAD</button>
+    </div>
+    <div class="panel-body" data-unmatched>
+      <div class="muted">Loading…</div>
+    </div>
+  </section>
+
+  {# ── The raw rows ──────────────────────────────────────────────────────
+     Last, and collapsed by default. This is the thing to read when a total
+     looks wrong, not the thing to read every day. #}
+  <section class="panel">
+    <div class="panel-head">
+      <span>EVERY LINE
+        {{ info("The ledger exactly as the marketplace reports it — sales, refunds and payouts. If a total above looks wrong, the answer is in here.") }}
+      </span>
+      <span class="filter-row" style="gap:8px">
+        <label>SHOW
+          <select data-filter-type>
+            <option value="">Everything</option>
+            <option value="sale">Sales</option>
+            <option value="refund">Refunds</option>
+            <option value="payment">Payouts</option>
+          </select>
+        </label>
+        <button class="btn btn-ghost btn-tiny" data-action="toggle-entries" type="button">SHOW</button>
+      </span>
+    </div>
+    <div class="panel-body" data-entries hidden>
+      <div class="muted">Loading…</div>
+    </div>
+  </section>
+
+  {# Run log — appears only after READ NOW, and reports per account so one
+     bad password reads as one bad account rather than a silent gap. #}
+  <section class="panel" data-read-panel hidden>
+    <div class="panel-head"><span>LAST READ</span></div>
+    <div class="panel-body">
+      <pre class="pipe-log" data-read-log></pre>
+    </div>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/admin_earnings.js?v={{ app_version }}"></script>
+{% endblock %}

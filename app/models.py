@@ -703,7 +703,12 @@ class UploadAccount(Base):
     __tablename__ = "upload_accounts"
 
     id                = Column(Integer, primary_key=True)
-    project_id        = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    # NULLABLE on purpose. An account exists ONCE and may belong to no
+    # project at all — the TeePublic accounts earn passively with nothing
+    # uploaded to them, and an account added from the Earnings tab has no
+    # project until you attach it to one. Uploading and revenue-reading are
+    # capabilities of one account, not two different objects.
+    project_id        = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
     name              = Column(String(64), nullable=False)
     target_site       = Column(String(32), nullable=False, default="faa")
     email             = Column(String(255), nullable=False)
@@ -927,4 +932,129 @@ class PipelineJob(Base):
 
     __table_args__ = (
         Index("ix_job_kind_status", "kind", "status"),
+    )
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  EARNINGS
+# ════════════════════════════════════════════════════════════════════════════
+# Read-only mirror of what a marketplace says it owes and has paid. Nothing
+# here is produced by this app — every row is copied from a page on their
+# site — so nothing here is ever authoritative about our own pipeline. It
+# answers one question the pipeline cannot: is any of this making money.
+
+class LedgerEntry(Base):
+    """
+    One line from a marketplace's account ledger.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY A LEDGER AND NOT A SALES TABLE
+    ════════════════════════════════════════════════════════════════════════
+    FineArtAmerica's Balance page is a running ledger: sales credit it,
+    payouts debit it, and every row carries the balance afterwards. Copying
+    that shape rather than inventing our own gives three things for free:
+
+      · payouts are events, so "what have I actually been paid" is answerable
+      · a refund arrives as its own row rather than a sale silently vanishing,
+        which is the difference between knowing and inferring
+      · the running balance is a checksum — our arithmetic must land on their
+        figure, and if it does not we have missed something
+
+    ════════════════════════════════════════════════════════════════════════
+    MONEY IS TEXT
+    ════════════════════════════════════════════════════════════════════════
+    Amounts are stored as strings and converted to Decimal when summed, the
+    same rule ApiSpend follows. Floats accumulate error, and this table
+    exists precisely to be totalled.
+    """
+    __tablename__ = "ledger_entries"
+
+    id             = Column(Integer, primary_key=True)
+    account_id     = Column(Integer, ForeignKey("upload_accounts.id"),
+                            nullable=False, index=True)
+    # Denormalised from the account so a marketplace filter never needs a
+    # join, and so the row still reads correctly if an account is renamed.
+    marketplace    = Column(String(32), nullable=False, index=True)
+
+    occurred_at    = Column(DateTime, nullable=False, index=True)
+    # 'sale' | 'payment' | 'refund' | 'other'. Anything we do not recognise
+    # is stored as 'other' with its raw description rather than being forced
+    # into a bucket — an unknown row we can see beats a wrong one we cannot.
+    entry_type     = Column(String(16), nullable=False, index=True)
+
+    remote_order_id = Column(String(64), nullable=True, index=True)
+    description     = Column(Text, nullable=True)
+
+    # What was sold, split out of the description. Kept raw as well, because
+    # the split is a guess about their formatting and the raw text is not.
+    artwork_name   = Column(String(255), nullable=True, index=True)
+    product        = Column(String(160), nullable=True)
+
+    credit         = Column(String(24), nullable=False, default="0")
+    debit          = Column(String(24), nullable=False, default="0")
+    balance_after  = Column(String(24), nullable=True)
+
+    # ── From the order's Details panel, for sales only ──────────────────
+    # The ledger gives the money; these give the shape of the sale. Fetched
+    # once, when the row is first seen, because it is a request per order.
+    website        = Column(String(64), nullable=True)   # fineartamerica | pixels
+    quantity       = Column(Integer, nullable=True)
+    gross_price    = Column(String(24), nullable=True)   # before their discount
+    discount       = Column(String(24), nullable=True)
+    buyer_location = Column(String(255), nullable=True)
+    details_read   = Column(Integer, nullable=False, default=0)   # 0/1
+
+    # ── Attribution ─────────────────────────────────────────────────────
+    # Which of OUR designs this was. NULL means unmatched, which is a state
+    # to work through rather than an error — the sale still counts toward
+    # account totals either way.
+    master_title_id = Column(Integer, ForeignKey("master_titles.id"),
+                             nullable=True, index=True)
+    # 'exact' | 'alias' | 'suffix' | 'name' — recorded so a bad rule can be
+    # found later by looking at how its matches were made.
+    match_method    = Column(String(16), nullable=True)
+
+    # Natural key for "have we seen this row already". Sales use the order
+    # id; payouts have none, so they use type+timestamp+amount. Unique per
+    # account, which is what makes re-reading a page free of duplicates.
+    dedupe_key     = Column(String(128), nullable=False)
+
+    created_at     = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "dedupe_key", name="uq_ledger_account_key"),
+        Index("ix_ledger_account_time", "account_id", "occurred_at"),
+        Index("ix_ledger_type_time", "entry_type", "occurred_at"),
+    )
+
+
+class TitleAlias(Base):
+    """
+    A marketplace product name, permanently pointed at one of our designs.
+
+    Exists because matching cannot be perfect and guessing is worse than
+    asking. A listing title can differ from what we stored for three
+    reasons — the marketplace strips characters, it truncates at 100, and
+    the oldest listings were uploaded by hand before any of these rules
+    existed. Fuzzy matching would eventually attribute a sale to the wrong
+    design, which is worse than attributing it to none, because you would
+    act on it.
+
+    So: match what can be matched exactly, show the rest, and let one
+    correction fix every past and future sale of that design at once.
+    """
+    __tablename__ = "title_aliases"
+
+    id              = Column(Integer, primary_key=True)
+    marketplace     = Column(String(32), nullable=False, index=True)
+    # Exactly as the marketplace writes it, before any normalisation. That
+    # is what future rows will be compared against.
+    artwork_name    = Column(String(255), nullable=False)
+    master_title_id = Column(Integer, ForeignKey("master_titles.id"),
+                             nullable=False, index=True)
+    created_by      = Column(String(64), nullable=True)
+    created_at      = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("marketplace", "artwork_name", name="uq_alias_market_name"),
     )

@@ -1117,22 +1117,58 @@ def api_delete_account(
     db: Session = Depends(get_db),
 ):
     """
-    Delete an account.
+    Delete an account, and release the work that was queued against it.
 
-    Its UploadTracking history is preserved — that's the record of what was
-    uploaded where, and it's what makes rebuilding onto a new account
-    possible. Only the credentials go away.
+    FINISHED history is preserved — uploaded / removed / skipped rows are the
+    record of what went live where, and that record is what makes rebuilding
+    onto a replacement account possible.
+
+    UNFINISHED rows are discarded, and this is the important half. A queued
+    row is only ever handed out by walking the list of live, enabled accounts
+    (`claim_upload_batch`), so once its account no longer exists the row can
+    never be claimed by anything — while the poster it belongs to sits at
+    'uploading' forever, counted as in-flight on the funnel. Deleting an
+    account to re-add it therefore used to strand every design that had
+    reached the upload stage, permanently and silently.
+
+    The posters go back to 'processed', which is the state the greenlight and
+    REQUEUE BACK CATALOGUE paths both seed from, so adding the replacement
+    account picks them straight back up.
     """
     account = db.query(UploadAccount).filter_by(id=account_id).first()
     if account is None:
         raise HTTPException(404, "Account not found.")
     name = account.name
+
+    unfinished = (
+        db.query(UploadTracking)
+          .filter(UploadTracking.account_id == account_id,
+                  UploadTracking.status.in_(
+                      ("pending", "uploading", "failed")))
+          .all()
+    )
+    released = 0
+    for row in unfinished:
+        poster = db.query(SavedPoster).filter_by(id=row.saved_poster_id).first()
+        if poster is not None and poster.pipeline_status in ("uploading", "failed_upload"):
+            poster.pipeline_status = "processed"
+            released += 1
+        db.delete(row)
+
+    # Nothing may point at a row that is about to disappear.
+    db.query(UploadAccount).filter(
+        UploadAccount.replaced_by_id == account_id
+    ).update({"replaced_by_id": None}, synchronize_session=False)
+
     db.delete(account)
     log_activity(db, user=admin, action="pipeline_account_deleted",
                  target_type="upload_account", target_id=account_id,
-                 details={"name": name})
+                 details={"name": name,
+                          "queued_rows_discarded": len(unfinished),
+                          "posters_released": released})
     db.commit()
-    return JSONResponse({"ok": True})
+    return JSONResponse({"ok": True, "released": released,
+                         "discarded": len(unfinished)})
 
 
 # ═══════════════════════════════════════════════════════════════════════════

@@ -23,3 +23,8 @@ Pillow==10.4.0
 # stage runs here rather than on the Windows node, and this box has no S:
 # drive — see app/storage_remote.py for why SFTP rather than a mount.
 paramiko==3.4.1
+# beautifulsoup4: parsing the marketplace control-panel pages for the
+# earnings tab. Deliberately NOT a headless browser — those pages are plain
+# server-rendered HTML, so a browser would add ~150MB to the image and a
+# process that can hang, to read a table that is already in the response.
+beautifulsoup4==4.12.3

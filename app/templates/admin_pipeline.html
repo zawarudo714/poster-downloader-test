@@ -701,39 +701,6 @@
       They are still in PIPELINE.md if a machine ever has to be rebuilt.
     #}
   </div>
-      <div class="panel-body">
-        <p><strong>1 · Log the machine in automatically.</strong> Photoshop needs a real
-        desktop session, so the VPS must reach the desktop without you. In an
-        <em>administrator</em> Command Prompt:</p>
-        <pre class="pipe-log">reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v AutoAdminLogon /t REG_SZ /d 1 /f
-reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v DefaultUserName /t REG_SZ /d Administrator /f
-reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v DefaultPassword /t REG_SZ /d YOUR_WINDOWS_PASSWORD /f</pre>
-        <p class="muted">The password is stored in the registry in plain text — that is how
-        Windows autologon works, and it is why this is only acceptable on a machine
-        that does nothing else. Anyone who can read that registry key can already
-        log in as you.</p>
-
-        <p><strong>2 · Start the agent inside that session.</strong> Still as administrator,
-        with the path adjusted to where you put <code>worker_service</code>:</p>
-        <pre class="pipe-log">schtasks /create /tn "PosterAgent" /tr "cmd /c cd /d C:\poster\worker_service && python -m worker_service.agent" /sc onlogon /rl highest /f</pre>
-        <p class="muted">
-          <code>/sc onlogon</code> is deliberate — <em>not</em> <code>/sc onstart</code>.
-          A task that runs at boot gets a session with no desktop, and Photoshop
-          fails there in ways that look like a broken script rather than a missing
-          screen.
-        </p>
-
-        <p><strong>3 · Check it.</strong> Reboot the machine, wait two minutes, and look at
-        NODES above — the node should come back online on its own. If it does not,
-        run <code>schtasks /run /tn "PosterAgent"</code> and read the console window.</p>
-
-        <p class="muted">Before a planned reboot, press <strong>PAUSE NEW WORK</strong> on the
-        Overview tab and wait for it to say nothing is in flight. That way the
-        machine goes down between items instead of halfway through one.</p>
-      </div>
-    </section>
-
-  </div>
 
   {# ═══════════════════════════════════════════════════════════════ #}
   {#  LIVE CONSOLE — deliberately OUTSIDE every section              #}

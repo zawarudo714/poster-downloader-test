@@ -574,6 +574,46 @@ def check_orphaned_bans(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def check_orphaned_upload_rows(db: Session, scope: Scope) -> CheckResult:
+    """
+    Queued uploads whose marketplace account no longer exists.
+
+    Work is only ever handed out by walking the list of live accounts, so a
+    row pointing at a deleted account can never be claimed by anything. The
+    design sits at 'uploading' on the funnel and waits forever.
+
+    Deleting an account now releases these, so this should only ever find
+    rows created before that fix. It stays because the state is cheap to
+    detect and impossible to notice by eye.
+    """
+    live = {i for (i,) in db.query(UploadAccount.id).all()}
+    q = (
+        db.query(UploadTracking, MasterTitle.title)
+          .join(SavedPoster, UploadTracking.saved_poster_id == SavedPoster.id)
+          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+          .filter(UploadTracking.status.in_(("pending", "uploading", "failed")))
+    )
+    if scope.project_id:
+        q = q.filter(UploadTracking.project_id == scope.project_id)
+
+    rows = [
+        Finding(title or f"poster {t.saved_poster_id}",
+                f"queued against account #{t.account_id}, which no longer exists",
+                "/admin/pipeline#upload",
+                project=scope.label(t.project_id))
+        for t, title in q.all() if t.account_id not in live
+    ]
+
+    return _result(
+        "orphaned_upload_rows", "Uploads queued against a deleted account",
+        "These images were waiting to go to a marketplace account that has "
+        "since been deleted, so nothing will ever pick them up. Add the "
+        "replacement account and press REQUEUE BACK CATALOGUE on the Upload "
+        "tab to put them back in the queue.",
+        "error", rows,
+    )
+
+
 def check_open_revisions_on_deleted(db: Session, scope: Scope) -> CheckResult:
     """Change requests still open against a poster that's already gone."""
     q = (
@@ -645,6 +685,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_uploaded_without_processed,
     check_upload_accounts,
     check_orphaned_bans,
+    check_orphaned_upload_rows,
     check_unassigned_titles,
     check_duplicate_hashes,
 ]

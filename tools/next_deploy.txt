@@ -1,3 +1,1 @@
-Remove completed setup instructions from the Nodes and Test tabs
----
-cd /opt/poster && docker compose exec -T web python scripts/reset_workflow.py --yes --force
+Fix ADD ACCOUNT modal (broken markup in v61) and release uploads queued against a deleted account

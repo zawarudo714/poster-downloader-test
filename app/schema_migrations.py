@@ -94,6 +94,20 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("upload_accounts",  "replaced_by_id",  "INTEGER"),
 ]
 
+# ════════════════════════════════════════════════════════════════════════════
+#  COLUMNS THAT MUST BECOME NULLABLE
+# ════════════════════════════════════════════════════════════════════════════
+# SQLite cannot ALTER a column's nullability. The table has to be rebuilt,
+# which is a real migration rather than an additive one — so it is listed
+# separately and run only when the current schema actually says NOT NULL.
+#
+# upload_accounts.project_id: an account may now belong to no project. The
+# TeePublic accounts earn passively with nothing uploaded to them, and an
+# account added from the Earnings tab has no project until you attach one.
+RELAX_NOT_NULL: list[tuple[str, str]] = [
+    ("upload_accounts", "project_id"),
+]
+
 NEW_INDEXES: list[tuple[str, str, str]] = [
     ("ix_master_titles_project_id",      "master_titles", "project_id"),
     ("ix_master_titles_greenlit_at",     "master_titles", "greenlit_at"),
@@ -105,6 +119,16 @@ NEW_INDEXES: list[tuple[str, str, str]] = [
     ("ix_poster_project_folder",         "saved_posters", "project_folder"),
     ("ix_processed_review",              "processed_images", "review_status"),
 ]
+
+
+def _create_table_sql(conn, table: str) -> str:
+    """The CREATE TABLE statement SQLite is currently using for this table."""
+    row = conn.execute(text(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name=:t"
+    ), {"t": table}).first()
+    if not row or not row[0]:
+        raise RuntimeError(f"Could not read the schema for {table}")
+    return row[0]
 
 
 def migrate_schema(*, dry_run: bool = False) -> dict:
@@ -139,6 +163,41 @@ def migrate_schema(*, dry_run: bool = False) -> dict:
 
             conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
             added.append(f"{table}.{column}")
+
+        # ── Relax NOT NULL where the model now allows NULL ──────────────
+        # SQLite has no ALTER COLUMN, so this rebuilds the table: create a
+        # copy with the corrected definition, move the rows, swap it in.
+        # Guarded by an actual check of the current schema, so it runs once
+        # and is a no-op every time afterwards.
+        for table, column in RELAX_NOT_NULL:
+            if table not in existing_tables:
+                continue
+            cols = {c["name"]: c for c in inspector.get_columns(table)}
+            if column not in cols or cols[column]["nullable"]:
+                skipped.append(f"{table}.{column} (already nullable)")
+                continue
+            if dry_run:
+                added.append(f"{table}.{column} (would become nullable)")
+                continue
+
+            # PRAGMA writable_schema is the surgical option, but editing the
+            # schema text by hand is exactly the kind of clever that breaks
+            # quietly. Rebuilding is slower and obviously correct.
+            names = ", ".join(f'"{c}"' for c in cols)
+            ddl = _create_table_sql(conn, table).replace(
+                f"{column} INTEGER NOT NULL", f"{column} INTEGER"
+            ).replace(
+                f'"{column}" INTEGER NOT NULL', f'"{column}" INTEGER'
+            ).replace(f"{table}", f"{table}__new", 1)
+
+            conn.execute(text("PRAGMA foreign_keys=OFF"))
+            conn.execute(text(ddl))
+            conn.execute(text(
+                f'INSERT INTO {table}__new ({names}) SELECT {names} FROM {table}'))
+            conn.execute(text(f"DROP TABLE {table}"))
+            conn.execute(text(f"ALTER TABLE {table}__new RENAME TO {table}"))
+            conn.execute(text("PRAGMA foreign_keys=ON"))
+            added.append(f"{table}.{column} (now nullable)")
 
         if not dry_run:
             for name, table, columns in NEW_INDEXES:

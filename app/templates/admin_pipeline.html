@@ -539,19 +539,6 @@
   {# ═══════════════════════════════════════════════════════════════ #}
   <div class="pipe-section" data-section-panel="test" hidden>
 
-    <section class="panel">
-      <div class="panel-head">
-        <span>WHY THIS EXISTS</span>
-      </div>
-      <div class="panel-body">
-        <p>Each stage runs independently on a single item, so you never have to start a
-        full pipeline run to find out whether a small fix worked. Every test streams
-        into the Live Console with per-phase timing, and a failure captures a
-        screenshot plus the page source.</p>
-        <p class="muted">Test output is written under a <code>_tests/</code> prefix in storage
-        and never overwrites a live derivative. Test uploads do not mutate tracking state.</p>
-      </div>
-    </section>
 
     {#
       Which tests exist depends on WHERE this project's processing runs.
@@ -705,43 +692,15 @@
       </div>
     </section>
 
-    <section class="panel">
-      <div class="panel-head"><span>SETUP — WHAT TO PUT ON THE WINDOWS VPS</span></div>
-      <div class="panel-body">
-        <ol class="pipe-steps">
-          <li>Install Adobe Photoshop (with the Real Paint FX plugin), Google Chrome and Python 3.11+.</li>
-          <li>Mount the storage box as a drive letter and make sure the path matches
-              <code>storage_root</code> under Processing → Storage.</li>
-          <li>Copy the <code>worker_service/</code> folder from the repo onto the machine
-              and run <code>pip install -r requirements.txt</code>.</li>
-          <li>Register a node above and copy the token it shows once.</li>
-          <li>Create <code>worker_service/config.json</code> with the server URL and that token.</li>
-          <li>Run <code>python -m worker_service.agent</code> once to verify it connects.</li>
-          <li><strong>Make it survive a reboot</strong> — see below. Without this, every
-              restart of that machine leaves the pipeline with no worker until
-              someone logs in and starts it by hand.</li>
-        </ol>
-        <p class="muted">Full detail, including the one-time migration of your existing
-        processed files and upload history, is in <code>PIPELINE.md</code> in the repo.</p>
-      </div>
-    </section>
-
     {#
-      The reboot problem, written out where it will actually be read.
+      The one-time VPS setup steps and the autologon/scheduled-task
+      instructions used to live here. Removed once done: a checklist you
+      have already completed is not reference material, it is clutter that
+      every future reader has to scroll past to reach the live data.
 
-      Photoshop needs a real interactive desktop session — it will not run as
-      a Windows service, and a scheduled task set to "run whether the user is
-      logged on or not" gets a non-interactive session where Photoshop fails
-      in confusing ways. So the machine has to log itself in, and the task has
-      to run inside that session. Both halves are required; one without the
-      other silently does nothing.
+      They are still in PIPELINE.md if a machine ever has to be rebuilt.
     #}
-    <section class="panel">
-      <div class="panel-head">
-        <span>SURVIVING A REBOOT
-          {{ info("Windows updates reboot this machine on their own schedule. Without these two steps the agent stops and nothing processes or uploads until someone notices — which is usually the next morning.") }}
-        </span>
-      </div>
+  </div>
       <div class="panel-body">
         <p><strong>1 · Log the machine in automatically.</strong> Photoshop needs a real
         desktop session, so the VPS must reach the desktop without you. In an

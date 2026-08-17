@@ -1,1 +1,3 @@
-Audit fixes: no TMDB link or paste-URL box in MUSIK, year column hidden, cost reconciliation
+Remove completed setup instructions from the Nodes and Test tabs
+---
+cd /opt/poster && docker compose exec -T web python scripts/reset_workflow.py --yes --force

@@ -37,6 +37,7 @@ the screens filter on `marketplace` as data.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -109,7 +110,7 @@ def read_account(db: Session, account: UploadAccount,
     end — which is the backfill, paid once, with no separate import step to
     remember.
     """
-    from ..pipeline import decrypt_secret
+    from ..pipeline import decrypt_secret, get_setting, resolve_project
 
     say = on_log or (lambda m: log.info("%s: %s", account.name, m))
     marketplace = (account.target_site or "").lower()
@@ -117,22 +118,47 @@ def read_account(db: Session, account: UploadAccount,
     if reader is None:
         return {"account": account.name, "skipped": "no reader for this marketplace"}
 
+    # ── Where to look comes from SETTINGS, never from this module ────────
+    #
+    # The sign-in page is `login_url` out of the selectors map — the exact
+    # value the uploader signs in with. One account has one login page, and
+    # a second copy of it here would drift the first time FineArtAmerica
+    # moved it: the uploader would keep working while earnings silently
+    # returned 403, which is precisely what happened when this was
+    # hardcoded.
+    project = resolve_project(db, account.project_id)
+    selectors = dict(get_setting(db, "selectors", project=project))
+    if account.selectors_json:
+        try:
+            selectors.update(json.loads(account.selectors_json))
+        except (TypeError, ValueError):
+            pass
+
+    login_url = selectors.get("login_url")
+    if not login_url:
+        return {"account": account.name,
+                "skipped": "no login_url configured for this account"}
+    balance_url = get_setting(db, "earnings_balance_url", project=project)
+    sales_url = get_setting(db, "earnings_sales_url", project=project)
+
     known = {
         k for (k,) in db.query(LedgerEntry.dedupe_key)
                         .filter(LedgerEntry.account_id == account.id).all()
     }
     is_known = known.__contains__
 
-    session = reader.login(account.email, decrypt_secret(account.password_enc))
+    session = reader.login(account.email, decrypt_secret(account.password_enc),
+                           login_url=login_url, verify_url=balance_url)
 
     # Sales FIRST. That page carries the artwork name, the product and the
     # order's detail panel inline, so reading it costs one request per page
     # rather than one per order. The ledger is read afterwards for the things
     # only it has: payouts, refunds, and the running balance.
-    sales = reader.read_sales(session, is_known=is_known)
+    sales = reader.read_sales(session, is_known=is_known, sales_url=sales_url)
     say(f"sales: {len(sales.rows)} new over {sales.pages_read} page(s)")
 
-    ledger = reader.read_ledger(session, is_known=is_known)
+    ledger = reader.read_ledger(session, is_known=is_known,
+                                balance_url=balance_url)
     say(f"ledger: {len(ledger.rows)} new over {ledger.pages_read} page(s)")
 
     index = MatchIndex(db, marketplace)

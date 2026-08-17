@@ -65,10 +65,17 @@ import requests
 log = logging.getLogger("uvicorn.error")
 
 BASE = "https://fineartamerica.com"
-LOGIN_URL = f"{BASE}/loginpost.php"
-LOGIN_PAGE = f"{BASE}/login.html"
-BALANCE_URL = f"{BASE}/controlpanel/balance"
-SALES_URL = f"{BASE}/controlpanel/sales"
+
+# ── There are deliberately NO hardcoded page URLs here ──────────────────────
+#
+# Every URL this module touches is passed IN by the caller, which reads it
+# from settings. An earlier version hardcoded a guessed sign-in endpoint and
+# spent two rounds returning HTTP 403 — while `login_url`, the value the
+# uploader has always used and which the admin can edit in the dashboard,
+# sat one function call away.
+#
+# If you find yourself typing a marketplace URL into this file, that is the
+# bug, not the value you were about to type.
 
 TIMEOUT_S = 30
 # Their pages are 20-25 rows each. A hard ceiling stops a parsing bug from
@@ -426,6 +433,7 @@ def read_sales(
     session: requests.Session,
     *,
     is_known: Callable[[str], bool],
+    sales_url: str,
     max_pages: int = MAX_PAGES,
 ) -> ReadResult:
     """
@@ -439,7 +447,7 @@ def read_sales(
     seen_total: Optional[int] = None
 
     for page in range(1, max_pages + 1):
-        url = SALES_URL if page == 1 else f"{SALES_URL}?page={page}"
+        url = sales_url if page == 1 else f"{sales_url}?page={page}"
         try:
             resp = session.get(url, timeout=TIMEOUT_S)
         except requests.RequestException as e:
@@ -560,7 +568,8 @@ def _login_form(html: str) -> tuple[Optional[str], dict, Optional[str], Optional
     return None, {}, None, None
 
 
-def login(email: str, password: str) -> requests.Session:
+def login(email: str, password: str, *, login_url: str,
+          verify_url: str) -> requests.Session:
     """
     Sign in and return a session carrying the cookies.
 
@@ -574,12 +583,15 @@ def login(email: str, password: str) -> requests.Session:
     session.headers.update(BROWSER_HEADERS)
 
     try:
-        page = session.get(LOGIN_PAGE, timeout=TIMEOUT_S)
+        page = session.get(login_url, timeout=TIMEOUT_S)
     except requests.RequestException as e:
         raise FaaError(f"Could not reach FineArtAmerica: {e}")
     if page.status_code != 200:
-        raise FaaError(f"The sign-in page returned HTTP {page.status_code} "
-                       f"({LOGIN_PAGE}).")
+        raise FaaError(
+            f"The sign-in page returned HTTP {page.status_code} ({login_url}). "
+            f"If that URL is wrong, change 'login_url' under "
+            f"Pipeline → Upload → Selectors — it is the same one the uploader "
+            f"uses. Page said: {_snippet(page.text)}")
 
     action, fields, email_field, pw_field = _login_form(page.text)
     if not email_field or not pw_field:
@@ -590,14 +602,14 @@ def login(email: str, password: str) -> requests.Session:
 
     fields[email_field] = email
     fields[pw_field] = password
-    post_url = urljoin(LOGIN_PAGE, action) if action else LOGIN_PAGE
+    post_url = urljoin(login_url, action) if action else login_url
 
     try:
         resp = session.post(
             post_url, data=fields, timeout=TIMEOUT_S, allow_redirects=True,
             # Sent because the browser sends them. A form POST arriving with
             # neither is a common signal for "not a browser".
-            headers={"Referer": LOGIN_PAGE, "Origin": BASE},
+            headers={"Referer": login_url, "Origin": BASE},
         )
     except requests.RequestException as e:
         raise FaaError(f"Could not reach FineArtAmerica: {e}")
@@ -610,7 +622,7 @@ def login(email: str, password: str) -> requests.Session:
 
     # Proven by fetching a page that only exists behind a login, rather than
     # by trusting the login response — which returns 200 for a bad password.
-    check = session.get(BALANCE_URL, timeout=TIMEOUT_S)
+    check = session.get(verify_url, timeout=TIMEOUT_S)
     if "Current Balance" not in check.text:
         raise FaaError(
             f"Signed in but the balance page was not returned — the email or "
@@ -623,6 +635,7 @@ def read_ledger(
     session: requests.Session,
     *,
     is_known: Callable[[str], bool],
+    balance_url: str,
     max_pages: int = MAX_PAGES,
 ) -> ReadResult:
     """
@@ -636,7 +649,7 @@ def read_ledger(
     seen_total: Optional[int] = None
 
     for page in range(1, max_pages + 1):
-        url = BALANCE_URL if page == 1 else f"{BALANCE_URL}?page={page}"
+        url = balance_url if page == 1 else f"{balance_url}?page={page}"
         try:
             resp = session.get(url, timeout=TIMEOUT_S)
         except requests.RequestException as e:
@@ -666,7 +679,8 @@ def read_ledger(
     return result
 
 
-def fetch_sale_detail(session: requests.Session, order_id: str) -> Optional[SaleDetail]:
+def fetch_sale_detail(session: requests.Session, order_id: str,
+                      *, sales_url: str) -> Optional[SaleDetail]:
     """
     The Details panel for one order.
 
@@ -675,7 +689,7 @@ def fetch_sale_detail(session: requests.Session, order_id: str) -> Optional[Sale
     which is the price of a backfill and is paid once.
     """
     try:
-        resp = session.get(f"{SALES_URL}?orderid={order_id}", timeout=TIMEOUT_S)
+        resp = session.get(f"{sales_url}?orderid={order_id}", timeout=TIMEOUT_S)
     except requests.RequestException as e:
         log.warning("Could not read details for order %s: %s", order_id, e)
         return None

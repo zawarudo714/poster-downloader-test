@@ -556,6 +556,41 @@ that page BEFORE suspecting X's logic.** The handler is usually fine. Check
 what shipped most recently against `tools/DEPLOY_LOG.md` and diff the region
 you touched.
 
+### 3c-bis. NEVER invent a value you could look up or ask for
+
+A value you cannot verify is not a default, it is a guess wearing a
+default's clothing — and it ships looking exactly like working code.
+
+The incident: the earnings reader needed FineArtAmerica's sign-in page. I
+wrote `LOGIN_URL = f"{BASE}/loginpost.php"` and field names `email` /
+`password` / `rememberme`, none of which I had ever seen. Two deploy cycles
+were spent on HTTP 403 before the owner supplied the real page. Worse, the
+correct value already EXISTED in the system: `login_url`, in the selectors
+map, dashboard-editable, used by the uploader to log into the very same
+account every day.
+
+So, in order, before typing any external constant — a URL, an endpoint, a
+form field name, a header, an ID format:
+
+1. **Is it already in the codebase?** Something else almost certainly talks
+   to this marketplace already. `grep` the settings map before writing a
+   literal. Two copies of one fact are two chances to drift, and the copy
+   that breaks is always the newer one, silently.
+2. **Can I read it from the source at runtime?** Parsing the form off the
+   login page beats hardcoding its action, because it survives a redesign.
+3. **Can I ask the owner?** He has the account open in a browser. One
+   question costs a minute; a guess costs a deploy cycle and his evening.
+4. Only then, and say plainly that it is unverified.
+
+**Never present a guessed value as if it were researched.** If it was not
+verified, the sentence to write is "I guessed this, here is how to check
+it", not silence.
+
+The general form: **for anything outside this codebase — a marketplace, an
+API, an OS behaviour — the code must either read the value at runtime, take
+it from a setting, or be told it. Inventing it is not an option, and neither
+is inferring it from a plausible-looking pattern.**
+
 ### 3d. A symptom on one screen is not a fault in that screen's code
 
 "The uploads stopped" is a statement about a PIPELINE, and a pipeline runs

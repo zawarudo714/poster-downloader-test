@@ -1,1 +1,1 @@
-Earnings: read the real sign-in form instead of a guessed endpoint, and report what the page actually said
+Earnings reads its URLs from settings instead of hardcoded guesses — sign-in uses the same login_url the uploader does

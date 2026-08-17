@@ -522,6 +522,17 @@ DEFAULTS: dict[str, Any] = {
     "earnings_last_run_day": "",
     "earnings_last_run_at":  "",
 
+    # ── Where the earnings reader looks ──────────────────────────────────
+    # Settings, not constants, for the same reason every other marketplace
+    # URL in this file is: when FineArtAmerica moves a page you change it in
+    # the dashboard and press READ NOW, instead of waiting for a deploy.
+    #
+    # The SIGN-IN page is deliberately NOT here — it is `login_url` in the
+    # selectors map above, the one the uploader already uses. One account has
+    # one login page, and having two copies of it guarantees they drift.
+    "earnings_balance_url": "https://fineartamerica.com/controlpanel/balance",
+    "earnings_sales_url":   "https://fineartamerica.com/controlpanel/sales",
+
     # ── How many failures in a row before an account is parked ───────────
     # Only applies to failures the node marks as "might be systemic" — a
     # missing form field. A bot wall or rejected credentials still parks the

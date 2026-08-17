@@ -1,1 +1,1 @@
-Ban recovery, pause/drain, node reboot survival, project-aware diagnostics, deploy log
+Show how long ago a node last checked in

@@ -185,7 +185,8 @@ def api_overview(
         })
 
     nodes = []
-    stale_after = datetime.utcnow() - timedelta(minutes=5)
+    now = datetime.utcnow()
+    stale_after = now - timedelta(minutes=5)
     for node in db.query(WorkerNode).order_by(WorkerNode.id.asc()).all():
         nodes.append({
             "id": node.id,
@@ -195,6 +196,17 @@ def api_overview(
             "hostname": node.hostname,
             "agent_version": node.agent_version,
             "last_seen_at": fmt_local(node.last_seen_at, "%Y-%m-%d %H:%M") if node.last_seen_at else None,
+            # HOW LONG AGO, not just a timestamp. ONLINE means "seen within
+            # five minutes", a window that stops the label flickering between
+            # 30-second polls — but it also means a node that died two
+            # minutes ago still reads ONLINE next to a stale clock time, and
+            # you are left comparing timestamps in your head to notice.
+            # Reading the age out loud makes a stopping node obvious before
+            # the label catches up.
+            "last_seen_age_s": (
+                int((now - node.last_seen_at).total_seconds())
+                if node.last_seen_at else None
+            ),
             "online": bool(node.last_seen_at and node.last_seen_at > stale_after),
         })
 

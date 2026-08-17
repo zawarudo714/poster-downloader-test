@@ -475,6 +475,25 @@
          : status === 'running' ? 'in-progress' : 'pending';
   }
 
+  // How long since a node last spoke, in words.
+  //
+  // ONLINE only means "seen in the last five minutes" — a window that stops
+  // the label flickering between 30-second polls. The side effect is that a
+  // node which died two minutes ago still reads ONLINE beside a clock time
+  // you have to subtract in your head. This says the age out loud, and turns
+  // it amber once a healthy node would have checked in twice over, so a
+  // machine going quiet is visible well before the label admits it.
+  function nodeAge(n) {
+    if (n.last_seen_age_s == null) return '';
+    const s = n.last_seen_age_s;
+    const txt = s < 90 ? `${s}s ago`
+              : s < 5400 ? `${Math.round(s / 60)}m ago`
+              : `${Math.round(s / 3600)}h ago`;
+    // The agent polls every 30s; anything past ~2 minutes is a missed beat.
+    const late = s > 120;
+    return `<span class="node-age mono ${late ? 'is-late' : ''}">${txt}</span>`;
+  }
+
   function renderNodes() {
     const el = q('[data-nodes-list]');
     if (!el) return;
@@ -492,6 +511,7 @@
             <td>
               <span class="status-pill status-${n.online ? 'complete' : 'error'}">${n.online ? 'ONLINE' : 'OFFLINE'}</span>
               ${!n.is_enabled ? '<span class="status-pill">DISABLED</span>' : ''}
+              ${nodeAge(n)}
             </td>
             <td class="mono">${esc((n.capabilities || []).join(', '))}</td>
             <td class="mono">${esc(n.hostname || '—')}</td>

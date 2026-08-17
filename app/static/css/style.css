@@ -3920,6 +3920,16 @@ body:has(#ib-bulk-bar:not([hidden])) { padding-bottom: 88px; }
 .pipe-subrow td { padding-top: 0 !important; border-top: none !important; }
 .pipe-subrow    { background: rgba(232,85,75,0.04); }
 
+/* How long since a node checked in. Sits beside the ONLINE/OFFLINE pill,
+   quiet when healthy and amber once a beat has been missed — the point is to
+   contradict a stale "ONLINE" before the five-minute window expires. */
+.node-age {
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--subtext);
+}
+.node-age.is-late { color: var(--skip); font-weight: 600; }
+
 /* Which niche a diagnostic finding came from. Small and inline — it is a
    qualifier on the finding, not a heading, and a mixed list is unreadable
    without it. */

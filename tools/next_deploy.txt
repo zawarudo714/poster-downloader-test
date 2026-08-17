@@ -1,1 +1,1 @@
-Pause an upload account only after a RUN of selector failures, not the first one; Earnings 500 fix; storage mount falls back to HTTP; drive-root path fix
+Earnings: read the real sign-in form instead of a guessed endpoint, and report what the page actually said

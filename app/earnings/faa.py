@@ -58,6 +58,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable, Iterable, Optional
 
+from urllib.parse import urljoin
+
 import requests
 
 log = logging.getLogger("uvicorn.error")
@@ -234,6 +236,22 @@ def split_description(text: str) -> tuple[Optional[str], Optional[str]]:
 
 
 # ── The pages ───────────────────────────────────────────────────────────────
+
+def _snippet(html: str, limit: int = 220) -> str:
+    """
+    The visible text of a response, for an error message.
+
+    Marketplaces answer a refusal with a PAGE, not an HTTP error — and when
+    they do use an HTTP error the body still says which kind. Without this,
+    "403" is the whole diagnosis and the next step is guesswork.
+    """
+    try:
+        text = _soup(html).get_text(" ", strip=True)
+    except Exception:
+        text = re.sub(r"<[^>]+>", " ", html or "")
+    text = re.sub(r"\s+", " ", text).strip()
+    return (text[:limit] + "…") if len(text) > limit else (text or "(empty page)")
+
 
 def _soup(html: str):
     from bs4 import BeautifulSoup
@@ -490,37 +508,114 @@ def parse_sale_details(html: str, order_id: str) -> Optional[SaleDetail]:
 
 # ── Session ─────────────────────────────────────────────────────────────────
 
+BROWSER_HEADERS = {
+    "User-Agent": UA,
+    "Accept": ("text/html,application/xhtml+xml,application/xml;q=0.9,"
+               "image/avif,image/webp,*/*;q=0.8"),
+    "Accept-Language": "en-US,en;q=0.9",
+    "Upgrade-Insecure-Requests": "1",
+}
+
+
+def _login_form(html: str) -> tuple[Optional[str], dict, Optional[str], Optional[str]]:
+    """
+    Find the real sign-in form: (action, fields, email_field, password_field).
+
+    Read from the page rather than hardcoded, because a guess at the endpoint
+    is a guess that breaks silently. Every input on the form is carried over,
+    which is what preserves hidden CSRF/session tokens — posting without them
+    is the most common way to get a 403 from a form that works fine in a
+    browser.
+    """
+    soup = _soup(html)
+    for form in soup.find_all("form"):
+        pw = form.find("input", {"type": "password"})
+        if not pw:
+            continue
+
+        fields: dict[str, str] = {}
+        email_name = pw_name = None
+        for inp in form.find_all(("input", "select", "textarea")):
+            name = inp.get("name")
+            if not name:
+                continue
+            kind = (inp.get("type") or "").lower()
+            if kind == "password":
+                pw_name = name
+                fields[name] = ""
+            elif kind in ("email", "text") and email_name is None:
+                email_name = name
+                fields[name] = ""
+            elif kind in ("submit", "button"):
+                continue
+            elif kind == "checkbox":
+                # "Remember me" and friends: only send when pre-ticked.
+                if inp.has_attr("checked"):
+                    fields[name] = inp.get("value") or "on"
+            else:
+                fields[name] = inp.get("value") or ""
+
+        return form.get("action") or "", fields, email_name, pw_name
+
+    return None, {}, None, None
+
+
 def login(email: str, password: str) -> requests.Session:
     """
     Sign in and return a session carrying the cookies.
 
-    The login form is the same one the uploader drives on the node. Posting
-    it directly is enough here because nothing afterwards needs JavaScript.
+    The form's ACTION and field names are read off the live login page. An
+    earlier version posted to a hardcoded endpoint with guessed field names
+    and got HTTP 403 — which is what happens when you post a form without the
+    hidden token that came with it, and is indistinguishable from a blocked
+    request unless you look.
     """
     session = requests.Session()
-    session.headers.update({"User-Agent": UA})
+    session.headers.update(BROWSER_HEADERS)
 
     try:
-        session.get(LOGIN_PAGE, timeout=TIMEOUT_S)      # sets the initial cookies
+        page = session.get(LOGIN_PAGE, timeout=TIMEOUT_S)
+    except requests.RequestException as e:
+        raise FaaError(f"Could not reach FineArtAmerica: {e}")
+    if page.status_code != 200:
+        raise FaaError(f"The sign-in page returned HTTP {page.status_code} "
+                       f"({LOGIN_PAGE}).")
+
+    action, fields, email_field, pw_field = _login_form(page.text)
+    if not email_field or not pw_field:
+        raise FaaError(
+            "Could not find the sign-in form on FineArtAmerica's login page — "
+            "they have changed it. The reader needs updating; nothing is wrong "
+            "with your account.")
+
+    fields[email_field] = email
+    fields[pw_field] = password
+    post_url = urljoin(LOGIN_PAGE, action) if action else LOGIN_PAGE
+
+    try:
         resp = session.post(
-            LOGIN_URL,
-            data={"email": email, "password": password, "rememberme": "1"},
-            timeout=TIMEOUT_S,
-            allow_redirects=True,
+            post_url, data=fields, timeout=TIMEOUT_S, allow_redirects=True,
+            # Sent because the browser sends them. A form POST arriving with
+            # neither is a common signal for "not a browser".
+            headers={"Referer": LOGIN_PAGE, "Origin": BASE},
         )
     except requests.RequestException as e:
         raise FaaError(f"Could not reach FineArtAmerica: {e}")
 
     if resp.status_code >= 400:
-        raise FaaError(f"FineArtAmerica returned HTTP {resp.status_code} on login.")
+        raise FaaError(
+            f"FineArtAmerica returned HTTP {resp.status_code} on login "
+            f"(posted to {post_url}). "
+            f"Page said: {_snippet(resp.text)}")
 
     # Proven by fetching a page that only exists behind a login, rather than
     # by trusting the login response — which returns 200 for a bad password.
     check = session.get(BALANCE_URL, timeout=TIMEOUT_S)
     if "Current Balance" not in check.text:
         raise FaaError(
-            "Signed in but the balance page was not returned — the email or "
-            "password is probably wrong, or the account is locked.")
+            f"Signed in but the balance page was not returned — the email or "
+            f"password is probably wrong, or the account is locked. "
+            f"Page said: {_snippet(check.text)}")
     return session
 
 

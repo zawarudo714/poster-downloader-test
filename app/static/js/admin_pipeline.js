@@ -86,7 +86,7 @@
       ['brave_api_key_free', 'password','Brave key — free plan', 'Used for NORMAL searches. 1 request/second, 2,000 a month.'],
       ['brave_api_key_paid', 'password','Brave key — paid plan', 'Used for DEEP searches, which fire two queries at once and would trip the free key\'s 1/second limit. Also the fallback when the free quota runs out.'],
       ['openai_api_key',     'password','OpenAI key',            'Generates the images.'],
-      ['openai_admin_key',   'password','OpenAI admin key',      'Optional. Higher-privilege credential used ONLY by the nightly cost reconciliation — image generation never touches it. Leave blank to rely on our own metering.'],
+      ['openai_admin_key',   'password','OpenAI admin key',      "Optional, and a DIFFERENT key from the one above — an admin key (sk-admin-...). Used once a night to compare OpenAI's own billing against what we calculated, and nothing else; image generation never touches it. Leave blank and the cross-check is simply skipped."],
     ],
     spend: [
       ['spend_cap_usd_month','number','Monthly cap (USD)', '0 disables the cap. Counted from the token usage each API call reports.'],
@@ -106,7 +106,7 @@
       ['claim_timeout_min',   'number', 'Claim timeout (min)','Work claimed by a node that stops reporting is automatically returned to the queue after this long.'],
     ],
     templates: [
-      ['title_template',      'text',     'Listing title',      'Variables: {title} {year} {letter} {index} {content_type} {external_id}. {letter} is the per-image A/B/C suffix. Output is ASCII-folded automatically.'],
+      ['title_template',      'text',     'Listing title',      'Variables: {title} {letter} {index} {external_id} — plus {year} and {content_type} where the project has them (this one may not; check the Title List). {letter} is the per-image A/B/C suffix. Output is folded to what the marketplace accepts, automatically.'],
       ['keywords_static',     'text',     'Static keywords',    'Appended to whatever the marketplace pre-fills. Keep the leading comma.'],
       ['description_source',  'select',   'Description source', '"master" uses the title description from the master list. "template" renders the field below.', ['master', 'template']],
       ['description_template','textarea', 'Description template','Variables: {title} {year} {description} {content_type}. Only used when source is "template".'],
@@ -1543,6 +1543,36 @@
   // failed.
   const num = (v) => (typeof v === 'number' && isFinite(v) ? v : 0);
 
+  // OpenAI's own figure next to ours.
+  //
+  // Shown as a cross-check, never as a correction. Their number covers the
+  // whole organisation and lags; ours is per-image and immediate. They
+  // answer different questions — the only interesting event is them
+  // DISAGREEING, which usually means our hardcoded per-token prices have
+  // gone stale after a price change.
+  function renderReconcile(r) {
+    if (!r) {
+      return '<p class="muted">No admin key set, so OpenAI\'s own billing is not '
+           + 'being cross-checked. Optional — add one under API KEYS if you want '
+           + 'the monthly cap verified against their figures.</p>';
+    }
+    const ours = num(parseFloat(r.ours));
+    const theirs = num(parseFloat(r.theirs));
+    const gap = num(parseFloat(r.gap));
+    const when = esc((r.checked_at || '').replace('T', ' '));
+    if (!r.significant) {
+      return `<p class="muted">OpenAI's own billing agrees: they report `
+           + `$${theirs.toFixed(2)} this month against our $${ours.toFixed(2)}. `
+           + `Checked ${when}.</p>`;
+    }
+    return `<p class="error-text"><strong>Our figure and OpenAI's disagree.</strong> `
+         + `We metered $${ours.toFixed(2)}; OpenAI reports $${theirs.toFixed(2)} `
+         + `(${gap > 0 ? '+' : ''}$${gap.toFixed(2)}). The usual cause is a price `
+         + `change on their side, which makes our per-image cost — and therefore `
+         + `the monthly cap — wrong until the rates in the code are updated. `
+         + `Checked ${when}.</p>`;
+  }
+
   async function loadSpend() {
     const box = q('[data-spend-summary]');
     if (!box) return;                       // not a project that spends money
@@ -1602,7 +1632,8 @@
         ? '<p class="muted">Cost per image is measured from the token usage each call reports, '
           + 'and the finish-the-queue figure assumes the same rate holds — the model picks a size '
           + 'per photo, so treat it as a guide.</p>'
-        : ''}`;
+        : ''}
+      ${renderReconcile(d.reconcile)}`;
 
     const daysEl = q('[data-spend-days]');
     if (!daysEl) return;
@@ -1718,6 +1749,7 @@
     short_titles:  [],
     spend_capped:  [],
     generation_stopped: [],
+    spend_mismatch:     [],
     node_offline:       [],
   };
 
@@ -1790,6 +1822,11 @@
     if (f.key === 'spend_capped') {
       const i = f.items[0];
       return `<p class="mono">$${esc(i.spent)} spent · $${esc(i.cap)} cap</p>`;
+    }
+
+    if (f.key === 'spend_mismatch') {
+      const i = f.items[0] || {};
+      return `<p class="mono">we metered $${esc(i.spent)} · OpenAI reports $${esc(i.cap)}</p>`;
     }
 
     // The generation worker's own state. There is nothing to tick or act on

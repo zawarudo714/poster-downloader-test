@@ -480,6 +480,32 @@ State it without being asked, every time:
 name; a missing import once 500'd a whole page after being called "verified".
 If you claim something is verified, name the test.
 
+### 3b. Ask what a mechanism SERVES, not where it appears
+
+The most expensive misses in this codebase have all been the same shape:
+reasoning about a thing by the screen it is displayed on, rather than by
+what actually depends on it.
+
+A real one: the "no worker machine is running" warning was written as a
+per-project check gated on `processor == 'photoshop'`. Standing inside MUSIK
+— whose processor is 'gpt' — it said nothing at all, while the very node
+MUSIK's UPLOADS run through was dead. The node does two jobs for two
+different reasons; the check only knew about one of them.
+
+So for anything you touch, ask in this order:
+
+1. **Who depends on this?** List them. Not "which page shows it".
+2. **Is it shared?** Nodes, marketplace accounts, storage, selectors and
+   timings are account-wide or marketplace-wide, NOT per project. A shared
+   fact displayed inside one project is invisible to every other one — put
+   it at master level.
+3. **Does it serve more than one purpose?** The node processes AND uploads.
+   A check covering one of those silently passes while the other is broken.
+
+The general form: **a per-project screen may only report a per-project
+fact.** If the underlying thing is shared, the alarm belongs on the master
+dashboard, and the per-project view explains what it means locally.
+
 ### 4. Declare the blast radius
 
 Before building: what else touches this, and what could break that he would

@@ -181,6 +181,15 @@ def _source_search_url(db: Session, title: str, content_type: Optional[str],
     different URLs rather than one template with a substitution.
     """
     from ..pipeline import get_setting
+
+    # A project that searches IN-PAGE has no external source, full stop.
+    # Asking the setting first was the bug: MUSIK never overrode
+    # source_search_url, so it inherited the global TMDB default and every
+    # "Open source" link on a flag card pointed at a site that has never
+    # heard of the artist. Capability first, configuration second.
+    if project is not None and getattr(project, "search_mode", "") == "inpage":
+        return ""
+
     try:
         template = str(get_setting(db, "source_search_url", project=project) or "")
     except Exception:

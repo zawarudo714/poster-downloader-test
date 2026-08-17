@@ -148,6 +148,10 @@
       NOUNS: {{ NOUNS | default('POSTERS', true) | tojson }},
       sourceLabel: {{ source_label | default('the source', true) | tojson }},
       targetLabel: {{ target_label | default('the marketplace', true) | tojson }},
+      {# 'external' (open a source site in a tab, paste a URL back) or
+         'inpage' (search grid, tap to pick). Decides whether any
+         paste-a-URL control has meaning at all. #}
+      searchMode: {{ search_mode | default('external', true) | tojson }},
       hasYear: {{ (has_year | default(true, true)) | tojson }},
       hasContentType: {{ (has_content_type | default(true, true)) | tojson }},
       projectName: {{ project_name | default('', true) | tojson }}

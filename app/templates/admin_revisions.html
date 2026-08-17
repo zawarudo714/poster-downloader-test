@@ -23,7 +23,7 @@
         <div class="pending-complete-card" data-master-id="{{ t.id }}">
           <div class="pcc-head">
             <div>
-              <div class="pcc-title">{{ t.title }} ({{ t.year }})</div>
+              <div class="pcc-title">{{ t.title }}{% if t.year %} ({{ t.year }}){% endif %}</div>
               <div class="pcc-meta mono muted">
                 claimed by {{ t.claimed_by_name }} · submitted {{ t.updated_at | local_dt('%Y-%m-%d %H:%M') }}
                 {% if t.complete_comment %}

@@ -41,7 +41,11 @@
       </div>
 
       <div class="master-table-wrap" id="mb-wrap">
-        <table class="master-table" id="mb-table">
+        {# Year and Type columns are hidden for projects that have neither —
+           the same `no-year` / `no-type` rule the admin Title List uses. An
+           always-blank column is not neutral: it teaches people to skim past
+           that part of the row. #}
+        <table class="master-table{% if not has_year %} no-year{% endif %}{% if not has_content_type %} no-type{% endif %}" id="mb-table">
           <thead>
             <tr>
               <th class="col-cb"><input type="checkbox" id="mb-cb-all" title="Select page"></th>

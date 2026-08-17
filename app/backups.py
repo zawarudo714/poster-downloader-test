@@ -263,6 +263,21 @@ def _scheduler_loop():
             now = local_now()
             today_local = local_today()
 
+            # ── Does OpenAI agree with our own metering? ─────────────────
+            # Once a day, guarded by its own date marker. Wrapped so a
+            # failure here cannot stop the backup below — an unreachable
+            # billing API must never cost you a backup.
+            try:
+                from .db import SessionLocal
+                from .openai_costs import run_daily
+                _db = SessionLocal()
+                try:
+                    run_daily(_db)
+                finally:
+                    _db.close()
+            except Exception:
+                log.exception("OpenAI cost reconciliation failed")
+
             # ── Is image generation still running? ───────────────────────
             # Wrapped in its own try so a failure here can never stop the
             # backups. Losing a day's backup to a watchdog would be a poor

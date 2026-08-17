@@ -69,7 +69,7 @@
         const t = s.locked;
         html += '<div class="peek-section">';
         html += `<div class="peek-section-head">ACTIVE TITLE</div>`;
-        html += `<div class="peek-title">${t.title} (${t.year}) <span class="muted">· ${t.posters ? t.posters.length : 0} posters</span></div>`;
+        html += `<div class="peek-title">${t.title}${t.year ? ` (${t.year})` : ''} <span class="muted">· ${t.posters ? t.posters.length : 0} posters</span></div>`;
         if (t.admin_note) {
           html += `<div class="peek-admin-note">Admin note: ${esc(t.admin_note)}</div>`;
         }
@@ -100,7 +100,7 @@
             html += `<img class="peek-rev-thumb" src="${adminFileUrl(r.poster_id, r.filename)}" alt="" loading="lazy">`;
           }
           html += `<div class="peek-rev-body">`;
-          html += `<div><strong>${esc(r.title)} (${r.year})</strong></div>`;
+          html += `<div><strong>${esc(r.title)}${r.year ? ` (${r.year})` : ''}</strong></div>`;
           html += `<div class="muted">${esc(r.comment || '(no comment)')}</div>`;
           html += `<div class="mono" style="font-size:11px">status: ${r.status}${r.worker_action ? ' · action: ' + r.worker_action : ''}</div>`;
           if (r.was_rejected) html += `<div style="color:#ff8080">Admin rejected: ${esc(r.admin_verdict)}</div>`;
@@ -114,7 +114,7 @@
         html += '<div class="peek-section">';
         html += `<div class="peek-section-head">⏳ AWAITING ADMIN APPROVAL (${s.pending_complete_titles.length})</div>`;
         s.pending_complete_titles.forEach(t => {
-          html += `<div class="peek-item">${esc(t.title)} (${t.year}) — submitted ${t.submitted_at}</div>`;
+          html += `<div class="peek-item">${esc(t.title)}${t.year ? ` (${t.year})` : ''} — submitted ${t.submitted_at}</div>`;
         });
         html += '</div>';
       }
@@ -124,7 +124,7 @@
         html += '<div class="peek-section">';
         html += `<div class="peek-section-head">QUEUE (${s.queue.length} titles)</div>`;
         s.queue.forEach(q => {
-          html += `<div class="peek-item">${esc(q.title)} (${q.year}) <span class="muted">· ${q.status}</span></div>`;
+          html += `<div class="peek-item">${esc(q.title)}${q.year ? ` (${q.year})` : ''} <span class="muted">· ${q.status}</span></div>`;
         });
         html += '</div>';
       }

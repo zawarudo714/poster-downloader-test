@@ -431,6 +431,11 @@ DEFAULTS: dict[str, Any] = {
     # Separate, higher-privilege credential. Only the nightly cost
     # reconciliation uses it; image generation never does.
     "openai_admin_key":   "",
+    # Written by the nightly reconciler, never by a human. They live in
+    # DEFAULTS because set_setting() validates every key against it — a
+    # value written by the app still has to be declared here.
+    "openai_reconcile_result": "",
+    "openai_reconcile_date":   "",
     "openai_model":       "gpt-image-2",
     "openai_size":        "auto",
     "openai_quality":     "low",
@@ -719,6 +724,10 @@ PROJECT_DEFS: list[dict] = [
         # every artist would be pure noise.
         "settings":         {
             "review_min_width_px": 0,
+            # No external source. Belt and braces alongside the search_mode
+            # check in _source_search_url(): without this the project simply
+            # inherits the global default, which is TMDB.
+            "source_search_url": "",
             # "Carla Bruni #A" / "Carla Bruni #B". No year — artists have
             # none.
             #

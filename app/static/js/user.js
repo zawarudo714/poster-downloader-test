@@ -435,8 +435,21 @@
     });
     node.querySelector('.poster-name').textContent = p.filename;
     node.querySelector('.poster-size').textContent = humanSize(p.size || 0);
+    // REPLACE-BY-URL ONLY EXISTS WHERE THERE IS A URL TO PASTE.
+    //
+    // A project that searches in-page has no source URL — the worker picked
+    // from a grid and would have no idea what to type here. Their way to
+    // change their mind is DELETE and pick again, which is why that button
+    // stays. Removed rather than disabled: a control that can never do
+    // anything is not a labelling problem.
     const replaceUrl = node.querySelector('.poster-replace-url');
-    node.querySelector('[data-action="replace"]').addEventListener('click', () => replacePoster(p.id, replaceUrl));
+    const replaceBtn = node.querySelector('[data-action="replace"]');
+    if (PD.searchMode === 'inpage') {
+      replaceUrl.remove();
+      replaceBtn.remove();
+    } else {
+      replaceBtn.addEventListener('click', () => replacePoster(p.id, replaceUrl));
+    }
     node.querySelector('[data-action="delete"]').addEventListener('click', () => deletePoster(p.id, { fromRevision: false }));
     return node;
   }
@@ -718,11 +731,16 @@
     wrap.querySelector('.rev-title').textContent = titleStr;
     wrap.querySelector('.rev-file').textContent  = `/ ${r.title_folder} / ${r.filename}`;
 
-    // Source link, named and shown by the project rather than assumed.
+    // Source link. REMOVED, not hidden, for a project with no external
+    // source — GO TO TITLE already takes the worker to the in-page search,
+    // which is the only place their images come from.
     const tmdbA = wrap.querySelector('.rev-tmdb');
-    tmdbA.href = r.tmdb_search || '#';
-    tmdbA.hidden = !r.tmdb_search;
-    if (r.tmdb_search) tmdbA.textContent = `↗ Open ${r.source_label || 'source'}`;
+    if (PD.searchMode === 'inpage' || !r.tmdb_search) {
+      tmdbA.remove();
+    } else {
+      tmdbA.href = r.tmdb_search;
+      tmdbA.textContent = `↗ Open ${r.source_label || 'source'}`;
+    }
 
     // VIEW ALL POSTERS — opens the catalog modal so the worker can see
     // the rest of their saves on this title without leaving the flag list.
@@ -802,7 +820,13 @@
         const deleteBtn  = wrap.querySelector('[data-action="delete-revision"]');
         const resolveBtn = wrap.querySelector('[data-action="resolve"]');
         if (r.status === 'awaiting_approval') resolveBtn.hidden = true;
-        replaceBtn.addEventListener('click', () => replacePoster(r.poster_id, urlInp));
+        // Same rule as the saved-image card: no external source, no paste.
+        if (PD.searchMode === 'inpage') {
+          urlInp.remove();
+          replaceBtn.remove();
+        } else {
+          replaceBtn.addEventListener('click', () => replacePoster(r.poster_id, urlInp));
+        }
         deleteBtn.addEventListener('click',  () => deletePoster(r.poster_id, { fromRevision: true }));
         resolveBtn.addEventListener('click', () => resolveRevision(r.revision_id));
       }

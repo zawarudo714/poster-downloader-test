@@ -2012,6 +2012,7 @@ def api_spend(
     flagged as estimated.
     """
     from .. import gpt_images as G
+    from .. import openai_costs as OC
     from ..models import ApiSpend
 
     project = _project(request, admin, db)
@@ -2083,6 +2084,10 @@ def api_spend(
             "backlog_cost": (round(per_image * remaining_backlog, 2)
                              if per_image and remaining_backlog else None),
         },
+        # OpenAI's own figure, when an admin key is configured. Reported
+        # beside ours rather than replacing it — see openai_costs.py for why
+        # both numbers are worth keeping.
+        "reconcile": OC.last_result(db),
         "days": days_out,
         "today": days_out[0] if days_out else None,
     })
@@ -2275,6 +2280,32 @@ def api_attention(
             note=(f"Last contact {fmt_local(last, '%Y-%m-%d %H:%M')}." if last
                   else "No machine has ever checked in."),
         ))
+
+    # ── Do our costs match the bill? ────────────────────────────────────
+    # Surfaced here as well as on the spend panel, because the spend panel
+    # is somewhere you go when you are already thinking about money, and
+    # this is something you need told rather than something you go looking
+    # for. The consequence is that the cap stops meaning anything.
+    if project.processor == "gpt":
+        from .. import openai_costs as OC
+
+        rec = OC.last_result(db)
+        if rec and rec.get("significant"):
+            findings.append(_attention_finding(
+                "spend_mismatch",
+                "Our cost figures disagree with OpenAI's billing",
+                "We calculate spend from the token counts each call reports, "
+                "multiplied by prices written into the code. OpenAI's own "
+                "billing says something different — usually because they "
+                "changed their prices, which makes the per-image cost and the "
+                "monthly cap wrong until those rates are updated.",
+                "Compare against OpenAI's billing page. If their prices have "
+                "changed, the rates in gpt_images.py need updating.",
+                severity="warn",
+                items=[{"kind": "note", "spent": rec.get("ours"),
+                        "cap": rec.get("theirs")}],
+                note=f"Last checked {rec.get('checked_at', '')}.",
+            ))
 
     # A configuration failure repeats identically on every image. Group by the
     # error text so a wrong API key reads as one problem with a count, rather

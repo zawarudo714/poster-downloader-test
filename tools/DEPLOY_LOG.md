@@ -9,6 +9,7 @@ log or diff to work it out — that costs far more to read than these lines.**
 If the top entry looks older than the work in the repo, the difference is
 what has not been deployed yet.
 
+- **2026-08-17 18:41** · `c2dcd306` · Earnings tab (filters, per-design sales, manual matching, nightly read); report upload-session startup failures instead of stranding the batch; fix ADD ACCOUNT modal
 - **2026-08-17 18:02** · `c464e93f` · Fix ADD ACCOUNT modal (broken markup in v61) and release uploads queued against a deleted account
 - **2026-08-17 16:13** · `002a8fcb` · Remove completed setup instructions from the Nodes and Test tabs
 - **2026-08-17 15:14** · `fff4ac88` · Audit fixes: no TMDB link or paste-URL box in MUSIK, year column hidden, cost reconciliation

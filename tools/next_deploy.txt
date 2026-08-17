@@ -1,1 +1,1 @@
-Earnings tab (filters, per-design sales, manual matching, nightly read); report upload-session startup failures instead of stranding the batch; fix ADD ACCOUNT modal
+Fix 500 on the Earnings page — declare its two settings keys in DEFAULTS

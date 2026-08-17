@@ -521,7 +521,19 @@ file type before saying you are done:
 | a Jinja template | `<div>`/`<section>`/`<form>` opens == closes, and the template still parses |
 | a JS file | it parses (`node --check`) and every `data-` hook it queries still exists in the template |
 | Python | no undefined names (AST or `pyflakes`), not just `py_compile` |
-| a settings key | it is read somewhere, and something writes it |
+| a settings key | it is DECLARED in `pipeline.DEFAULTS`, not merely read and written |
+
+**A new settings key is a schema change, not a string.** `get_setting` and
+`set_setting` REFUSE any key not declared in `pipeline.DEFAULTS` — on purpose,
+so a typo cannot resolve to None. The consequence is that an undeclared key is
+an instant 500 on the first page that touches it, and it will pass every
+static check there is: the code parses, the names are defined, the hooks
+exist. The Earnings tab shipped this way and the page was blank white on the
+first click. Before saying a feature is done, grep every `get_setting` /
+`set_setting` call you added and confirm each key is in `DEFAULTS`. Note that
+`payments.py` has its OWN `get_setting(db, key, default)` which is unrelated
+and needs no declaration — check WHICH function is imported before believing
+a hit.
 
 **Deleting is the dangerous edit, not adding.** Removing a panel means
 removing its opening tag, its body AND its closing tags — a slice that starts

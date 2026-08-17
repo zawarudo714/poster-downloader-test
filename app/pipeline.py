@@ -507,6 +507,20 @@ DEFAULTS: dict[str, Any] = {
     # them forever. They are the only record when the node cannot reach the
     # server, so this is generous by default.
     "node_log_retention_days": 14,
+
+    # ── Earnings ─────────────────────────────────────────────────────────
+    # Bookkeeping for the nightly marketplace read, not knobs — they are
+    # written by the scheduler and read by the Earnings page. They live here
+    # because get_setting/set_setting REFUSE any key not declared in
+    # DEFAULTS, which is what makes a typo impossible and is also why an
+    # undeclared key is a 500 rather than a silent None.
+    #
+    # `_day` is the local date of the last attempt and is what stops the
+    # read running sixty times an hour; `_at` is the timestamp shown on the
+    # page. Two keys because "did we try today" and "when did we last get
+    # something" are different questions, and after a failure they differ.
+    "earnings_last_run_day": "",
+    "earnings_last_run_at":  "",
 }
 
 

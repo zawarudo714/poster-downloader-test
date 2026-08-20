@@ -51,12 +51,31 @@ from .client import PipelineClient, PipelineError
 
 
 # Phrases that mean "the site is challenging us, not rejecting the image".
-# Seeing one of these must pause the whole account rather than burn attempts
-# on every queued image.
+# Seeing one of these pauses the whole account rather than burning attempts on
+# every queued image — so a false positive is expensive, and there was a bad
+# one here.
+#
+# These are matched against the page's VISIBLE TEXT, never its HTML, and they
+# are all things a challenge page SAYS. Vendor names were the mistake: the old
+# list contained bare "captcha" and "cloudflare", and TeePublic's perfectly
+# ordinary sign-in page mentions "recaptcha" fifteen times in script tags and
+# a dormant widget. "captcha" is a substring of "recaptcha", so the check
+# fired on a page whose visible text reads "Welcome Back!" and parked the
+# account for three hours.
+#
+# Rule for anything added here: it must be a SENTENCE THE USER WOULD SEE, not
+# the name of a product that might merely be loaded.
 BOT_MARKERS = (
-    "cloudflare", "captcha", "checking your browser", "access denied",
-    "are you human", "unusual traffic", "verify you are human",
-    "rate limit", "too many requests",
+    "checking your browser",
+    "are you human",
+    "verify you are human",
+    "verify visitor",              # FineArtAmerica's exact wording
+    "please check the box",        # ditto, the line under it
+    "unusual traffic",
+    "access denied",
+    "rate limit",
+    "too many requests",
+    "enable javascript and cookies to continue",
 )
 
 
@@ -124,6 +143,28 @@ def _clone_options(source: Options, profile_dir: str) -> Options:
     for key, value in (source.experimental_options or {}).items():
         clone.add_experimental_option(key, value)
     return clone
+
+
+def _visible_text(html: str) -> str:
+    """
+    What a person would actually read on the page, lowercased.
+
+    Scripts, styles and markup are stripped, because a challenge announces
+    itself in words. Falls back to a crude tag-strip if BeautifulSoup is not
+    installed on this node — degraded, but still far better than searching
+    raw HTML.
+    """
+    try:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html or "", "html.parser")
+        for tag in soup(["script", "style", "noscript", "template"]):
+            tag.decompose()
+        text = soup.get_text(" ")
+    except Exception:
+        text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html or "",
+                      flags=re.S | re.I)
+        text = re.sub(r"<[^>]+>", " ", text)
+    return re.sub(r"\s+", " ", text).lower()
 
 
 def _tail(path: Path, lines: int = 25) -> str:
@@ -465,9 +506,14 @@ class MarketplaceUploader:
         gives the site time to cool off.
         """
         try:
-            page = (self.driver.page_source or "").lower()
+            raw = self.driver.page_source or ""
         except WebDriverException:
             return
+
+        # VISIBLE TEXT, not markup. Script sources, class names and dormant
+        # widgets are not the site talking to us — and matching them is what
+        # turned a normal sign-in page into a three-hour pause.
+        page = _visible_text(raw)
         hits = [marker for marker in BOT_MARKERS if marker in page]
         if not hits:
             return

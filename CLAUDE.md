@@ -672,6 +672,15 @@ so the visible symptom lands somewhere unrelated to the edit. That is exactly
 how removing finished instructions from the NODES tab made the ADD ACCOUNT
 box on the UPLOAD tab stop appearing.
 
+**Matching a word in raw HTML is not detection.** A page's markup is full of
+vendor names, class names and script sources that say nothing about what the
+page is DOING. The bot-wall check searched page_source for "captcha", and
+TeePublic's ordinary sign-in page mentions "recaptcha" fifteen times in a
+dormant widget — so a page whose visible text read "Welcome Back!" parked the
+account for three hours. Match the VISIBLE TEXT, and match a sentence the
+user would actually see, not the name of a product that might merely be
+loaded.
+
 **A page that loads is not a page that works.** There is no compiler for HTML.
 The only honest check is to parse the tree and assert the thing you care about
 is where you think it is — in particular that no modal, panel or control has

@@ -1,1 +1,1 @@
-One Chrome profile per account keyed on id, cleaned before launch; chromedriver log reported on first failure; sale timestamps upgraded from the ledger; quiet-time settings editable; funnel auto-refreshes
+Deleting a marketplace account now removes its Chrome profile from the worker machine

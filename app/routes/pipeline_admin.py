@@ -1303,6 +1303,21 @@ def api_delete_account(
         UploadAccount.replaced_by_id == account_id
     ).update({"replaced_by_id": None}, synchronize_session=False)
 
+    # ── Ask the node to remove this account's Chrome profile ─────────────
+    #
+    # The website cannot reach the node's disk, so this is a job like any
+    # other. Queued BEFORE the row disappears, because the folder name is
+    # derived from the account's id and name and there is no way to work it
+    # out afterwards.
+    #
+    # Deliberately names one folder rather than telling the node to tidy up.
+    # The worst this can do is leave a folder behind — which is where things
+    # already stood — whereas "delete anything that looks unused" could wipe
+    # live sessions if it were ever told the wrong thing.
+    P.create_job(db, kind="profile_cleanup", requested_by=admin.username,
+                 payload={"account_id": account_id, "name": name,
+                          "chrome_profile_dir": account.chrome_profile_dir or ""})
+
     db.delete(account)
     log_activity(db, user=admin, action="pipeline_account_deleted",
                  target_type="upload_account", target_id=account_id,

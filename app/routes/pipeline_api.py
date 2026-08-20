@@ -517,7 +517,8 @@ def jobs_claim(
         # same browser, the same account and the same login. A separate
         # capability would be one more thing to provision on every node for
         # no gain today.
-        allowed += ["upload", "test_upload", "earnings_read"]
+        allowed += ["upload", "test_upload", "earnings_read",
+                    "profile_cleanup"]
     if kinds:
         allowed = [k for k in allowed if k in kinds]
     if not allowed:
@@ -561,6 +562,24 @@ def _resolve_job_payload(
     resolution a real batch would.
     """
     resolved = dict(payload)
+
+    if job.kind == "profile_cleanup":
+        # The far-end sanity check. The instruction was written when the
+        # account was deleted; by the time a node picks it up the account may
+        # have been recreated with the same id — SQLite reuses the number of
+        # the most recently deleted row. Deleting its profile then would take
+        # a LIVE session with it.
+        account_id = payload.get("account_id")
+        if db.query(UploadAccount).filter_by(id=account_id).first() is not None:
+            return {**resolved,
+                    "error": f"Account {account_id} exists again — not "
+                             f"deleting its profile."}
+        # The PATH is deliberately not computed here. Only the node knows
+        # where its own scratch folder is, and this server importing the
+        # node's browser module would drag Selenium into an image that has no
+        # use for it. We send who it was; the node works out where, with the
+        # same function it uses to launch Chrome.
+        return resolved
 
     if job.kind == "earnings_read":
         # Everything the node needs to sign in and fetch: the account with

@@ -799,6 +799,14 @@ what to click after deploying.
 2. **Loud** — it fails immediately, at the right moment, saying why.
 3. **Detectable** — Diagnostics or Needs Attention finds it later.
 
+**A destructive instruction must be checked by the thing carrying it out,
+not only by the thing issuing it.** The profile cleanup names one folder,
+decided server-side — and the node still refuses any path that is a
+CONTAINER (the profiles folder, the scratch folder, a drive root). A test
+pointed an account's own `chrome_profile_dir` at the profiles folder and the
+first version cheerfully deleted every account's saved session in one go.
+"The caller would never send that" is not a guard.
+
 Every check on tier 3 is an admission that 1 and 2 were skipped. He would
 rather have well-formed flows than a growing list of warnings. Before adding
 a diagnostic, ask: why can this state not simply be impossible? Sometimes the

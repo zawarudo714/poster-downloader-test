@@ -80,6 +80,33 @@ def _drive_root(root: Path) -> Path:
     return root
 
 
+def profile_path_for(account: dict, config: dict) -> str:
+    """
+    Where an account's Chrome profile lives. THE definition — nothing else
+    works this out for itself.
+
+    Module level rather than a method because the cleanup job has to compute
+    the same path for an account that no longer exists, and a second copy of
+    this rule is exactly how the launcher and the orphan-sweeper drifted
+    apart and left the sweeper doing nothing for months.
+
+    Keyed on the account ID: names get renamed and can be reused after a ban,
+    IDs cannot.
+    """
+    configured = (account.get("chrome_profile_dir") or "").strip()
+    if configured:
+        return configured
+    slug = re.sub(r"[^A-Za-z0-9_-]+", "_",
+                  account.get("name") or "").strip("_") or "account"
+    return str(Path(config.get("temp_dir", "C:/faa/temp"))
+               / "profiles" / f"{account.get('id', 0)}_{slug}")
+
+
+def profiles_root(config: dict) -> Path:
+    """The folder profiles live under. Nothing outside it is ever deleted."""
+    return Path(config.get("temp_dir", "C:/faa/temp")) / "profiles"
+
+
 def _clone_options(source: Options, profile_dir: str) -> Options:
     """
     The same Chrome options, pointed at a different profile.
@@ -655,20 +682,8 @@ class MarketplaceUploader:
     )
 
     def _profile_path(self) -> str:
-        """
-        Where this account's Chrome profile lives. One answer, one place.
-
-        An explicit `chrome_profile_dir` on the account still wins. Otherwise
-        it is <temp_dir>/profiles/<id>_<name>, and the ID is what makes it
-        stable: names get renamed and can be reused after a ban, IDs cannot.
-        """
-        configured = (self.account.get("chrome_profile_dir") or "").strip()
-        if configured:
-            return configured
-        slug = re.sub(r"[^A-Za-z0-9_-]+", "_",
-                      self.account.get("name") or "").strip("_") or "account"
-        return str(Path(self.config.get("temp_dir", "C:/faa/temp"))
-                   / "profiles" / f"{self.account.get('id', 0)}_{slug}")
+        """This account's profile folder. See profile_path_for()."""
+        return profile_path_for(self.account, self.config)
 
     def _kill_orphans(self) -> None:
         profile_dir = self.profile_dir
@@ -1166,6 +1181,95 @@ class UploadStage:
         return summary
 
     # ── Test hook ──────────────────────────────────────────────────────────
+
+    def remove_profile(self, job_id: int, payload: dict) -> dict:
+        """
+        Delete one deleted account's Chrome profile folder.
+
+        ════════════════════════════════════════════════════════════════════
+        NARROW ON PURPOSE
+        ════════════════════════════════════════════════════════════════════
+        This names ONE folder, decided by the server at the moment you press
+        delete. It never lists the directory and never decides for itself what
+        looks unused.
+
+        The wider design — "ask which accounts are alive, delete anything
+        else" — was rejected deliberately. It would tidy up more, but a server
+        that ever answered with a short list would wipe the sessions of live
+        accounts: a hundred fresh logins at once, and a real chance of the
+        marketplace starting to challenge us again, silently, overnight. The
+        worst this version can do is leave one folder behind, which is exactly
+        where things already stood.
+
+        Two guards, because an instruction should survive a sanity check at
+        the end that carries it out:
+
+          * the path must sit INSIDE the profiles folder, unless the account
+            had an explicit profile directory set — in which case that exact
+            path, and nothing above it, is what gets removed
+          * a missing folder is a SUCCESS, not an error. Deleting something
+            already gone is the outcome we wanted.
+        """
+        import shutil
+
+        # Worked out HERE, with the same function that launches Chrome, from
+        # the identity the server sent. One rule, one place: the server has no
+        # business knowing this machine's folder layout.
+        target = Path(profile_path_for(
+            {"id": payload.get("account_id"),
+             "name": payload.get("name"),
+             "chrome_profile_dir": payload.get("chrome_profile_dir")},
+            self.config,
+        ))
+        root = profiles_root(self.config).resolve()
+        explicit = bool((payload.get("chrome_profile_dir") or "").strip())
+
+        try:
+            resolved = target.resolve()
+        except OSError:
+            resolved = target
+
+        # ── Never delete a CONTAINER, however we were told to ────────────
+        #
+        # This guard applies even when the account named its own profile
+        # folder. An earlier version trusted an explicit path completely, and
+        # a test pointed one at the profiles folder itself: it cheerfully
+        # deleted every account's session in one go. An instruction that
+        # would destroy other accounts' work is refused no matter who wrote
+        # it.
+        scratch = Path(self.config.get("temp_dir", "C:/faa/temp")).resolve()
+        forbidden = {root, scratch, resolved.anchor and Path(resolved.anchor)}
+        if resolved in forbidden or resolved in root.parents or resolved in scratch.parents:
+            raise ValueError(
+                f"Refusing to delete {resolved}: that is a folder holding "
+                f"other things, not one account's profile.")
+
+        if not explicit:
+            # A derived path must additionally sit INSIDE the profiles folder.
+            if root not in resolved.parents:
+                raise ValueError(
+                    f"Refusing to delete {resolved}: it is not inside {root}.")
+
+        if not resolved.exists():
+            self.log(f"Profile {resolved} was already gone — nothing to do.")
+            return {"removed": False, "path": str(resolved), "note": "already gone"}
+
+        size = 0
+        try:
+            size = sum(f.stat().st_size for f in resolved.rglob("*") if f.is_file())
+        except OSError:
+            pass
+
+        shutil.rmtree(resolved, ignore_errors=True)
+        if resolved.exists():
+            # Reported rather than silently half-done: a locked profile that
+            # keeps coming back is worth knowing about.
+            raise RuntimeError(
+                f"Could not fully delete {resolved} — something still has it "
+                f"open. Delete it by hand, or reboot the machine.")
+
+        self.log(f"Deleted profile {resolved} ({size // 1024} KB)", level="ok")
+        return {"removed": True, "path": str(resolved), "bytes": size}
 
     def read_earnings(self, job_id: int, payload: dict) -> dict:
         """

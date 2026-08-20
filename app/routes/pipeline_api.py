@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -462,8 +462,9 @@ def earnings_page(
         # knocking on the sign-in page — repeated knocking is what got us
         # challenged in the first place — and the reason says what to do.
         db.rollback()
-        account.paused_until = datetime.utcnow() + timedelta(hours=12)
-        account.pause_reason = str(e)
+        # Stops READING only. Uploading to this account is a separate
+        # capability and may be working perfectly.
+        earnings_service.pause_reading(account, hours=12, reason=str(e))
         job_id = payload.get("job_id")
         if job_id:
             job = db.query(PipelineJob).filter_by(id=int(job_id)).first()
@@ -757,6 +758,32 @@ def jobs_finish(
         raise HTTPException(404, "Job not found.")
 
     ok = bool(payload.get("ok"))
+
+    # A failed READ has to cool down, and until now nothing made it.
+    # `report_upload_failure` covers uploading; an earnings job reported its
+    # error into the log and nothing else, so the next scheduled run walked
+    # straight back into the same bot wall. Three hours matches the pause an
+    # upload takes for the same cause.
+    if not ok and job.kind == "earnings_read":
+        from ..earnings import service as earnings_service
+        try:
+            account_id = int(json.loads(job.payload_json or "{}")
+                             .get("account_id") or 0)
+        except (TypeError, ValueError):
+            account_id = 0
+        account = (db.query(UploadAccount).filter_by(id=account_id).first()
+                   if account_id else None)
+        # Skip if a page handler already parked it with a more specific
+        # reason — "signed out, sign in by hand" beats "the read failed".
+        if account is not None and not earnings_service.read_paused(account):
+            earnings_service.pause_reading(
+                account, hours=3,
+                reason=f"Last read failed: {payload.get('error') or 'unknown'}")
+            P.append_job_log(
+                db, job,
+                f"Not reading {account.name} again for 3 hours. Uploading "
+                f"to it is unaffected.", level="warn")
+
     P.finish_job(
         db, job, ok=ok,
         result=payload.get("result"),

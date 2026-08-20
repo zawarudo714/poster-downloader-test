@@ -772,11 +772,27 @@ class UploadAccount(Base):
     is_enabled        = Column(Integer, nullable=False, default=1)
     timing_json       = Column(Text, nullable=True)
     selectors_json    = Column(Text, nullable=True)
-    # Set when a run hits bot-detection / login failure. While in the future,
-    # the dispatcher refuses to hand this account any work.
+    # Set when an UPLOAD run hits bot-detection / login failure. While in the
+    # future, the dispatcher refuses to hand this account any upload work.
     paused_until      = Column(DateTime, nullable=True)
     pause_reason      = Column(Text, nullable=True)
     last_run_at       = Column(DateTime, nullable=True)
+
+    # ── The same idea, for READING money ────────────────────────────────
+    # Separate columns, deliberately, because uploading and reading earnings
+    # are two capabilities of ONE account and they fail independently. A
+    # Cloudflare challenge while reading TeePublic says nothing about whether
+    # uploading works; a rejected upload password says nothing about whether
+    # the balance can be read. Sharing one pause meant either failure
+    # silenced the other, and the screen would have offered no clue which had
+    # actually happened.
+    #
+    # Cleared by a SUCCESSFUL read, not only by the clock — otherwise an
+    # account you have just fixed by hand keeps being skipped by the
+    # scheduler until the timer runs out, while READ NOW works perfectly.
+    # That combination is unreadable from outside.
+    earnings_paused_until = Column(DateTime, nullable=True)
+    earnings_pause_reason = Column(Text, nullable=True)
 
     # ── Banned ──────────────────────────────────────────────────────────
     # A pause is temporary and self-clearing; a ban is neither. When a

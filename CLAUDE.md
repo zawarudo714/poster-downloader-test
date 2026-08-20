@@ -641,6 +641,21 @@ So for anything you touch, ask in this order:
 3. **Does it serve more than one purpose?** The node processes AND uploads.
    A check covering one of those silently passes while the other is broken.
 
+**A thing with two purposes needs two of everything that can stop it.** An
+account both UPLOADS and REPORTS MONEY, and those fail for unrelated reasons
+— a bot wall while reading TeePublic says nothing about whether uploading
+works, a rejected upload password says nothing about the balance. One shared
+`paused_until` meant either failure silenced the other, and the screen could
+not say which had happened. Hence `earnings_paused_until` beside it. Before
+reusing a status field, ask whether the thing it describes can fail in more
+than one way INDEPENDENTLY; if it can, one field is already wrong.
+
+**And a cooldown must have a way to end early.** A pause set by a failure
+should be cleared by the next SUCCESS, not only by the clock. An account
+signed in by hand and read successfully was still skipped by the scheduler
+for the rest of its twelve hours, while the READ NOW button worked perfectly
+— a disagreement between two paths with no symptom you could see.
+
 The general form: **a per-project screen may only report a per-project
 fact.** If the underlying thing is shared, the alarm belongs on the master
 dashboard, and the per-project view explains what it means locally.

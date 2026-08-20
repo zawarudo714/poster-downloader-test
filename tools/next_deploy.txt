@@ -1,3 +1,2 @@
-FAA still signs in to read earnings; TeePublic uses its saved session. Paused
-accounts are left alone, the next FAA payout is a real figure, and uploads got
-their clean tab back.
+Reading money and uploading now have one pause each, so a failure in one no
+longer silences the other. A successful read clears its own pause.

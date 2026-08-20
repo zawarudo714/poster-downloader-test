@@ -201,6 +201,36 @@ def _fmt(amount: Decimal) -> str:
 #  READING
 # ═══════════════════════════════════════════════════════════════════════════
 
+def read_paused(account: UploadAccount, now: Optional[datetime] = None) -> bool:
+    """Is this account in a READING cooldown right now?"""
+    until = account.earnings_paused_until
+    return bool(until and until > (now or datetime.utcnow()))
+
+
+def pause_reading(account: UploadAccount, *, hours: float, reason: str) -> None:
+    """
+    Stop READING this account for a while. Uploading is untouched.
+
+    One function so the two callers — a signed-out page and a failed read job
+    — cannot drift into two slightly different ideas of what a read pause is.
+    """
+    account.earnings_paused_until = datetime.utcnow() + timedelta(hours=hours)
+    account.earnings_pause_reason = reason
+
+
+def clear_read_pause(account: UploadAccount) -> None:
+    """
+    A read worked, so whatever stopped it is over.
+
+    The clock alone is not enough. You fix a signed-out account by hand in two
+    minutes and press READ NOW; without this the scheduler carries on skipping
+    it for the rest of the cooldown while the button works fine — a state with
+    no symptom you could see and no way to reason about it from the screen.
+    """
+    account.earnings_paused_until = None
+    account.earnings_pause_reason = None
+
+
 def readable_accounts(db: Session, *, include_paused: bool = False) -> list[UploadAccount]:
     """
     Accounts we could read tonight.
@@ -210,17 +240,22 @@ def readable_accounts(db: Session, *, include_paused: bool = False) -> list[Uplo
     are. Disabled ones are included too — `is_enabled` governs UPLOADING,
     which is a different capability from earning. An account exists once.
 
-    A PAUSED account is excluded, and that is the one exception. The cooldown
-    used to apply to uploading only, so a TeePublic account that had just been
+    An account in a READ cooldown is excluded, and that is the one exception.
+    There used to be no read cooldown at all, so an account that had just been
     challenged was queued again straight away: jobs #34 to #38 all fired
     inside ninety seconds, five sign-in attempts from one datacentre address
     in a minute. Retrying is how a site that was merely suspicious becomes a
     site that is certain.
 
+    It is the READ pause (`earnings_paused_until`), not the upload one. The
+    two are separate on purpose — a bot wall while reading TeePublic says
+    nothing about whether uploading works, and an account paused for a
+    rejected upload password may still have money to report.
+
     Note this deliberately does NOT call `pipeline.account_is_available`,
-    which is the obvious-looking reuse and would be wrong: that function also
-    refuses disabled and banned accounts, which is right for uploading and
-    exactly backwards here. Only the cooldown is shared between the two.
+    which is the obvious-looking reuse and would be wrong twice over: it reads
+    the upload pause, and it also refuses disabled and banned accounts, which
+    is right for uploading and exactly backwards here.
 
     `include_paused` is for a person pressing READ NOW on ONE account. The
     cooldown exists to stop a machine retrying by itself; it must not stop the
@@ -231,8 +266,7 @@ def readable_accounts(db: Session, *, include_paused: bool = False) -> list[Uplo
     return [
         a for a in db.query(UploadAccount).order_by(UploadAccount.name).all()
         if (a.target_site or "").lower() in READERS
-        and (include_paused
-             or not (a.paused_until and a.paused_until > now))
+        and (include_paused or not read_paused(a, now))
     ]
 
 
@@ -450,6 +484,8 @@ def store_page(db: Session, *, account: UploadAccount, kind: str,
         # "next payout" figure and the checksum on our own arithmetic.
         account.marketplace_balance = balance
     account.last_earnings_read_at = datetime.utcnow()
+    # A page came back and parsed, so whatever stopped reading is over.
+    clear_read_pause(account)
     # Committed per PAGE, not per run. A node that dies mid-backfill keeps
     # everything it already read, and tomorrow resumes rather than restarts.
     db.commit()
@@ -543,6 +579,7 @@ def store_snapshot(db: Session, *, account: UploadAccount, html: str) -> dict:
     # join — the same reason the ledger denormalises the marketplace name.
     account.marketplace_balance = snap.owed
     account.last_earnings_read_at = datetime.utcnow()
+    clear_read_pause(account)          # same reason as in store_page
     db.commit()
 
     return {"stored": 1, "owed": snap.owed, "total_earned": snap.total_earned,
@@ -1064,9 +1101,11 @@ def owed_by_account(db: Session, *, marketplace: Optional[str] = None,
             # on the screen that lists what each account is owed, because that
             # is where you look when a figure stops moving — not on the Upload
             # tab, where the same pause is displayed for a different reason.
-            "paused": bool(account.paused_until
-                           and account.paused_until > datetime.utcnow()),
-            "pause_reason": account.pause_reason or None,
+            # The READ pause. The upload pause is a different fact and belongs
+            # on the Upload tab; showing it here would tell you reading had
+            # stopped when it had not.
+            "paused": read_paused(account),
+            "pause_reason": account.earnings_pause_reason or None,
         })
 
     out = sorted(groups.values(), key=lambda g: g["label"])

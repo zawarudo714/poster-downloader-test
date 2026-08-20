@@ -96,6 +96,11 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("upload_accounts",  "last_earnings_read_at", "DATETIME"),
     ("upload_accounts",  "consecutive_failures",  "INTEGER NOT NULL DEFAULT 0"),
     ("upload_accounts",  "marketplace_balance",   "VARCHAR(24)"),
+    # Reading money and uploading are two capabilities of one account, so they
+    # get one pause each. Sharing `paused_until` meant a bot wall during a
+    # read stopped uploading too — and vice versa.
+    ("upload_accounts",  "earnings_paused_until", "DATETIME"),
+    ("upload_accounts",  "earnings_pause_reason", "TEXT"),
 ]
 
 # ════════════════════════════════════════════════════════════════════════════

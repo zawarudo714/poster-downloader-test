@@ -35,6 +35,7 @@ from sqlalchemy.orm import Session
 from ..audit import log as log_activity
 from ..auth import require_admin
 from ..db import get_db
+from .. import pipeline as P
 from ..earnings import matching, service
 from ..models import LedgerEntry, MasterTitle, UploadAccount, User
 from ..templating import templates
@@ -99,6 +100,12 @@ def api_overview(
             [marketplace] if marketplace
             else [a["marketplace"] for a in service.accounts_overview(db)
                   if not ids or a["id"] in ids]),
+        # The closed list an account may belong to, with proper names. The
+        # form offers these and nothing else.
+        "known_marketplaces": [
+            {"value": m, "label": service.CAPABILITIES.get(m, {}).get("label", m)}
+            for m in P.MARKETPLACES
+        ],
         "marketplaces": sorted({
             a["marketplace"] for a in service.accounts_overview(db)
             if a["marketplace"]

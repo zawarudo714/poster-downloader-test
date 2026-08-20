@@ -718,6 +718,22 @@ DEFAULT_PROJECT_SLUG = "tell-a-vision"
 # is the safe direction to fail.
 NODE_PROCESSORS = ("photoshop",)
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  THE MARKETPLACES AN ACCOUNT CAN BELONG TO
+# ═══════════════════════════════════════════════════════════════════════════
+# One canonical spelling each, and the ONLY values `target_site` may take.
+#
+# It has to be a closed list because the name is load-bearing: it selects the
+# reader, the sign-in selectors, the capability row that decides which panels
+# the Earnings page shows, and it is copied onto every stored row. A typo
+# produces an account that is silently inert — never read, absent from every
+# total, and showing up in the site filter as a marketplace that does not
+# exist. Nothing would say why.
+#
+# Adding one means adding it here, plus a reader and a capability row.
+MARKETPLACES = ("fineartamerica", "teepublic")
+
 # ════════════════════════════════════════════════════════════════════════════
 #  HUMAN LABELS FOR THE THINGS A PROJECT PLUGS INTO
 # ════════════════════════════════════════════════════════════════════════════

@@ -109,7 +109,10 @@
       <div data-add-account hidden style="margin-bottom:12px">
         <div class="filter-row" style="gap:8px; flex-wrap:wrap">
           <input type="text" data-new-name placeholder="Name you'll recognise" style="min-width:180px">
-          <input type="text" data-new-site placeholder="Marketplace (e.g. teepublic)" style="min-width:150px">
+          {# A list, not a free-text box. The marketplace name selects the
+             reader, the sign-in form and the capability row, so a typo would
+             create an account nothing can read and nothing explains. #}
+          <select data-new-site style="min-width:150px"></select>
           <input type="text" data-new-email placeholder="Sign-in email" style="min-width:200px">
           <input type="password" data-new-password placeholder="Password" style="min-width:150px">
           <button class="btn btn-accent btn-tiny" data-action="create-account" type="button">ADD</button>

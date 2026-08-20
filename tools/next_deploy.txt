@@ -1,1 +1,1 @@
-TeePublic earnings (daily snapshots via the node); Earnings page now marketplace-agnostic with owed broken down per account; marketplace names settled on fineartamerica/teepublic
+TeePublic earnings; Earnings page marketplace-agnostic with owed per account; marketplace is a closed list so a typo cannot create a dead account

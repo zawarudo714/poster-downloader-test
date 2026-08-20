@@ -982,6 +982,15 @@ def api_create_account(
     # to be per project, which is exactly what forced the same FineArtAmerica
     # account to be created twice under two names.
     target_site = (payload.get("target_site") or "fineartamerica").strip().lower()
+    # Rejected loudly rather than stored. An unknown marketplace name creates
+    # an account that nothing can read, that appears in no total, and that
+    # gives no clue why — the worst kind of failure for a value you typed by
+    # hand.
+    if target_site not in P.MARKETPLACES:
+        raise HTTPException(
+            400, f"'{target_site}' is not a marketplace this app knows. "
+                 f"Use one of: {', '.join(P.MARKETPLACES)}.")
+
     if db.query(UploadAccount).filter_by(target_site=target_site, name=name).first():
         raise HTTPException(
             400, f"An account named '{name}' already exists on {target_site}. "

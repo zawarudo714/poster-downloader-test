@@ -98,6 +98,16 @@
     }
   }
 
+  // The marketplaces this app can actually read, straight from the server —
+  // so the list here cannot drift from the list the reader honours.
+  function fillMarketplaceChoices(list) {
+    var sel = q('[data-new-site]');
+    if (!sel || sel.options.length === list.length) return;
+    sel.innerHTML = list.map(function (m) {
+      return '<option value="' + esc(m.value) + '">' + esc(m.label) + '</option>';
+    }).join('');
+  }
+
   // ── Owed, per account ────────────────────────────────────────────────
   function renderOwed(data) {
     var el = q('[data-owed-list]');
@@ -393,6 +403,7 @@
       renderOwed(data.owed_by_account || {});
       renderNextPayout(data.next_payout, data.reconcile);
       renderAccounts(data.accounts);
+      fillMarketplaceChoices(data.known_marketplaces || []);
     } catch (e) {
       root.innerHTML = '<p class="muted">Could not load earnings: ' +
                        esc(e.message) + '</p>';

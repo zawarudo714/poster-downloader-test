@@ -525,6 +525,23 @@ BROWSER_HEADERS = {
 }
 
 
+def looks_signed_out(html: str) -> bool:
+    """
+    Is this a sign-in page rather than the page we asked for?
+
+    Keyed on a PASSWORD FIELD being present, which is what a sign-in page
+    uniquely has and no ledger or sales page ever does. Reuses `_login_form`
+    rather than inventing a second way to recognise the same form — two
+    definitions of one fact is how the profile-path bug survived for months.
+
+    TeePublic has the identical function for the identical reason; both exist
+    so a signed-out page is reported as "sign in by hand", not as a page the
+    marketplace supposedly redesigned.
+    """
+    _action, _fields, _email, pw_name = _login_form(html)
+    return pw_name is not None
+
+
 def _login_form(html: str) -> tuple[Optional[str], dict, Optional[str], Optional[str]]:
     """
     Find the real sign-in form: (action, fields, email_field, password_field).

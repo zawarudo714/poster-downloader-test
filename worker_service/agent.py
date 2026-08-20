@@ -45,7 +45,7 @@ from .processor import ProcessStage
 from .uploader import UploadStage
 
 
-AGENT_VERSION = "1.14.0"
+AGENT_VERSION = "1.15.0"
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_CONFIG = HERE / "config.json"

@@ -136,9 +136,13 @@
               // The row that matters: an account that has stopped reporting
               // shows a stale figure, not a zero, and nothing else on the
               // page would tell you.
-              + (a.stale
-                  ? '<span class="muted">NOT READ RECENTLY — this figure is out of date</span>'
-                  : '')
+              // A paused account is the more useful thing to say, because it
+              // names the fix. Stale is the fallback when we do not know why.
+              + (a.paused
+                  ? '<span class="quota-note">' + esc(a.pause_reason || 'Paused.') + '</span>'
+                  : a.stale
+                    ? '<span class="muted">NOT READ RECENTLY — this figure is out of date</span>'
+                    : '')
               + '</td></tr>';
           }).join('')
         + '</tbody></table></div>';
@@ -154,9 +158,14 @@
     // so the two screens stay visually identical for free.
     root.innerHTML =
       '<div class="funnel-grid">' +
-        card('EARNED', money(s.earned), s.sales_count + ' sale(s)') +
-        card('TODAY', '+' + money(s.today.amount), s.today.sales + ' sale(s)') +
-        card('LAST 7 DAYS', '+' + money(s.week.amount), s.week.sales + ' sale(s)') +
+        // The COUNT of sales is a ledger fact, not a universal one. TeePublic
+        // reports money and nothing else, so "0 sale(s)" under a real figure
+        // was the page inventing a zero it had never been told. Same
+        // capability flag that already governs REFUNDED and PAID OUT, so a
+        // third marketplace inherits the right behaviour without an edit.
+        card('EARNED', money(s.earned), caps.sales ? s.sales_count + ' sale(s)' : 'to date') +
+        card('TODAY', '+' + money(s.today.amount), caps.sales ? s.today.sales + ' sale(s)' : 'since yesterday') +
+        card('LAST 7 DAYS', '+' + money(s.week.amount), caps.sales ? s.week.sales + ' sale(s)' : 'past week') +
         // Refunds and payouts only exist on a site that publishes a ledger.
         // Shown when the selection can support them, omitted otherwise —
         // with the reason spelled out below rather than left blank.
@@ -218,14 +227,34 @@
         + 'the marketplace.</p>';
 
     var since = '<p class="muted mono">' + money(p.credited_since_payout)
-      + ' credited from ' + p.sales_since_payout + ' sale(s) since '
+      + ' credited'
+      + (caps.sales ? ' from ' + p.sales_since_payout + ' sale(s)' : '')
+      + ' since '
       + (p.since ? 'your last payout on ' + when(p.since) : 'you started')
       + (p.last_payout ? ' (that one was ' + money(p.last_payout) + ')' : '') + '.'
       + (p.unsettled
           ? ' ' + p.unsettled + ' are recent enough that they may still change.'
           : '') + '</p>';
 
-    el.innerHTML = head + '<p class="muted">' + esc(p.rule) + '</p>' + since
+    // What is actually DUE on the 15th, which is not the same as what you are
+    // owed. Across eight real payouts each one equalled the balance left after
+    // the previous one, to the cent — so the balance overstates the next
+    // cheque by everything earned since the last one. The claim is only made
+    // while that pattern still holds, and it says so.
+    var due = '';
+    if (p.due_next && p.due_next_holds) {
+      due = '<p style="margin-top:6px"><strong>' + money(p.due_next)
+        + '</strong> of that should land on the 15th; the rest follows a month '
+        + 'later. <span class="muted">Read from your own history — every one of '
+        + 'the last ' + p.due_next_checked + ' payouts was exactly the balance '
+        + 'left after the one before it.</span></p>';
+    } else if (p.due_next && p.due_next_holds === false) {
+      due = '<p class="muted" style="margin-top:6px">Your payouts no longer '
+        + 'follow the pattern this used to predict from, so only the total '
+        + 'owed is shown. Worth telling Claude.</p>';
+    }
+
+    el.innerHTML = head + due + '<p class="muted">' + esc(p.rule) + '</p>' + since
       + renderReconcile(checks);
   }
 
@@ -270,7 +299,7 @@
       return '<label class="inline-check" style="margin-right:14px">' +
         '<input type="checkbox" data-account="' + a.id + '"' + checked + '> ' +
         esc(a.name) + ' <span class="muted">(' + esc(a.marketplace || '—') +
-        ' · ' + a.sales + ' sales' +
+        (a.publishes_sales ? ' · ' + a.sales + ' sales' : '') +
         (a.banned ? ' · banned' : '') +
         (a.readable ? '' : ' · cannot be read') + ')</span>' +
         (a.readable

@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -456,6 +456,23 @@ def earnings_page(
             url=payload.get("url") or "",
             html=html,
         )
+    except earnings_service.SignedOutError as e:
+        # Its own branch because it is the one read failure a PERSON fixes,
+        # and in two minutes. The account is parked so the scheduler stops
+        # knocking on the sign-in page — repeated knocking is what got us
+        # challenged in the first place — and the reason says what to do.
+        db.rollback()
+        account.paused_until = datetime.utcnow() + timedelta(hours=12)
+        account.pause_reason = str(e)
+        job_id = payload.get("job_id")
+        if job_id:
+            job = db.query(PipelineJob).filter_by(id=int(job_id)).first()
+            if job is not None:
+                P.append_job_log(db, job, str(e), level="error")
+        db.commit()
+        return JSONResponse({"ok": False, "more": False,
+                             "needs_signin": True, "error": str(e)})
+
     except Exception as e:
         # Reported rather than raised: a parsing failure on page 7 must not
         # look to the node like a network fault, and the job log is where the
@@ -601,6 +618,13 @@ def _resolve_job_payload(
             "settings": P.upload_settings_payload(db, project=acct_project),
             "pages": earnings_service.page_urls(db, account),
             "max_pages": int(P.get_setting(db, "earnings_max_pages_per_run")),
+            # Whether to sign in is a property of the MARKETPLACE, decided
+            # here and not sniffed on the node. FineArtAmerica drops the
+            # session and must sign in; TeePublic holds it for weeks and
+            # challenges anyone who keeps knocking. Declared in CAPABILITIES
+            # so marketplace number three answers this by adding a line.
+            "signin_on_read": earnings_service.signin_on_read(
+                (account.target_site or "").lower()),
         })
         return resolved
 

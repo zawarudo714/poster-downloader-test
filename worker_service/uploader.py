@@ -1229,6 +1229,13 @@ class UploadStage:
             try:
                 uploader.start()
                 uploader.login()
+                # UPLOAD hygiene, so it lives here and not in login(): the
+                # login tab reliably collects a Chrome dialog over it, and the
+                # legacy tool that uploaded thousands of images always left it
+                # behind. Moving it out of login() to keep it away from
+                # earnings reads dropped the call entirely — every upload
+                # since has run in the login tab.
+                uploader.open_work_tab()
             except Exception as e:
                 detail = f"{type(e).__name__}: {e}"
                 shot = uploader.capture_evidence("fail_startup")
@@ -1412,6 +1419,33 @@ class UploadStage:
         already saved and tomorrow simply carries on.
 
         This node parses nothing. It fetches HTML and posts it back.
+
+        ════════════════════════════════════════════════════════════════════
+        WHETHER IT SIGNS IN IS THE MARKETPLACE'S CALL, NOT THIS FUNCTION'S
+        ════════════════════════════════════════════════════════════════════
+        The two sites behave oppositely, so one answer here would be wrong
+        for one of them:
+
+          · FineArtAmerica drops the session quickly, so a read almost always
+            lands on the sign-in page. It signs in — and can afford to,
+            because FAA has never challenged this node.
+          · TeePublic holds a session for weeks and CHALLENGES a datacentre
+            address that keeps opening the sign-in page. The owner's own
+            TeePublic tool ran for years without ever meeting a security
+            check, and its source shows why: it never signed in. It opened a
+            profile he had signed into by hand and went straight to the work.
+
+        This used to sign in on every read for every site, which is what
+        taught TeePublic to distrust us after weeks of working fine.
+
+        The server sends `signin_on_read`, resolved from that marketplace's
+        capability row. It is not decided here and not sniffed from the page.
+        If the flag is absent — an older server — we sign in, because signing
+        in needlessly costs a slow page while skipping it when it was needed
+        parks the account and stops the money being read.
+
+        When a page comes back signed out anyway, the SERVER says so and the
+        account is flagged for a two-minute manual sign-in via PROFILES.bat.
         """
         account = payload["account"]
         settings = payload["settings"]
@@ -1432,7 +1466,14 @@ class UploadStage:
             # end in a reported state). A failure here is reported against
             # the JOB, which is what the dashboard is watching.
             uploader.start()
-            uploader.login()
+
+            # Absent means sign in — see the docstring for why the safe
+            # default is the noisy one.
+            if payload.get("signin_on_read", True):
+                uploader.login()
+            else:
+                uploader.emit("Using the saved session — not opening the "
+                              "sign-in page.")
 
             for spec in pages:
                 kind = spec.get("kind") or "page"
@@ -1441,6 +1482,14 @@ class UploadStage:
                     uploader.emit(f"{kind}: page {page_no}",
                                   progress=min(95, 5 + fetched * 4))
                     uploader.driver.get(url)
+
+                    # Every page we fetch, not just the sign-in one. A
+                    # challenge served on the SALES page used to be handed
+                    # straight to the parser, which reported "TeePublic has
+                    # changed it" — sending the reader off to hunt a page
+                    # redesign that had not happened.
+                    uploader.check_for_bot_wall(f"{kind} page {page_no}")
+
                     html = uploader.driver.page_source
                     fetched += 1
 
@@ -1540,6 +1589,9 @@ class UploadStage:
         try:
             uploader.start()
             uploader.login()
+            # A test upload has to walk the SAME path as a real one, or it
+            # cannot tell you where a real one breaks.
+            uploader.open_work_tab()
             image_path = self._resolve_image(item, storage_root)
             self.client.job_log(
                 job_id, f"Image resolved to {image_path}", progress=20)

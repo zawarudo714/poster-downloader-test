@@ -320,10 +320,19 @@ $1,178.93 = $298.28, which is exactly the Current Balance FAA prints at the
 top. If our arithmetic does not land on their figure, we have missed rows.
 
 **Payouts are on the 15th, for orders SHIPPED before the 15th of the previous
-month** — stated on the Balance page. Ship dates are not published, so what
-the next payout will contain cannot be computed. `Current Balance` is the
-authoritative "what you are owed"; anything we derive is an estimate and must
-be worded as one.
+month** — stated on the Balance page. Ship dates are not published, so this
+file used to say the next payout could not be computed. **Measured, that was
+too pessimistic.** Across his eight payouts, each one equals the balance left
+standing after the PREVIOUS one, to the cent — 7 transitions out of 7. Nothing
+is held back for late shipping; the whole month moves as one block, a month
+late. So `due_next = their balance − everything credited since the last
+payout` ($183.78 of the $298.28 balance, the rest in October).
+
+That is a pattern in one account's history, not a rule they state, so
+`_payout_rule_holds()` re-tests it on every render and the screen only makes
+the claim while it still passes. `Current Balance` remains the authoritative
+"what you are owed" — never replace it with arithmetic, which is how the page
+once read "probably $1,477.21" against a real $298.28.
 
 ## FineArtAmerica title rules (measured 2026-08-13)
 
@@ -555,10 +564,12 @@ irrelevant, say why in one line rather than skipping it silently.
 | 3b | Reasoned from where a thing is SHOWN, not what depends on it | 3d, 6 |
 | 3c | Trusted the edit you meant to make over the file that exists | 3, 5 |
 | 3c-bis | Invented an external value instead of looking it up or asking | 3c-ter |
-| 3c-ter | Built a second path to something that already works | 3b, 3d |
+| 3c-ter | Built a second path to something that already works — or theorised about a difference instead of reading the thing that works, or retried something the far side counts | 3b, 3d |
 | 3d | Debugged the screen instead of the machine doing the work | 3b, 8 |
 | 4 | Shipped without saying what else could break | 2 |
 | 5 | Added a warning where the state should have been impossible | 8 |
+| 5b | Turned one marketplace's measured behaviour into policy for all of them | 6, 3c-ter |
+| 5c | Moved a call out of a shared function and dropped it on the way | 3c, 3c-ter |
 | 6 | Correct for two projects, wrong for the third | 1, 3b |
 | 7 | Fixed a bug and left no rule behind | all |
 | 8 | Claimed work with an exit that reports nothing | 3d, 5 |
@@ -672,6 +683,15 @@ so the visible symptom lands somewhere unrelated to the edit. That is exactly
 how removing finished instructions from the NODES tab made the ADD ACCOUNT
 box on the UPLOAD tab stop appearing.
 
+**Moving a call OUT of a shared function is a deletion, and needs the same
+proof.** `open_work_tab()` was correctly taken out of `login()` so earnings
+reads would stop running upload hygiene — and never added to `run_batch`. The
+method still existed, still had its docstring, still compiled, and nothing
+called it: every upload since ran in the login tab, the one tab the legacy
+tool always abandoned because Chrome puts a dialog over it. After moving a
+call, grep for it and count the CALL SITES, not the definition. Zero callers
+of a public method is a defect, not a style question.
+
 **Matching a word in raw HTML is not detection.** A page's markup is full of
 vendor names, class names and script sources that say nothing about what the
 page is DOING. The bot-wall check searched page_source for "captcha", and
@@ -780,6 +800,28 @@ He can see the working path from outside the code. If the answer is "that
 would be awkward because…", the awkwardness is the thing to fix, not a
 reason to build a second path.
 
+**And when something ALREADY WORKS — even outside this repo — READ IT before
+theorising about why ours does not.** He asked why the VPS meets Cloudflare
+when his old laptop tool never had, and offered the tool. The answer was one
+grep: it contains no login code at all. It opened a Chrome profile he had
+signed into by hand and went straight to the work, while ours opened the
+sign-in page on every single read. Everything else — datacentre address,
+headless, timing — was secondary to the one behaviour we had and it did not.
+A working precedent is EVIDENCE, and reading it costs a minute; reasoning
+about the difference from the outside had already cost several deploys.
+
+**Corollary, and it inverts an instinct: a retry can be the cause.** After a
+failed read the account was queued again immediately — jobs #34 to #38 inside
+ninety seconds — because the cooldown governed uploading only. Five sign-in
+attempts a minute from one datacentre address is how a site that was merely
+suspicious becomes a site that is certain. Before adding or permitting a
+retry, ask whether the thing being retried is something the far side COUNTS.
+Logins, searches and writes are counted; fetching a page you are entitled to
+is not. Note also the fix here was NOT `account_is_available`, the obvious
+reuse: it also refuses banned and disabled accounts, which is right for
+uploading and backwards for reading money. Reuse the CONDITION that is
+genuinely shared, not the function that happens to contain it.
+
 ### 3d. A symptom on one screen is not a fault in that screen's code
 
 "The uploads stopped" is a statement about a PIPELINE, and a pipeline runs
@@ -822,6 +864,39 @@ rather have well-formed flows than a growing list of warnings. Before adding
 a diagnostic, ask: why can this state not simply be impossible? Sometimes the
 honest answer is "the marketplace is outside our control" — that is fine.
 Often it is laziness.
+
+### 5b. A lesson from one marketplace is not a rule about all of them
+
+Rule 6 asks whether a change is right for a third PROJECT. This asks the same
+about a third MARKETPLACE, and it is easier to get wrong because the lesson
+usually arrives as a genuine discovery.
+
+The incident: his old TeePublic tool proved that never opening the sign-in
+page is what avoids a security check. Correct — and applied to every earnings
+read, including FineArtAmerica, which drops its session almost immediately.
+FAA would have failed as "signed out" on the very first read and parked
+itself for twelve hours. The owner caught it in one line, before deploy:
+*"this is for teepublic only yes? faa almost always requires log in."*
+
+The untested assumption was that a behaviour measured on one site describes
+"how marketplaces work". Two sites here behave OPPOSITELY: one keeps you
+signed in for weeks and punishes knocking, the other forgets you in minutes
+and does not mind. Either single answer is wrong somewhere.
+
+So when a discovery changes how we talk to a marketplace:
+
+1. **Say which site it was measured on.** One site's behaviour is one site's.
+2. **Put it in that site's CAPABILITIES row**, not in the node and not in an
+   if-statement. `signin_on_read` sits beside `shape` and `sales` for the
+   same reason those do — the next marketplace answers by adding a line.
+3. **Pick the default that fails cheaply.** An unmeasured site signs in:
+   signing in needlessly costs a slow page, while skipping it when it was
+   needed stops the money being read. Wrong in the cheap direction.
+
+The general form: **a fact discovered about one external system is DATA about
+that system, never policy for all of them.** Same shape as rule 6, one level
+out — and the same shape as `processor` and `has_year`, which exist so a
+project's differences are data rather than a template edit.
 
 ### 6. The third-project test
 

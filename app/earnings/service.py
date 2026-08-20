@@ -68,6 +68,19 @@ READERS: dict[str, Any] = {
 REVISION_WINDOW_H = 48
 
 
+class SignedOutError(Exception):
+    """
+    The page came back as a sign-in form.
+
+    Its own type because it is the one read failure with a HUMAN fix, and the
+    admin must be told that rather than being shown a parser complaint. The
+    node no longer signs in on a routine read — see `read_earnings` for why
+    that stopped — so this is the expected way a stale session surfaces, not
+    an exceptional one.
+    """
+
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  WHAT EACH MARKETPLACE ACTUALLY PUBLISHES
 # ═══════════════════════════════════════════════════════════════════════════
@@ -93,6 +106,11 @@ CAPABILITIES: dict[str, dict] = {
         "refunds":     True,
         "payouts":     True,         # payout history as rows
         "balance":     True,         # they state what they owe
+        # FineArtAmerica does NOT keep you signed in — the session is short
+        # and a read almost always lands on the sign-in page. So it signs in,
+        # and it can afford to: FAA has never challenged the node, which
+        # arrives in the account's own Chrome. Compare TeePublic below.
+        "signin_on_read": True,
         "payout_rule": ("Paid on the 15th, for orders that shipped before the "
                         "15th of the previous month. Ship dates are not "
                         "published, so how much of this arrives next is not "
@@ -106,12 +124,31 @@ CAPABILITIES: dict[str, dict] = {
         "refunds":     False,
         "payouts":     False,
         "balance":     True,
+        # TeePublic DOES keep you signed in, for weeks — and it challenges a
+        # datacentre address that keeps opening the sign-in page. The owner's
+        # own TeePublic tool ran for years and never met a security check for
+        # exactly this reason: it never signed in, it opened a profile he had
+        # signed into by hand. So we do not either. A stale session here is
+        # rare and is fixed by a person, through PROFILES.bat.
+        "signin_on_read": False,
         "payout_rule": ("Paid on the 15th of every month, for the previous "
                         "calendar month, in full. So this figure drops to "
                         "near zero just after the 15th — that is the payment "
                         "landing, not a fault."),
     },
 }
+
+
+def signin_on_read(marketplace: str) -> bool:
+    """
+    Should a routine read sign in, or arrive already signed in?
+
+    Defaults to TRUE for a marketplace we have not measured, because signing
+    in when it was not needed costs a slow page, while failing to sign in
+    when it WAS needed parks the account and stops the money being read.
+    Wrong in the cheap direction.
+    """
+    return bool(CAPABILITIES.get(marketplace, {}).get("signin_on_read", True))
 
 
 def capabilities_for(marketplaces) -> dict:
@@ -164,7 +201,7 @@ def _fmt(amount: Decimal) -> str:
 #  READING
 # ═══════════════════════════════════════════════════════════════════════════
 
-def readable_accounts(db: Session) -> list[UploadAccount]:
+def readable_accounts(db: Session, *, include_paused: bool = False) -> list[UploadAccount]:
     """
     Accounts we could read tonight.
 
@@ -172,10 +209,30 @@ def readable_accounts(db: Session) -> list[UploadAccount]:
     owed a final payout, and the money is real whether or not the listings
     are. Disabled ones are included too — `is_enabled` governs UPLOADING,
     which is a different capability from earning. An account exists once.
+
+    A PAUSED account is excluded, and that is the one exception. The cooldown
+    used to apply to uploading only, so a TeePublic account that had just been
+    challenged was queued again straight away: jobs #34 to #38 all fired
+    inside ninety seconds, five sign-in attempts from one datacentre address
+    in a minute. Retrying is how a site that was merely suspicious becomes a
+    site that is certain.
+
+    Note this deliberately does NOT call `pipeline.account_is_available`,
+    which is the obvious-looking reuse and would be wrong: that function also
+    refuses disabled and banned accounts, which is right for uploading and
+    exactly backwards here. Only the cooldown is shared between the two.
+
+    `include_paused` is for a person pressing READ NOW on ONE account. The
+    cooldown exists to stop a machine retrying by itself; it must not stop the
+    owner testing the account he has just signed into by hand, which is the
+    very next thing he does after clearing a challenge.
     """
+    now = datetime.utcnow()
     return [
         a for a in db.query(UploadAccount).order_by(UploadAccount.name).all()
         if (a.target_site or "").lower() in READERS
+        and (include_paused
+             or not (a.paused_until and a.paused_until > now))
     ]
 
 
@@ -209,7 +266,10 @@ def queue_reads(db: Session, *, account_id: Optional[int] = None,
     from ..pipeline import create_job
     from ..models import PipelineJob
 
-    accounts = readable_accounts(db)
+    # Asking for ONE account is a person pressing READ NOW, so the cooldown is
+    # lifted for it. Asking for all of them is the scheduler, which is the
+    # thing the cooldown exists to restrain.
+    accounts = readable_accounts(db, include_paused=bool(account_id))
     if account_id:
         accounts = [a for a in accounts if a.id == account_id]
 
@@ -317,6 +377,15 @@ def store_page(db: Session, *, account: UploadAccount, kind: str,
     if reader is None:
         return {"more": False, "next_url": None, "stored": 0,
                 "note": "no reader for this marketplace"}
+
+    # Asked BEFORE parsing, for every marketplace, because a sign-in page
+    # parses as "the figures are missing" and that sends you looking for a
+    # redesign that has not happened. Both readers answer this question.
+    if getattr(reader, "looks_signed_out", None) and reader.looks_signed_out(html):
+        raise SignedOutError(
+            f"{account.name} is signed out — this page was the sign-in form. "
+            f"Open its Chrome profile with PROFILES.bat, sign in by hand, "
+            f"close Chrome, then press READ NOW.")
 
     # A totals-only site has one page and no paging. Routed on the declared
     # SHAPE rather than the site's name, so the next marketplace picks its
@@ -742,6 +811,14 @@ def next_payout_estimate(db: Session, *, marketplace: Optional[str] = None,
     balances = [a for a in accounts.all() if a.marketplace_balance]
     owed = sum((dec(a.marketplace_balance) for a in balances), Decimal("0"))
 
+    # What is actually due on the 15th, rather than the whole balance.
+    due_next = owed - (gross - back) if balances and last_payout else None
+    if due_next is not None and due_next < 0:
+        due_next = None          # rows missing; say nothing rather than a lie
+
+    holds, checked = _payout_rule_holds(db, marketplace=marketplace,
+                                        account_ids=account_ids)
+
     return {
         "owed": _fmt(owed),
         "owed_known": bool(balances),
@@ -751,11 +828,65 @@ def next_payout_estimate(db: Session, *, marketplace: Optional[str] = None,
         "since": since.isoformat() if since else None,
         "last_payout": _fmt(dec(last_payout.debit)) if last_payout else None,
         "unsettled": unsettled,
+        "due_next": _fmt(due_next) if due_next is not None else None,
+        "due_next_holds": holds,
+        "due_next_checked": checked,
         "rule": ("They pay on the 15th, for orders that shipped before the "
                  "15th of the previous month. Ship dates are not published, "
-                 "so how much of this arrives next is not knowable — only the "
-                 "total owed."),
+                 "so this is read from your own payout history rather than "
+                 "from their rule."),
     }
+
+
+def _payout_rule_holds(db: Session, *, marketplace: Optional[str] = None,
+                       account_ids: Optional[list[int]] = None
+                       ) -> tuple[Optional[bool], int]:
+    """
+    Has every past payout equalled the balance left standing after the one
+    before it? Returns (holds, how many transitions were checked).
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS EXISTS RATHER THAN A CONSTANT
+    ════════════════════════════════════════════════════════════════════════
+    FineArtAmerica pays on the SHIP date and does not publish it, so the
+    honest position for a long time was "how much arrives next cannot be
+    computed". Measured against the real ledger, that turned out to be too
+    pessimistic: across eight payouts, each one equalled the residue after the
+    previous one TO THE CENT, seven transitions out of seven. Nothing is held
+    back for late shipping; the whole month moves as one block, a month late.
+
+    But that is a pattern in one account's history, not a rule they state. So
+    it is TESTED here on every render rather than assumed, and the screen says
+    which it is. The day an account stops matching, the figure stops claiming
+    to be reliable instead of quietly going wrong — which is the difference
+    between an estimate and a guess.
+    """
+    q = _filtered(db, marketplace=marketplace, account_ids=account_ids)
+    rows = q.order_by(LedgerEntry.occurred_at.asc()).all()
+    payouts = [r for r in rows if r.entry_type == "payment"]
+    if len(payouts) < 2:
+        return None, 0
+
+    def balance_at(when: datetime) -> Decimal:
+        total = Decimal("0")
+        for r in rows:
+            if r.occurred_at > when:
+                continue
+            if r.entry_type == "sale":
+                total += dec(r.credit)
+            elif r.entry_type == "refund":
+                total -= (dec(r.debit) or dec(r.credit))
+            elif r.entry_type == "payment":
+                total -= dec(r.debit)
+        return total
+
+    checked = 0
+    for previous, nxt in zip(payouts, payouts[1:]):
+        residue = balance_at(previous.occurred_at)
+        if abs(residue - dec(nxt.debit)) > Decimal("0.01"):
+            return False, checked
+        checked += 1
+    return True, checked
 
 
 def reconcile(db: Session, *, account_ids: Optional[list[int]] = None) -> list[dict]:
@@ -929,6 +1060,13 @@ def owed_by_account(db: Session, *, marketplace: Optional[str] = None,
             # every day would train you to ignore the flag.
             "stale": stale_days is None or stale_days >= 2,
             "banned": bool(account.banned_at),
+            # The account that needs two minutes of your time. Reported HERE,
+            # on the screen that lists what each account is owed, because that
+            # is where you look when a figure stops moving — not on the Upload
+            # tab, where the same pause is displayed for a different reason.
+            "paused": bool(account.paused_until
+                           and account.paused_until > datetime.utcnow()),
+            "pause_reason": account.pause_reason or None,
         })
 
     out = sorted(groups.values(), key=lambda g: g["label"])
@@ -960,6 +1098,11 @@ def accounts_overview(db: Session) -> list[dict]:
             "name": a.name,
             "marketplace": marketplace,
             "readable": marketplace in READERS,
+            # Whether a sale COUNT means anything for this account. A
+            # totals-only site has no rows to count, so showing "0 sales"
+            # beside a real balance states something we were never told.
+            "publishes_sales": bool(
+                CAPABILITIES.get(marketplace, {}).get("sales")),
             "banned": bool(a.banned_at),
             "sales": int(totals.get(a.id, 0) or 0),
             "last_read": (a.last_earnings_read_at.isoformat()

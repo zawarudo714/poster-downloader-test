@@ -193,7 +193,7 @@
            '</div></div>';
   }
 
-  function renderNextPayout(p, checks) {
+  function renderNextPayout(p, checks, caps) {
     var el = q('[data-next-payout]');
 
     // Their figure is the headline BECAUSE it is theirs. Everything else on
@@ -202,7 +202,14 @@
     // "probably $1,477.21" against a real balance of $298.28.
     var head = p.owed_known
       ? '<div style="font-size:30px; font-weight:600">' + money(p.owed) + '</div>'
-        + '<p class="muted">Owed to you right now — FineArtAmerica\'s own figure'
+        // Named from the CURRENT selection, never hardcoded. This line read
+        // "FineArtAmerica's own figure" while totalling FineArtAmerica and
+        // TeePublic together — the same assumption the whole page was
+        // supposed to have stopped making.
+        + '<p class="muted">Owed to you right now — '
+        + ((caps.labels || []).length
+            ? esc((caps.labels || []).join(' and ')) + '\'s own figure'
+            : 'what the marketplaces themselves report')
         + (p.accounts_reporting > 1
             ? ', totalled across ' + p.accounts_reporting + ' accounts' : '')
         + '.</p>'
@@ -401,7 +408,8 @@
       renderSummary(data.summary, data.capabilities || {});
       applyCapabilities(data.capabilities || {});
       renderOwed(data.owed_by_account || {});
-      renderNextPayout(data.next_payout, data.reconcile);
+      renderNextPayout(data.next_payout, data.reconcile,
+                       data.capabilities || {});
       renderAccounts(data.accounts);
       fillMarketplaceChoices(data.known_marketplaces || []);
     } catch (e) {

@@ -1,1 +1,1 @@
-Earnings read no longer opens an upload tab it does not need, and reports what the server actually said instead of finishing silently
+Reconciliation only runs where we hold the sales; the owed headline names the sites actually selected

@@ -769,6 +769,19 @@ def reconcile(db: Session, *, account_ids: Optional[list[int]] = None) -> list[d
 
     Read-only and per account, because a mismatch on one account says nothing
     about the others.
+
+    ════════════════════════════════════════════════════════════════════════
+    ONLY A LEDGER MARKETPLACE CAN BE RECONCILED
+    ════════════════════════════════════════════════════════════════════════
+    The check compares rows WE hold against the balance THEY state. That only
+    means something where we hold the events. TeePublic publishes no sales at
+    all — we store its balance directly from the page — so there is nothing
+    of our own to check it against, and "we hold 0 sales, they say $74" is
+    not a discrepancy, it is the design.
+
+    Reported as a scary red box, it was worse than useless: it said the
+    totals were wrong when they were right. Skipped by SHAPE rather than by
+    marketplace name, so the next snapshot-only site needs no change here.
     """
     accounts = db.query(UploadAccount)
     if account_ids:
@@ -776,6 +789,9 @@ def reconcile(db: Session, *, account_ids: Optional[list[int]] = None) -> list[d
 
     out = []
     for account in accounts.all():
+        site = (account.target_site or "").lower()
+        if CAPABILITIES.get(site, {}).get("shape") != "ledger":
+            continue
         if not account.marketplace_balance:
             continue
         rows = db.query(LedgerEntry).filter(

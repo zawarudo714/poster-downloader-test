@@ -48,8 +48,8 @@ from ..auth import require_admin
 from ..config import WORKSPACE_DIR
 from ..db import get_db
 from ..models import (
-    AccountProject, MasterTitle, PipelineJob, ProcessedImage, Project,
-    SavedPoster, UploadAccount, UploadTracking, User, WorkerNode,
+    AccountProject, LedgerEntry, MasterTitle, PipelineJob, ProcessedImage,
+    Project, SavedPoster, UploadAccount, UploadTracking, User, WorkerNode,
 )
 from ..templating import templates
 from ..timeutil import fmt_local, local_today
@@ -1279,7 +1279,26 @@ def api_delete_account(
             released += 1
         db.delete(row)
 
-    # Nothing may point at a row that is about to disappear.
+    # ── Earnings rows go with it ─────────────────────────────────────────
+    # A ledger row belongs to the ACCOUNT it was read from. Leaving them
+    # behind was how deleting the duplicate FineArtAmerica account would have
+    # left its 70 sales in the totals forever — every figure on the Earnings
+    # page double-counted, with nothing on screen to explain it.
+    #
+    # Safe to delete rather than soft-delete: unlike a poster, nothing here is
+    # our own work. It is a copy of a page on someone else's site and one
+    # READ NOW brings it all back.
+    ledger_rows = (
+        db.query(LedgerEntry)
+          .filter(LedgerEntry.account_id == account_id).delete()
+    )
+    # NOTE: title aliases are deliberately NOT deleted. An alias belongs to a
+    # MARKETPLACE, not to an account — another account on the same site still
+    # needs it, and re-teaching those matches by hand would be real work lost.
+
+    # Which projects it served, and anything pointing at it.
+    db.query(AccountProject).filter(
+        AccountProject.account_id == account_id).delete()
     db.query(UploadAccount).filter(
         UploadAccount.replaced_by_id == account_id
     ).update({"replaced_by_id": None}, synchronize_session=False)
@@ -1289,10 +1308,12 @@ def api_delete_account(
                  target_type="upload_account", target_id=account_id,
                  details={"name": name,
                           "queued_rows_discarded": len(unfinished),
-                          "posters_released": released})
+                          "posters_released": released,
+                          "earnings_rows_removed": ledger_rows})
     db.commit()
     return JSONResponse({"ok": True, "released": released,
-                         "discarded": len(unfinished)})
+                         "discarded": len(unfinished),
+                         "earnings_removed": ledger_rows})
 
 
 # ═══════════════════════════════════════════════════════════════════════════

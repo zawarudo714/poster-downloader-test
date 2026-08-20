@@ -83,6 +83,10 @@ def api_overview(
                                    account_ids=ids, days=days),
         "next_payout": service.next_payout_estimate(
             db, marketplace=marketplace, account_ids=ids),
+        # Our arithmetic against the marketplace's own balance. On the page
+        # rather than buried in Diagnostics, because a total that does not
+        # reconcile is the one thing that makes every other figure suspect.
+        "reconcile": service.reconcile(db, account_ids=ids),
         "accounts": service.accounts_overview(db),
         "marketplaces": sorted({
             a["marketplace"] for a in service.accounts_overview(db)

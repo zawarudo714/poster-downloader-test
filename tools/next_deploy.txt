@@ -1,1 +1,1 @@
-Accounts shared across projects (ADD EXISTING); earnings read through the node's Chrome; nightly quiet window at 22:00 with a visible reason
+Earnings: ledger no longer stops on sales it already has, so payouts are read; balance stored and shown as the headline with a reconciliation check

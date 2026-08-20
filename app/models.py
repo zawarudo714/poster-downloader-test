@@ -802,6 +802,12 @@ class UploadAccount(Base):
     # per-account question — one bad password must be visible as one bad
     # account, not as a silent gap in the totals.
     last_earnings_read_at = Column(DateTime, nullable=True)
+    # What the marketplace itself says it owes, as text (money is never a
+    # float here). This is a FACT where every figure we compute is a
+    # derivation — it is both the honest "next payout" number and the
+    # checksum on our own arithmetic: our sales minus our payouts must land
+    # on it, and when it does not we have missed rows.
+    marketplace_balance   = Column(String(24), nullable=True)
     # How many uploads in a row have failed for a reason that MIGHT be
     # systemic. Reset to zero by any success, so it measures a run of
     # failures rather than a total. See pipeline.report_upload_failure for

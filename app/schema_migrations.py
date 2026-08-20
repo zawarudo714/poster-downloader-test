@@ -95,6 +95,7 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     # ── Earnings ────────────────────────────────────────────────────────
     ("upload_accounts",  "last_earnings_read_at", "DATETIME"),
     ("upload_accounts",  "consecutive_failures",  "INTEGER NOT NULL DEFAULT 0"),
+    ("upload_accounts",  "marketplace_balance",   "VARCHAR(24)"),
 ]
 
 # ════════════════════════════════════════════════════════════════════════════

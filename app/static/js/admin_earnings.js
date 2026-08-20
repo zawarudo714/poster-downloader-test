@@ -97,18 +97,54 @@
            '</div></div>';
   }
 
-  function renderNextPayout(p) {
+  function renderNextPayout(p, checks) {
     var el = q('[data-next-payout]');
-    el.innerHTML =
-      '<div style="font-size:26px; font-weight:600">probably ' + money(p.amount) + '</div>' +
-      '<p class="muted">' + esc(p.caveat) + '</p>' +
-      '<p class="muted mono">' + p.sales + ' sale(s) credited since ' +
-      (p.since ? 'your last payout on ' + when(p.since) : 'you started') +
-      (p.last_payout ? ' (that one was ' + money(p.last_payout) + ')' : '') + '.' +
-      (p.unsettled
-        ? ' ' + p.unsettled + ' of them are recent enough that they may still change.'
-        : '') +
-      '</p>';
+
+    // Their figure is the headline BECAUSE it is theirs. Everything else on
+    // this page is arithmetic we did; this line is the marketplace stating
+    // what it owes. An earlier version showed our estimate instead and read
+    // "probably $1,477.21" against a real balance of $298.28.
+    var head = p.owed_known
+      ? '<div style="font-size:30px; font-weight:600">' + money(p.owed) + '</div>'
+        + '<p class="muted">Owed to you right now — FineArtAmerica\'s own figure'
+        + (p.accounts_reporting > 1
+            ? ', totalled across ' + p.accounts_reporting + ' accounts' : '')
+        + '.</p>'
+      : '<div style="font-size:22px" class="muted">Not read yet</div>'
+        + '<p class="muted">Press READ NOW — the balance comes straight from '
+        + 'the marketplace.</p>';
+
+    var since = '<p class="muted mono">' + money(p.credited_since_payout)
+      + ' credited from ' + p.sales_since_payout + ' sale(s) since '
+      + (p.since ? 'your last payout on ' + when(p.since) : 'you started')
+      + (p.last_payout ? ' (that one was ' + money(p.last_payout) + ')' : '') + '.'
+      + (p.unsettled
+          ? ' ' + p.unsettled + ' are recent enough that they may still change.'
+          : '') + '</p>';
+
+    el.innerHTML = head + '<p class="muted">' + esc(p.rule) + '</p>' + since
+      + renderReconcile(checks);
+  }
+
+  // Sales minus payouts must land on their balance. When it does not, we have
+  // missed rows — and every total above is understated by exactly that much.
+  function renderReconcile(checks) {
+    if (!checks || !checks.length) return '';
+    var bad = checks.filter(function (c) { return !c.agrees; });
+    if (!bad.length) {
+      return '<p class="muted mono">Our figures reconcile with theirs exactly '
+        + '(' + checks.length + ' account(s) checked).</p>';
+    }
+    return bad.map(function (c) {
+      return '<div class="quota-note" style="margin-top:8px">'
+        + '<strong>' + esc(c.account) + ' does not add up.</strong> '
+        + 'We hold ' + c.sales + ' sale(s) and ' + c.payouts + ' payout(s), '
+        + 'which come to ' + money(c.ours) + '. They say ' + money(c.theirs)
+        + ' — a difference of ' + money(c.difference) + '. '
+        + 'That means rows are missing, so the totals above are wrong. '
+        + 'Try READ NOW; if it persists, tell Claude.'
+        + '</div>';
+    }).join('');
   }
 
   // ── Accounts filter ──────────────────────────────────────────────────
@@ -264,7 +300,7 @@
     try {
       var data = await getJSON(API + '/overview?' + params());
       renderSummary(data.summary);
-      renderNextPayout(data.next_payout);
+      renderNextPayout(data.next_payout, data.reconcile);
       renderAccounts(data.accounts);
     } catch (e) {
       root.innerHTML = '<p class="muted">Could not load earnings: ' +

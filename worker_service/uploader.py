@@ -559,13 +559,21 @@ class MarketplaceUploader:
             # reboot (which is exactly how this box gets restarted) is the
             # most likely cause of an instant exit, and retrying without it
             # both proves that and gets the night's work out.
-            self.emit(f"Chrome would not start ({first_error.__class__.__name__}) — "
-                      f"retrying once with a fresh profile", level="warn")
+            # Name the path. Without it there is no way to tell "the folder
+            # is wrong" from "Chrome itself is broken", and this failed on
+            # every single run for days while the message said nothing about
+            # WHERE it was trying to work.
+            self.emit(f"Chrome would not start on {profile_dir} "
+                      f"({first_error.__class__.__name__}) — retrying on the "
+                      f"fallback profile", level="warn")
             try:
-                spare = Path(self.config.get("temp_dir", "C:/faa/temp")) / "profiles" / f"{slug}_retry"
-                if spare.exists():
-                    import shutil
-                    shutil.rmtree(spare, ignore_errors=True)
+                spare = Path(self.config.get("temp_dir", "C:/faa/temp")) / "profiles" / f"{slug}_fallback"
+                # NOT wiped. This is the profile that actually works, so it is
+                # the one worth keeping: it holds the marketplace session and
+                # the cookie proving we already cleared the bot check. An
+                # earlier version deleted it before every retry, which meant a
+                # full sign-in on every single run and a challenge clearance
+                # that never persisted.
                 spare.mkdir(parents=True, exist_ok=True)
 
                 retry_opts = _clone_options(options, str(spare))
@@ -583,9 +591,11 @@ class MarketplaceUploader:
                 import shutil
                 shutil.rmtree(profile_dir, ignore_errors=True)
                 self.emit(
-                    "Started on a fresh profile. The saved one was unusable and "
-                    "has been deleted, so the next run rebuilds it and goes back "
-                    "to skipping the login form.",
+                    f"Started on the fallback profile ({spare}), which is kept "
+                    f"between runs. The configured one ({profile_dir}) was "
+                    f"unusable and has been cleared so it can rebuild — if this "
+                    f"warning repeats every run, that path is the problem: "
+                    f"check the account's 'Chrome profile dir'.",
                     level="warn",
                 )
             except WebDriverException:

@@ -89,23 +89,28 @@ Also planned, stated but not yet built:
    yesterday"), filterable and totalled by site (all / TeePublic / FAA /
    Redbubble later), by account, or by any subset.
 
-   Design points already established:
-     * An ACCOUNT EXISTS ONCE. The Chrome profiles created for revenue
-       reading are the same accounts a future TeePublic upload pipeline
-       would log into — do not model "revenue account" and "upload account"
-       separately or the owner ends up with two profiles per account.
-       Uploading and revenue-reading are capabilities of one account.
-     * `UploadAccount.project_id` is currently NOT NULL, which does not fit:
-       these 9 accounts belong to no project and may never do. Resolve that
-       before building — probably by making the column nullable rather than
-       inventing a parallel table.
-     * Store ABSOLUTE snapshots, never deltas. "This Month" resets to zero on
-       the 1st, so a stored delta would show a large negative every month.
-       Deltas are computed at read time, within a month boundary.
-     * The figures are estimates that can revise DOWNWARD (refunds), and
-       TeePublic states up to 48h lag after a sale. A drop is not a bug.
-     * This is read-only and belongs with `diagnostics.py` / the marketplace
-       reconciler, not the pipeline module.
+   **BUILT for FineArtAmerica, 2026-08-20.** TeePublic still to come — it
+   needs a reader module and an entry in `service.READERS`, nothing else.
+   What actually got built, where it differs from the plan above:
+
+     * An ACCOUNT EXISTS ONCE — held to, and it is now enforced by the
+       `account_projects` link table rather than by a nullable column. The
+       plan said "make project_id nullable rather than inventing a parallel
+       table"; that was wrong, because one account serves SEVERAL projects,
+       which a single column cannot express. `project_id` survives as a dead
+       legacy column, backfilled into the link table at startup.
+     * Reading does NOT happen on the server. FAA challenges it as a bot, so
+       it is a node job using the account's own Chrome profile. See the
+       FineArtAmerica behaviour section.
+     * ABSOLUTE rows, never stored deltas — held to, and it is the single
+       most important rule in `earnings/service.py`. Every figure on the
+       screen is arithmetic over rows computed at read time.
+     * Figures revise DOWNWARD and a drop is not a bug — held to, and it is
+       said on the page so the owner is not left wondering.
+     * Read-only, sibling of `diagnostics.py` — held to.
+     * The "next payout" figure is NOT computable: FAA pays on the SHIP date
+       and does not publish it. Their `Current Balance` is authoritative;
+       anything we derive is an estimate and must be worded as one.
 
 6. **Ban recovery / account handover.** When a marketplace account is banned,
    mark it as such and use that marking to bring a replacement account online
@@ -158,6 +163,34 @@ Script, selectors, timings, templates and credentials all arrive over the API
 on every cycle. That's what lets the owner change behaviour from the browser
 and rebuild the box from nothing.
 
+**The node now does THREE jobs, not two** (added 2026-08-20):
+
+| Job | Why it must be the node |
+|---|---|
+| Photoshop | needs a real desktop and the licensed app |
+| Uploading | fills a form and sends a file — every project, always |
+| **Reading earnings** | FAA challenges the server as a bot; the node's Chrome profile already cleared it |
+
+That third one is easy to forget and it changes the answer to "why did X
+stop". Note also that the loop is **serial** — one thing at a time — so an
+earnings read cannot collide with an upload; it can only delay it.
+
+**The quiet window** (added 2026-08-20). Each night from
+`earnings_quiet_from` (default 22:00, node-local) the dispatcher stops handing
+out NEW work until that night's earnings read has been dealt with. Work
+already in flight finishes normally.
+
+It is a WINDOW, not a switch, and that distinction is the whole design.
+Nothing is stored and nothing is toggled: `quiet_window_state()` looks at the
+clock and at whether tonight's read has been attempted, and answers fresh
+every time. A switch has two edges and the second one can be lost, which
+leaves uploading dead while everything looks fine. There is no second edge
+here — the read finishing, the read failing, or midnight arriving all reopen
+it on their own.
+
+If work goes quiet and the page does not SAY why, that is a defect. A working
+feature that looks like a fault is a bad feature.
+
 ---
 
 ## The master / project split (added 2026-08-04)
@@ -197,6 +230,25 @@ Rules that matter:
   inherit the movie backlog.
 - Workers are scoped by the `user_projects` table. **No rows = no restriction**,
   because that's the state every existing worker is in.
+- **Accounts are scoped by `account_projects`, and there NO ROWS MEANS NO
+  PROJECTS — the exact opposite of `user_projects`.** Read the worker
+  convention across to accounts and every earn-only account silently becomes
+  an upload target for every niche. An account with no rows is one nothing is
+  uploaded to: the TeePublic accounts that just sit there earning. It still
+  appears on Earnings, because reading revenue and uploading are two
+  capabilities of ONE account.
+- **An account exists once and may serve several projects.** One FAA account
+  carries both niches. Before the link table the only way to do that was to
+  create it twice — two Chrome profiles, two copies of the password, and a
+  daily upload limit the marketplace applies ONCE being counted as two. Never
+  scope by the legacy `UploadAccount.project_id` column; use
+  `pipeline.accounts_for_project()` / `project_ids_for_account()`.
+- **A batch is single-project even when the account is not.** The node gets
+  ONE settings blob per batch, and the title template, keywords and
+  description all differ per project — so `claim_upload_batch` picks one of
+  the account's projects for that turn and takes only its rows. A mixed batch
+  would list MUSIK artwork under the movie template, publicly, on a real
+  marketplace.
 - **A worker's queue scopes to the ONE project they are standing in**, via
   `worker._worker_project()` — never to the union of their projects. The first
   version used the union and, the moment a worker had two projects, GET pulled
@@ -231,6 +283,46 @@ Rules that matter:
   never `slug`.
 - `sync_projects()` never touches `process_weight` or `is_active` — those are
   dashboard levers, and a deploy must not re-enable a project you turned off.
+
+## FineArtAmerica behaviour, measured (do not re-derive these)
+
+**There are TWO upload forms live at the same time.** `updateartwork.html`
+and `updateartwork2025.html`, chosen per request, apparently at random. The
+selector `name:artworkname` exists on the old one and not the new one, so an
+upload fails whenever FAA happens to serve the 2025 page. Observed
+2026-08-17: the movie project failed three times in a row while MUSIK
+succeeded on the same account minutes later, which looked exactly like a
+per-project bug and was not.
+
+Consequences:
+
+  * A missing form field is NOT proof the form changed. It is usually "this
+    request got the other page". That is why `upload_pause_after_failures`
+    exists — an account is only parked after a RUN of them.
+  * When a selector times out, the error lists every field name on the page,
+    so the fix is copy-and-paste rather than reading saved HTML.
+  * The real fix, not yet built: let a selector hold alternatives, so one
+    account can straddle both form versions unattended.
+
+**FAA challenges the Linux server as a bot, but not the Windows node.**
+Reading the control panel with a plain HTTP client returns "Verify Visitor —
+Are you human? Please check the box in order to continue", regardless of
+headers or which URL is used. The node does not see this, because it arrives
+in a real Chrome carrying the account's own profile — the one that cleared
+the challenge once and holds the cookie. This is why earnings reading is a
+node job. Do not try to solve it with headers, a different HTTP client, or a
+guessed endpoint; all three were tried and cost three deploy cycles.
+
+**The Balance page is a running ledger and its own checksum.** 78 rows for
+this account = 70 sales + 8 payouts, and gross sales $1,477.21 − payouts
+$1,178.93 = $298.28, which is exactly the Current Balance FAA prints at the
+top. If our arithmetic does not land on their figure, we have missed rows.
+
+**Payouts are on the 15th, for orders SHIPPED before the 15th of the previous
+month** — stated on the Balance page. Ship dates are not published, so what
+the next payout will contain cannot be computed. `Current Balance` is the
+authoritative "what you are owed"; anything we derive is an estimate and must
+be worded as one.
 
 ## FineArtAmerica title rules (measured 2026-08-13)
 
@@ -276,6 +368,17 @@ app/
                        greenlight, dispatch/claiming, templates, encryption.
                        DEFAULTS is the only place a pipeline literal belongs.
   payments.py          Eligibility + payment runs. Greenlight hooks in here.
+  earnings/            Money coming IN. Sibling of diagnostics.py, NOT of the
+                       pipeline — nothing here dispatches or changes a design.
+    faa.py             Parsers for FineArtAmerica's Sales and Balance pages.
+                       Every function takes a STRING, never a URL, which is
+                       what let the fetching move to the node for free.
+                       Deliberately contains no page URLs at all.
+    matching.py        Attributing a sale to one of our designs. Refuses to
+                       guess — see its docstring for why a wrong match is
+                       worse than no match.
+    service.py         Storing rows, queueing the node's reads, and the
+                       figures each screen needs.
   routes/
     worker.py          Worker-facing (file name is historical; URLs don't say
                        "worker")
@@ -720,6 +823,28 @@ problem.
 in one line.** The incident is what makes it believable enough to obey. A
 rule with no story behind it reads like generic advice and gets skipped.
 
+**REVISE, do not append. This is the iron rule.** Before writing anything
+down, search these files for what is already said about it. Then:
+
+  * The topic already has a rule → **edit that rule.** A bug with a new
+    wrinkle adds a sentence to the existing entry; it does not get a second
+    entry of its own.
+  * The instruction has CHANGED → **rewrite the old text, do not stack a
+    contradiction next to it.** If he ever asks for more technical language,
+    the fix is to find "Write in plain words" and change it — not to add a
+    second, opposite instruction and leave the next session to guess which
+    one wins.
+  * Something written earlier was later fixed, or turned out wrong → **go
+    back and correct it.** The "make project_id nullable rather than
+    inventing a parallel table" note was confidently wrong for two weeks. A
+    stale note is worse than no note, because it is trusted.
+  * Genuinely new and unrelated → then, and only then, a new entry.
+
+The test is length. This file should get SHARPER as it grows, not longer.
+If an edit makes it longer without making it more useful, it is the wrong
+edit. Not everything is worth writing down — the bar is "would this have
+changed what a future session did".
+
 **Three things every new rule must do**, because the owner has asked for a
 net rather than a list of anecdotes:
 
@@ -813,6 +938,34 @@ inherits the wrong half of another one.
 - He is cost-conscious and picks cheap, simple, mainstream hosting.
 - **Anything he might want to tweak belongs in the dashboard.** He has said
   this more than once. Treat a hardcoded value as a defect.
-- He is not a coder. Explain in plain language what a thing DOES and what it
-  costs him, not how it is implemented — unless he asks, and he often will.
 - He notices the thing you glossed over. Say the uncomfortable part first.
+
+### Write in plain words. This is a standing instruction, not a preference.
+
+His words, 2026-08-17: *"explain to me step by step using simple words you
+keep using big words. From now on make it easy to understand in layman terms
+everything we talk about."*
+
+He is not a coder. Every explanation is judged on whether HE can act on it,
+not on whether it is technically complete. Concretely:
+
+- **Say what happens, in order, with times or numbers.** When he asked how
+  earnings could run on a busy Monday, the answer that worked was a clock:
+  "9:50pm the worker is doing Photoshop · 10:00pm the boss stops handing out
+  new work · 10:35pm it finishes what it's holding · 10:36pm earnings run".
+  The answer that did NOT work was the same thing described as a mechanism.
+- **Name the machines by what they do**, not by their role in the code. "The
+  Linux server is the boss, the Windows machine is the worker" landed;
+  "dispatcher" and "node" did not.
+- **Ban the shorthand.** intake, idempotent, derived state, artefact,
+  scoping, dispatch, payload. If a word only means something to someone who
+  has read the code, it is the wrong word. There is always a plain one.
+- **Give the cost in his terms** — minutes lost, designs delayed, money —
+  rather than in properties of the design.
+- **When he says he does not understand, that is a defect in the
+  explanation.** Rewrite it from scratch in simpler words; do not repeat it
+  with more detail bolted on. He asked twice before I stopped using jargon,
+  and that was two wasted rounds.
+
+This applies to CHAT, not to code comments. Comments explain *why* to the
+next engineer and stay technical.

@@ -177,16 +177,47 @@ def page_urls(db: Session, account: UploadAccount) -> list[dict]:
     ]
 
 
+# What each page is the SOURCE for. A page may CONTAIN other kinds of row —
+# the ledger lists sales too — but it only gets to say "we have reached rows
+# we already hold" about the kinds it owns.
+PAGE_OWNS: dict[str, set[str]] = {
+    "sales":  {"sale"},
+    "ledger": {"payment", "refund"},
+}
+
+# What each page LISTS, which is a wider set than what it owns — the ledger
+# shows sales as well. Used only to compare our row count against the "of 78"
+# the page prints, so the two numbers are counting the same thing.
+PAGE_LISTS: dict[str, set[str]] = {
+    "sales":  {"sale"},
+    "ledger": {"sale", "payment", "refund", "other"},
+}
+
+
 def store_page(db: Session, *, account: UploadAccount, kind: str,
                page: int, url: str, html: str) -> dict:
     """
     Parse one page the node just fetched, store what is new, say whether to
     continue.
 
-    The stop rule lives HERE because it needs the database: rows are
-    newest-first, so the first one we already hold means everything below it
-    is already stored. The node cannot know that, which is why it asks after
-    every page rather than being told a page count up front.
+    ════════════════════════════════════════════════════════════════════════
+    STOP ON WHAT THIS PAGE IS THE SOURCE FOR
+    ════════════════════════════════════════════════════════════════════════
+    Rows are newest-first, so meeting one we already hold normally means
+    everything below it is stored too. That rule is correct only while a page
+    is the ONLY source for its rows — and it is not.
+
+    Sales are read from the Sales page first. The ledger then lists those same
+    sales, so its very first row is already known, and the read stopped there
+    on every single run: eight payouts were never fetched, "paid out" read
+    $0.00, and the next-payout figure became every sale ever made ($1,477.21
+    against a real balance of $298.28).
+
+    So a known row only ends the read when the page OWNS that kind. The ledger
+    skips over sales it has already seen and keeps going until it meets a
+    PAYOUT or REFUND it holds. Overlap between pages becomes irrelevant
+    instead of fatal — which also means any future page that overlaps another
+    needs no special case.
 
     Returns {"more": bool, "next_url": str|None, "stored": int}.
     """
@@ -201,20 +232,26 @@ def store_page(db: Session, *, account: UploadAccount, kind: str,
                         .filter(LedgerEntry.account_id == account.id).all()
     }
 
+    balance = None
     if kind == "sales":
-        rows, _total = reader.parse_sales_page(html)
+        rows, total = reader.parse_sales_page(html)
     else:
-        rows, _balance, _total = reader.parse_balance_page(html)
+        rows, balance, total = reader.parse_balance_page(html)
 
+    owns = PAGE_OWNS.get(kind, set())
     index = MatchIndex(db, marketplace)
-    stored = matched = 0
-    hit_known = False
+    stored = matched = skipped = 0
+    hit_own_known = False
 
     for row in rows:
         if row.dedupe_key in known:
-            # Newest-first, so this is the end of what is new.
-            hit_known = True
-            break
+            if row.entry_type in owns:
+                hit_own_known = True
+                break
+            # Someone else's row that we already have — the ledger repeating
+            # a sale the Sales page gave us. Step over it and keep looking.
+            skipped += 1
+            continue
         known.add(row.dedupe_key)
         entry = _entry_from_row(account, marketplace, row)
         db.add(entry)
@@ -222,18 +259,41 @@ def store_page(db: Session, *, account: UploadAccount, kind: str,
         if match_entry(db, entry, index):
             matched += 1
 
+    if balance:
+        # FineArtAmerica stating what it owes. Kept because it is a FACT where
+        # everything we compute is a derivation — it is both the honest
+        # "next payout" figure and the checksum on our own arithmetic.
+        account.marketplace_balance = balance
     account.last_earnings_read_at = datetime.utcnow()
     # Committed per PAGE, not per run. A node that dies mid-backfill keeps
     # everything it already read, and tomorrow resumes rather than restarts.
     db.commit()
 
-    more = bool(rows) and not hit_known
+    # ── Second stop: their own row count ─────────────────────────────────
+    # Every page says "Displaying 1-25 of 78". Compared against how many rows
+    # we actually HOLD of the kinds this page lists — not against page number
+    # times page size, which undercounts the moment the last page is short and
+    # sends the node after a page that does not exist.
+    #
+    # Also a backstop if the rule above ever fails to fire: a read that cannot
+    # end would walk a marketplace all night.
+    held = (
+        db.query(func.count(LedgerEntry.id))
+          .filter(LedgerEntry.account_id == account.id,
+                  LedgerEntry.entry_type.in_(PAGE_LISTS.get(kind, ())))
+          .scalar() or 0
+    )
+    at_end = bool(total) and held >= total
+
+    more = bool(rows) and not hit_own_known and not at_end
     base = url.split("?")[0]
     return {
         "more": more,
         "next_url": f"{base}?page={page + 1}" if more else None,
         "stored": stored,
         "matched": matched,
+        "skipped_known": skipped,
+        "balance": balance,
     }
 
 
@@ -382,16 +442,23 @@ def summary(db: Session, *, marketplace: Optional[str] = None,
 def next_payout_estimate(db: Session, *, marketplace: Optional[str] = None,
                          account_ids: Optional[list[int]] = None) -> dict:
     """
-    Roughly what the next payout will contain — deliberately not a fact.
+    What you are owed, and how much of it is likely to land next.
 
-    FineArtAmerica pays on the date an order SHIPS, and never publishes which
-    orders have shipped. So this is "sales credited since the last payout",
-    which is the closest honest answer: it will include things that have not
-    shipped yet and may still be revised.
+    ════════════════════════════════════════════════════════════════════════
+    THEIR FIGURE IS THE FACT; OURS IS THE ESTIMATE
+    ════════════════════════════════════════════════════════════════════════
+    FineArtAmerica prints `Current Balance` at the top of the ledger. That is
+    the marketplace stating what it owes — it is not derived, it cannot drift,
+    and it is the honest headline. An earlier version dropped it in favour of
+    arithmetic and displayed "probably $1,477.21" against a real balance of
+    $298.28, because the payouts had never been read.
 
-    Presented with the word "probably" everywhere it is shown. If a future
-    version can read a ship date, this becomes a fact and the wording should
-    change with it — not before.
+    What is still NOT knowable: which of those orders have SHIPPED. FAA pays on
+    the ship date and does not publish it, so how much of the balance arrives
+    on the 15th cannot be computed — only the total owed can.
+
+    `owed` is theirs. `credited_since_payout` is ours, kept because it answers
+    a different question: what has built up since the last time you were paid.
     """
     q = _filtered(db, marketplace=marketplace, account_ids=account_ids)
 
@@ -412,16 +479,73 @@ def next_payout_estimate(db: Session, *, marketplace: Optional[str] = None,
     unsettled = sum(1 for r in sales
                     if (now - r.occurred_at) < timedelta(hours=REVISION_WINDOW_H))
 
+    # Their balance, per account, so a filtered view totals only what it shows.
+    accounts = db.query(UploadAccount)
+    if account_ids:
+        accounts = accounts.filter(UploadAccount.id.in_(account_ids))
+    if marketplace:
+        accounts = accounts.filter(
+            func.lower(UploadAccount.target_site) == marketplace)
+    balances = [a for a in accounts.all() if a.marketplace_balance]
+    owed = sum((dec(a.marketplace_balance) for a in balances), Decimal("0"))
+
     return {
-        "amount": _fmt(gross - back),
-        "sales": len(sales),
+        "owed": _fmt(owed),
+        "owed_known": bool(balances),
+        "accounts_reporting": len(balances),
+        "credited_since_payout": _fmt(gross - back),
+        "sales_since_payout": len(sales),
         "since": since.isoformat() if since else None,
         "last_payout": _fmt(dec(last_payout.debit)) if last_payout else None,
         "unsettled": unsettled,
-        "caveat": ("They pay on the date an order ships, which they do not "
-                   "publish — so this is what has been credited since your "
-                   "last payout, not a promise."),
+        "rule": ("They pay on the 15th, for orders that shipped before the "
+                 "15th of the previous month. Ship dates are not published, "
+                 "so how much of this arrives next is not knowable — only the "
+                 "total owed."),
     }
+
+
+def reconcile(db: Session, *, account_ids: Optional[list[int]] = None) -> list[dict]:
+    """
+    Does our arithmetic land on the marketplace's own balance?
+
+    Sales minus payouts minus refunds must equal what they say they owe. When
+    it does not, we have missed rows — and this is exactly the check that
+    would have caught the ledger read stopping on its first line, on the very
+    first night, instead of it being spotted by eye a day later.
+
+    Read-only and per account, because a mismatch on one account says nothing
+    about the others.
+    """
+    accounts = db.query(UploadAccount)
+    if account_ids:
+        accounts = accounts.filter(UploadAccount.id.in_(account_ids))
+
+    out = []
+    for account in accounts.all():
+        if not account.marketplace_balance:
+            continue
+        rows = db.query(LedgerEntry).filter(
+            LedgerEntry.account_id == account.id).all()
+        gross = sum((dec(r.credit) for r in rows if r.entry_type == "sale"),
+                    Decimal("0"))
+        paid = sum((dec(r.debit) for r in rows if r.entry_type == "payment"),
+                   Decimal("0"))
+        back = sum((dec(r.debit) or dec(r.credit)
+                    for r in rows if r.entry_type == "refund"), Decimal("0"))
+        ours = gross - paid - back
+        theirs = dec(account.marketplace_balance)
+        out.append({
+            "account_id": account.id,
+            "account": account.name,
+            "ours": _fmt(ours),
+            "theirs": _fmt(theirs),
+            "difference": _fmt(ours - theirs),
+            "agrees": ours == theirs,
+            "sales": sum(1 for r in rows if r.entry_type == "sale"),
+            "payouts": sum(1 for r in rows if r.entry_type == "payment"),
+        })
+    return out
 
 
 def by_design(db: Session, *, marketplace: Optional[str] = None,

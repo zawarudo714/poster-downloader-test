@@ -240,7 +240,7 @@ def store_page(db: Session, *, account: UploadAccount, kind: str,
 
     owns = PAGE_OWNS.get(kind, set())
     index = MatchIndex(db, marketplace)
-    stored = matched = skipped = 0
+    stored = matched = skipped = upgraded = 0
     hit_own_known = False
 
     for row in rows:
@@ -250,6 +250,25 @@ def store_page(db: Session, *, account: UploadAccount, kind: str,
                 break
             # Someone else's row that we already have — the ledger repeating
             # a sale the Sales page gave us. Step over it and keep looking.
+            #
+            # But take its TIME on the way past. The Sales page prints only a
+            # date, so a sale stored from there sits at midnight; the ledger
+            # prints the clock time. Three canvas prints sold at 9:22pm on the
+            # 15th were being counted as before that day's 3:22pm payout,
+            # which understated "credited since your last payout" by $105.
+            # The better value wins, and only ever gets more precise.
+            if row.occurred_at.time() != datetime.min.time():
+                existing = (
+                    db.query(LedgerEntry)
+                      .filter(LedgerEntry.account_id == account.id,
+                              LedgerEntry.dedupe_key == row.dedupe_key)
+                      .first()
+                )
+                if existing is not None and existing.occurred_at.time() == datetime.min.time():
+                    existing.occurred_at = row.occurred_at
+                    if row.balance_after and not existing.balance_after:
+                        existing.balance_after = row.balance_after
+                    upgraded += 1
             skipped += 1
             continue
         known.add(row.dedupe_key)
@@ -293,6 +312,7 @@ def store_page(db: Session, *, account: UploadAccount, kind: str,
         "stored": stored,
         "matched": matched,
         "skipped_known": skipped,
+        "timestamps_upgraded": upgraded,
         "balance": balance,
     }
 

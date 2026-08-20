@@ -104,6 +104,12 @@
       ['poll_idle_after_min', 'number', 'Back off after (min)', 'How long the node must find nothing before it slows its polling down. It snaps back to the normal interval the moment work appears, so this never delays a batch.'],
       ['node_log_retention_days','number','Node log retention (days)', "How long the worker node keeps its own local log files on the Windows box. These are the only record when the node cannot reach this server. 0 keeps them forever."],
       ['claim_timeout_min',   'number', 'Claim timeout (min)','Work claimed by a node that stops reporting is automatically returned to the queue after this long.'],
+      // The nightly earnings check. Here rather than on the Earnings page
+      // because what it CHANGES is when the pipeline hands out work, and this
+      // is the page that governs that.
+      ['earnings_quiet_from', 'text',   'Go quiet at (HH:MM)', "Each night from this time the pipeline stops handing out NEW work until that night's earnings check has been dealt with. Anything already running finishes normally. It reopens on its own — when the check finishes, when it fails, or at midnight if the worker machine was off. Blank turns the quiet time off entirely. Node local time."],
+      ['earnings_run_at',     'text',   'Check earnings at (HH:MM)', 'When the nightly marketplace read is queued. Normally the same as the quiet time. Set both to a few minutes from now to watch the whole thing happen instead of waiting until tonight.'],
+      ['earnings_max_pages_per_run', 'number', 'Max pages per account per run', "Ceiling on how many ledger pages one account reads in one go. A normal night touches one or two; only a first-ever read walks a long history, and this stops that one account eating the whole quiet window. It picks up where it left off the next night on its own."],
     ],
     templates: [
       ['title_template',      'text',     'Listing title',      'Variables: {title} {letter} {index} {external_id} — plus {year} and {content_type} where the project has them (this one may not; check the Title List). {letter} is the per-image A/B/C suffix. Output is folded to what the marketplace accepts, automatically.'],
@@ -254,7 +260,10 @@
     } catch (e) {
       q('[data-funnel]').innerHTML =
         '<div class="muted">Could not load overview: ' + esc(e.message) + '</div>';
-      return;
+      // Reported to the caller, not just to the screen. The auto-refresh needs
+      // to KNOW this failed so it can back off; swallowing it here meant the
+      // timer kept firing every 3s at a server that was already struggling.
+      return false;
     }
     projectId = overview.project.id;
     renderFunnel();
@@ -268,6 +277,7 @@
 
     const modeSel = q('[data-greenlight-mode]');
     if (modeSel) modeSel.value = overview.greenlight_mode;
+    return true;
   }
 
   // ── Stopped on purpose ──────────────────────────────────────────────
@@ -1357,7 +1367,8 @@
               ? `<button class="btn btn-accent btn-tiny" data-acc-handover="${a.id}">HAND OVER TO…</button>`
               : `<button class="btn btn-error btn-tiny" data-acc-ban="${a.id}">MARK BANNED</button>`}
             ${(a.project_ids || []).length > 1
-              ? `<button class="btn btn-ghost btn-tiny" data-acc-detach="${a.id}">REMOVE FROM THIS PROJECT</button>`
+              ? `<button class="btn btn-ghost btn-tiny" data-acc-detach="${a.id}"
+                   title="This account also serves ${(a.project_ids || []).length - 1} other project(s), so it cannot be deleted from here — that would stop them uploading too. Remove it from each project first; the last one offers DELETE.">REMOVE FROM THIS PROJECT</button>`
               : `<button class="btn btn-error btn-tiny" data-acc-delete="${a.id}">DELETE</button>`}
           </div>
         </div>`;
@@ -2461,14 +2472,31 @@
   // Refresh the overview while it's the visible tab. Cadence adapts: 8s when
   // something is actually in flight so you can watch a batch move, 30s when
   // idle so an open tab isn't polling pointlessly all day.
-  let overviewTick = 0;
+  // ── Live-ish refresh ────────────────────────────────────────────────
+  //
+  // 3 seconds while you are actually looking at the overview, so the funnel
+  // moves by itself and you can watch a batch climb it. Two brakes, both
+  // deliberate:
+  //
+  //   · nothing at all while the tab is hidden or you are on another
+  //     section — an overview left open overnight would otherwise make
+  //     ~29,000 requests before morning, all of them unread
+  //   · on an error it backs right off instead of hammering a server that is
+  //     already unhappy, and returns to 3s the moment a request succeeds
+  let overviewFailures = 0;
   overviewTimer = setInterval(() => {
     const active = q('.pipe-tab.active');
     if (!active || active.dataset.section !== 'overview' || document.hidden) return;
-    const busy = overview && (overview.in_flight || []).length > 0;
-    overviewTick += 1;
-    if (busy || overviewTick % 4 === 0) loadOverview();
-  }, 8000);
+    // After a failure, only try every 4th tick (~12s) until one works.
+    if (overviewFailures && (Date.now() / 3000 | 0) % 4 !== 0) return;
+
+    // Never redraw underneath an open dialog. These panels are rebuilt from
+    // scratch on every refresh, so a redraw while you are reaching for a
+    // button moves the button — and at 3s that would happen constantly.
+    if (document.querySelector('.pipe-modal:not([hidden])')) return;
+
+    loadOverview().then((ok) => { overviewFailures = ok ? 0 : overviewFailures + 1; });
+  }, 3000);
 })();
 
 

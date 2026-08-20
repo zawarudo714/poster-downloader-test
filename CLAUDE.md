@@ -703,6 +703,17 @@ form field name, a header, an ID format:
    to this marketplace already. `grep` the settings map before writing a
    literal. Two copies of one fact are two chances to drift, and the copy
    that breaks is always the newer one, silently.
+
+   **The same applies to a value DERIVED in two places, and that version is
+   harder to spot** because neither copy looks like a hardcoded constant.
+   The Chrome profile folder was computed as "the account's setting, or this
+   default" where it launched the browser, and read as "the account's
+   setting" where it killed leftover browser processes. Accounts normally
+   have that setting blank, so the launcher used the default while the
+   cleaner saw an empty string and returned immediately — the one function
+   whose entire job was clearing a stuck profile had never run for any
+   account, for months. A fallback default belongs in ONE function that
+   everything calls, never inlined at each use.
 2. **Can I read it from the source at runtime?** Parsing the form off the
    login page beats hardcoding its action, because it survives a redesign.
 3. **Can I ask the owner?** He has the account open in a browser. One

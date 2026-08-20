@@ -1,1 +1,1 @@
-Earnings: ledger no longer stops on sales it already has, so payouts are read; balance stored and shown as the headline with a reconciliation check
+One Chrome profile per account keyed on id, cleaned before launch; chromedriver log reported on first failure; sale timestamps upgraded from the ledger; quiet-time settings editable; funnel auto-refreshes

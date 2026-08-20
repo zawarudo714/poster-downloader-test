@@ -9,6 +9,7 @@ log or diff to work it out — that costs far more to read than these lines.**
 If the top entry looks older than the work in the repo, the difference is
 what has not been deployed yet.
 
+- **2026-08-20 13:20** · `170bbb5d` · Earnings: ledger no longer stops on sales it already has, so payouts are read; balance stored and shown as the headline with a reconciliation check
 - **2026-08-20 11:41** · `7e857061` · Accounts shared across projects (ADD EXISTING); earnings read through the node's Chrome; nightly quiet window at 22:00 with a visible reason
 - **2026-08-17 19:57** · `9c11311a` · Earnings reads its URLs from settings instead of hardcoded guesses — sign-in uses the same login_url the uploader does
 - **2026-08-17 19:51** · `e266574e` · Earnings: read the real sign-in form instead of a guessed endpoint, and report what the page actually said

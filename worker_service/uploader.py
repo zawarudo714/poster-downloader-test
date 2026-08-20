@@ -133,8 +133,8 @@ def _startup_error(original: Exception, profile_dir: str,
         hints.append("a stale SingletonLock exists in the profile — a previous "
                      "Chrome is still holding it, or crashed while holding it")
 
-    hints.append("a fresh profile was tried too and also failed, so this is "
-                 "Chrome or chromedriver itself, not the saved session")
+    hints.append("the profile was cleared and rebuilt and it STILL failed, so "
+                 "this is Chrome or chromedriver itself, not the saved session")
     hints.append("verify by hand with: "
                  f'& "{found or "chrome.exe"}" --headless=new --disable-gpu '
                  f'--no-sandbox --dump-dom https://example.com')
@@ -258,6 +258,21 @@ class MarketplaceUploader:
         self.client = client
         self.log = log
         self.job_id = job_id
+
+        # ── The profile folder, worked out ONCE ─────────────────────────
+        #
+        # This used to be derived in start() and read raw in _kill_orphans(),
+        # so when an account had no `chrome_profile_dir` set — the normal case
+        # — the launcher used a sensible default while the orphan sweeper saw
+        # a blank string and gave up. The one piece of code whose whole job is
+        # to clear a stuck profile had never run for any account.
+        #
+        # Keyed on the account ID, not its name. A rename used to silently
+        # create a second profile and orphan the first, and two accounts that
+        # ever shared a name would have shared one folder — including a new
+        # account reusing a banned one's name, which would have inherited the
+        # banned account's cookies.
+        self.profile_dir = self._profile_path()
 
         self.selectors: dict[str, str] = account["selectors"]
         self.timings: dict[str, float] = account["timings"]
@@ -473,13 +488,14 @@ class MarketplaceUploader:
         runs skip the login form entirely. It's disposable: wipe it and the
         next run logs in again.
         """
-        # Account names are free text ("TEST WnB"), and chromedriver is
-        # unreliable with spaces in --user-data-dir. Slugify rather than pass
-        # the raw name through.
-        slug = re.sub(r"[^A-Za-z0-9_-]+", "_", self.account["name"]).strip("_") or "account"
-        profile_dir = (self.account.get("chrome_profile_dir")
-                       or str(Path(self.config.get("temp_dir", "C:/faa/temp"))
-                              / "profiles" / slug))
+        profile_dir = self.profile_dir
+        slug = Path(profile_dir).name
+
+        # Anything still holding this profile is cleared BEFORE launching, not
+        # only when a run ends. The orphan is left behind by the run that
+        # crashed; sweeping on the way out never helps the run that inherits
+        # the mess.
+        self._kill_orphans()
         Path(profile_dir).mkdir(parents=True, exist_ok=True)
 
         # Fail with something actionable rather than chromedriver's stack dump.
@@ -550,54 +566,50 @@ class MarketplaceUploader:
         try:
             self.driver = _launch(options, service)
         except WebDriverException as first_error:
-            # ── One retry on a throwaway profile ─────────────────────────
+            # ── Clear the profile and try the SAME path again ─────────────
             #
-            # The persistent profile is an OPTIMISATION — it carries the
-            # session cookie so most runs skip the login form. It is
-            # explicitly disposable, so it must never be able to stop
-            # uploading altogether. A profile left inconsistent by a hard
-            # reboot (which is exactly how this box gets restarted) is the
-            # most likely cause of an instant exit, and retrying without it
-            # both proves that and gets the night's work out.
-            # Name the path. Without it there is no way to tell "the folder
-            # is wrong" from "Chrome itself is broken", and this failed on
-            # every single run for days while the message said nothing about
-            # WHERE it was trying to work.
-            self.emit(f"Chrome would not start on {profile_dir} "
-                      f"({first_error.__class__.__name__}) — retrying on the "
-                      f"fallback profile", level="warn")
-            try:
-                spare = Path(self.config.get("temp_dir", "C:/faa/temp")) / "profiles" / f"{slug}_fallback"
-                # NOT wiped. This is the profile that actually works, so it is
-                # the one worth keeping: it holds the marketplace session and
-                # the cookie proving we already cleared the bot check. An
-                # earlier version deleted it before every retry, which meant a
-                # full sign-in on every single run and a challenge clearance
-                # that never persisted.
-                spare.mkdir(parents=True, exist_ok=True)
+            # There is deliberately no second folder any more. A separate
+            # "_fallback" profile meant two directories per account, an orphan
+            # whenever a name changed, and a saved session that was never the
+            # one actually in use. The profile is disposable by design, so the
+            # honest recovery is to throw this one away and rebuild it here.
+            #
+            # The chromedriver log is reported on THIS failure, not only when
+            # the retry also fails. Chromedriver's own advice is "examine the
+            # verbose log" and until now a successful retry threw that log
+            # away — which is why the same failure repeated for days with no
+            # evidence of its cause.
+            tail = _tail(driver_log, 12)
+            self.emit(
+                f"Chrome would not start on {profile_dir} "
+                f"({first_error.__class__.__name__}) — clearing that profile "
+                f"and trying again."
+                + (f"\n--- chromedriver said ---\n{tail}" if tail else ""),
+                level="warn",
+            )
 
-                retry_opts = _clone_options(options, str(spare))
-                self.driver = _launch(retry_opts, service)
-
-                # ── Actually throw the bad profile away ──────────────────
-                #
-                # An earlier version of this message said the saved profile
-                # "will be rebuilt on the next login" and then rebuilt
-                # nothing, so every single run paid the failed launch, the
-                # retry and a full login — forever, while claiming to have
-                # recovered. Deleting it is what makes that sentence true:
-                # the profile is disposable by design, and the next run
-                # recreates it from scratch and gets its cookie back.
-                import shutil
-                shutil.rmtree(profile_dir, ignore_errors=True)
+            import shutil
+            shutil.rmtree(profile_dir, ignore_errors=True)
+            leftovers = list(Path(profile_dir).glob("*")) if Path(profile_dir).exists() else []
+            if leftovers:
+                # Half-deleted profiles are self-perpetuating: Chrome refuses
+                # the remains, we delete what we can, and the same wreckage is
+                # there next run. Say so rather than failing the same way
+                # every night in silence.
                 self.emit(
-                    f"Started on the fallback profile ({spare}), which is kept "
-                    f"between runs. The configured one ({profile_dir}) was "
-                    f"unusable and has been cleared so it can rebuild — if this "
-                    f"warning repeats every run, that path is the problem: "
-                    f"check the account's 'Chrome profile dir'.",
-                    level="warn",
+                    f"Could not fully clear {profile_dir} — {len(leftovers)} "
+                    f"item(s) are locked. Something still has it open; the "
+                    f"next run will hit the same wall. Delete the folder by "
+                    f"hand, or reboot the machine.",
+                    level="error",
                 )
+            Path(profile_dir).mkdir(parents=True, exist_ok=True)
+
+            try:
+                self.driver = _launch(_clone_options(options, profile_dir), service)
+                self.emit("Started on a rebuilt profile — you will see one "
+                          "extra sign-in this run, then it is back to normal.",
+                          level="warn")
             except WebDriverException:
                 raise _startup_error(first_error, profile_dir, driver_log)
 
@@ -642,8 +654,24 @@ class MarketplaceUploader:
         "google-chrome", "google-chrome-stable",   # Linux packaging variants
     )
 
+    def _profile_path(self) -> str:
+        """
+        Where this account's Chrome profile lives. One answer, one place.
+
+        An explicit `chrome_profile_dir` on the account still wins. Otherwise
+        it is <temp_dir>/profiles/<id>_<name>, and the ID is what makes it
+        stable: names get renamed and can be reused after a ban, IDs cannot.
+        """
+        configured = (self.account.get("chrome_profile_dir") or "").strip()
+        if configured:
+            return configured
+        slug = re.sub(r"[^A-Za-z0-9_-]+", "_",
+                      self.account.get("name") or "").strip("_") or "account"
+        return str(Path(self.config.get("temp_dir", "C:/faa/temp"))
+                   / "profiles" / f"{self.account.get('id', 0)}_{slug}")
+
     def _kill_orphans(self) -> None:
-        profile_dir = self.account.get("chrome_profile_dir")
+        profile_dir = self.profile_dir
         if not profile_dir:
             return
         try:

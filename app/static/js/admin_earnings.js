@@ -495,7 +495,10 @@
   reloadAll();
   loadUnmatched();
 
-  // Refreshed on its own so the quiet time can be watched flipping. Cheap:
-  // one small query, and only while this page is open.
-  setInterval(loadSchedule, 20000);
+  // Refreshed on its own so the quiet time can be watched flipping — 3s to
+  // match the pipeline funnel, and skipped entirely while the tab is hidden
+  // so a page left open overnight is not polling for nothing.
+  setInterval(function () {
+    if (!document.hidden) loadSchedule();
+  }, 3000);
 })();

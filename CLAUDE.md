@@ -435,6 +435,30 @@ around afterwards, which means every miss costs him a deploy cycle and an
 evening. So the burden is on you to make your method visible BEFORE it is
 expensive, and to speak in plain terms rather than implementation detail.
 
+**These rules are a NET, not a checklist.** Each one was written after a real
+defect, but the point is never the defect — it is the SHAPE. Before starting
+anything, read the shapes below and ask which could apply here, including the
+ones that look like they belong to a different part of the system. A rule
+learned from a deleted HTML panel is what catches a broken JS hook; a rule
+learned from an upload stall is what catches a stuck backup. If a rule seems
+irrelevant, say why in one line rather than skipping it silently.
+
+| # | The shape it catches | Related |
+|---|---|---|
+| 1 | Built without enumerating what is already on the screen | 3b |
+| 2 | Fixed the asked-for thing, left its neighbours broken | 1, 6 |
+| 3 | Said "verified" without naming a test | 3c |
+| 3b | Reasoned from where a thing is SHOWN, not what depends on it | 3d, 6 |
+| 3c | Trusted the edit you meant to make over the file that exists | 3, 5 |
+| 3c-bis | Invented an external value instead of looking it up or asking | 3c-ter |
+| 3c-ter | Built a second path to something that already works | 3b, 3d |
+| 3d | Debugged the screen instead of the machine doing the work | 3b, 8 |
+| 4 | Shipped without saying what else could break | 2 |
+| 5 | Added a warning where the state should have been impossible | 8 |
+| 6 | Correct for two projects, wrong for the third | 1, 3b |
+| 7 | Fixed a bug and left no rule behind | all |
+| 8 | Claimed work with an exit that reports nothing | 3d, 5 |
+
 ### 1. Audit before you build
 
 Anything that touches a screen, or a mechanism more than one thing uses,
@@ -591,6 +615,47 @@ API, an OS behaviour — the code must either read the value at runtime, take
 it from a setting, or be told it. Inventing it is not an option, and neither
 is inferring it from a plausible-looking pattern.**
 
+### 3c-ter. If something in this system ALREADY does it, reuse that path
+
+The rule above says do not invent a value. This one is bigger: **do not
+invent a mechanism either.** Before writing a new way to talk to anything —
+a marketplace, an OS, a machine — find what already talks to it and ask why
+that would not serve.
+
+The incident, and it is the same evening as 3c-bis: the earnings reader was
+written as a fresh `requests` session logging into FineArtAmerica. It got
+HTTP 403 with "Verify Visitor — Are you human?". Meanwhile the uploader logs
+into the SAME account successfully every single day, because it arrives in a
+real browser on the node. The proven path was sitting right there. Three
+deploy cycles were spent making a second, unproven path fail in new ways.
+
+The questions, in order:
+
+1. **What already does this successfully?** Name it. If the answer is "the
+   uploader", the design is "do what the uploader does", not "do the same
+   thing a different way".
+2. **Why would that path not work here?** There must be a real reason —
+   cost, a machine that is not running, a capability it lacks. "It felt
+   heavier" is not a reason. A 150MB browser you ALREADY RUN costs nothing
+   extra to reuse.
+3. **What is the untested assumption?** Here it was "the pages are plain
+   HTML so an HTTP client is enough", which was true of the PAGES and false
+   of the LOGIN. State it, and test that specific thing first, before
+   building everything downstream of it.
+
+The general form, which links this to 3b and 3d: **a capability belongs to
+whatever already has it.** 3b says a shared fact must be reported where it
+is shared. 3d says a symptom belongs to the machine that does the work.
+This one says a new feature must be built on the machine that can already
+reach the thing — and for anything on the far side of a bot wall, a login
+wall, or a browser check, that machine is the node.
+
+**A corollary worth stating on its own: when the owner says "just copy how
+X does it", that is not a shortcut, it is usually the correct architecture.**
+He can see the working path from outside the code. If the answer is "that
+would be awkward because…", the awkwardness is the thing to fix, not a
+reason to build a second path.
+
 ### 3d. A symptom on one screen is not a fault in that screen's code
 
 "The uploads stopped" is a statement about a PIPELINE, and a pipeline runs
@@ -654,6 +719,23 @@ problem.
 **The rule goes in the section it belongs to, and it names the real incident
 in one line.** The incident is what makes it believable enough to obey. A
 rule with no story behind it reads like generic advice and gets skipped.
+
+**Three things every new rule must do**, because the owner has asked for a
+net rather than a list of anecdotes:
+
+1. **Generalise past its own domain.** Write it so it fires on a DIFFERENT
+   subsystem. 3c came from HTML and its real target is any structural edit;
+   3c-ter came from a marketplace login and its real target is any new path
+   to anything already reachable.
+2. **Link to the rules it neighbours**, and add the row to the table at the
+   top of this section. Defects arrive in families — the same evening
+   produced 3c-bis (invented a URL) and 3c-ter (invented a whole mechanism),
+   and either rule alone would have let the other happen.
+3. **Say what the untested assumption was.** Nearly every entry here is a
+   case of one unexamined belief — "the panel ends here", "the form field is
+   called that", "plain HTTP is enough" — carrying a large build on top of
+   it. Naming the assumption is what lets the next session test it FIRST,
+   in five minutes, instead of last, after three deploys.
 
 ### 8. Claimed work must always end in a reported state
 

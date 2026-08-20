@@ -301,10 +301,33 @@
     }
   }
 
+  // The nightly decision, spelled out. Refreshed on a timer so you can watch
+  // it flip at the quiet time rather than reloading and hoping.
+  async function loadSchedule() {
+    var el = q('[data-schedule-line]');
+    try {
+      var d = await getJSON(API + '/schedule');
+      var s = d.quiet || {};
+      if (!s.enabled) {
+        el.textContent = 'Quiet time off · checks run at ' + esc(d.run_at || '—')
+          + ' · new work: ALLOWED';
+        return;
+      }
+      el.textContent =
+        'Now ' + s.now +
+        ' · quiet from ' + s.starts_at +
+        " · tonight's check: " + (s.done_today ? 'done' : 'not done yet') +
+        ' · new work: ' + (s.blocking ? 'BLOCKED' : 'ALLOWED');
+    } catch (e) {
+      el.textContent = 'Could not read the schedule: ' + e.message;
+    }
+  }
+
   function reloadAll() {
     loadOverview();
     loadDesigns();
     loadEntries();
+    loadSchedule();
   }
 
   // ── Events ───────────────────────────────────────────────────────────
@@ -351,10 +374,57 @@
       loadEntries();
       return;
     }
+    if (t.dataset.action === 'rearm') {
+      t.disabled = true;
+      postJSON(API + '/rearm', {})
+        .then(function () { loadSchedule(); })
+        .catch(function (e) { alert('Failed: ' + e.message); })
+        .then(function () { t.disabled = false; });
+      return;
+    }
+    if (t.dataset.action === 'toggle-add') {
+      var box = q('[data-add-account]');
+      box.hidden = !box.hidden;
+      return;
+    }
+    if (t.dataset.action === 'create-account') { createAccount(t); return; }
     if (t.dataset.action === 'reload-unmatched') { loadUnmatched(); return; }
     if (t.dataset.action === 'read-now') { readNow(t, null); return; }
     if (t.dataset.readAccount) { readNow(t, Number(t.dataset.readAccount)); }
   });
+
+  // Creates an account attached to NO project — nothing will ever be
+  // uploaded to it. Posts to the same endpoint the Upload tab uses, with
+  // attach_to_project false, so there is one way to create an account rather
+  // than two that can drift apart.
+  async function createAccount(button) {
+    var status = q('[data-add-status]');
+    var body = {
+      name: q('[data-new-name]').value.trim(),
+      target_site: q('[data-new-site]').value.trim().toLowerCase(),
+      email: q('[data-new-email]').value.trim(),
+      password: q('[data-new-password]').value,
+      attach_to_project: false
+    };
+    if (!body.name || !body.email || !body.password || !body.target_site) {
+      status.textContent = 'Name, marketplace, email and password are all needed.';
+      return;
+    }
+    button.disabled = true;
+    status.textContent = 'Saving…';
+    try {
+      await postJSON('/admin/pipeline/api/accounts', body);
+      status.textContent = 'Added.';
+      q('[data-new-name]').value = '';
+      q('[data-new-email]').value = '';
+      q('[data-new-password]').value = '';
+      loadOverview();
+    } catch (e) {
+      status.textContent = 'Failed: ' + e.message;
+    } finally {
+      button.disabled = false;
+    }
+  }
 
   async function readNow(button, accountId) {
     var panel = q('[data-read-panel]');
@@ -388,4 +458,8 @@
 
   reloadAll();
   loadUnmatched();
+
+  // Refreshed on its own so the quiet time can be watched flipping. Cheap:
+  // one small query, and only while this page is open.
+  setInterval(loadSchedule, 20000);
 })();

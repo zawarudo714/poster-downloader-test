@@ -687,6 +687,41 @@ class WorkerNode(Base):
     created_at    = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class AccountProject(Base):
+    """
+    Which projects an upload account serves. An account exists ONCE.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY A LINK TABLE AND NOT A COLUMN
+    ════════════════════════════════════════════════════════════════════════
+    One FineArtAmerica account carries the movie posters AND the MUSIK
+    artwork. With a single `project_id` the only way to do that was to
+    create the same account twice — two rows, two Chrome profiles, two sets
+    of credentials to keep in step, and a daily upload limit that the
+    marketplace applies to ONE account being counted as though it were two.
+    That last one is the dangerous part: two rows each believing they had
+    100 uploads a day would quietly go over the real limit.
+
+    ════════════════════════════════════════════════════════════════════════
+    NO ROWS MEANS NO PROJECTS — NOT ALL OF THEM
+    ════════════════════════════════════════════════════════════════════════
+    This is the OPPOSITE of `user_projects`, where a worker with no rows is
+    unrestricted. Read that convention across to here and every earn-only
+    account would silently become an upload target for every project.
+
+    An account with no rows is one nothing is uploaded to — the TeePublic
+    accounts that just sit there earning. It still appears on Earnings,
+    because reading revenue and uploading are different capabilities of the
+    same account.
+    """
+    __tablename__ = "account_projects"
+
+    account_id  = Column(Integer, ForeignKey("upload_accounts.id"), primary_key=True)
+    project_id  = Column(Integer, ForeignKey("projects.id"), primary_key=True)
+    attached_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    attached_by = Column(String(64), nullable=True)
+
+
 class UploadAccount(Base):
     """
     A marketplace account the pipeline uploads into (replaces faa_config.json).
@@ -703,11 +738,11 @@ class UploadAccount(Base):
     __tablename__ = "upload_accounts"
 
     id                = Column(Integer, primary_key=True)
-    # NULLABLE on purpose. An account exists ONCE and may belong to no
-    # project at all — the TeePublic accounts earn passively with nothing
-    # uploaded to them, and an account added from the Earnings tab has no
-    # project until you attach it to one. Uploading and revenue-reading are
-    # capabilities of one account, not two different objects.
+    # LEGACY. Which projects this account serves now lives in
+    # `account_projects`, because one account can carry several. This column
+    # is kept only so old rows survive the upgrade — it is backfilled into
+    # the link table on startup and NOTHING should scope a query by it.
+    # Use pipeline.accounts_for_project() / project_ids_for_account().
     project_id        = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
     name              = Column(String(64), nullable=False)
     target_site       = Column(String(32), nullable=False, default="faa")

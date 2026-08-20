@@ -100,176 +100,220 @@ def readable_accounts(db: Session) -> list[UploadAccount]:
     ]
 
 
-def read_account(db: Session, account: UploadAccount,
-                 *, on_log: Optional[Callable[[str], None]] = None) -> dict:
+def queue_reads(db: Session, *, account_id: Optional[int] = None,
+                requested_by: str = "scheduler") -> dict:
     """
-    Read one account and store whatever is new.
+    Ask the NODE to read the marketplaces. One job per account.
 
-    Incremental by construction: both readers stop at the first row already
-    stored, so a nightly run touches one page and the FIRST run walks to the
-    end — which is the backfill, paid once, with no separate import step to
-    remember.
+    ════════════════════════════════════════════════════════════════════════
+    WHY THE NODE AND NOT THIS SERVER
+    ════════════════════════════════════════════════════════════════════════
+    FineArtAmerica answers this server with "Verify Visitor — Are you human?".
+    It does not answer the node that way, because the node arrives in a real
+    Chrome carrying the account's own profile — the one that cleared that
+    challenge once and still holds the cookie. The uploader has been logging
+    into these accounts successfully every day all along; this reuses that
+    exact path rather than inventing a second one.
+
+    ════════════════════════════════════════════════════════════════════════
+    ONE JOB PER ACCOUNT
+    ════════════════════════════════════════════════════════════════════════
+    Not one job for all of them. A wrong password, a hung page or a banned
+    account must cost you that one account's figures, not the other
+    ninety-nine — and each one reports its own outcome to the dashboard
+    instead of disappearing into a single pass/fail.
+
+    Queuing is cheap and idempotent: an account that already has a queued
+    read does not get a second one, so a node that was off for two days comes
+    back to one job per account rather than six.
     """
-    from ..pipeline import decrypt_secret, get_setting, resolve_project
+    from ..pipeline import create_job
+    from ..models import PipelineJob
 
-    say = on_log or (lambda m: log.info("%s: %s", account.name, m))
+    accounts = readable_accounts(db)
+    if account_id:
+        accounts = [a for a in accounts if a.id == account_id]
+
+    already = {
+        int(json.loads(j.payload_json or "{}").get("account_id") or 0)
+        for j in db.query(PipelineJob)
+                   .filter(PipelineJob.kind == "earnings_read",
+                           PipelineJob.status.in_(("queued", "running"))).all()
+    }
+
+    queued, skipped = [], []
+    for account in accounts:
+        if account.id in already:
+            skipped.append(account.name)
+            continue
+        create_job(db, kind="earnings_read",
+                   payload={"account_id": account.id},
+                   requested_by=requested_by)
+        queued.append(account.name)
+
+    from ..pipeline import set_setting
+    set_setting(db, "earnings_last_run_at", datetime.utcnow().isoformat(),
+                by=requested_by)
+    db.commit()
+    return {"queued": queued, "already_queued": skipped,
+            "accounts": len(queued)}
+
+
+def page_urls(db: Session, account: UploadAccount) -> list[dict]:
+    """
+    The pages the node should fetch, in the order it should fetch them.
+
+    Sales first: that page carries the artwork name, the product and each
+    order's detail panel inline, so a sale costs no extra request. The ledger
+    follows for the things only it has — payouts, refunds, running balance.
+    """
+    from ..pipeline import get_setting, project_ids_for_account, resolve_project
+
+    attached = project_ids_for_account(db, account.id)
+    project = resolve_project(db, attached[0] if attached else None)
+    return [
+        {"kind": "sales", "url": get_setting(db, "earnings_sales_url", project=project)},
+        {"kind": "ledger", "url": get_setting(db, "earnings_balance_url", project=project)},
+    ]
+
+
+def store_page(db: Session, *, account: UploadAccount, kind: str,
+               page: int, url: str, html: str) -> dict:
+    """
+    Parse one page the node just fetched, store what is new, say whether to
+    continue.
+
+    The stop rule lives HERE because it needs the database: rows are
+    newest-first, so the first one we already hold means everything below it
+    is already stored. The node cannot know that, which is why it asks after
+    every page rather than being told a page count up front.
+
+    Returns {"more": bool, "next_url": str|None, "stored": int}.
+    """
     marketplace = (account.target_site or "").lower()
     reader = READERS.get(marketplace)
     if reader is None:
-        return {"account": account.name, "skipped": "no reader for this marketplace"}
-
-    # ── Where to look comes from SETTINGS, never from this module ────────
-    #
-    # The sign-in page is `login_url` out of the selectors map — the exact
-    # value the uploader signs in with. One account has one login page, and
-    # a second copy of it here would drift the first time FineArtAmerica
-    # moved it: the uploader would keep working while earnings silently
-    # returned 403, which is precisely what happened when this was
-    # hardcoded.
-    project = resolve_project(db, account.project_id)
-    selectors = dict(get_setting(db, "selectors", project=project))
-    if account.selectors_json:
-        try:
-            selectors.update(json.loads(account.selectors_json))
-        except (TypeError, ValueError):
-            pass
-
-    login_url = selectors.get("login_url")
-    if not login_url:
-        return {"account": account.name,
-                "skipped": "no login_url configured for this account"}
-    balance_url = get_setting(db, "earnings_balance_url", project=project)
-    sales_url = get_setting(db, "earnings_sales_url", project=project)
+        return {"more": False, "next_url": None, "stored": 0,
+                "note": "no reader for this marketplace"}
 
     known = {
         k for (k,) in db.query(LedgerEntry.dedupe_key)
                         .filter(LedgerEntry.account_id == account.id).all()
     }
-    is_known = known.__contains__
 
-    session = reader.login(account.email, decrypt_secret(account.password_enc),
-                           login_url=login_url, verify_url=balance_url)
-
-    # Sales FIRST. That page carries the artwork name, the product and the
-    # order's detail panel inline, so reading it costs one request per page
-    # rather than one per order. The ledger is read afterwards for the things
-    # only it has: payouts, refunds, and the running balance.
-    sales = reader.read_sales(session, is_known=is_known, sales_url=sales_url)
-    say(f"sales: {len(sales.rows)} new over {sales.pages_read} page(s)")
-
-    ledger = reader.read_ledger(session, is_known=is_known,
-                                balance_url=balance_url)
-    say(f"ledger: {len(ledger.rows)} new over {ledger.pages_read} page(s)")
+    if kind == "sales":
+        rows, _total = reader.parse_sales_page(html)
+    else:
+        rows, _balance, _total = reader.parse_balance_page(html)
 
     index = MatchIndex(db, marketplace)
     stored = matched = 0
+    hit_known = False
 
-    for row in list(sales.rows) + list(ledger.rows):
+    for row in rows:
         if row.dedupe_key in known:
-            continue                      # the two pages overlap on sales
+            # Newest-first, so this is the end of what is new.
+            hit_known = True
+            break
         known.add(row.dedupe_key)
-
-        entry = LedgerEntry(
-            account_id=account.id,
-            marketplace=marketplace,
-            occurred_at=row.occurred_at,
-            entry_type=row.entry_type,
-            remote_order_id=row.order_id,
-            description=row.description,
-            artwork_name=row.artwork_name,
-            product=row.product,
-            credit=row.credit,
-            debit=row.debit,
-            balance_after=row.balance_after,
-            dedupe_key=row.dedupe_key,
-        )
-        detail = getattr(row, "detail", None)
-        if detail is not None:
-            entry.website = detail.website
-            entry.quantity = detail.quantity
-            entry.gross_price = detail.gross_price
-            entry.discount = detail.discount
-            entry.buyer_location = detail.buyer_location
-            entry.product = entry.product or detail.product
-            entry.details_read = 1
-
+        entry = _entry_from_row(account, marketplace, row)
         db.add(entry)
         stored += 1
         if match_entry(db, entry, index):
             matched += 1
 
     account.last_earnings_read_at = datetime.utcnow()
-    db.flush()
-
-    return {
-        "account": account.name,
-        "marketplace": marketplace,
-        "stored": stored,
-        "matched": matched,
-        "unmatched": stored - matched,
-        "balance": ledger.current_balance,
-        "pages": sales.pages_read + ledger.pages_read,
-    }
-
-
-def run_nightly(db: Session, *, on_log: Optional[Callable[[str], None]] = None) -> dict:
-    """
-    Read every readable account.
-
-    One account failing must not stop the others — a wrong password on one
-    marketplace is not a reason to have no figures at all. Failures are
-    collected and reported rather than raised.
-    """
-    say = on_log or (lambda m: log.info("%s", m))
-    results, errors = [], []
-
-    for account in readable_accounts(db):
-        try:
-            say(f"reading {account.name}…")
-            results.append(read_account(db, account, on_log=say))
-            db.commit()
-        except Exception as e:
-            db.rollback()
-            msg = f"{account.name}: {type(e).__name__}: {e}"
-            say(msg)
-            errors.append(msg)
-
-    from ..pipeline import set_setting
-    set_setting(db, "earnings_last_run_at", datetime.utcnow().isoformat(),
-                by="scheduler")
+    # Committed per PAGE, not per run. A node that dies mid-backfill keeps
+    # everything it already read, and tomorrow resumes rather than restarts.
     db.commit()
 
+    more = bool(rows) and not hit_known
+    base = url.split("?")[0]
     return {
-        "accounts": len(results), "errors": errors,
-        "stored": sum(r.get("stored", 0) for r in results),
-        "results": results,
+        "more": more,
+        "next_url": f"{base}?page={page + 1}" if more else None,
+        "stored": stored,
+        "matched": matched,
     }
+
+
+def _entry_from_row(account: UploadAccount, marketplace: str, row) -> LedgerEntry:
+    """One parsed row into a stored row. Shared by both read paths."""
+    entry = LedgerEntry(
+        account_id=account.id,
+        marketplace=marketplace,
+        occurred_at=row.occurred_at,
+        entry_type=row.entry_type,
+        remote_order_id=row.order_id,
+        description=row.description,
+        artwork_name=row.artwork_name,
+        product=row.product,
+        credit=row.credit,
+        debit=row.debit,
+        balance_after=row.balance_after,
+        dedupe_key=row.dedupe_key,
+    )
+    detail = getattr(row, "detail", None)
+    if detail is not None:
+        entry.website = detail.website
+        entry.quantity = detail.quantity
+        entry.gross_price = detail.gross_price
+        entry.discount = detail.discount
+        entry.buyer_location = detail.buyer_location
+        entry.product = entry.product or detail.product
+        entry.details_read = 1
+    return entry
 
 
 def run_daily_if_due(db: Session) -> Optional[dict]:
     """
-    The nightly read, once per LOCAL day, called from the scheduler tick.
+    Queue tonight's reads, once per LOCAL day, from the scheduler tick.
 
-    Guarded by a date marker rather than by a clock time. The loop ticks
-    every minute, so the read happens on the first tick after local midnight
-    — and if the server was down at midnight it happens on the first tick
-    after it comes back, instead of being silently skipped for a day. Same
-    pattern as the auto-backup beside it, for the same reason.
+    Two guards, and they do different jobs:
+
+      · the CLOCK — not before `earnings_run_at`
+      · the DAY MARKER — not twice in one local day
+
+    The marker is set BEFORE the work rather than after. A failure must not
+    leave it unset, or every tick for the rest of the day tries again —
+    sixty sign-in attempts an hour is how a marketplace account gets locked.
+    One attempt a day, and the error is visible on the page.
+
+    It is also what reopens the quiet window: whether the read succeeded or
+    failed, the day has been dealt with, so new work starts flowing again
+    instead of waiting for a success that may never come.
     """
-    from ..pipeline import get_setting, set_setting
-    from ..timeutil import local_today
+    from ..pipeline import _parse_hhmm, get_setting, set_setting
+    from ..timeutil import local_now, local_today
 
     today = local_today().isoformat()
     if str(get_setting(db, "earnings_last_run_day") or "") == today:
         return None
 
-    # Written BEFORE the work, not after. A read that throws must not leave
-    # the marker unset, or every tick for the rest of the day retries it —
-    # sixty login attempts an hour against a marketplace is how an account
-    # gets locked. One attempt a day, and the error is visible on the page.
+    run_at = _parse_hhmm(get_setting(db, "earnings_run_at"))
+    if run_at:
+        now = local_now()
+        if (now.hour, now.minute) < run_at:
+            return None
+
     set_setting(db, "earnings_last_run_day", today, by="scheduler")
     db.commit()
-    return run_nightly(db)
+    return queue_reads(db, requested_by="scheduler")
+
+
+def rearm_today(db: Session, *, by: str = "admin") -> None:
+    """
+    Forget that tonight's read happened, so the schedule can fire again.
+
+    Purely for testing the timed path: without it you get one attempt a day
+    and no way to try the real code again until tomorrow. Re-reading is
+    harmless — every row is matched against what is already stored, so a
+    second read simply finds nothing new.
+    """
+    from ..pipeline import set_setting
+
+    set_setting(db, "earnings_last_run_day", "", by=by)
+    db.commit()
 
 
 # ═══════════════════════════════════════════════════════════════════════════

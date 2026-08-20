@@ -1129,6 +1129,75 @@ class UploadStage:
 
     # ── Test hook ──────────────────────────────────────────────────────────
 
+    def read_earnings(self, job_id: int, payload: dict) -> dict:
+        """
+        Fetch an account's ledger pages in the SAME browser the uploader uses.
+
+        ════════════════════════════════════════════════════════════════════
+        WHY THIS RUNS HERE AND NOT ON THE SERVER
+        ════════════════════════════════════════════════════════════════════
+        The server tried to read these pages with a plain HTTP client and got
+        "Verify Visitor — Are you human?". This node does not, because it
+        arrives in a real Chrome carrying the account's own profile — the
+        same profile that already cleared that challenge once and holds the
+        cookie proving it. Uploading and reading revenue are two things one
+        logged-in browser can do; they were never two problems.
+
+        ════════════════════════════════════════════════════════════════════
+        THE SERVER DECIDES WHEN TO STOP
+        ════════════════════════════════════════════════════════════════════
+        "Stop at the first row we already have" needs the database, so this
+        loop asks after every page instead of guessing a page count. That
+        also means a page is STORED the moment it is read: if this node dies
+        halfway through a first-time backfill, everything up to that point is
+        already saved and tomorrow simply carries on.
+
+        This node parses nothing. It fetches HTML and posts it back.
+        """
+        account = payload["account"]
+        settings = payload["settings"]
+        pages = payload.get("pages") or []
+        max_pages = int(payload.get("max_pages") or 25)
+
+        uploader = MarketplaceUploader(
+            account=account, settings=settings, config=self.config,
+            client=self.client, log=self.log, job_id=job_id,
+        )
+
+        fetched = 0
+        try:
+            # Same three exits as run_batch (rule: claimed work must always
+            # end in a reported state). A failure here is reported against
+            # the JOB, which is what the dashboard is watching.
+            uploader.start()
+            uploader.login()
+
+            for spec in pages:
+                kind = spec.get("kind") or "page"
+                url = spec.get("url")
+                for page_no in range(1, max_pages + 1):
+                    uploader.emit(f"{kind}: page {page_no}",
+                                  progress=min(95, 5 + fetched * 4))
+                    uploader.driver.get(url)
+                    html = uploader.driver.page_source
+                    fetched += 1
+
+                    verdict = self.client.post(
+                        "/earnings/page",
+                        {"job_id": job_id, "account_id": account["id"],
+                         "kind": kind, "page": page_no, "url": url,
+                         "html": html},
+                    )
+                    if not verdict.get("more"):
+                        break
+                    url = verdict.get("next_url")
+                    if not url:
+                        break
+        finally:
+            uploader.stop()
+
+        return {"pages_fetched": fetched, "account": account["name"]}
+
     def test_upload(self, job_id: int, payload: dict) -> dict:
         """
         Walk exactly one image through the whole flow, phase by phase.

@@ -417,6 +417,74 @@ def upload_quota(
 #  JOBS — batch bookkeeping and Test & Debug
 # ═══════════════════════════════════════════════════════════════════════════
 
+@router.post("/earnings/page")
+def earnings_page(
+    payload: dict = Body(...),
+    node: WorkerNode = Depends(require_node),
+    db: Session = Depends(get_db),
+):
+    """
+    One page of a marketplace ledger, as the node's browser saw it.
+
+    The node fetches and posts; this parses, stores and answers whether to
+    keep going. The stop rule ("the first row we already have") needs the
+    database, so it has to be decided here — which is also why the node asks
+    after every page instead of being handed a page count it would have to
+    guess.
+
+    Committed per page, so a node that dies halfway through a first-ever read
+    keeps everything up to that point and tomorrow carries on rather than
+    starting again.
+    """
+    _require_capability(node, "upload")
+    from ..earnings import service as earnings_service
+
+    account = db.query(UploadAccount).filter_by(
+        id=payload.get("account_id")).first()
+    if account is None:
+        raise HTTPException(404, "Account not found.")
+
+    html = payload.get("html") or ""
+    if not html.strip():
+        raise HTTPException(400, "Empty page.")
+
+    try:
+        result = earnings_service.store_page(
+            db, account=account,
+            kind=(payload.get("kind") or "ledger"),
+            page=int(payload.get("page") or 1),
+            url=payload.get("url") or "",
+            html=html,
+        )
+    except Exception as e:
+        # Reported rather than raised: a parsing failure on page 7 must not
+        # look to the node like a network fault, and the job log is where the
+        # admin will read it.
+        db.rollback()
+        job_id = payload.get("job_id")
+        if job_id:
+            job = db.query(PipelineJob).filter_by(id=int(job_id)).first()
+            if job is not None:
+                P.append_job_log(db, job,
+                                 f"Could not read page {payload.get('page')}: "
+                                 f"{type(e).__name__}: {e}", level="error")
+                db.commit()
+        return JSONResponse({"ok": False, "more": False,
+                             "error": f"{type(e).__name__}: {e}"})
+
+    job_id = payload.get("job_id")
+    if job_id:
+        job = db.query(PipelineJob).filter_by(id=int(job_id)).first()
+        if job is not None:
+            P.append_job_log(
+                db, job,
+                f"{payload.get('kind')} page {payload.get('page')}: "
+                f"{result['stored']} new, {result.get('matched', 0)} matched")
+            db.commit()
+
+    return JSONResponse({"ok": True, **result})
+
+
 @router.post("/jobs/claim")
 def jobs_claim(
     payload: dict = Body(default={}),
@@ -445,7 +513,11 @@ def jobs_claim(
     if _has_capability(node, "process"):
         allowed += ["process", "test_download", "test_process"]
     if _has_capability(node, "upload"):
-        allowed += ["upload", "test_upload"]
+        # earnings_read rides on the upload capability on purpose: it is the
+        # same browser, the same account and the same login. A separate
+        # capability would be one more thing to provision on every node for
+        # no gain today.
+        allowed += ["upload", "test_upload", "earnings_read"]
     if kinds:
         allowed = [k for k in allowed if k in kinds]
     if not allowed:
@@ -489,6 +561,29 @@ def _resolve_job_payload(
     resolution a real batch would.
     """
     resolved = dict(payload)
+
+    if job.kind == "earnings_read":
+        # Everything the node needs to sign in and fetch: the account with
+        # its decrypted password, the selectors and timings, and the page
+        # URLs. All resolved HERE, so the node holds no marketplace
+        # configuration of its own — same rule as every other job.
+        from ..earnings import service as earnings_service
+
+        account = db.query(UploadAccount).filter_by(
+            id=payload.get("account_id")).first()
+        if account is None:
+            return {**resolved, "error": "Account not found."}
+
+        attached = P.project_ids_for_account(db, account.id)
+        acct_project = P.resolve_project(db, attached[0] if attached else None)
+        resolved.update({
+            "account": P.account_payload(db, account, include_secret=True,
+                                         project=acct_project),
+            "settings": P.upload_settings_payload(db, project=acct_project),
+            "pages": earnings_service.page_urls(db, account),
+            "max_pages": int(P.get_setting(db, "earnings_max_pages_per_run")),
+        })
+        return resolved
 
     if job.kind == "test_download":
         master_id = payload.get("master_id")
@@ -560,7 +655,8 @@ def _resolve_job_payload(
                 db, title, poster, tracking.letter_index or 0, project=project),
             "keywords": P.render_keywords(db, title, project=project),
             "description": P.render_description(db, title, project=project),
-            "account": P.account_payload(db, account, include_secret=True),
+            "account": P.account_payload(db, account, include_secret=True,
+                                         project=project),
             "settings": P.upload_settings_payload(db, project=project),
             # A test never mutates tracking state — it only reports phases.
             "dry_run_tracking": True,

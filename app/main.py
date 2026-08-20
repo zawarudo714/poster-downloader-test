@@ -137,7 +137,7 @@ def on_startup():
     # loudly, because a project rename also changes its storage folder and
     # that should never happen invisibly.
     from .db import SessionLocal
-    from .pipeline import sync_projects
+    from .pipeline import backfill_account_projects, sync_projects
     db = SessionLocal()
     try:
         for change in sync_projects(db):
@@ -149,6 +149,15 @@ def on_startup():
         # both layouts — see the module docstring.
         from .workspace_migration import run_startup_migration
         run_startup_migration(db)
+
+        # An account used to belong to ONE project. It now serves a list of
+        # them, and the old column is copied into that list here. Without
+        # this, every existing account comes back from the upgrade attached
+        # to nothing and uploading stops dead — which is the worst possible
+        # first impression of a change that is meant to be invisible.
+        made = backfill_account_projects(db)
+        if made:
+            log.info("Attached %d existing account(s) to their project", made)
 
         # GPT generation runs HERE, not on the Windows node — it is an HTTPS
         # call, so it needs no desktop and keeps working when that box is

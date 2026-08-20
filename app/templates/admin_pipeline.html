@@ -462,9 +462,19 @@
     <section class="panel">
       <div class="panel-head">
         <span>MARKETPLACE ACCOUNTS
-          {{ info("Accounts the pipeline uploads into. Passwords are encrypted and only ever sent to an authenticated worker node — never back to this page. Adding an account does not queue anything by itself; use REQUEUE to push the processed back catalogue onto it (the ban-recovery path).") }}
+          {{ info("Accounts this project uploads into. An account exists once and can serve several projects — if you already use it elsewhere, ADD EXISTING rather than creating a second copy, or the marketplace's daily limit gets counted twice. Passwords are encrypted and only ever sent to an authenticated worker node, never back to this page. Attaching an account queues nothing by itself; use REQUEUE to push the processed back catalogue onto it.") }}
         </span>
-        <button type="button" class="btn btn-accent btn-tiny" data-action="account-new">ADD ACCOUNT</button>
+        <span class="filter-row" style="gap:8px">
+          <button type="button" class="btn btn-ghost btn-tiny" data-action="account-attach">ADD&nbsp;EXISTING</button>
+          <button type="button" class="btn btn-accent btn-tiny" data-action="account-new">ADD&nbsp;NEW</button>
+        </span>
+      </div>
+
+      {# The picker for accounts that already exist elsewhere. Listed before
+         the create form in the UI order deliberately: for FineArtAmerica the
+         right answer is almost always "attach the one I already have". #}
+      <div class="panel-body" data-attach-panel hidden>
+        <div class="muted" data-attach-list>Loading…</div>
       </div>
       <div class="panel-body" data-accounts-list>
         <div class="muted">Loading…</div>

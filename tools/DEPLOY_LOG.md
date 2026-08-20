@@ -9,6 +9,7 @@ log or diff to work it out — that costs far more to read than these lines.**
 If the top entry looks older than the work in the repo, the difference is
 what has not been deployed yet.
 
+- **2026-08-17 19:57** · `9c11311a` · Earnings reads its URLs from settings instead of hardcoded guesses — sign-in uses the same login_url the uploader does
 - **2026-08-17 19:51** · `e266574e` · Earnings: read the real sign-in form instead of a guessed endpoint, and report what the page actually said
 - **2026-08-17 19:46** · `95ad52e2` · Pause an upload account only after a RUN of selector failures, not the first one; Earnings 500 fix; storage mount falls back to HTTP; drive-root path fix
 - **2026-08-17 18:46** · `97266e0d` · Fix 500 on the Earnings page — declare its two settings keys in DEFAULTS

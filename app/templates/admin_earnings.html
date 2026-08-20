@@ -23,6 +23,26 @@
       </span>
     </div>
 
+    {# ── The nightly decision, on screen ─────────────────────────────────
+       Three inputs and an answer. Shown rather than left implicit for two
+       reasons: you can test the timed path by watching it flip instead of
+       waiting until 10pm, and when uploads go quiet the page says why —
+       a working feature that looks like a fault is a bad feature. #}
+    <div class="panel-body" style="border-top:1px solid rgba(255,255,255,.06)">
+      <div class="filter-row" style="gap:10px; flex-wrap:wrap">
+        <span class="mono" data-schedule-line>Checking…</span>
+        <button class="btn btn-ghost btn-tiny" data-action="rearm" type="button">
+          RUN&nbsp;TONIGHT'S&nbsp;CHECK&nbsp;AGAIN
+        </button>
+      </div>
+      <p class="muted" style="margin-top:6px">
+        Reading happens in the worker machine's browser, because the
+        marketplace challenges this server as a bot but not that machine.
+        So a check needs the Windows box switched on — if it is off, the job
+        waits in the queue rather than failing.
+      </p>
+    </div>
+
     <div class="panel-body">
       {# ── Filters ─────────────────────────────────────────────────────
          Marketplace, then accounts, then window. Any subset — the nine
@@ -51,6 +71,38 @@
       </div>
 
       <div data-account-filter hidden style="margin-bottom:12px"></div>
+
+      {# ── Adding an account that nothing is uploaded to ─────────────────
+         The TeePublic accounts earn passively and will never have a project.
+         They are added HERE rather than on a project's Upload tab, because
+         attaching them to a project would queue work into an account you
+         have no intention of touching.
+
+         An account that DOES upload is created on its project's Upload tab
+         and appears here automatically — reading revenue and uploading are
+         two capabilities of one account, not two accounts. #}
+      <div class="filter-row" style="gap:8px; margin-bottom:10px">
+        <button class="btn btn-ghost btn-tiny" data-action="toggle-add" type="button">
+          ADD&nbsp;AN&nbsp;EARN-ONLY&nbsp;ACCOUNT
+        </button>
+        <span class="muted">for accounts you never upload to</span>
+      </div>
+
+      <div data-add-account hidden style="margin-bottom:12px">
+        <div class="filter-row" style="gap:8px; flex-wrap:wrap">
+          <input type="text" data-new-name placeholder="Name you'll recognise" style="min-width:180px">
+          <input type="text" data-new-site placeholder="Marketplace (e.g. teepublic)" style="min-width:150px">
+          <input type="text" data-new-email placeholder="Sign-in email" style="min-width:200px">
+          <input type="password" data-new-password placeholder="Password" style="min-width:150px">
+          <button class="btn btn-accent btn-tiny" data-action="create-account" type="button">ADD</button>
+          <span class="muted" data-add-status></span>
+        </div>
+        <p class="muted" style="margin-top:6px">
+          Nothing is ever uploaded to an account added here. To upload as well,
+          create it on that project's Upload tab instead — it will still show up
+          on this page.
+        </p>
+      </div>
 
       <div data-figures>
         <div class="muted">Loading…</div>

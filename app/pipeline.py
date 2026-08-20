@@ -59,8 +59,8 @@ from sqlalchemy import func, or_, true as sa_true
 from sqlalchemy.orm import Session
 
 from .models import (
-    AppSetting, MasterTitle, PipelineJob, ProcessedImage, Project,
-    SavedPoster, UploadAccount, UploadTracking, WorkerNode,
+    AccountProject, AppSetting, MasterTitle, PipelineJob, ProcessedImage,
+    Project, SavedPoster, UploadAccount, UploadTracking, WorkerNode,
 )
 from .timeutil import local_today
 
@@ -532,6 +532,23 @@ DEFAULTS: dict[str, Any] = {
     # one login page, and having two copies of it guarantees they drift.
     "earnings_balance_url": "https://fineartamerica.com/controlpanel/balance",
     "earnings_sales_url":   "https://fineartamerica.com/controlpanel/sales",
+    # Ceiling on pages fetched per account per run. A nightly read touches
+    # one or two; only a first-ever read walks a long history, and the cap
+    # stops that one account eating the whole quiet window. It resumes the
+    # next night on its own, because the stop rule is "the first row we
+    # already have" and nothing needs remembering.
+    "earnings_max_pages_per_run": 25,
+
+    # ── The quiet window ─────────────────────────────────────────────────
+    # HH:MM, node-local. `earnings_quiet_from` is when new batches stop being
+    # handed out; `earnings_run_at` is when the reads are queued. Times
+    # rather than plain hours so this can be tested at three minutes' notice
+    # instead of only on the hour.
+    #
+    # Blank quiet_from disables the window entirely — earnings then simply
+    # queue and take their turn like any other job.
+    "earnings_quiet_from":  "22:00",
+    "earnings_run_at":      "22:00",
 
     # ── How many failures in a row before an account is parked ───────────
     # Only applies to failures the node marks as "might be systemic" — a
@@ -1834,12 +1851,7 @@ def ensure_upload_rows(
     reprocessing and no manual reconciliation.
     """
     project = project or project_for_title(db, title)
-    accounts = (
-        db.query(UploadAccount)
-          .filter(UploadAccount.project_id == project.id,
-                  UploadAccount.is_enabled == 1)
-          .all()
-    )
+    accounts = [a for a in accounts_for_project(db, project.id) if a.is_enabled]
     if not accounts:
         return []
 
@@ -1928,16 +1940,172 @@ def intake_open(db: Session, project: Optional[Project] = None) -> bool:
 
     Per-project, so one niche can be paused while another keeps running.
     """
-    return str(get_setting(db, "run_mode", project=project) or "run") == "run"
+    if str(get_setting(db, "run_mode", project=project) or "run") != "run":
+        return False
+    return not quiet_window_state(db)["blocking"]
+
+
+def _parse_hhmm(text: Any) -> Optional[tuple[int, int]]:
+    """"22:00" -> (22, 0). Anything unreadable means "no window"."""
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    try:
+        hh, _, mm = raw.partition(":")
+        h, m = int(hh), int(mm or 0)
+    except ValueError:
+        return None
+    return (h, m) if 0 <= h <= 23 and 0 <= m <= 59 else None
+
+
+def quiet_window_state(db: Session) -> dict:
+    """
+    Is the nightly earnings read holding new work back right now?
+
+    ════════════════════════════════════════════════════════════════════════
+    A WINDOW, NOT A SWITCH
+    ════════════════════════════════════════════════════════════════════════
+    Nothing is stored and nothing is toggled. This looks at the clock and at
+    whether tonight's read has been dealt with, and answers fresh every time
+    it is asked.
+
+    That is the whole design. A switch has two edges — turn work off, turn it
+    back on — and the second one can be lost, which leaves uploading dead
+    while everything looks healthy. There is no second edge here:
+
+      · the read finishes      -> the day is marked done -> work resumes
+      · the read fails         -> the day is still marked -> work resumes
+      · the node was off all night -> midnight arrives, new day -> resumes
+
+    There is no state that can be left in the wrong position, because there
+    is no state.
+
+    Returns everything the screen needs to EXPLAIN itself, because work
+    stopping with no visible reason looks exactly like a fault.
+    """
+    from .timeutil import local_now, local_today
+
+    start = _parse_hhmm(get_setting(db, "earnings_quiet_from"))
+    now = local_now()
+    today = local_today().isoformat()
+    done_day = str(get_setting(db, "earnings_last_run_day") or "")
+    done_today = done_day == today
+
+    after_start = bool(start) and (now.hour, now.minute) >= start
+    blocking = bool(start) and after_start and not done_today
+
+    return {
+        "enabled": bool(start),
+        "blocking": blocking,
+        "starts_at": f"{start[0]:02d}:{start[1]:02d}" if start else "",
+        "now": now.strftime("%H:%M"),
+        "done_today": done_today,
+        "reason": (
+            "Paused for the nightly earnings check — new work resumes as soon "
+            "as it finishes." if blocking else ""
+        ),
+    }
 
 
 def run_mode_state(db: Session, project: Optional[Project] = None) -> dict:
     mode = str(get_setting(db, "run_mode", project=project) or "run")
+    quiet = quiet_window_state(db)
     return {
         "mode": mode,
-        "running": mode == "run",
-        "reason": str(get_setting(db, "run_mode_reason", project=project) or ""),
+        # "running" must reflect what the dispatcher will ACTUALLY do, not
+        # just the switch, or the page says running while nothing moves.
+        "running": mode == "run" and not quiet["blocking"],
+        "reason": (quiet["reason"] if quiet["blocking"]
+                   else str(get_setting(db, "run_mode_reason", project=project) or "")),
+        "quiet": quiet,
     }
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  WHICH ACCOUNTS SERVE WHICH PROJECTS
+# ════════════════════════════════════════════════════════════════════════════
+# An account exists ONCE and may serve several projects, none, or one. Every
+# query that needs "the accounts for this project" or "the projects for this
+# account" goes through here — the same rule as scope_titles(): nothing
+# filters on the legacy `project_id` column by hand.
+
+def project_ids_for_account(db: Session, account_id: int) -> list[int]:
+    """Projects this account uploads for. Empty means it is earn-only."""
+    return [
+        pid for (pid,) in db.query(AccountProject.project_id)
+                            .filter(AccountProject.account_id == account_id).all()
+    ]
+
+
+def accounts_for_project(db: Session, project_id: int) -> list[UploadAccount]:
+    """
+    Every account attached to one project.
+
+    Note there is deliberately NO "or project_id IS NULL" here. An
+    unattached account is not a wildcard, it is an account nothing is
+    uploaded to. Three endpoints once made that mistake with titles and
+    MUSIK inherited 101,605 movie rows; the same shape here would upload a
+    celebrity portrait into a movie account.
+    """
+    return (
+        db.query(UploadAccount)
+          .join(AccountProject, AccountProject.account_id == UploadAccount.id)
+          .filter(AccountProject.project_id == project_id)
+          .order_by(UploadAccount.rotation_order.asc(), UploadAccount.id.asc())
+          .all()
+    )
+
+
+def attach_account(db: Session, *, account_id: int, project_id: int,
+                   by: Optional[str] = None) -> bool:
+    """Let a project upload through an existing account. Idempotent."""
+    existing = (
+        db.query(AccountProject)
+          .filter(AccountProject.account_id == account_id,
+                  AccountProject.project_id == project_id).first()
+    )
+    if existing:
+        return False
+    db.add(AccountProject(account_id=account_id, project_id=project_id,
+                          attached_by=by))
+    return True
+
+
+def detach_account(db: Session, *, account_id: int, project_id: int) -> bool:
+    """
+    Stop uploading this project's work through this account.
+
+    The account and its whole upload history survive — this only says "no
+    more of THIS project's work goes here". Anything already queued for that
+    pair is left alone rather than deleted, because a half-uploaded set that
+    silently vanished would be unexplainable later.
+    """
+    rows = (
+        db.query(AccountProject)
+          .filter(AccountProject.account_id == account_id,
+                  AccountProject.project_id == project_id).delete()
+    )
+    return bool(rows)
+
+
+def backfill_account_projects(db: Session) -> int:
+    """
+    One-off: turn the old single `project_id` column into link rows.
+
+    Idempotent and cheap, so it runs at startup like the workspace move.
+    Without it, every existing account would come back from the upgrade
+    serving NO projects — which reads as "uploading is broken" and would be
+    the worst possible first impression of this change.
+    """
+    made = 0
+    for account in db.query(UploadAccount).filter(
+            UploadAccount.project_id.isnot(None)).all():
+        if attach_account(db, account_id=account.id,
+                          project_id=account.project_id, by="upgrade"):
+            made += 1
+    if made:
+        db.commit()
+    return made
 
 
 def account_is_available(account: UploadAccount) -> bool:
@@ -2063,7 +2231,8 @@ def hand_over_account(
         raise ValueError("Account not found")
     if dead.id == new.id:
         raise ValueError("An account cannot replace itself.")
-    if dead.project_id != new.project_id:
+    if set(project_ids_for_account(db, dead.id)) != set(
+            project_ids_for_account(db, new.id)):
         raise ValueError(
             f"{dead.name} belongs to a different project than {new.name}. "
             f"Listings cannot move between projects."
@@ -2084,6 +2253,23 @@ def pause_account(db: Session, account: UploadAccount, *, minutes: int, reason: 
     account.pause_reason = (reason or "")[:1000]
 
 
+def _has_upload_work(db: Session, account_id: int, project_id: Optional[int]) -> bool:
+    """
+    Is there anything queued for this (account, project) pair?
+
+    Asked before committing an account's turn to a project, so an account
+    serving two projects doesn't waste its turn on the empty one and leave
+    the busy one waiting for the next rotation.
+    """
+    q = db.query(UploadTracking.id).filter(
+        UploadTracking.account_id == account_id,
+        UploadTracking.status.in_(("pending", "failed")),
+    )
+    if project_id:
+        q = q.filter(UploadTracking.project_id == project_id)
+    return db.query(q.exists()).scalar()
+
+
 def claim_upload_batch(
     db: Session, *, node: str, account_id: Optional[int] = None,
     limit: Optional[int] = None, project_id: Optional[int] = None,
@@ -2102,7 +2288,11 @@ def claim_upload_batch(
     if account_id:
         accounts_q = accounts_q.filter(UploadAccount.id == account_id)
     if project_id:
-        accounts_q = accounts_q.filter(UploadAccount.project_id == project_id)
+        # Through the link table, never the legacy column. An account serving
+        # both projects must be reachable from both.
+        accounts_q = accounts_q.join(
+            AccountProject, AccountProject.account_id == UploadAccount.id
+        ).filter(AccountProject.project_id == project_id)
 
     # ── Take turns between accounts ─────────────────────────────────────
     #
@@ -2124,16 +2314,36 @@ def claim_upload_batch(
         if not account_is_available(account):
             continue
 
-        # Checked per account, because run_mode is per PROJECT and one
-        # project may be paused while another keeps uploading.
-        if not intake_open(db, resolve_project(db, account.project_id)):
-            continue
-
         quota = account_quota(db, account)
         if quota["remaining"] <= 0:
             continue
 
-        project = resolve_project(db, account.project_id)
+        # ── ONE PROJECT PER TURN ─────────────────────────────────────────
+        #
+        # An account can now serve several projects, but a batch cannot: the
+        # node gets ONE settings blob, and the title template, keywords and
+        # description all differ per project. A mixed batch would upload
+        # MUSIK artwork under the movie project's title template — a public
+        # mistake on a real marketplace.
+        #
+        # So the account's turn goes to whichever of its projects has waited
+        # longest, and the whole batch is that project's work.
+        candidates = ([project_id] if project_id
+                      else project_ids_for_account(db, account.id))
+        chosen = None
+        for pid in candidates:
+            candidate_project = resolve_project(db, pid)
+            # run_mode is per project: one may be paused while another runs.
+            if not intake_open(db, candidate_project):
+                continue
+            if not _has_upload_work(db, account.id, pid):
+                continue
+            chosen = candidate_project
+            break
+        if chosen is None:
+            continue
+
+        project = chosen
         # How many this account gets per turn. Its own rotation_size wins;
         # otherwise the project's batch size. Always capped by whatever is
         # left of today's marketplace allowance.
@@ -2149,15 +2359,15 @@ def claim_upload_batch(
               .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
               .join(ProcessedImage, UploadTracking.processed_image_id == ProcessedImage.id)
               .filter(UploadTracking.account_id == account.id,
-                      # Belt and braces on the account's project. Rows are
-                      # seeded per project, so account and tracking should
-                      # always agree — but "should always" is exactly what
-                      # was true of the Photoshop dispatcher too. If they
-                      # ever disagree, the consequence here is uploading a
-                      # celebrity image to the movie account under the movie
-                      # project's title template, which is a public mistake
-                      # on a real marketplace.
-                      UploadTracking.project_id == account.project_id,
+                      # The project chosen for THIS turn — not the account's
+                      # old single project_id, which no longer means
+                      # anything now that one account serves several.
+                      #
+                      # This filter is what keeps a batch single-project,
+                      # and it must stay: the settings sent with the batch
+                      # are this project's, so a row from another project
+                      # would be listed under the wrong title template.
+                      UploadTracking.project_id == project.id,
                       UploadTracking.status.in_(("pending", "failed")),
                       UploadTracking.attempts < max_attempts,
                       SavedPoster.deleted_at.is_(None))
@@ -2219,7 +2429,8 @@ def claim_upload_batch(
         account.last_run_at = now
 
         return {
-            "account": account_payload(db, account, include_secret=True),
+            "account": account_payload(db, account, include_secret=True,
+                                       project=project),
             "settings": upload_settings_payload(db, project=project),
             "quota": account_quota(db, account),
             "items": items,
@@ -2432,16 +2643,32 @@ def mark_removed(
 
 def requeue_for_account(
     db: Session, *, account_id: int, source_account_id: Optional[int] = None,
+    project_id: Optional[int] = None,
 ) -> int:
     """
     Seed pending rows on `account_id` for every processed image — the
     ban-recovery path. Optionally mirror only what a specific dead account
     had uploaded, so a replacement account rebuilds exactly that catalogue.
+
+    `project_id` says WHICH catalogue. An account serving both niches has two,
+    and requeueing "the account" without saying which would queue the movie
+    back catalogue into a MUSIK rebuild. Omitted is only safe when the account
+    serves exactly one project, which is checked rather than assumed.
     """
     account = db.query(UploadAccount).filter_by(id=account_id).first()
     if account is None:
         raise ValueError("Account not found")
-    project = resolve_project(db, account.project_id)
+
+    attached = project_ids_for_account(db, account_id)
+    if project_id is None:
+        if len(attached) > 1:
+            raise ValueError(
+                f"{account.name} serves {len(attached)} projects — say which "
+                f"one to requeue.")
+        project_id = attached[0] if attached else None
+    elif project_id not in attached:
+        raise ValueError(f"{account.name} is not attached to that project.")
+    project = resolve_project(db, project_id)
 
     query = (
         db.query(ProcessedImage, SavedPoster, MasterTitle)
@@ -2528,12 +2755,22 @@ def decrypt_secret(token: str) -> str:
 
 def account_payload(
     db: Session, account: UploadAccount, *, include_secret: bool = False,
+    project: Optional[Project] = None,
 ) -> dict[str, Any]:
     """
     Serialize an account. `include_secret` is only ever true for an
     authenticated worker node — the browser never receives the password.
+
+    `project` decides which settings the payload carries (timings, selectors,
+    title template). It must be passed by anything that is about to DO
+    something project-specific, because one account now serves several and
+    the account itself no longer knows which one you mean. Omitting it falls
+    back to the account's first project, then to the default — fine for a
+    read-only listing, wrong for a batch.
     """
-    project = resolve_project(db, account.project_id)
+    if project is None:
+        attached = project_ids_for_account(db, account.id)
+        project = resolve_project(db, attached[0] if attached else None)
     timings = dict(get_setting(db, "timings", project=project))
     if account.timing_json:
         try:
@@ -2550,8 +2787,12 @@ def account_payload(
 
     data: dict[str, Any] = {
         "id":                 account.id,
-        "project_id":         account.project_id,
+        "project_id":         project.id,
         "project_slug":       project.slug,
+        # Every project this account serves, so a screen can say "shared with
+        # MUSIK" instead of implying it belongs to whichever one you are
+        # standing in.
+        "project_ids":        project_ids_for_account(db, account.id),
         "name":               account.name,
         "target_site":        account.target_site,
         "email":              account.email,

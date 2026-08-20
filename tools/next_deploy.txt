@@ -1,1 +1,1 @@
-Earnings reads its URLs from settings instead of hardcoded guesses — sign-in uses the same login_url the uploader does
+Accounts shared across projects (ADD EXISTING); earnings read through the node's Chrome; nightly quiet window at 22:00 with a visible reason

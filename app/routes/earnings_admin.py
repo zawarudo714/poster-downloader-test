@@ -155,6 +155,39 @@ def api_entries(
 # writes an ALIAS rather than editing the sale — which is what makes one
 # decision fix every past and future sale of that design at once.
 
+@router.get("/api/earnings/schedule")
+def api_schedule(admin: User = Depends(require_admin),
+                 db: Session = Depends(get_db)):
+    """
+    The three things the nightly decision looks at, and its answer.
+
+    Put on screen rather than left implicit so the schedule can be TESTED by
+    watching it, instead of by waiting until 10pm and guessing. It is also
+    what stops the quiet window looking like a fault when uploads go quiet.
+    """
+    from ..pipeline import get_setting, quiet_window_state
+
+    quiet = quiet_window_state(db)
+    return JSONResponse({
+        "quiet": quiet,
+        "run_at": get_setting(db, "earnings_run_at"),
+        "quiet_from": get_setting(db, "earnings_quiet_from"),
+        "last_run_at": get_setting(db, "earnings_last_run_at"),
+        "max_pages": get_setting(db, "earnings_max_pages_per_run"),
+    })
+
+
+@router.post("/api/earnings/rearm")
+def api_rearm(admin: User = Depends(require_admin),
+              db: Session = Depends(get_db)):
+    """Clear tonight's 'already done' mark so the timed path can fire again."""
+    service.rearm_today(db, by=admin.username)
+    log_activity(db, user=admin, action="earnings_rearmed",
+                 target_type="earnings", target_id=None, details={})
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
 @router.get("/api/earnings/unmatched")
 def api_unmatched(admin: User = Depends(require_admin),
                   db: Session = Depends(get_db)):
@@ -230,35 +263,28 @@ def api_read_now(
     db: Session = Depends(get_db),
 ):
     """
-    Run the read immediately, for one account or all of them.
+    Ask the node to read now — one account, or all of them.
 
-    The same code path the nightly job uses — there is no separate "manual"
-    mode, so pressing this proves the scheduled run works rather than
-    proving something adjacent to it.
+    This queues exactly what the nightly schedule queues. There is no
+    separate "manual" mode, so pressing this proves the scheduled run works
+    rather than proving something next to it.
+
+    It returns as soon as the work is QUEUED, not when it is done: the read
+    happens in the node's browser, and you watch it in the live console. If
+    the node is off, the job waits — visibly — instead of silently returning
+    nothing.
     """
     account_id = payload.get("account_id")
-    lines: list[str] = []
-
     if account_id:
         account = db.query(UploadAccount).filter_by(id=int(account_id)).first()
         if account is None:
             raise HTTPException(404, "Account not found.")
-        try:
-            result = service.read_account(db, account, on_log=lines.append)
-            db.commit()
-        except Exception as e:
-            db.rollback()
-            # Reported, not raised: a wrong password is an answer, and the
-            # admin needs to read it on the page rather than in a 500.
-            return JSONResponse({"ok": False, "log": lines,
-                                 "error": f"{type(e).__name__}: {e}"})
-        return JSONResponse({"ok": True, "log": lines, "result": result})
 
-    outcome = service.run_nightly(db, on_log=lines.append)
-    log_activity(db, user=admin, action="earnings_read",
+    outcome = service.queue_reads(
+        db, account_id=int(account_id) if account_id else None,
+        requested_by=admin.username)
+    log_activity(db, user=admin, action="earnings_read_queued",
                  target_type="earnings", target_id=None,
-                 details={"stored": outcome["stored"],
-                          "errors": len(outcome["errors"])})
+                 details={"queued": outcome["queued"]})
     db.commit()
-    return JSONResponse({"ok": not outcome["errors"], "log": lines,
-                         "result": outcome})
+    return JSONResponse({"ok": True, "result": outcome})

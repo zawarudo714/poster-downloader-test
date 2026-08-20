@@ -48,8 +48,8 @@ from ..auth import require_admin
 from ..config import WORKSPACE_DIR
 from ..db import get_db
 from ..models import (
-    MasterTitle, PipelineJob, ProcessedImage, Project, SavedPoster,
-    UploadAccount, UploadTracking, User, WorkerNode,
+    AccountProject, MasterTitle, PipelineJob, ProcessedImage, Project,
+    SavedPoster, UploadAccount, UploadTracking, User, WorkerNode,
 )
 from ..templating import templates
 from ..timeutil import fmt_local, local_today
@@ -164,16 +164,14 @@ def api_overview(
     funnel = P.funnel_counts(db, project_id=project.id)
 
     accounts = []
-    for account in (
-        db.query(UploadAccount)
-          .filter(UploadAccount.project_id == project.id)
-          .order_by(UploadAccount.id.asc())
-          .all()
-    ):
+    for account in P.accounts_for_project(db, project.id):
         quota = P.account_quota(db, account)
         pending = (
             db.query(func.count(UploadTracking.id))
               .filter(UploadTracking.account_id == account.id,
+                      # Scoped to THIS project: a shared account's queue for
+                      # another niche is not this screen's business.
+                      UploadTracking.project_id == project.id,
                       UploadTracking.status.in_(("pending", "failed")))
               .scalar() or 0
         )
@@ -820,16 +818,12 @@ def api_accounts(
 ):
     project = _project(request, admin, db, project_id)
     out = []
-    for account in (
-        db.query(UploadAccount)
-          .filter(UploadAccount.project_id == project.id)
-          .order_by(UploadAccount.id.asc())
-          .all()
-    ):
+    for account in P.accounts_for_project(db, project.id):
         stats = {
             status: count for status, count in
             db.query(UploadTracking.status, func.count(UploadTracking.id))
-              .filter(UploadTracking.account_id == account.id)
+              .filter(UploadTracking.account_id == account.id,
+                      UploadTracking.project_id == project.id)
               .group_by(UploadTracking.status)
               .all()
         }
@@ -840,6 +834,121 @@ def api_accounts(
             "stats": stats,
         })
     return JSONResponse({"ok": True, "accounts": out})
+
+
+@router.get("/api/accounts/available")
+def api_accounts_available(
+    request: Request,
+    project_id: Optional[int] = None,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Accounts that exist but are NOT yet attached to this project.
+
+    This is the list behind ADD EXISTING ACCOUNT. Its whole reason for
+    existing is that the same FineArtAmerica account carries both niches:
+    without it the only way to upload MUSIK through the account already
+    serving movies was to create it a second time, which meant two Chrome
+    profiles, two copies of the password, and a daily limit the marketplace
+    applies once being counted twice.
+    """
+    project = _project(request, admin, db, project_id)
+    attached = {a.id for a in P.accounts_for_project(db, project.id)}
+
+    out = []
+    for account in db.query(UploadAccount).order_by(UploadAccount.name).all():
+        if account.id in attached:
+            continue
+        others = [
+            n for (n,) in db.query(Project.name)
+                            .join(AccountProject,
+                                  AccountProject.project_id == Project.id)
+                            .filter(AccountProject.account_id == account.id).all()
+        ]
+        out.append({
+            "id": account.id,
+            "name": account.name,
+            "target_site": account.target_site,
+            "email": account.email,
+            "banned": bool(account.banned_at),
+            # So the picker can say "already used by MUSIK" rather than
+            # presenting an account with no context.
+            "used_by": others,
+        })
+    return JSONResponse({"ok": True, "accounts": out, "project": project.name})
+
+
+@router.post("/api/accounts/{account_id}/attach")
+def api_attach_account(
+    account_id: int,
+    request: Request,
+    payload: dict = Body(default={}),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Let this project upload through an account that already exists.
+
+    Deliberately does NOT queue the back catalogue — same rule as creating an
+    account. Attaching is a safe, reversible act; use REQUEUE BACK CATALOGUE
+    when you actually want the existing work sent there.
+    """
+    account = db.query(UploadAccount).filter_by(id=account_id).first()
+    if account is None:
+        raise HTTPException(404, "Account not found.")
+    if account.banned_at is not None:
+        raise HTTPException(400, f"{account.name} is banned — attaching it "
+                                 f"would queue work that can never upload.")
+
+    project = _project(request, admin, db, payload.get("project_id"))
+    added = P.attach_account(db, account_id=account_id, project_id=project.id,
+                             by=admin.username)
+    if added:
+        log_activity(db, user=admin, action="pipeline_account_attached",
+                     target_type="upload_account", target_id=account_id,
+                     details={"project": project.name, "name": account.name})
+    db.commit()
+    return JSONResponse({"ok": True, "attached": added})
+
+
+@router.post("/api/accounts/{account_id}/detach")
+def api_detach_account(
+    account_id: int,
+    request: Request,
+    payload: dict = Body(default={}),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Stop sending THIS project's work to this account.
+
+    The account, its credentials and its entire upload history all survive —
+    this is not a delete. Anything already queued for the pair is left in
+    place rather than removed, because a half-finished set that silently
+    disappeared would be unexplainable a week later. It simply stops being
+    handed out, because the dispatcher only walks attached accounts.
+    """
+    account = db.query(UploadAccount).filter_by(id=account_id).first()
+    if account is None:
+        raise HTTPException(404, "Account not found.")
+
+    project = _project(request, admin, db, payload.get("project_id"))
+    queued = (
+        db.query(func.count(UploadTracking.id))
+          .filter(UploadTracking.account_id == account_id,
+                  UploadTracking.project_id == project.id,
+                  UploadTracking.status.in_(("pending", "failed")))
+          .scalar() or 0
+    )
+    removed = P.detach_account(db, account_id=account_id, project_id=project.id)
+    if removed:
+        log_activity(db, user=admin, action="pipeline_account_detached",
+                     target_type="upload_account", target_id=account_id,
+                     details={"project": project.name, "name": account.name,
+                              "left_queued": queued})
+    db.commit()
+    return JSONResponse({"ok": True, "detached": removed, "left_queued": queued})
 
 
 @router.post("/api/accounts")
@@ -863,14 +972,26 @@ def api_create_account(
     if not name or not email or not password:
         raise HTTPException(400, "name, email and password are required.")
 
-    project = _project(request, admin, db, payload.get("project_id"))
-    if db.query(UploadAccount).filter_by(project_id=project.id, name=name).first():
-        raise HTTPException(400, f"An account named '{name}' already exists in this project.")
+    # `attach_to_project` false means an earn-only account: it will appear on
+    # Earnings and nothing will ever be uploaded to it. That is how the
+    # TeePublic accounts are added.
+    attach = payload.get("attach_to_project", True)
+    project = _project(request, admin, db, payload.get("project_id")) if attach else None
+
+    # An account name is unique per MARKETPLACE now, not per project. It used
+    # to be per project, which is exactly what forced the same FineArtAmerica
+    # account to be created twice under two names.
+    target_site = (payload.get("target_site") or "faa").strip()
+    if db.query(UploadAccount).filter_by(target_site=target_site, name=name).first():
+        raise HTTPException(
+            400, f"An account named '{name}' already exists on {target_site}. "
+                 f"Use ADD EXISTING ACCOUNT to attach it to this project "
+                 f"instead of creating a second copy.")
 
     account = UploadAccount(
-        project_id=project.id,
+        project_id=project.id if project else None,
         name=name,
-        target_site=(payload.get("target_site") or "faa").strip(),
+        target_site=target_site,
         email=email,
         password_enc=P.encrypt_secret(password),
         profile_url=(payload.get("profile_url") or "").strip() or None,
@@ -886,6 +1007,9 @@ def api_create_account(
     )
     db.add(account)
     db.flush()
+    if project is not None:
+        P.attach_account(db, account_id=account.id, project_id=project.id,
+                         by=admin.username)
     log_activity(db, user=admin, action="pipeline_account_created",
                  target_type="upload_account", target_id=account.id,
                  details={"name": name, "target": account.target_site})

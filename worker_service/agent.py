@@ -45,7 +45,7 @@ from .processor import ProcessStage
 from .uploader import UploadStage
 
 
-AGENT_VERSION = "1.6.0"
+AGENT_VERSION = "1.7.0"
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_CONFIG = HERE / "config.json"
@@ -224,6 +224,8 @@ class Agent:
                 result = self.processor.test_download(job_id, payload)
             elif kind == "test_process":
                 result = self.processor.test_process(job_id, payload)
+            elif kind == "earnings_read":
+                result = self.uploader.read_earnings(job_id, payload)
             elif kind == "test_upload":
                 result = self.uploader.test_upload(job_id, payload)
             elif kind == "process":

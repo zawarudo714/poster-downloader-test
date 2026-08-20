@@ -281,7 +281,29 @@
     if (rm.running) { box.hidden = true; return; }
 
     const flying = (overview.in_flight || []).length;
+    const quiet = rm.quiet || {};
     box.hidden = false;
+
+    // The nightly earnings window is not a fault and must never read like
+    // one. Work going quiet with no explanation is exactly what sent you
+    // hunting for a bug when an account had simply been paused.
+    // RESUME sets run_mode back to 'run' — but during quiet time run_mode is
+    // ALREADY 'run', so the button would do nothing at all. A control that
+    // cannot act is not a label problem; it is hidden.
+    const resumeBtn = q('[data-action="run-resume"]');
+    if (resumeBtn) resumeBtn.hidden = !!quiet.blocking;
+
+    if (quiet.blocking) {
+      q('[data-run-title]').textContent = 'QUIET TIME — CHECKING EARNINGS';
+      q('[data-run-detail]').textContent =
+        `Since ${quiet.starts_at}. Nothing new is being handed out while the `
+        + `marketplaces are read; it resumes on its own as soon as that `
+        + `finishes. ` + (flying
+            ? `${flying} item(s) already started are still finishing.`
+            : 'Nothing is in flight.');
+      return;
+    }
+
     q('[data-run-title]').textContent =
       rm.mode === 'halt' ? 'PIPELINE HALTED' : 'PAUSED — DRAINING';
     q('[data-run-detail]').textContent =
@@ -1334,10 +1356,32 @@
             ${a.banned
               ? `<button class="btn btn-accent btn-tiny" data-acc-handover="${a.id}">HAND OVER TO…</button>`
               : `<button class="btn btn-error btn-tiny" data-acc-ban="${a.id}">MARK BANNED</button>`}
-            <button class="btn btn-error btn-tiny" data-acc-delete="${a.id}">DELETE</button>
+            ${(a.project_ids || []).length > 1
+              ? `<button class="btn btn-ghost btn-tiny" data-acc-detach="${a.id}">REMOVE FROM THIS PROJECT</button>`
+              : `<button class="btn btn-error btn-tiny" data-acc-delete="${a.id}">DELETE</button>`}
           </div>
         </div>`;
     }).join('');
+
+    // DELETE is offered only when this project is the account's last one.
+    // Otherwise the honest action is REMOVE FROM THIS PROJECT — deleting a
+    // shared account here would silently stop the OTHER niche uploading,
+    // which is a per-project screen doing damage outside its own project.
+    el.querySelectorAll('[data-acc-detach]').forEach((b) =>
+      b.addEventListener('click', async () => {
+        const acc = accounts.find((a) => a.id === parseInt(b.dataset.accDetach, 10)) || {};
+        if (!confirm(`Stop uploading this project's work through "${acc.name}"?\n\n`
+          + 'The account, its password and its whole upload history stay exactly '
+          + 'as they are, and other projects keep using it. Anything already '
+          + 'queued for this project is left in place, it just stops being sent.')) return;
+        try {
+          const res = await postJSON(`${API}/accounts/${acc.id}/detach`, {});
+          toast(res.left_queued
+            ? `Removed. ${res.left_queued} queued item(s) left untouched.`
+            : 'Removed from this project.');
+          await loadAccounts();
+        } catch (e) { toast(e.message, 'error'); }
+      }));
 
     el.querySelectorAll('[data-acc-edit]').forEach((b) =>
       b.addEventListener('click', () => openAccountModal(
@@ -1424,6 +1468,61 @@
           loadAccounts(); loadOverview();
         } catch (e) { toast(e.message, 'error'); }
       }));
+  }
+
+  // ── Attaching an account that already exists ──────────────────────────
+  //
+  // One FineArtAmerica account carries both niches. Creating it twice gave
+  // two Chrome profiles, two copies of the password, and a daily upload
+  // limit the marketplace applies ONCE being counted as two — so this list
+  // is the normal path for FAA, and ADD NEW is the exception.
+  async function toggleAttachPanel() {
+    const panel = q('[data-attach-panel]');
+    panel.hidden = !panel.hidden;
+    if (panel.hidden) return;
+    await loadAttachable();
+  }
+
+  async function loadAttachable() {
+    const box = q('[data-attach-list]');
+    box.innerHTML = 'Loading…';
+    try {
+      const data = await getJSON(`${API}/accounts/available`);
+      const rows = data.accounts || [];
+      if (!rows.length) {
+        box.innerHTML = '<span class="muted">Every account you have is already '
+          + 'attached to this project. Use ADD NEW to create another.</span>';
+        return;
+      }
+      box.innerHTML = rows.map((a) => `
+        <div class="attach-row" style="padding:6px 0">
+          <strong>${esc(a.name)}</strong>
+          <span class="muted">· ${esc(a.target_site)} · ${esc(a.email)}</span>
+          ${a.used_by && a.used_by.length
+            ? `<span class="muted"> · already used by ${esc(a.used_by.join(', '))}</span>`
+            : '<span class="muted"> · not used by any project</span>'}
+          ${a.banned ? '<span class="muted"> · BANNED</span>' : ''}
+          ${a.banned ? '' :
+            `<button class="btn btn-accent btn-tiny" data-acc-attach="${a.id}"
+               style="margin-left:8px">ATTACH</button>`}
+        </div>`).join('');
+
+      box.querySelectorAll('[data-acc-attach]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          b.disabled = true;
+          try {
+            await postJSON(`${API}/accounts/${b.dataset.accAttach}/attach`, {});
+            toast('Account attached to this project.');
+            await loadAttachable();
+            await loadAccounts();
+          } catch (e) {
+            b.disabled = false;
+            toast(e.message, 'error');
+          }
+        }));
+    } catch (e) {
+      box.innerHTML = `<span class="muted">Could not load: ${esc(e.message)}</span>`;
+    }
   }
 
   function openAccountModal(account) {
@@ -2225,6 +2324,7 @@
         break;
 
       case 'account-new': openAccountModal(null); break;
+      case 'account-attach': toggleAttachPanel(); break;
       case 'account-cancel': q('[data-account-modal]').hidden = true; break;
       case 'account-save': saveAccount(); break;
 

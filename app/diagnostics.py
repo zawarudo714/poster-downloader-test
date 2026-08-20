@@ -74,8 +74,8 @@ from sqlalchemy.orm import Session
 
 from .config import WORKSPACE_DIR
 from .models import (
-    MasterTitle, ProcessedImage, Project, Revision, SavedPoster,
-    UploadAccount, UploadTracking, User,
+    AccountProject, MasterTitle, ProcessedImage, Project, Revision,
+    SavedPoster, UploadAccount, UploadTracking, User,
 )
 from .utils import saved_poster_path
 
@@ -513,7 +513,12 @@ def check_upload_accounts(db: Session, scope: Scope) -> CheckResult:
     """Marketplace accounts that can't actually be used."""
     q = db.query(UploadAccount)
     if scope.project_id:
-        q = q.filter(UploadAccount.project_id == scope.project_id)
+        # Through the link table: an account shared with another niche must
+        # still be checked here, and an earn-only account must not appear in
+        # any project's scan.
+        q = q.join(AccountProject,
+                   AccountProject.account_id == UploadAccount.id
+                   ).filter(AccountProject.project_id == scope.project_id)
 
     rows: list[Finding] = []
     for acct in q.all():
@@ -532,7 +537,7 @@ def check_upload_accounts(db: Session, scope: Scope) -> CheckResult:
         if problems:
             rows.append(Finding(f"{acct.name} ({acct.email})",
                                 ", ".join(problems), "/admin/pipeline",
-                                project=scope.label(acct.project_id)))
+                                project=scope.label(scope.project_id)))
     return _result(
         "upload_accounts", "Marketplace accounts that can't be used",
         "The uploader will skip these. If an account is meant to be idle, "
@@ -547,7 +552,9 @@ def check_orphaned_bans(db: Session, scope: Scope) -> CheckResult:
     q = db.query(UploadAccount).filter(UploadAccount.banned_at.isnot(None),
                                        UploadAccount.replaced_by_id.is_(None))
     if scope.project_id:
-        q = q.filter(UploadAccount.project_id == scope.project_id)
+        q = q.join(AccountProject,
+                   AccountProject.account_id == UploadAccount.id
+                   ).filter(AccountProject.project_id == scope.project_id)
 
     rows = []
     for acct in q.all():
@@ -561,7 +568,7 @@ def check_orphaned_bans(db: Session, scope: Scope) -> CheckResult:
             f"{acct.name} — {lost} listing(s) not rebuilt",
             f"banned {acct.banned_at:%Y-%m-%d}: {acct.banned_reason or 'no reason recorded'}",
             "/admin/pipeline#upload",
-            project=scope.label(acct.project_id)))
+            project=scope.label(scope.project_id)))
 
     return _result(
         "orphaned_bans", "Banned accounts whose work was never re-listed",

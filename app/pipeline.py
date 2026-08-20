@@ -254,10 +254,18 @@ DEFAULT_TEEPUBLIC_SELECTORS = {
     "login_submit":      "css:#login",
     "control_panel_url": "https://www.teepublic.com/account/sales",
     "popup_close":       "css:.jsCloseFlash",
+    # TeePublic sits behind Cloudflare, which serves a "managed challenge" —
+    # an interstitial that clears itself for a browser that looks like a
+    # browser. Headless is one of the loudest signals it looks for, so this
+    # marketplace runs with a visible window. The node has a desktop anyway.
+    "headless":          "0",
 }
 
 
 DEFAULT_FAA_SELECTORS = {
+    # FineArtAmerica has never objected to headless, so it stays: no window,
+    # less memory, nothing on screen if you happen to be on that desktop.
+    "headless":             "1",
     "login_url":            "https://fineartamerica.com/loginchoosetype.php",
     "artist_login_link":    "css:a.buttonlogin[href='/artists/index.php']",
     "username_field":       "name:username",
@@ -295,6 +303,10 @@ DEFAULT_FAA_SELECTORS = {
 # Selenium waits, previously the Tkinter "Settings" tab. Per-account
 # overrides live in UploadAccount.timing_json.
 DEFAULT_TIMINGS = {
+    # How long to let a self-clearing security check finish before calling it
+    # a wall. Cloudflare's managed challenge takes a few seconds; failing at
+    # three meant never getting past a site that would have let us in.
+    "bot_wall_wait_s":  30,
     "login_wait":       2.0,
     "page_load_wait":   2.0,
     "upload_wait":      5.0,

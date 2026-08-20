@@ -65,18 +65,41 @@ from .client import PipelineClient, PipelineError
 #
 # Rule for anything added here: it must be a SENTENCE THE USER WOULD SEE, not
 # the name of a product that might merely be loaded.
-BOT_MARKERS = (
+# ── TRANSIENT vs HARD, and the difference matters enormously ──────────────
+#
+# Cloudflare's "managed challenge" is an interstitial that SOLVES ITSELF for a
+# real browser in a few seconds and then continues to the page you asked for.
+# FineArtAmerica's "Verify Visitor — please check the box" does not: it waits
+# for a human and will sit there forever.
+#
+# Treating them the same is what parked a TeePublic account. The check ran
+# three seconds after navigating, saw Cloudflare's waiting room, and called it
+# a wall — a browser that would have sailed through never got the chance.
+#
+# So a transient one is WAITED OUT and only becomes a failure if it is still
+# there afterwards. A hard one fails immediately, because waiting on it is
+# just a slower way to fail.
+CHALLENGE_TRANSIENT = (
+    "just a moment",                   # Cloudflare's page title
+    "performing security verification",
     "checking your browser",
-    "are you human",
-    "verify you are human",
+    "enable javascript and cookies to continue",
+    "verification successful",         # mid-transition; let it finish
+)
+
+CHALLENGE_HARD = (
     "verify visitor",              # FineArtAmerica's exact wording
     "please check the box",        # ditto, the line under it
+    "are you human",
+    "verify you are human",
     "unusual traffic",
     "access denied",
     "rate limit",
     "too many requests",
-    "enable javascript and cookies to continue",
 )
+
+# Kept as the union so anything still importing it behaves sensibly.
+BOT_MARKERS = CHALLENGE_HARD + CHALLENGE_TRANSIENT
 
 
 def _drive_root(root: Path) -> Path:
@@ -499,30 +522,61 @@ class MarketplaceUploader:
 
     def check_for_bot_wall(self, context: str) -> None:
         """
-        Look for a challenge page.
+        Look for a challenge page — and wait out the kind that clears itself.
 
-        Checked after navigation and login because continuing past one wastes
-        the batch and makes the account look worse. Raising with a long pause
-        gives the site time to cool off.
+        A Cloudflare managed challenge is a WAITING ROOM, not a wall. It runs
+        for a few seconds and then sends the browser on. Failing the moment we
+        see one means never getting past a site that would have let us in, so
+        this polls until it clears or the patience runs out.
+
+        A hard challenge — one asking a human to tick something — is failed at
+        once. There is nobody at that machine to tick it.
         """
-        try:
-            raw = self.driver.page_source or ""
-        except WebDriverException:
-            return
+        deadline = time.time() + float(self.t("bot_wall_wait_s", 30))
+        waited = False
 
-        # VISIBLE TEXT, not markup. Script sources, class names and dormant
-        # widgets are not the site talking to us — and matching them is what
-        # turned a normal sign-in page into a three-hour pause.
-        page = _visible_text(raw)
-        hits = [marker for marker in BOT_MARKERS if marker in page]
-        if not hits:
-            return
+        while True:
+            try:
+                raw = self.driver.page_source or ""
+                title = (self.driver.title or "").lower()
+            except WebDriverException:
+                return
+
+            # VISIBLE TEXT, not markup. Script sources, class names and dormant
+            # widgets are not the site talking to us — and matching them is
+            # what turned a normal sign-in page into a three-hour pause.
+            page = _visible_text(raw)
+            haystack = f"{title} {page}"
+
+            hard = [m for m in CHALLENGE_HARD if m in haystack]
+            if hard:
+                break
+
+            soft = [m for m in CHALLENGE_TRANSIENT if m in haystack]
+            if not soft:
+                if waited:
+                    self.emit("Security check cleared on its own — carrying on.",
+                              level="ok")
+                return
+
+            if time.time() >= deadline:
+                hard = soft
+                break
+
+            if not waited:
+                waited = True
+                self.emit(f"Security check in progress ({soft[0]}) — waiting up "
+                          f"to {int(self.t('bot_wall_wait_s', 30))}s for it to "
+                          f"clear itself.")
+            time.sleep(2)
+
         shot = self.capture_evidence(f"botwall_{context}")
         raise UploadError(
-            f"Bot-protection page detected during {context} "
-            f"(matched: {', '.join(hits)}). Account paused to cool off.",
+            f"Bot-protection page during {context}, still there after waiting "
+            f"(matched: {', '.join(hard)}). See Diagnostics → Failure Evidence "
+            f"for the page it was showing.",
             pause_minutes=180,
-            pause_reason=f"Bot wall during {context}: {', '.join(hits)}",
+            pause_reason=f"Bot wall during {context}: {', '.join(hard)}",
             fatal=True,
         )
 
@@ -585,7 +639,21 @@ class MarketplaceUploader:
         options.add_argument("--profile-directory=Default")
         # Unattended box: no visible window, and the flags below are what make
         # headless Chrome behave on a bare Windows VPS.
-        options.add_argument("--headless=new")
+        # ── Headless is an OPTIMISATION, not a requirement ───────────────
+        #
+        # This machine has a real desktop — Photoshop needs one — so a visible
+        # window costs nothing but a window. And headless is one of the
+        # strongest signals Cloudflare uses: TeePublic's managed challenge is
+        # far likelier to clear itself for a browser that looks like a browser.
+        #
+        # Per marketplace, from the selectors map, so FineArtAmerica keeps
+        # headless while TeePublic gets a window — changed in the dashboard,
+        # not here.
+        if str(self.selectors.get("headless", "1")).strip().lower() not in ("0", "false", "no"):
+            options.add_argument("--headless=new")
+        else:
+            self.emit("Running with a visible window (headless off for this "
+                      "marketplace)")
         options.add_argument("--disable-gpu")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")

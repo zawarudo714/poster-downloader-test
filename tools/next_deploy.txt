@@ -1,1 +1,1 @@
-Failure screenshots and page dumps are now viewable on Diagnostics, including from jobs with no project
+Wait out self-clearing security checks instead of failing in three seconds; headless is now per marketplace and off for TeePublic

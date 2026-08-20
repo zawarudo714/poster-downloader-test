@@ -35,6 +35,24 @@
           RUN&nbsp;TONIGHT'S&nbsp;CHECK&nbsp;AGAIN
         </button>
       </div>
+
+      {# ── The two times, next to the line that describes them ───────────
+         These are the same settings as Pipeline → Upload Settings; there is
+         one stored value, editable from either place. They belong here as
+         well because this is the page that SHOWS what they do, and a setting
+         you cannot find is a setting you do not have. #}
+      <div class="filter-row" style="gap:8px; flex-wrap:wrap; margin-top:8px">
+        <label>GO&nbsp;QUIET&nbsp;AT
+          <input type="text" data-quiet-from placeholder="22:00" size="6">
+        </label>
+        <label>CHECK&nbsp;EARNINGS&nbsp;AT
+          <input type="text" data-run-at placeholder="22:00" size="6">
+        </label>
+        <button class="btn btn-accent btn-tiny" data-action="save-schedule" type="button">SAVE</button>
+        <span class="muted" data-schedule-status></span>
+        <span class="muted">Blank the first one to switch the quiet time off.
+          To test it, set both a few minutes ahead and watch the line above.</span>
+      </div>
       <p class="muted" style="margin-top:6px">
         Reading happens in the worker machine's browser, because the
         marketplace challenges this server as a bot but not that machine.

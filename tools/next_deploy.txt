@@ -1,1 +1,1 @@
-Deleting a marketplace account now removes its Chrome profile from the worker machine
+Quiet-time and earnings-check times editable on the Earnings page, next to the line that describes them

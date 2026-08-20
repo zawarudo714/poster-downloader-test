@@ -112,15 +112,16 @@ Also planned, stated but not yet built:
        and does not publish it. Their `Current Balance` is authoritative;
        anything we derive is an estimate and must be worded as one.
 
-6. **Ban recovery / account handover.** When a marketplace account is banned,
-   mark it as such and use that marking to bring a replacement account online
-   with as little manual work as possible — reassign everything that was on
-   the dead account to the new credentials so uploading resumes on its own.
-   `UploadTracking` is already keyed on (poster, account) and REQUEUE BACK
-   CATALOGUE already re-queues processed images against a chosen account, so
-   the pieces exist; what's missing is the "this account is dead, move its
-   work to that one" action and a banned state on `UploadAccount`. Owner has
-   not designed this yet — raise it when ban recovery next comes up.
+6. **Ban recovery / account handover. BUILT.** `ban_account()` and
+   `hand_over_account()` in `pipeline.py`, MARK BANNED and HAND OVER TO… on
+   the Upload tab. A banned account keeps its row and its history — it is not
+   a disabled one, because its listings are gone from the marketplace and
+   have to be rebuilt elsewhere. Handover reuses `requeue_for_account()`, so
+   the review-gate rules apply to a rebuild exactly as they do to a first
+   upload. `check_orphaned_bans` in Diagnostics catches a banned account
+   whose catalogue was never moved anywhere.
+
+   Untested against a REAL ban — nothing here has been through one.
 
 7. **Reprocess the dot-truncated legacy titles.** The old JSX did
    `split('.')[0]` on the filename, so every poster in a title containing a
@@ -957,6 +958,11 @@ inherits the wrong half of another one.
 - He is cost-conscious and picks cheap, simple, mainstream hosting.
 - **Anything he might want to tweak belongs in the dashboard.** He has said
   this more than once. Treat a hardcoded value as a defect.
+- **And it belongs where the thing it governs is SHOWN.** A setting he cannot
+  find is a setting he does not have. The nightly earnings times were added
+  to Upload Settings — correct by category, useless in practice, because the
+  screen that displays "quiet from 22:00" is the Earnings page and that is
+  where he looked. One stored value, editable from wherever it is relevant.
 - He notices the thing you glossed over. Say the uncomfortable part first.
 
 ### Write in plain words. This is a standing instruction, not a preference.

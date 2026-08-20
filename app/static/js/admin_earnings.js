@@ -344,6 +344,16 @@
     try {
       var d = await getJSON(API + '/schedule');
       var s = d.quiet || {};
+
+      // Only refill a box you are not currently typing into. This line
+      // refreshes every 3 seconds, and overwriting a half-typed time would
+      // make the field unusable.
+      [['[data-quiet-from]', d.quiet_from], ['[data-run-at]', d.run_at]]
+        .forEach(function (pair) {
+          var el = q(pair[0]);
+          if (el && document.activeElement !== el) el.value = pair[1] || '';
+        });
+
       if (!s.enabled) {
         el.textContent = 'Quiet time off · checks run at ' + esc(d.run_at || '—')
           + ' · new work: ALLOWED';
@@ -408,6 +418,24 @@
       el.hidden = !el.hidden;
       t.textContent = el.hidden ? 'SHOW' : 'HIDE';
       loadEntries();
+      return;
+    }
+    if (t.dataset.action === 'save-schedule') {
+      var status = q('[data-schedule-status]');
+      status.textContent = 'Saving…';
+      // Written through the same endpoint the Pipeline settings use, so the
+      // key is validated in one place and there is still only one stored
+      // value behind both screens.
+      postJSON('/admin/pipeline/api/settings', {
+        scope: 'global',
+        settings: {
+          earnings_quiet_from: q('[data-quiet-from]').value.trim(),
+          earnings_run_at: q('[data-run-at]').value.trim()
+        }
+      }).then(function () {
+        status.textContent = 'Saved.';
+        loadSchedule();
+      }).catch(function (e) { status.textContent = 'Failed: ' + e.message; });
       return;
     }
     if (t.dataset.action === 'rearm') {

@@ -1,1 +1,1 @@
-Wait out self-clearing security checks instead of failing in three seconds; headless is now per marketplace and off for TeePublic
+Earnings read no longer opens an upload tab it does not need, and reports what the server actually said instead of finishing silently

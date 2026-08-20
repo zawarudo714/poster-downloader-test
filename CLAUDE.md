@@ -912,6 +912,14 @@ console on an unattended VPS. The reaper released them, the next cycle
 claimed them, and it stranded them again — forever, looking alive the whole
 time.
 
+**And a REPLY that is ignored is the same defect wearing a different hat.**
+The earnings read posted each page to the server and read one key out of the
+answer — "is there another page" — discarding the error and the stored count.
+So a page the server could not parse produced a run that fetched, stored
+nothing, and reported "Job finished". The screen stayed empty and no line
+anywhere connected the two. If you asked something a question, say what it
+answered.
+
 Concretely: **an exception must never be able to escape past the point where
 the work was claimed.** If setup can fail, either claim after it, or catch it
 and report the claim as failed with the real error text. And an error that is

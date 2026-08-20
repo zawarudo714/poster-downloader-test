@@ -911,7 +911,10 @@ class MarketplaceUploader:
             self.emit("Login OK", level="ok", progress=10)
 
             # Everything from here happens in a clean tab.
-            self.open_work_tab()
+            # NOTE: opening the separate work tab used to happen here, which
+            # meant every caller got it — including an earnings READ, which
+            # neither uploads nor needs a spare tab. Moved to the uploader,
+            # where it belongs. login() logs in; nothing else.
 
         except UploadError:
             raise
@@ -1421,6 +1424,9 @@ class UploadStage:
         )
 
         fetched = 0
+        stored = 0
+        problems: list[str] = []
+
         try:
             # Same three exits as run_batch (rule: claimed work must always
             # end in a reported state). A failure here is reported against
@@ -1447,6 +1453,31 @@ class UploadStage:
                          "kind": kind, "page": page_no, "url": url,
                          "html": html},
                     )
+
+                    # ── SAY WHAT CAME BACK ───────────────────────────────
+                    #
+                    # This reply used to be read for one key — "is there
+                    # another page" — and everything else thrown away. So a
+                    # page the server could not parse produced a run that
+                    # fetched, reported nothing, and finished OK. The job said
+                    # "finished", the Earnings screen stayed empty, and there
+                    # was no line anywhere connecting the two.
+                    if verdict.get("error"):
+                        problems.append(f"{kind} page {page_no}: {verdict['error']}")
+                        uploader.emit(f"  ✗ {kind} page {page_no}: "
+                                      f"{verdict['error']}", level="error")
+                        break
+
+                    count = int(verdict.get("stored") or 0)
+                    stored += count
+                    uploader.emit(
+                        f"  {kind} page {page_no}: {count} new"
+                        + (f", {verdict['skipped_known']} already held"
+                           if verdict.get("skipped_known") else "")
+                        + (f", balance {verdict['balance']}"
+                           if verdict.get("balance") else "")
+                    )
+
                     if not verdict.get("more"):
                         break
                     url = verdict.get("next_url")
@@ -1455,7 +1486,19 @@ class UploadStage:
         finally:
             uploader.stop()
 
-        return {"pages_fetched": fetched, "account": account["name"]}
+        # A read that stored nothing and hit a problem is a FAILURE, and must
+        # be reported as one. "Job finished" over an empty screen is the exact
+        # shape of silence this codebase keeps being bitten by.
+        if problems:
+            raise RuntimeError(
+                "Could not read this account: " + "; ".join(problems)
+                + ". See Diagnostics → Failure Evidence for the page it saw.")
+        if fetched and stored == 0:
+            uploader.emit("Nothing new — every row on those pages was already "
+                          "stored.", level="ok")
+
+        return {"pages_fetched": fetched, "stored": stored,
+                "account": account["name"]}
 
     def test_upload(self, job_id: int, payload: dict) -> dict:
         """

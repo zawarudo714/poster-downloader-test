@@ -65,8 +65,78 @@
     return data;
   }
 
+  // ── What the current selection can honestly show ─────────────────────
+  //
+  // Panels are hidden by CAPABILITY, not by marketplace name. Select
+  // FineArtAmerica and TeePublic together and "what sold" disappears,
+  // because TeePublic publishes no per-design data and a list covering only
+  // half your money is worse than none. The page says which site removed it
+  // rather than leaving a hole.
+  function applyCapabilities(caps) {
+    document.querySelectorAll('[data-cap-panel]').forEach(function (panel) {
+      var key = panel.dataset.capPanel;
+      var allowed = caps[key] === true;
+      panel.hidden = !allowed;
+    });
+
+    var notes = [];
+    ['per_design', 'refunds', 'payouts'].forEach(function (key) {
+      var blockers = (caps.missing_from || {})[key] || [];
+      if (!caps[key] && blockers.length) {
+        notes.push({ per_design: 'per-design sales', refunds: 'refunds',
+                     payouts: 'payout history' }[key]
+                   + ' (not published by ' + blockers.join(', ') + ')');
+      }
+    });
+    var el = q('[data-cap-note]');
+    if (el) {
+      el.hidden = !notes.length;
+      el.textContent = notes.length
+        ? 'Hidden for this selection: ' + notes.join('; ')
+          + '. Choose a single site to see them.'
+        : '';
+    }
+  }
+
+  // ── Owed, per account ────────────────────────────────────────────────
+  function renderOwed(data) {
+    var el = q('[data-owed-list]');
+    var groups = data.groups || [];
+    q('[data-owed-total]').textContent = groups.length
+      ? 'total ' + money(data.total) : '';
+
+    if (!groups.length) {
+      el.innerHTML = '<p class="muted">No accounts to read yet.</p>';
+      return;
+    }
+
+    el.innerHTML = groups.map(function (g) {
+      return '<div style="margin-bottom:12px">'
+        + '<div><strong>' + esc(g.label) + '</strong> '
+        + '<span class="muted">· ' + money(g.total) + ' across '
+        + g.accounts.length + ' account(s)</span></div>'
+        + '<table class="data-table"><tbody>'
+        + g.accounts.map(function (a) {
+            return '<tr><td>' + esc(a.name)
+              + (a.banned ? ' <span class="muted">· banned</span>' : '')
+              + '</td><td>' + (a.owed ? money(a.owed) : '<span class="muted">—</span>')
+              + '</td><td class="muted mono">'
+              + (a.last_read ? 'read ' + when(a.last_read) : 'never read')
+              + '</td><td>'
+              // The row that matters: an account that has stopped reporting
+              // shows a stale figure, not a zero, and nothing else on the
+              // page would tell you.
+              + (a.stale
+                  ? '<span class="muted">NOT READ RECENTLY — this figure is out of date</span>'
+                  : '')
+              + '</td></tr>';
+          }).join('')
+        + '</tbody></table></div>';
+    }).join('');
+  }
+
   // ── Headline figures ─────────────────────────────────────────────────
-  function renderSummary(s) {
+  function renderSummary(s, caps) {
     // "+$25 today" is the format asked for: the delta is what tells you
     // something happened, and it is arithmetic over rows rather than a
     // stored number, so it stays correct across a month boundary.
@@ -77,9 +147,25 @@
         card('EARNED', money(s.earned), s.sales_count + ' sale(s)') +
         card('TODAY', '+' + money(s.today.amount), s.today.sales + ' sale(s)') +
         card('LAST 7 DAYS', '+' + money(s.week.amount), s.week.sales + ' sale(s)') +
-        card('REFUNDED', '-' + money(s.refunded), 'taken back') +
-        card('PAID OUT', money(s.paid_out), 'already received') +
+        // Refunds and payouts only exist on a site that publishes a ledger.
+        // Shown when the selection can support them, omitted otherwise —
+        // with the reason spelled out below rather than left blank.
+        (caps.refunds ? card('REFUNDED', '-' + money(s.refunded), 'taken back') : '') +
+        (caps.payouts ? card('PAID OUT', money(s.paid_out), 'already received') : '') +
       '</div>' +
+      '<p class="muted" style="margin-top:8px" data-cap-note hidden></p>' +
+      (s.snapshot_partial
+        ? '<p class="muted" style="margin-top:8px">Some of these accounts only '
+          + 'report running totals, so their figures start from ' + when(s.snapshot_since)
+          + ' — when this app first read them. Anything earned before that is '
+          + 'in their lifetime total but cannot be split by day.</p>'
+        : '') +
+      (s.snapshot_gap_days
+        ? '<p class="muted" style="margin-top:8px">' + s.snapshot_gap_days
+          + ' day(s) were missed while the worker machine was off. That money is '
+          + 'counted, but on the day it was noticed rather than the day it was '
+          + 'earned.</p>'
+        : '') +
       (s.unmatched
         ? '<p class="muted" style="margin-top:8px">' + s.unmatched +
           ' sale(s) in this period are not tied to a design yet — they still ' +
@@ -299,7 +385,12 @@
   async function loadOverview() {
     try {
       var data = await getJSON(API + '/overview?' + params());
-      renderSummary(data.summary);
+      // renderSummary FIRST: it creates the note element that
+      // applyCapabilities fills in. The other way round, the note was looked
+      // up before it existed and silently never appeared.
+      renderSummary(data.summary, data.capabilities || {});
+      applyCapabilities(data.capabilities || {});
+      renderOwed(data.owed_by_account || {});
       renderNextPayout(data.next_payout, data.reconcile);
       renderAccounts(data.accounts);
     } catch (e) {

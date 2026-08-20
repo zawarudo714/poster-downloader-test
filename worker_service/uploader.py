@@ -1324,6 +1324,9 @@ class UploadStage:
                     html = uploader.driver.page_source
                     fetched += 1
 
+                    # One page for a totals-only site, several for a ledger.
+                    # The node does not know which — it asks after every page
+                    # and the server, which holds the rule, answers.
                     verdict = self.client.post(
                         "/earnings/page",
                         {"job_id": job_id, "account_id": account["id"],

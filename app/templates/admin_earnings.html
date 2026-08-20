@@ -128,6 +128,23 @@
     </div>
   </section>
 
+  {# ── What each account is owed ─────────────────────────────────────────
+     Always shown, whatever is selected: every marketplace publishes some
+     version of "not yet paid". With ten accounts this is also the panel that
+     reveals ONE of them has quietly stopped being readable — a single total
+     hides that, a list with a stale date does not. #}
+  <section class="panel">
+    <div class="panel-head">
+      <span>OWED, BY ACCOUNT
+        {{ info("What each marketplace says it currently owes that account, straight from their own page. Grouped by site with a subtotal. An account marked NOT READ RECENTLY has stopped reporting — usually a session that expired or a password that changed — and its figure is stale rather than zero.") }}
+      </span>
+      <span class="muted mono" data-owed-total></span>
+    </div>
+    <div class="panel-body" data-owed-list>
+      <div class="muted">Loading…</div>
+    </div>
+  </section>
+
   {# ── Next payout ───────────────────────────────────────────────────────
      Its own panel because it is the one figure that is NOT a fact. FAA pays
      on the date an order ships and does not publish which orders have
@@ -147,7 +164,7 @@
      Sorted by money by default, because two sales of a framed print and two
      of a sticker are not the same result, and deciding what to make more of
      is the only reason this list exists. #}
-  <section class="panel">
+  <section class="panel" data-cap-panel="per_design">
     <div class="panel-head">
       <span>WHAT SOLD
         {{ info("Every design that has earned anything in the period, best first. Refunds are subtracted, so a design can show less than it sold. Rows marked UNMATCHED are sales we could not tie to one of your titles — match them below and they join the totals here.") }}
@@ -171,7 +188,7 @@
      The matcher refuses to guess: a sale credited to the wrong design is
      worse than one credited to nothing, because you would act on it. So
      whatever it could not prove lands here for a human. #}
-  <section class="panel">
+  <section class="panel" data-cap-panel="per_design">
     <div class="panel-head">
       <span>SALES WE COULD NOT PLACE
         {{ info("Listings whose name does not match any title we hold — usually the oldest ones, uploaded by hand before the pipeline existed. Matching one is permanent and fixes every past and future sale of that design at once.") }}
@@ -186,7 +203,7 @@
   {# ── The raw rows ──────────────────────────────────────────────────────
      Last, and collapsed by default. This is the thing to read when a total
      looks wrong, not the thing to read every day. #}
-  <section class="panel">
+  <section class="panel" data-cap-panel="sales">
     <div class="panel-head">
       <span>EVERY LINE
         {{ info("The ledger exactly as the marketplace reports it — sales, refunds and payouts. If a total above looks wrong, the answer is in here.") }}

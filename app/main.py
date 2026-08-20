@@ -137,7 +137,9 @@ def on_startup():
     # loudly, because a project rename also changes its storage folder and
     # that should never happen invisibly.
     from .db import SessionLocal
-    from .pipeline import backfill_account_projects, sync_projects
+    from .pipeline import (
+        backfill_account_projects, backfill_marketplace_names, sync_projects,
+    )
     db = SessionLocal()
     try:
         for change in sync_projects(db):
@@ -158,6 +160,12 @@ def on_startup():
         made = backfill_account_projects(db)
         if made:
             log.info("Attached %d existing account(s) to their project", made)
+
+        # One spelling per marketplace, across accounts AND the rows that
+        # carry a copy of the name. Must happen together or the totals split.
+        renamed = backfill_marketplace_names(db)
+        if renamed:
+            log.info("Renamed %d row(s) to the settled marketplace names", renamed)
 
         # GPT generation runs HERE, not on the Windows node — it is an HTTPS
         # call, so it needs no desktop and keeps working when that box is

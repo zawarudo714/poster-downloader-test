@@ -88,6 +88,17 @@ def api_overview(
         # reconcile is the one thing that makes every other figure suspect.
         "reconcile": service.reconcile(db, account_ids=ids),
         "accounts": service.accounts_overview(db),
+        # What each account says it is owed, grouped by site. Always shown:
+        # every marketplace publishes something like it, and with ten
+        # accounts it is the figure that tells you one of them has stopped.
+        "owed_by_account": service.owed_by_account(
+            db, marketplace=marketplace, account_ids=ids),
+        # What this SELECTION can honestly show. The page reads this instead
+        # of assuming FineArtAmerica.
+        "capabilities": service.capabilities_for(
+            [marketplace] if marketplace
+            else [a["marketplace"] for a in service.accounts_overview(db)
+                  if not ids or a["id"] in ids]),
         "marketplaces": sorted({
             a["marketplace"] for a in service.accounts_overview(db)
             if a["marketplace"]

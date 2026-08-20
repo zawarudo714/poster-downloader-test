@@ -745,7 +745,7 @@ class UploadAccount(Base):
     # Use pipeline.accounts_for_project() / project_ids_for_account().
     project_id        = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
     name              = Column(String(64), nullable=False)
-    target_site       = Column(String(32), nullable=False, default="faa")
+    target_site       = Column(String(32), nullable=False, default="fineartamerica")
     email             = Column(String(255), nullable=False)
     password_enc      = Column(Text, nullable=False)
     profile_url       = Column(Text, nullable=True)
@@ -907,7 +907,7 @@ class UploadTracking(Base):
     processed_image_id = Column(Integer, ForeignKey("processed_images.id"), nullable=True)
     account_id         = Column(Integer, ForeignKey("upload_accounts.id"), nullable=False, index=True)
     project_id         = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
-    target_site        = Column(String(32), nullable=False, default="faa")
+    target_site        = Column(String(32), nullable=False, default="fineartamerica")
 
     # The exact title submitted to the marketplace, e.g. "Pulp Fiction - 1994 A".
     # Frozen at upload time so the listing can always be found again even if
@@ -993,6 +993,73 @@ class PipelineJob(Base):
 # here is produced by this app — every row is copied from a page on their
 # site — so nothing here is ever authoritative about our own pipeline. It
 # answers one question the pipeline cannot: is any of this making money.
+
+class MarketplaceSnapshot(Base):
+    """
+    One reading of a marketplace that publishes TOTALS instead of events.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY A SECOND SHAPE EXISTS AT ALL
+    ════════════════════════════════════════════════════════════════════════
+    `LedgerEntry` is one row per thing that happened, which is the better
+    model and the one to prefer. TeePublic makes it impossible: its account
+    page publishes four running totals and no list of sales, so there are no
+    events to store.
+
+    So this table stores what they DO publish, once a day, absolutely — and
+    "earned on Tuesday" becomes Tuesday's `total_earned` minus Monday's.
+    `total_earned` is lifetime and only ever climbs, which is what makes that
+    subtraction trustworthy where `month_to_date` (zeroed on the 1st) would
+    not be.
+
+    Still ABSOLUTE, never deltas, for exactly the reason the ledger is: a
+    stored delta cannot survive the month boundary, and cannot be recomputed
+    afterwards if it turns out to be wrong.
+
+    ════════════════════════════════════════════════════════════════════════
+    ONE ROW PER ACCOUNT PER LOCAL DAY
+    ════════════════════════════════════════════════════════════════════════
+    Re-reading the same day overwrites rather than appends, so pressing READ
+    NOW five times leaves five better readings of one day, not five days.
+
+    `covers_days` is how many days of earning the difference from the
+    PREVIOUS row actually represents. Normally 1. If the worker machine was
+    off for three nights it is 4, and the total is right while the daily
+    breakdown for those days is gone for good — an honest gap rather than an
+    invented average. Anything drawing a graph must read this.
+    """
+    __tablename__ = "marketplace_snapshots"
+
+    id            = Column(Integer, primary_key=True)
+    account_id    = Column(Integer, ForeignKey("upload_accounts.id"),
+                           nullable=False, index=True)
+    marketplace   = Column(String(32), nullable=False, index=True)
+    # The LOCAL date this reading belongs to, which is what the owner thinks
+    # in. Stored as a date, not a timestamp, because it is the key.
+    taken_on      = Column(Date, nullable=False, index=True)
+    taken_at      = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Money as TEXT, like every other amount in this app. Floats accumulate
+    # error and these exist to be subtracted from one another.
+    owed          = Column(String(24), nullable=True)   # their own "unpaid" figure
+    next_payment  = Column(String(24), nullable=True)
+    next_payment_period = Column(String(32), nullable=True)
+    month_to_date = Column(String(24), nullable=True)
+    month_to_date_period = Column(String(32), nullable=True)
+    total_earned  = Column(String(24), nullable=True)   # lifetime, monotonic
+    items_sold    = Column(Integer, nullable=True)      # lifetime, monotonic
+
+    # Earned since the previous snapshot, and how many days that spans.
+    # Derived on write because it needs the previous row, and re-derivable at
+    # any time from the absolute figures if it is ever wrong.
+    earned_since  = Column(String(24), nullable=True)
+    covers_days   = Column(Integer, nullable=False, default=1)
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "taken_on", name="uq_snapshot_account_day"),
+        Index("ix_snapshot_account_day", "account_id", "taken_on"),
+    )
+
 
 class LedgerEntry(Base):
     """

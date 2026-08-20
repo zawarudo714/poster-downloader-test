@@ -1,1 +1,1 @@
-Quiet-time and earnings-check times editable on the Earnings page, next to the line that describes them
+TeePublic earnings (daily snapshots via the node); Earnings page now marketplace-agnostic with owed broken down per account; marketplace names settled on fineartamerica/teepublic

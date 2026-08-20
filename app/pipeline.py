@@ -233,6 +233,30 @@ run();
 # redesigns its upload form — which is exactly why they are settings and not
 # code. Edit in the dashboard (Pipeline → Upload Settings → Selectors), hit
 # Test Upload on one image, done.
+# TeePublic's sign-in, measured from the real page 2026-08-20.
+#
+# There is deliberately NO new login code for this. The uploader's login()
+# already does the right things: it treats the first "click through to the
+# artist login" step as optional, and it decides whether to type credentials
+# by whether the email field is on the page. TeePublic redirects an
+# already-signed-in visitor away from the sign-in page, so the field is
+# absent and the session is reused — the same signal, for free.
+#
+# Only the strings differ, which is the whole point of keeping them as
+# settings.
+DEFAULT_TEEPUBLIC_SELECTORS = {
+    "login_url":         "https://www.teepublic.com/users/sign_in",
+    # No equivalent of FAA's "choose your account type" page. Left blank on
+    # purpose: login() logs one line and carries on when it cannot find it.
+    "artist_login_link": "",
+    "username_field":    "css:#user_email",
+    "password_field":    "css:#user_password",
+    "login_submit":      "css:#login",
+    "control_panel_url": "https://www.teepublic.com/account/sales",
+    "popup_close":       "css:.jsCloseFlash",
+}
+
+
 DEFAULT_FAA_SELECTORS = {
     "login_url":            "https://fineartamerica.com/loginchoosetype.php",
     "artist_login_link":    "css:a.buttonlogin[href='/artists/index.php']",
@@ -342,6 +366,9 @@ DEFAULTS: dict[str, Any] = {
     # reason — unattended reliability beats throughput here.
     "upload_sequential":  True,
     "selectors":          DEFAULT_FAA_SELECTORS,
+    # Chosen by the account's marketplace, not by its project — an account
+    # may serve no project at all, and the sign-in form belongs to the SITE.
+    "selectors_teepublic": DEFAULT_TEEPUBLIC_SELECTORS,
     "timings":            DEFAULT_TIMINGS,
 
     # Title submitted to the marketplace. Variables: {title} {year}
@@ -2088,6 +2115,45 @@ def detach_account(db: Session, *, account_id: int, project_id: int) -> bool:
     return bool(rows)
 
 
+# The marketplace used to be stored as "faa" on accounts while projects called
+# the same site "fineartamerica". Nothing compared the two, so it never broke —
+# but the moment anything did, every earnings total would have split in half.
+MARKETPLACE_RENAMES = {"faa": "fineartamerica", "tp": "teepublic"}
+
+
+def backfill_marketplace_names(db: Session) -> int:
+    """
+    One-off: settle on one spelling per marketplace.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE NAME IS COPIED, SO RENAMING IS A MIGRATION
+    ════════════════════════════════════════════════════════════════════════
+    `LedgerEntry.marketplace` and `TitleAlias.marketplace` are DENORMALISED
+    copies of the account's `target_site` — deliberately, so a filter needs no
+    join. That makes a rename a data migration rather than a spelling change:
+    change the account alone and its existing rows keep the old name, so the
+    account reads $0 while its money sits under a marketplace nothing points
+    at any more.
+
+    All three move together, here, in one transaction.
+    """
+    from .models import LedgerEntry, TitleAlias
+
+    changed = 0
+    for old, new in MARKETPLACE_RENAMES.items():
+        for model, field in ((UploadAccount, "target_site"),
+                             (LedgerEntry, "marketplace"),
+                             (TitleAlias, "marketplace")):
+            column = getattr(model, field)
+            changed += (
+                db.query(model).filter(column == old)
+                  .update({field: new}, synchronize_session=False)
+            )
+    if changed:
+        db.commit()
+    return changed
+
+
 def backfill_account_projects(db: Session) -> int:
     """
     One-off: turn the old single `project_id` column into link rows.
@@ -2778,7 +2844,14 @@ def account_payload(
         except (TypeError, ValueError):
             pass
 
-    selectors = dict(get_setting(db, "selectors", project=project))
+    # ── Selectors belong to the SITE, not the project ────────────────────
+    # A TeePublic account may serve no project at all, so resolving its
+    # sign-in form through a project would hand it FineArtAmerica's — which
+    # is how it would end up looking for an "artist login" link that does not
+    # exist on TeePublic.
+    site = (account.target_site or "").lower()
+    base_key = f"selectors_{site}" if f"selectors_{site}" in DEFAULTS else "selectors"
+    selectors = dict(get_setting(db, base_key, project=project))
     if account.selectors_json:
         try:
             selectors.update(json.loads(account.selectors_json))

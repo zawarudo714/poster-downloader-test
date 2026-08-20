@@ -981,7 +981,7 @@ def api_create_account(
     # An account name is unique per MARKETPLACE now, not per project. It used
     # to be per project, which is exactly what forced the same FineArtAmerica
     # account to be created twice under two names.
-    target_site = (payload.get("target_site") or "faa").strip()
+    target_site = (payload.get("target_site") or "fineartamerica").strip().lower()
     if db.query(UploadAccount).filter_by(target_site=target_site, name=name).first():
         raise HTTPException(
             400, f"An account named '{name}' already exists on {target_site}. "

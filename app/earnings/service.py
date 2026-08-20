@@ -48,7 +48,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..models import LedgerEntry, MasterTitle, UploadAccount
-from . import faa
+from . import faa, teepublic
 from .matching import MatchIndex, match_entry
 
 log = logging.getLogger(__name__)
@@ -58,13 +58,92 @@ log = logging.getLogger(__name__)
 # what selects the entry, so an account for a marketplace with no reader is
 # simply skipped rather than being an error.
 READERS: dict[str, Any] = {
-    "faa": faa,
     "fineartamerica": faa,
+    "teepublic": teepublic,
 }
 
-# How long after a sale FineArtAmerica may still revise it. Used only to
-# caveat what is shown, never to hide a row.
+# How long a marketplace may still revise a figure after a sale. Used only to
+# caveat what is shown, never to hide anything. Both sites happen to say 48
+# hours; it is per-marketplace because the next one will not.
 REVISION_WINDOW_H = 48
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  WHAT EACH MARKETPLACE ACTUALLY PUBLISHES
+# ═══════════════════════════════════════════════════════════════════════════
+# The Earnings page is shared by sites that do not offer the same things, and
+# the honest answer is not to average over that. FineArtAmerica publishes a
+# ledger — every sale, refund and payout as its own row. TeePublic publishes
+# four running totals and no list at all.
+#
+# So capabilities are DECLARED here and the screen reads them, rather than the
+# screen assuming FineArtAmerica and quietly showing empty panels for anything
+# else. A panel that cannot mean anything for the current selection is not
+# shown, and the page says which sites it would have covered — because a
+# figure silently missing half your money is worse than no figure.
+#
+# Adding a marketplace means adding a row here. Nothing on the page is keyed
+# on a site's name.
+CAPABILITIES: dict[str, dict] = {
+    "fineartamerica": {
+        "label":       "FineArtAmerica",
+        "shape":       "ledger",     # one row per event
+        "sales":       True,         # individual sales, with dates
+        "per_design":  True,         # which design earned what
+        "refunds":     True,
+        "payouts":     True,         # payout history as rows
+        "balance":     True,         # they state what they owe
+        "payout_rule": ("Paid on the 15th, for orders that shipped before the "
+                        "15th of the previous month. Ship dates are not "
+                        "published, so how much of this arrives next is not "
+                        "knowable — only the total owed."),
+    },
+    "teepublic": {
+        "label":       "TeePublic",
+        "shape":       "snapshot",   # running totals, read once a day
+        "sales":       False,        # no list of individual sales exists
+        "per_design":  False,
+        "refunds":     False,
+        "payouts":     False,
+        "balance":     True,
+        "payout_rule": ("Paid on the 15th of every month, for the previous "
+                        "calendar month, in full. So this figure drops to "
+                        "near zero just after the 15th — that is the payment "
+                        "landing, not a fault."),
+    },
+}
+
+
+def capabilities_for(marketplaces) -> dict:
+    """
+    What the CURRENT selection can honestly show.
+
+    A capability survives only if every marketplace in view has it. One
+    TeePublic account in the mix is enough to remove "per design", because
+    the resulting list would silently cover only part of the money.
+    """
+    sites = [m for m in dict.fromkeys(marketplaces) if m in CAPABILITIES]
+    if not sites:
+        return {"sites": [], "single": None, "labels": [],
+                **{k: False for k in ("sales", "per_design", "refunds",
+                                      "payouts", "balance")}}
+    caps = {
+        key: all(CAPABILITIES[m].get(key) for m in sites)
+        for key in ("sales", "per_design", "refunds", "payouts", "balance")
+    }
+    # Which sites are the REASON a capability is missing — so the page can
+    # name them instead of leaving a hole.
+    caps["missing_from"] = {
+        key: [CAPABILITIES[m]["label"] for m in sites
+              if not CAPABILITIES[m].get(key)]
+        for key in ("sales", "per_design", "refunds", "payouts")
+    }
+    caps["sites"] = sites
+    caps["labels"] = [CAPABILITIES[m]["label"] for m in sites]
+    caps["single"] = sites[0] if len(sites) == 1 else None
+    caps["payout_rule"] = (CAPABILITIES[sites[0]]["payout_rule"]
+                           if len(sites) == 1 else "")
+    return caps
 
 
 def dec(text: Optional[str]) -> Decimal:
@@ -171,6 +250,18 @@ def page_urls(db: Session, account: UploadAccount) -> list[dict]:
 
     attached = project_ids_for_account(db, account.id)
     project = resolve_project(db, attached[0] if attached else None)
+    marketplace = (account.target_site or "").lower()
+    if CAPABILITIES.get(marketplace, {}).get("shape") == "snapshot":
+        # One page, read whole. The URL comes from the account's selectors so
+        # it is dashboard-editable like every other marketplace address.
+        selectors = dict(get_setting(db, f"selectors_{marketplace}", project=project))
+        if account.selectors_json:
+            try:
+                selectors.update(json.loads(account.selectors_json))
+            except (TypeError, ValueError):
+                pass
+        return [{"kind": "snapshot", "url": selectors.get("control_panel_url")}]
+
     return [
         {"kind": "sales", "url": get_setting(db, "earnings_sales_url", project=project)},
         {"kind": "ledger", "url": get_setting(db, "earnings_balance_url", project=project)},
@@ -226,6 +317,12 @@ def store_page(db: Session, *, account: UploadAccount, kind: str,
     if reader is None:
         return {"more": False, "next_url": None, "stored": 0,
                 "note": "no reader for this marketplace"}
+
+    # A totals-only site has one page and no paging. Routed on the declared
+    # SHAPE rather than the site's name, so the next marketplace picks its
+    # path from its capability row instead of from an if-statement here.
+    if CAPABILITIES.get(marketplace, {}).get("shape") == "snapshot":
+        return store_snapshot(db, account=account, html=html)
 
     known = {
         k for (k,) in db.query(LedgerEntry.dedupe_key)
@@ -315,6 +412,73 @@ def store_page(db: Session, *, account: UploadAccount, kind: str,
         "timestamps_upgraded": upgraded,
         "balance": balance,
     }
+
+
+def store_snapshot(db: Session, *, account: UploadAccount, html: str) -> dict:
+    """
+    Store one reading of a totals-only marketplace.
+
+    One row per account per LOCAL day: reading twice in an afternoon leaves
+    two better readings of one day, not two days. `earned_since` is worked
+    out against the previous row and carries how many days it spans, so a
+    stretch when the worker machine was off shows as one honest four-day
+    figure instead of a false spike on the day it came back.
+    """
+    from ..timeutil import local_today
+    from ..models import MarketplaceSnapshot
+
+    marketplace = (account.target_site or "").lower()
+    reader = READERS.get(marketplace)
+    snap = reader.parse_account_page(html)
+    today = local_today()
+
+    previous = (
+        db.query(MarketplaceSnapshot)
+          .filter(MarketplaceSnapshot.account_id == account.id,
+                  MarketplaceSnapshot.taken_on < today)
+          .order_by(MarketplaceSnapshot.taken_on.desc())
+          .first()
+    )
+
+    row = (
+        db.query(MarketplaceSnapshot)
+          .filter(MarketplaceSnapshot.account_id == account.id,
+                  MarketplaceSnapshot.taken_on == today).first()
+    )
+    if row is None:
+        row = MarketplaceSnapshot(account_id=account.id, marketplace=marketplace,
+                                  taken_on=today)
+        db.add(row)
+
+    row.marketplace = marketplace
+    row.taken_at = datetime.utcnow()
+    row.owed = snap.owed
+    row.next_payment = snap.next_payment
+    row.next_payment_period = snap.next_payment_period
+    row.month_to_date = snap.month_to_date
+    row.month_to_date_period = snap.month_to_date_period
+    row.total_earned = snap.total_earned
+    row.items_sold = snap.items_sold
+
+    if previous is not None:
+        row.earned_since = _fmt(dec(snap.total_earned) - dec(previous.total_earned))
+        row.covers_days = max(1, (today - previous.taken_on).days)
+    else:
+        # The first ever reading has nothing to subtract from. Their lifetime
+        # total is a fact from day one; a daily figure is not, and inventing
+        # one would put the whole back catalogue on today's date.
+        row.earned_since = None
+        row.covers_days = 1
+
+    # The account carries the latest figure too, so "what am I owed" needs no
+    # join — the same reason the ledger denormalises the marketplace name.
+    account.marketplace_balance = snap.owed
+    account.last_earnings_read_at = datetime.utcnow()
+    db.commit()
+
+    return {"stored": 1, "owed": snap.owed, "total_earned": snap.total_earned,
+            "items_sold": snap.items_sold, "earned_since": row.earned_since,
+            "covers_days": row.covers_days, "more": False, "next_url": None}
 
 
 def _entry_from_row(account: UploadAccount, marketplace: str, row) -> LedgerEntry:
@@ -416,15 +580,66 @@ def _filtered(db: Session, *, marketplace: Optional[str] = None,
     return q
 
 
+def _snapshot_earnings(db: Session, *, marketplace: Optional[str],
+                       account_ids: Optional[list[int]],
+                       since_days: int) -> dict:
+    """
+    Earnings from totals-only accounts, over a window.
+
+    Adds up `earned_since` — each snapshot's climb over the one before it —
+    for snapshots inside the window. Two things this deliberately does NOT do:
+
+      * it does not reach back before our first snapshot. TeePublic states a
+        lifetime total, but not when any of it happened, so a window that
+        starts before we began watching is only partly answerable. The caller
+        gets `since` so the screen can say "since we started watching"
+        instead of quoting a number that looks complete and is not.
+      * it does not spread a multi-day gap evenly. A four-day jump stays one
+        four-day figure, flagged, because inventing three days of detail
+        would look exactly like data.
+    """
+    from ..models import MarketplaceSnapshot
+    from ..timeutil import local_today
+
+    start = local_today() - timedelta(days=since_days)
+    q = db.query(MarketplaceSnapshot).filter(MarketplaceSnapshot.taken_on >= start)
+    if marketplace:
+        q = q.filter(MarketplaceSnapshot.marketplace == marketplace)
+    if account_ids:
+        q = q.filter(MarketplaceSnapshot.account_id.in_(account_ids))
+    rows = q.order_by(MarketplaceSnapshot.taken_on.asc()).all()
+
+    earned = sum((dec(r.earned_since) for r in rows if r.earned_since), Decimal("0"))
+    items = sum((r.items_sold or 0) for r in rows[-1:])   # latest, lifetime
+    first = rows[0].taken_on if rows else None
+    partial = bool(rows) and first > start
+    return {
+        "earned": earned,
+        "rows": rows,
+        "first_seen": first.isoformat() if first else None,
+        "partial": partial,
+        "gap_days": sum((r.covers_days or 1) - 1 for r in rows),
+        "items_lifetime": items,
+    }
+
+
 def summary(db: Session, *, marketplace: Optional[str] = None,
             account_ids: Optional[list[int]] = None,
             days: int = 30) -> dict:
     """
     The headline numbers, for whatever subset is being looked at.
 
-    Everything is derived from rows in the window, so the same function
-    answers "all accounts" and "this one account on TeePublic" without a
-    special case.
+    ════════════════════════════════════════════════════════════════════════
+    TWO SHAPES, ONE SET OF FIGURES
+    ════════════════════════════════════════════════════════════════════════
+    FineArtAmerica's money comes from summing sale rows. TeePublic's comes
+    from subtracting yesterday's lifetime total from today's. Both are added
+    here, so "earned in the last 30 days" spans a mixed selection honestly.
+
+    Refunds and payouts are NOT added across shapes, because only a ledger
+    site publishes them. They are reported with the sites they cover so the
+    screen can say so rather than showing a total that quietly means "and
+    FineArtAmerica only".
     """
     now = datetime.utcnow()
     start = now - timedelta(days=days)
@@ -435,27 +650,45 @@ def summary(db: Session, *, marketplace: Optional[str] = None,
     refunds = [r for r in rows if r.entry_type == "refund"]
     payouts = [r for r in rows if r.entry_type == "payment"]
 
-    earned   = sum((dec(r.credit) for r in sales), Decimal("0"))
+    ledger_earned = sum((dec(r.credit) for r in sales), Decimal("0"))
     refunded = sum((dec(r.debit) or dec(r.credit) for r in refunds), Decimal("0"))
     paid     = sum((dec(r.debit) for r in payouts), Decimal("0"))
 
+    snaps = _snapshot_earnings(db, marketplace=marketplace,
+                               account_ids=account_ids, since_days=days)
+
     def window(hours: int) -> dict:
+        """Movement over a recent stretch, from both shapes."""
         edge = now - timedelta(hours=hours)
         recent = [r for r in sales if r.occurred_at >= edge]
-        return {"sales": len(recent),
-                "amount": _fmt(sum((dec(r.credit) for r in recent), Decimal("0")))}
+        amount = sum((dec(r.credit) for r in recent), Decimal("0"))
+
+        # Snapshot sites have no per-sale times, only per-day climbs, so a
+        # window is counted in whole local days.
+        from ..timeutil import local_today
+        edge_day = local_today() - timedelta(days=max(1, hours // 24))
+        for snap in snaps["rows"]:
+            if snap.taken_on > edge_day and snap.earned_since:
+                amount += dec(snap.earned_since)
+
+        return {"sales": len(recent), "amount": _fmt(amount)}
 
     return {
         "days": days,
-        "earned": _fmt(earned),
+        "earned": _fmt(ledger_earned + snaps["earned"]),
         "refunded": _fmt(refunded),
         "paid_out": _fmt(paid),
-        "net": _fmt(earned - refunded),
+        "net": _fmt(ledger_earned + snaps["earned"] - refunded),
         "sales_count": len(sales),
         "today": window(24),
         "week": window(24 * 7),
         "unmatched": sum(1 for r in sales if r.master_title_id is None),
         "revision_window_h": REVISION_WINDOW_H,
+        # Everything the page needs to be honest about what it cannot know.
+        "snapshot_since": snaps["first_seen"],
+        "snapshot_partial": snaps["partial"],
+        "snapshot_gap_days": snaps["gap_days"],
+        "items_lifetime": snaps["items_lifetime"],
     }
 
 
@@ -627,6 +860,72 @@ def by_design(db: Session, *, marketplace: Optional[str] = None,
     }
     out.sort(key=keys.get(sort, keys["amount"]), reverse=True)
     return out[:limit]
+
+
+def owed_by_account(db: Session, *, marketplace: Optional[str] = None,
+                    account_ids: Optional[list[int]] = None) -> dict:
+    """
+    What each account says it is owed, grouped by site.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY PER ACCOUNT AND NOT JUST A TOTAL
+    ════════════════════════════════════════════════════════════════════════
+    With ten accounts the realistic failure is not "the reader broke" — it is
+    ONE account quietly failing to sign in while the other nine keep working.
+    A single total hides that perfectly: it just looks a bit lower than you
+    expected, and there is nothing on screen to say why.
+
+    So every account is listed with when it was last read, and anything not
+    read for a couple of days is marked. That is the row that tells you a
+    password changed or a session expired.
+    """
+    from ..timeutil import local_today
+
+    q = db.query(UploadAccount)
+    if account_ids:
+        q = q.filter(UploadAccount.id.in_(account_ids))
+    if marketplace:
+        q = q.filter(func.lower(UploadAccount.target_site) == marketplace)
+
+    today = local_today()
+    groups: dict[str, dict] = {}
+    for account in q.order_by(UploadAccount.name).all():
+        site = (account.target_site or "").lower()
+        if site not in CAPABILITIES:
+            continue
+        last = account.last_earnings_read_at
+        stale_days = (today - last.date()).days if last else None
+        group = groups.setdefault(site, {
+            "marketplace": site,
+            "label": CAPABILITIES[site]["label"],
+            "total": Decimal("0"),
+            "accounts": [],
+        })
+        owed = dec(account.marketplace_balance)
+        group["total"] += owed
+        group["accounts"].append({
+            "id": account.id,
+            "name": account.name,
+            "owed": _fmt(owed) if account.marketplace_balance else None,
+            "last_read": last.isoformat() if last else None,
+            # Two days rather than one: a read that happens at 22:00 is
+            # nearly a day old by the following evening, and flagging that
+            # every day would train you to ignore the flag.
+            "stale": stale_days is None or stale_days >= 2,
+            "banned": bool(account.banned_at),
+        })
+
+    out = sorted(groups.values(), key=lambda g: g["label"])
+    for g in out:
+        g["accounts"].sort(key=lambda a: dec(a["owed"]), reverse=True)
+        g["total"] = _fmt(g["total"])
+    return {
+        "groups": out,
+        "total": _fmt(sum((dec(g["total"]) for g in out), Decimal("0"))),
+        "never_read": sum(1 for g in out for a in g["accounts"]
+                          if a["last_read"] is None),
+        "stale": sum(1 for g in out for a in g["accounts"] if a["stale"]),
+    }
 
 
 def accounts_overview(db: Session) -> list[dict]:

@@ -103,3 +103,72 @@
     runBtn.textContent = 'RUN SCAN AGAIN';
   });
 })();
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   FAILURE EVIDENCE
+   Screenshots and page dumps the worker machine captured when something went
+   wrong. Listed straight from the folder rather than looked up through an
+   upload row, so evidence from a job with no project — an earnings read, say
+   — is reachable too.
+   ═══════════════════════════════════════════════════════════════════════════ */
+(function () {
+  'use strict';
+
+  var list = document.getElementById('art-list');
+  var reload = document.getElementById('art-reload');
+  if (!list) return;
+
+  function esc(v) {
+    return String(v == null ? '' : v)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+  function when(iso) {
+    var d = new Date(iso + 'Z');
+    return isNaN(d) ? esc(iso) : d.toLocaleString();
+  }
+  function url(path) {
+    return '/admin/pipeline/api/artifact?path=' + encodeURIComponent(path);
+  }
+
+  async function load() {
+    list.innerHTML = '<div class="muted">Loading…</div>';
+    var data;
+    try {
+      var r = await fetch('/admin/pipeline/api/artifacts', { credentials: 'same-origin' });
+      data = await r.json();
+    } catch (e) {
+      list.innerHTML = '<div class="muted">Could not load: ' + esc(e.message) + '</div>';
+      return;
+    }
+
+    var rows = (data.artifacts || []);
+    if (!rows.length) {
+      list.innerHTML = '<p class="muted">Nothing captured yet — which is the '
+        + 'good outcome.</p>';
+      return;
+    }
+
+    list.innerHTML = rows.map(function (a) {
+      var isImage = a.kind === 'screenshot';
+      return '<div style="display:inline-block; vertical-align:top; margin:0 12px 14px 0; max-width:260px">'
+        + (isImage
+            // Thumbnail, and the image itself opens full size in a new tab.
+            ? '<a href="' + url(a.path) + '" target="_blank" rel="noopener">'
+              + '<img src="' + url(a.path) + '" alt="' + esc(a.name) + '" '
+              + 'style="max-width:260px; border:1px solid rgba(255,255,255,.12); '
+              + 'border-radius:4px; display:block"></a>'
+            : '<a class="btn btn-ghost btn-tiny" href="' + url(a.path) + '" '
+              + 'target="_blank" rel="noopener">OPEN PAGE SOURCE</a>')
+        + '<div class="muted mono" style="font-size:11px; margin-top:4px; word-break:break-all">'
+        + esc(a.name) + '</div>'
+        + '<div class="muted mono" style="font-size:11px">' + when(a.when)
+        + ' · ' + Math.round(a.bytes / 1024) + ' KB</div>'
+        + '</div>';
+    }).join('');
+  }
+
+  if (reload) reload.addEventListener('click', load);
+  load();
+})();

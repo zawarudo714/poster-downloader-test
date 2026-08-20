@@ -1,1 +1,1 @@
-Bot-wall check reads what the page SAYS, not its HTML — a dormant recaptcha widget was parking accounts for three hours
+Failure screenshots and page dumps are now viewable on Diagnostics, including from jobs with no project

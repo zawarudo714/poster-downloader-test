@@ -32,6 +32,23 @@
     </div>
   </section>
 
+  {# ── What the browser was looking at when something failed ────────────
+     Master level and not keyed on a project, because evidence is captured by
+     anything that drives a browser — including an earnings read for an
+     account attached to no project. Those screenshots were being written to
+     disk with nothing on any screen pointing at them. #}
+  <section class="panel">
+    <div class="panel-head">
+      <span>FAILURE EVIDENCE
+        {{ info("Screenshots and page dumps captured by the worker machine at the moment something went wrong — a bot-protection page, a rejected login, a form that changed. Newest first. The page dump is the raw HTML, which is what to send Claude when a marketplace changes something.") }}
+      </span>
+      <button class="btn btn-ghost btn-tiny" id="art-reload" type="button">RELOAD</button>
+    </div>
+    <div class="panel-body" id="art-list">
+      <div class="muted">Loading…</div>
+    </div>
+  </section>
+
 </div>
 {% endblock %}
 

@@ -1618,6 +1618,48 @@ def api_mark_removed(
     return JSONResponse({"ok": True, "marked": count})
 
 
+@router.get("/api/artifacts")
+def api_artifacts(
+    limit: int = 40,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    The newest screenshots and page dumps, newest first.
+
+    A plain listing of the folder, deliberately, rather than a lookup keyed on
+    an upload row. Evidence is captured by anything that drives a browser —
+    including an earnings read for an account attached to no project — and
+    those were being written to disk with nothing on any screen pointing at
+    them. A file nobody can find is a file that was not really saved.
+    """
+    base = (WORKSPACE_DIR / "_pipeline_artifacts").resolve()
+    if not base.is_dir():
+        return JSONResponse({"ok": True, "artifacts": []})
+
+    rows = []
+    for kind_dir in base.iterdir():
+        if not kind_dir.is_dir():
+            continue
+        for f in kind_dir.iterdir():
+            if not f.is_file():
+                continue
+            try:
+                stat = f.stat()
+            except OSError:
+                continue
+            rows.append({
+                "kind": kind_dir.name,
+                "name": f.name,
+                "path": f"_pipeline_artifacts/{kind_dir.name}/{f.name}",
+                "bytes": stat.st_size,
+                "when": datetime.utcfromtimestamp(stat.st_mtime).isoformat(),
+            })
+
+    rows.sort(key=lambda r: r["when"], reverse=True)
+    return JSONResponse({"ok": True, "artifacts": rows[:max(1, min(limit, 200))]})
+
+
 @router.get("/api/artifact")
 def api_artifact(
     path: str = Query(...),

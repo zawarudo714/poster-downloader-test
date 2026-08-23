@@ -94,7 +94,15 @@
         ' designs checked' + (c.missing ? ', ' + c.missing + ' missing so far' : '') +
         '.</p>' +
         '<p class="muted">Everything else on the worker machine is paused. ' +
-        'This can take hours — the page updates itself.</p>';
+        'This can take hours — the page updates itself.</p>' +
+        // Stop early but KEEP the results. Distinct from STOP THIS RUN,
+        // which throws them away — and it is the one you want when testing
+        // the later stages, or when you have simply seen enough.
+        (c.checked
+          ? '<p><button class="btn btn-accent" data-action="stop-scanning" ' +
+            'type="button">STOP SCANNING — REVIEW THE ' + c.checked +
+            ' CHECKED SO FAR</button></p>'
+          : '');
     } else if (run.status === 'reviewing') {
       body =
         '<p><strong>' + c.missing + ' design(s) are missing from search</strong>' +
@@ -243,6 +251,15 @@
       if (!confirm('Start a sweep? Photoshop and uploads pause until it is done.')) return;
       postJSON(API + '/start').then(reload)
         .catch(function (err) { alert(err.message); });
+    } else if (action === 'stop-scanning') {
+      if (!confirm('Stop scanning and review what has been found so far?\n\n'
+                   + 'Everything already checked is kept. The worker stops '
+                   + 'within one design.')) return;
+      postJSON(API + '/stop-scanning').then(function (r) {
+        alert('Stopped after ' + r.checked + ' design(s) — ' + r.missing
+              + ' missing.');
+        reload();
+      }).catch(function (err) { alert(err.message); });
     } else if (action === 'deactivate' || action === 'reactivate') {
       var word = action === 'deactivate'
         ? 'Turn the missing designs OFF? They stay off until you reactivate them.'

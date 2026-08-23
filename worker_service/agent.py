@@ -46,7 +46,7 @@ from .store_health import StoreHealthStage
 from .uploader import UploadStage
 
 
-AGENT_VERSION = "1.17.3"
+AGENT_VERSION = "1.18.0"
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_CONFIG = HERE / "config.json"

@@ -1,2 +1,2 @@
-DEPLOY THE SITE TOO - the scan job payload is built server-side.
-The wall is now detected on search pages by the absence of TeePublic's logo.
+STOP now actually stops the node, within one design, keeping everything checked.
+New: STOP SCANNING - REVIEW WHAT WE FOUND, and scan_limit_per_account for testing.

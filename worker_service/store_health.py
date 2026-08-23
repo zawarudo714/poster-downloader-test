@@ -303,6 +303,7 @@ class StoreHealthStage:
         }
         max_pages = int(payload.get("max_search_pages") or 25)
         delay = float(payload.get("delay_s") or 1)
+        limit = int(payload.get("limit_per_account") or 0)
 
         self.client.job_log(
             job_id,
@@ -314,6 +315,11 @@ class StoreHealthStage:
         failures: list[str] = []
         lock = threading.Lock()
         queue = list(accounts)
+        # Set when the SERVER says the run is no longer scanning — the admin
+        # pressed stop. Shared across account threads so one of them hearing
+        # it stops all of them, rather than each discovering it separately
+        # one design later.
+        stop = threading.Event()
 
         def emit(line: str) -> None:
             self.log(line)
@@ -324,6 +330,8 @@ class StoreHealthStage:
 
         def worker() -> None:
             while True:
+                if stop.is_set():
+                    return
                 with lock:
                     if not queue:
                         return
@@ -331,7 +339,7 @@ class StoreHealthStage:
                 try:
                     got = self._scan_account(job_id, run_id, account,
                                              max_pages, delay, emit, settings,
-                                             wall)
+                                             wall, stop, limit)
                     with lock:
                         for key in results:
                             results[key] += got.get(key, 0)
@@ -377,7 +385,8 @@ class StoreHealthStage:
     def _scan_account(self, job_id: int, run_id: int, account: dict,
                       max_pages: int, delay: float,
                       emit: Callable[[str], None],
-                      settings: dict, wall: dict) -> dict:
+                      settings: dict, wall: dict,
+                      stop: threading.Event, limit: int = 0) -> dict:
         """One account, one browser, held open for the whole account."""
         name = account.get("name")
         store_url = (account.get("store_url") or "").split("?")[0].rstrip("/")
@@ -419,6 +428,10 @@ class StoreHealthStage:
 
             emit(f"→ {name}: reading the store listing")
             designs = list_designs(store_url, session, emit, uploader.driver)
+            if limit:
+                designs = designs[:limit]
+                emit(f"  {name}: limited to the first {limit} for testing "
+                     f"(scan_limit_per_account)")
             emit(f"→ {name}: {len(designs)} designs to check")
             if not designs:
                 raise RuntimeError(
@@ -426,6 +439,8 @@ class StoreHealthStage:
                     f"address on the TeePublic tab.")
 
             for index, design in enumerate(designs, start=1):
+                if stop.is_set():
+                    break
                 tag, title, error = design_details(design["url"], session,
                                                    uploader.driver)
 
@@ -444,13 +459,21 @@ class StoreHealthStage:
                 counts["checked"] += 1
 
                 # Reported per DESIGN, not per account: a node that dies four
-                # hours in keeps everything it already checked.
-                self.client.post("/store/design", {
+                # hours in keeps everything it already checked. The REPLY is
+                # also how a stop reaches us — see the endpoint for why it
+                # rides along here rather than on a poll of its own.
+                verdict = self.client.post("/store/design", {
                     "run_id": run_id, "account_id": account["id"],
                     "design_id": design["design_id"], "url": design["url"],
                     "title": title, "search_tag": tag,
                     "status": status, "error": note,
-                })
+                }) or {}
+                if verdict.get("stop"):
+                    stop.set()
+                    emit(f"  {name}: stopped by the dashboard after "
+                         f"{counts['checked']} design(s) — everything checked "
+                         f"so far is saved.")
+                    break
 
                 if index % 10 == 0 or status != "visible":
                     emit(f"  {name} [{index}/{len(designs)}] "

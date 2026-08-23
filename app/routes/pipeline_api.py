@@ -1053,7 +1053,22 @@ def store_design_result(
         error=payload.get("error"),
     )
     db.commit()
-    return JSONResponse({"ok": True})
+
+    # ── THIS REPLY IS HOW A SCAN GETS STOPPED ────────────────────────────
+    #
+    # The node has no other way to hear about a button pressed here. It
+    # posts one of these per design anyway, so the answer rides along for
+    # free — no polling, no second endpoint, and the longest a stop can take
+    # is one design.
+    #
+    # The node used to throw this reply away, which is why STOP appeared to
+    # do nothing: the screen said "nothing running" while the node carried
+    # on scanning for another twenty minutes.
+    return JSONResponse({
+        "ok": True,
+        "stop": run.status != "scanning",
+        "reason": run.status,
+    })
 
 
 @router.post("/store/action")

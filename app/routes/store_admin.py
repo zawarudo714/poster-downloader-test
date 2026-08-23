@@ -153,6 +153,7 @@ def api_start(admin: User = Depends(require_admin),
         "parallel": int(P.get_setting(db, "scan_parallel_accounts")),
         "max_search_pages": int(P.get_setting(db, "scan_max_search_pages")),
         "delay_s": P.get_setting(db, "scan_delay_s"),
+        "limit_per_account": int(P.get_setting(db, "scan_limit_per_account")),
         # The FULL account payload, not a hand-rolled dict. The node builds a
         # browser from it and that browser wants `selectors` and `timings` —
         # a shorter dict passed here died with KeyError: 'selectors' on the
@@ -259,6 +260,49 @@ def api_advance(payload: dict = Body(default={}),
     db.commit()
     return JSONResponse({"ok": True, "run": run.id, "queued": queued,
                          "designs": len(rows), "status": run.status})
+
+
+@router.post("/api/store/stop-scanning")
+def api_stop_scanning(admin: User = Depends(require_admin),
+                      db: Session = Depends(get_db)):
+    """
+    Stop scanning, but KEEP what has been found and go to the gate.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS IS NOT THE SAME AS ABANDONING
+    ════════════════════════════════════════════════════════════════════════
+    Abandoning throws the run away. This ends the scan early and moves
+    straight to "here is what we found, shall I deactivate it" — which is
+    what you want when you have seen enough, or when you are testing the
+    later stages and do not want to sit through nine accounts first.
+
+    Everything already checked is kept, because every design was written the
+    moment it was checked rather than at the end of the account.
+
+    The node hears about this through the reply to its next per-design post,
+    so it stops within one design rather than carrying on to the end.
+    """
+    run = SH.active_run(db, MARKETPLACE)
+    if run is None:
+        raise HTTPException(404, "No run in progress.")
+    if run.status != "scanning":
+        raise HTTPException(409, f"The run is {run.status}, not scanning.")
+
+    counts = SH.counts(db, run)
+    if not counts["checked"]:
+        raise HTTPException(
+            409, "Nothing has been checked yet — there would be nothing to "
+                 "review. Use STOP THIS RUN instead.")
+
+    run.status = "reviewing"
+    run.stage_note = (f"Scan stopped early — {counts['missing']} missing of "
+                      f"{counts['checked']} checked.")
+    log_activity(db, user=admin, action="store_scan_stopped_early",
+                 target_type="store_run", target_id=run.id,
+                 details=counts)
+    db.commit()
+    return JSONResponse({"ok": True, "checked": counts["checked"],
+                         "missing": counts["missing"]})
 
 
 @router.post("/api/store/abandon")

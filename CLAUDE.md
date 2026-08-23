@@ -1142,6 +1142,14 @@ nothing, and reported "Job finished". The screen stayed empty and no line
 anywhere connected the two. If you asked something a question, say what it
 answered.
 
+**The same reply is also how a long job gets STOPPED.** The store scan posted
+one result per design and threw the answer away, so pressing STOP ended the
+run on screen while the node cheerfully scanned for another twenty minutes.
+A node cannot hear a button; it can only hear an answer to something it was
+already asking. Before adding a polling endpoint for "should I stop", check
+whether the work already talks to the server on a loop — it almost always
+does, and the answer rides along for free.
+
 Concretely: **an exception must never be able to escape past the point where
 the work was claimed.** If setup can fail, either claim after it, or catch it
 and report the claim as failed with the real error text. And an error that is

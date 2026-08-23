@@ -622,6 +622,12 @@ DEFAULTS: dict[str, Any] = {
     # Seconds between designs, per account. Not a rate limit the site asked
     # for — a courtesy, and the knob to turn if it ever starts complaining.
     "scan_delay_s":           1,
+    # Stop each account after this many designs. 0 = check them all, which is
+    # the real setting; anything else is for TESTING the later stages without
+    # sitting through ninety designs first. Kept as a dashboard value rather
+    # than a code constant because that is exactly when you need to change it
+    # and exactly when editing code is most annoying.
+    "scan_limit_per_account": 0,
 
     # ── How many failures in a row before an account is parked ───────────
     # Only applies to failures the node marks as "might be systemic" — a

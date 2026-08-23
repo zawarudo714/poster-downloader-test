@@ -1165,6 +1165,16 @@ nothing, and reported "Job finished". The screen stayed empty and no line
 anywhere connected the two. If you asked something a question, say what it
 answered.
 
+**"The job ended" is not "the work finished", and only the worker knows
+which.** Pausing the store scan ended its job cleanly — every design
+reported, no failure — which the server read as a completed scan and
+advanced the run to the review gate. On an automatic run the next step
+would have been deactivating 102 designs off a sweep that had covered 199
+of 1,543. So the node now says whether it was cut short, and the server
+also re-derives it from the data: are there designs this run never looked
+at? Deriving it repaired a run already stuck in the wrong stage, which a
+flag could not have done.
+
 **The same reply is also how a long job gets STOPPED.** The store scan posted
 one result per design and threw the answer away, so pressing STOP ended the
 run on screen while the node cheerfully scanned for another twenty minutes.

@@ -354,7 +354,19 @@ def api_resume(admin: User = Depends(require_admin),
 
     SH.resume_run(db, run)
     queued = 0
-    if run.status == "scanning":
+
+    # ── NEVER ACT ON AN UNFINISHED SCAN ──────────────────────────────────
+    #
+    # Asked as a question about the DATA, not read from a flag: are there
+    # designs this run has not looked at yet? If so the scan is not done,
+    # whatever the run's status happens to say — which also repairs a run
+    # that an earlier version pushed to the review gate when it was merely
+    # paused. Resuming an automatic run from there would have dispatched a
+    # mass deactivation based on designs nobody had checked.
+    left = SH.scan_incomplete(db, run)
+    if left and run.status in ("scanning",) + SH.WAITING:
+        run.status = "scanning"
+        run.stage_note = f"Carrying on — {left} design(s) still to check."
         queued = _queue_scan(db, run, by=admin.username)
     elif run.auto:
         nxt = SH.next_stage(run)

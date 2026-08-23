@@ -406,8 +406,20 @@ class StoreHealthStage:
                 f"{len(failures)} account(s) could not be scanned: "
                 + "; ".join(failures[:5]))
 
-        self.client.post("/store/stage-done",
-                         {"run_id": run_id, "stage": "scan"})
+        # ── SAY WHETHER IT ACTUALLY FINISHED ─────────────────────────────
+        #
+        # "The job ended" and "the scan finished" are different facts, and
+        # the server cannot tell them apart from the outside. A stop or a
+        # pause ends the job with everything reported and no failure — which
+        # read as a clean finish, so the run advanced to the review gate off
+        # a scan that had covered 199 designs of 1,543. On an automatic run,
+        # resuming from there would have gone straight to DEACTIVATING.
+        #
+        # So the node says which one it was. It is the only thing that knows.
+        self.client.post("/store/stage-done", {
+            "run_id": run_id, "stage": "scan",
+            "partial": bool(stop.is_set()),
+        })
         return results
 
     def _scan_account(self, job_id: int, run_id: int, account: dict,

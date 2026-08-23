@@ -1,3 +1,2 @@
-Search pages are now addressed directly (?page=N&query=) instead of following a
-'next' link that stops existing after page 7 - everything past it read MISSING.
-Sweep settings are editable on the TeePublic tab.
+A paused or stopped scan no longer counts as a FINISHED scan. Resume carries on
+scanning and skips what it already did, and never acts on an incomplete sweep.

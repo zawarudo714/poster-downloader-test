@@ -259,11 +259,20 @@
       renderSettings(data.settings || {});
       await loadDesigns();
 
+      // ── KEEP LOOKING WHILE A RUN EXISTS ────────────────────────────
+      //
+      // Polling used to stop the moment a run was paused, on the reasoning
+      // that a paused run does not change. It does: the node takes up to a
+      // design to wind down, and the server moves the run when it reports.
+      // So the panel sat there saying "paused at the scanning stage" while
+      // the database had moved on — and the next button pressed acted on
+      // the real state, not the shown one. A screen that is confidently
+      // wrong is worse than one that is slow.
       var run = data.run;
-      var moving = run && !run.paused
+      var moving = run
         && ['scanning', 'deactivating', 'reactivating'].indexOf(run.status) >= 0;
       clearTimeout(state.timer);
-      if (moving) state.timer = setTimeout(reload, 5000);
+      if (moving) state.timer = setTimeout(reload, run.paused ? 15000 : 5000);
     } catch (e) {
       q('[data-run-panel]').innerHTML =
         '<p class="muted">Could not load: ' + esc(e.message) + '</p>';

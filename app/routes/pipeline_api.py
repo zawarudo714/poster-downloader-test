@@ -1197,6 +1197,22 @@ def store_stage_done(
 
     tally = SH.counts(db, run, run.marketplace)
 
+    # ── A SCAN THAT WAS CUT SHORT HAS NOT FINISHED ───────────────────────
+    #
+    # Pausing or stopping ends the job cleanly, with every design reported
+    # and no failure — indistinguishable from success unless the node says
+    # so. Advancing here would put a half-covered scan at the review gate,
+    # and on an automatic run the next thing to happen would be a mass
+    # deactivation based on designs we never actually looked at.
+    #
+    # The run stays where it is. Resuming re-queues the scan and carries on.
+    if payload.get("partial") or run.paused_at:
+        run.stage_note = (f"Stopped early — {tally['checked']} of "
+                          f"{tally['total']} checked so far.")
+        db.commit()
+        return JSONResponse({"ok": True, "status": run.status,
+                             "partial": True})
+
     if stage == "scan" and run.status == "scanning":
         run.status = "reviewing"
         run.stage_note = (f"{tally['missing']} missing of {tally['checked']} "

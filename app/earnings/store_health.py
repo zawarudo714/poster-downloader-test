@@ -307,7 +307,12 @@ def scannable_listings(db: Session, run: StoreScanRun,
         q = q.filter(StoreListing.account_id == account_id)
     if run.scan_mode == "missing_only":
         q = q.filter(StoreListing.status == "missing")
-    return q.order_by(StoreListing.account_id, StoreListing.id).all()
+
+    # Skip whatever THIS run has already checked. Without it, resuming a
+    # paused sweep would start again from the top and a pause would cost the
+    # whole scan — which is the opposite of what pause is for.
+    return [r for r in q.order_by(StoreListing.account_id, StoreListing.id).all()
+            if not r.last_checked_at or r.last_checked_at < run.started_at]
 
 
 def missing_for(db: Session, run: StoreScanRun,
@@ -481,3 +486,26 @@ def dispatch_stage(db: Session, run: StoreScanRun, stage: str,
     run.status = "deactivating" if stage == "deactivate" else "reactivating"
     run.stage_note = f"{len(rows)} design(s) across {queued} account(s)."
     return queued
+
+
+def scan_incomplete(db: Session, run: StoreScanRun) -> int:
+    """
+    How many designs this run still has not looked at. 0 means it finished.
+
+    DERIVED from the catalogue rather than stored as a flag, so it is right
+    even for a run that was interrupted before anything could be recorded
+    about it — including one already sitting at the wrong stage because an
+    earlier version treated "the job ended" as "the scan finished".
+
+    A design counts as checked when its `last_checked_at` is at or after the
+    run started. That is also what makes RESUMING cheap: everything already
+    done is skipped.
+    """
+    rows = db.query(StoreListing).filter(
+        StoreListing.marketplace == run.marketplace,
+        StoreListing.removed_at.is_(None),
+        StoreListing.excluded == 0)
+    if run.scan_mode == "missing_only":
+        rows = rows.filter(StoreListing.status == "missing")
+    return sum(1 for r in rows.all()
+               if not r.last_checked_at or r.last_checked_at < run.started_at)

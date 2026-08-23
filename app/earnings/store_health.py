@@ -42,7 +42,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from ..models import StoreDesign, StoreScanRun, UploadAccount
+from ..models import StoreListing, StoreScanRun, UploadAccount
 
 
 # Marketplaces this tool understands. A closed list, like MARKETPLACES: an
@@ -84,14 +84,21 @@ def holds_pipeline(db: Session) -> Optional[str]:
     if run is None:
         return None
 
-    done = db.query(StoreDesign).filter(
-        StoreDesign.run_id == run.id,
-        StoreDesign.status != "pending").count()
-    total = db.query(StoreDesign).filter(StoreDesign.run_id == run.id).count()
-
     label = run.marketplace.title()
+
+    # ── A PAUSED RUN DOES NOT HOLD ANYTHING ──────────────────────────────
+    #
+    # That is the entire reason pause exists as something separate from
+    # stop: you pause precisely because you want Photoshop and the daily
+    # uploads to have the machine back for a while. A pause that kept the
+    # hold would be an unhelpful stop with extra steps.
+    if run.paused_at:
+        return None
+
+    tally = counts(db, run, run.marketplace)
     if run.status == "scanning":
-        seen = f"{done} of {total}" if total else "starting up"
+        seen = (f"{tally['checked']} of {tally['total']}"
+                if tally["total"] else "starting up")
         return (f"Paused for the {label} visibility scan ({seen} designs "
                 f"checked). Work resumes when the run finishes.")
     if run.status in WAITING:
@@ -125,8 +132,15 @@ def scannable(accounts: list[UploadAccount]) -> tuple[list, list]:
     return ready, blocked
 
 
-def start_run(db: Session, *, marketplace: str, by: str) -> StoreScanRun:
-    """Begin a sweep. Refuses if one is already going."""
+def start_run(db: Session, *, marketplace: str, by: str,
+              auto: bool = False, scan_mode: str = "full") -> StoreScanRun:
+    """
+    Begin a sweep. Refuses if one is already going.
+
+    `auto` hands each stage straight to the next with no button in between.
+    `scan_mode="missing_only"` rechecks just the designs currently missing,
+    which is what you want after a cure rather than re-reading everything.
+    """
     if active_run(db) is not None:
         raise ValueError("A run is already in progress.")
 
@@ -137,8 +151,20 @@ def start_run(db: Session, *, marketplace: str, by: str) -> StoreScanRun:
             "on this tab first — it looks like "
             "https://www.teepublic.com/user/yourname")
 
+    if scan_mode == "missing_only":
+        waiting = db.query(StoreListing).filter(
+            StoreListing.marketplace == marketplace.lower(),
+            StoreListing.status == "missing",
+            StoreListing.removed_at.is_(None),
+            StoreListing.excluded == 0).count()
+        if not waiting:
+            raise ValueError(
+                "Nothing is currently marked missing, so there is nothing to "
+                "recheck. Run a full sweep instead.")
+
     run = StoreScanRun(marketplace=marketplace.lower(), status="scanning",
-                       started_by=by)
+                       started_by=by, auto=1 if auto else 0,
+                       scan_mode=scan_mode)
     db.add(run)
     db.flush()
     return run
@@ -159,74 +185,299 @@ def finish_run(db: Session, run: StoreScanRun, *, status: str,
     run.finished_at = datetime.utcnow()
 
 
-def record_design(db: Session, *, run: StoreScanRun, account_id: int,
-                  design_id: str, url: str, title: Optional[str],
-                  search_tag: Optional[str], status: str,
-                  error: Optional[str] = None) -> StoreDesign:
+def sync_catalogue(db: Session, *, account: UploadAccount,
+                   marketplace: str, seen: list[dict]) -> dict:
     """
-    One design's verdict. Idempotent on (run, design id).
+    Reconcile what the store shows against what we already knew.
 
-    Written per design rather than per account, so a node that dies four
-    hours into a scan keeps everything it had already checked and the run
-    carries on rather than starting again.
+    ════════════════════════════════════════════════════════════════════════
+    THIS IS WHAT MAKES THE CATALOGUE WORTH KEEPING
+    ════════════════════════════════════════════════════════════════════════
+    Three answers come out of one comparison:
+
+      · NEW      — in the store, not in our catalogue. Added since last time.
+      · STILL    — in both. Its `last_seen_at` moves forward.
+      · REMOVED  — in our catalogue, not in the store. Deleted at the
+                   marketplace, or deactivated by hand outside this tool.
+
+    A removed design keeps its row and gets `removed_at` — never deleted,
+    because "this account lost eleven designs last month" is a question you
+    can only answer if the rows survive.
+
+    A design that comes BACK clears `removed_at`, which is how a design we
+    deactivated and reactivated re-enters the catalogue cleanly rather than
+    appearing to be brand new.
     """
-    row = db.query(StoreDesign).filter_by(
-        run_id=run.id, design_id=str(design_id)).first()
+    now = datetime.utcnow()
+    by_id = {str(d["design_id"]): d for d in seen}
+
+    existing = {
+        r.design_id: r for r in
+        db.query(StoreListing).filter(StoreListing.account_id == account.id).all()
+    }
+
+    added = returned = removed = 0
+    for design_id, data in by_id.items():
+        row = existing.get(design_id)
+        if row is None:
+            row = StoreListing(
+                account_id=account.id, marketplace=marketplace.lower(),
+                design_id=design_id, first_seen_at=now)
+            db.add(row)
+            added += 1
+        elif row.removed_at:
+            row.removed_at = None
+            returned += 1
+        row.url = data.get("url") or row.url
+        row.last_seen_at = now
+
+    for design_id, row in existing.items():
+        if design_id not in by_id and row.removed_at is None:
+            row.removed_at = now
+            removed += 1
+
+    return {"added": added, "returned": returned, "removed": removed,
+            "total": len(by_id)}
+
+
+def record_check(db: Session, *, account_id: int, design_id: str,
+                 status: str, title: Optional[str] = None,
+                 search_tag: Optional[str] = None,
+                 url: Optional[str] = None,
+                 error: Optional[str] = None) -> Optional[StoreListing]:
+    """
+    One design's verdict, written into the catalogue.
+
+    `consecutive_missing` counts UP while it stays missing and resets the
+    moment it is seen — so it means "how long has this been broken", not
+    "how often has it ever broken". That distinction is what makes it usable
+    as evidence for a vague tag rather than just a tally of bad luck.
+    """
+    row = db.query(StoreListing).filter_by(
+        account_id=account_id, design_id=str(design_id)).first()
     if row is None:
-        row = StoreDesign(run_id=run.id, account_id=account_id,
-                          design_id=str(design_id))
-        db.add(row)
+        return None
 
-    row.url = url or row.url
     row.title = title or row.title
     row.search_tag = search_tag or row.search_tag
+    row.url = url or row.url
     row.status = status
-    row.error = error
-    row.checked_at = datetime.utcnow()
+    row.status_error = error
+    row.last_checked_at = datetime.utcnow()
+
+    if status == "missing":
+        row.consecutive_missing = (row.consecutive_missing or 0) + 1
+    elif status == "visible":
+        row.consecutive_missing = 0
     return row
 
 
-def missing_for(db: Session, run: StoreScanRun,
-                account_id: Optional[int] = None) -> list[StoreDesign]:
-    """The designs a run found missing. What stage 3 acts on."""
-    q = db.query(StoreDesign).filter(StoreDesign.run_id == run.id,
-                                     StoreDesign.status == "missing")
+def looks_vague(row: StoreListing, after_fixes: int) -> bool:
+    """
+    Has the cure been tried enough times to suspect the TAG, not the listing?
+
+    The visibility check searches a design's primary tag and gives up after
+    `scan_max_search_pages` (25) pages. For "Shadow of the Colossus" that is
+    conclusive. For "Queen" it is nowhere near: a healthy design can sit at
+    page four hundred and read MISSING every single time, forever.
+
+    Deactivating and reactivating cannot fix that, so a design still missing
+    after several attempts is flagged for the owner to search by hand rather
+    than being cycled again. He can then exclude it, or edit the tag.
+    """
+    return bool(row.status == "missing"
+                and (row.fix_attempts or 0) >= after_fixes)
+
+
+def scannable_listings(db: Session, run: StoreScanRun,
+                       account_id: Optional[int] = None) -> list[StoreListing]:
+    """
+    Which designs this run should check.
+
+    `missing_only` is the recheck after a cure: there is no point re-reading
+    two thousand healthy designs to find out whether eleven came back. It
+    turns a six-hour sweep into a few minutes, which is the difference
+    between checking and not bothering.
+    """
+    q = db.query(StoreListing).filter(
+        StoreListing.marketplace == run.marketplace,
+        StoreListing.removed_at.is_(None),
+        StoreListing.excluded == 0)
     if account_id:
-        q = q.filter(StoreDesign.account_id == account_id)
-    return q.order_by(StoreDesign.account_id, StoreDesign.title).all()
+        q = q.filter(StoreListing.account_id == account_id)
+    if run.scan_mode == "missing_only":
+        q = q.filter(StoreListing.status == "missing")
+    return q.order_by(StoreListing.account_id, StoreListing.id).all()
+
+
+def missing_for(db: Session, run: StoreScanRun,
+                account_id: Optional[int] = None) -> list[StoreListing]:
+    """
+    Designs to deactivate: missing, not excluded, and not already flagged as
+    a probably-vague tag.
+
+    The vague ones are deliberately held back. Cycling a design whose tag is
+    simply too broad achieves nothing and takes a live listing offline for
+    the duration, twice, for no gain.
+    """
+    from ..pipeline import get_setting
+
+    after = int(get_setting(db, "scan_vague_after_fixes"))
+    rows = db.query(StoreListing).filter(
+        StoreListing.marketplace == run.marketplace,
+        StoreListing.status == "missing",
+        StoreListing.removed_at.is_(None),
+        StoreListing.excluded == 0,
+        StoreListing.deactivated_at.is_(None))
+    if account_id:
+        rows = rows.filter(StoreListing.account_id == account_id)
+    return [r for r in rows.order_by(StoreListing.account_id).all()
+            if not looks_vague(r, after)]
 
 
 def deactivated_for(db: Session, run: StoreScanRun,
-                    account_id: Optional[int] = None) -> list[StoreDesign]:
+                    account_id: Optional[int] = None) -> list[StoreListing]:
     """
-    Exactly what WE turned off, and nothing else. What stage 5 acts on.
+    Exactly what WE turned off and have not yet turned back on.
 
-    This is the whole reason a run exists as a record. The previous tool
-    reactivated by opening the marketplace's inactive list and republishing
-    the first N it found — which on one real account would have republished
-    379 designs the owner had deactivated himself, deliberately, over months.
-    There is no way to tell those apart from the outside. There is no need
-    to: we know which ones we touched.
+    Never the marketplace's inactive list, which on one real account holds
+    379 designs the owner deactivated himself over months. There is no way to
+    tell those apart from the outside, and no need to: we wrote down what we
+    touched.
     """
-    q = db.query(StoreDesign).filter(StoreDesign.run_id == run.id,
-                                     StoreDesign.deactivated_at.isnot(None),
-                                     StoreDesign.reactivated_at.is_(None))
+    q = db.query(StoreListing).filter(
+        StoreListing.marketplace == run.marketplace,
+        StoreListing.deactivated_at.isnot(None))
     if account_id:
-        q = q.filter(StoreDesign.account_id == account_id)
-    return q.order_by(StoreDesign.account_id, StoreDesign.title).all()
+        q = q.filter(StoreListing.account_id == account_id)
+    return q.order_by(StoreListing.account_id).all()
 
 
-def counts(db: Session, run: StoreScanRun) -> dict:
+def counts(db: Session, run: Optional[StoreScanRun] = None,
+           marketplace: str = "teepublic") -> dict:
     """Totals for the screen and for deciding when a stage is over."""
-    rows = db.query(StoreDesign).filter(StoreDesign.run_id == run.id).all()
+    from ..pipeline import get_setting
+
+    after = int(get_setting(db, "scan_vague_after_fixes"))
+    rows = db.query(StoreListing).filter(
+        StoreListing.marketplace == marketplace).all()
+    live = [r for r in rows if r.removed_at is None]
+
+    checked = 0
+    if run is not None and run.started_at:
+        checked = sum(1 for r in live
+                      if r.last_checked_at and r.last_checked_at >= run.started_at)
+
     return {
-        "total": len(rows),
-        "checked": sum(1 for r in rows if r.status != "pending"),
-        "visible": sum(1 for r in rows if r.status == "visible"),
-        "missing": sum(1 for r in rows if r.status == "missing"),
-        "under_review": sum(1 for r in rows if r.status == "under_review"),
-        "errors": sum(1 for r in rows if r.status == "error"),
-        "deactivated": sum(1 for r in rows if r.deactivated_at),
-        "reactivated": sum(1 for r in rows if r.reactivated_at),
-        "action_errors": sum(1 for r in rows if r.action_error),
+        "total":        len(live),
+        "checked":      checked,
+        "visible":      sum(1 for r in live if r.status == "visible"),
+        "missing":      sum(1 for r in live if r.status == "missing"),
+        "unknown":      sum(1 for r in live if r.status == "unknown"),
+        "errors":       sum(1 for r in live if r.status == "error"),
+        "excluded":     sum(1 for r in live if r.excluded),
+        "vague":        sum(1 for r in live if looks_vague(r, after)),
+        "removed":      sum(1 for r in rows if r.removed_at),
+        "deactivated":  sum(1 for r in live if r.deactivated_at),
+        "action_errors": sum(1 for r in live if r.action_error),
     }
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  AUTOMATIC MODE
+# ════════════════════════════════════════════════════════════════════════════
+
+def next_stage(run: StoreScanRun) -> Optional[str]:
+    """
+    What an automatic run does after the stage that just finished.
+
+    Returns None when a person has to decide — which is every gate on a
+    MANUAL run, and nothing at all on an automatic one.
+    """
+    if not run.auto or run.paused_at:
+        return None
+    return {"reviewing": "deactivate", "confirming": "reactivate"}.get(run.status)
+
+
+def pause_run(db: Session, run: StoreScanRun, *, by: str) -> None:
+    """
+    Hold the run where it is and give the machine back.
+
+    Nothing is lost and nothing is undone: designs already checked stay
+    checked, and designs already deactivated stay deactivated — which is why
+    the screen has to SAY so, because pausing between the two action stages
+    leaves live listings switched off.
+    """
+    run.paused_at = datetime.utcnow()
+    run.paused_by = by
+
+
+def resume_run(db: Session, run: StoreScanRun) -> None:
+    """Pick up exactly where it stopped."""
+    run.paused_at = None
+    run.paused_by = None
+
+
+def dispatch_stage(db: Session, run: StoreScanRun, stage: str,
+                   *, by: str) -> int:
+    """
+    Queue the node jobs for a stage. ONE definition, two callers.
+
+    The button on the tab calls it, and an automatic run calls it from
+    `stage-done` when one stage hands over to the next. A second copy of
+    "how do we start a deactivation" is exactly how the manual path and the
+    automatic path would drift into doing subtly different things — and the
+    automatic one is the path nobody is watching.
+
+    ════════════════════════════════════════════════════════════════════════
+    ONE JOB PER ACCOUNT HERE, UNLIKE THE SCAN
+    ════════════════════════════════════════════════════════════════════════
+    These stages are signed in, and each account needs its OWN Chrome
+    profile — two accounts cannot share one browser. Serial is fine too:
+    this stage is minutes, not hours.
+
+    Returns how many jobs were queued.
+    """
+    from .. import pipeline as P
+    from . import service as earnings_service
+    from . import wall
+
+    picker = missing_for if stage == "deactivate" else deactivated_for
+    rows = picker(db, run)
+    if not rows:
+        return 0
+
+    by_account: dict[int, list] = {}
+    for row in rows:
+        by_account.setdefault(row.account_id, []).append(row)
+
+    project = P.resolve_project(db, None)
+    attempts = int(P.get_setting(db, "wall_max_attempts"))
+    queued = 0
+
+    for account_id, designs in by_account.items():
+        account = db.query(UploadAccount).filter_by(id=account_id).first()
+        if account is None:
+            continue
+        P.create_job(db, kind=f"store_{stage}", payload={
+            "run_id": run.id,
+            "action": stage,
+            "account": P.account_payload(db, account, include_secret=True,
+                                         project=project),
+            "settings": P.upload_settings_payload(db, project=project),
+            "designs": [{"design_id": d.design_id, "title": d.title,
+                         "url": d.url} for d in designs],
+            # The same wall that stands in front of the earnings page. These
+            # stages are signed in, so it can appear here too.
+            "wall_html_markers": earnings_service.site_markers(run.marketplace),
+            "signed_out_markers": earnings_service.signed_out_markers(run.marketplace),
+            "wall_paths": wall.payload_for(
+                wall.next_paths(db, run.marketplace, attempts)),
+            "wall_wait_s": P.get_setting(db, "wall_wait_s"),
+            "wall_max_attempts": attempts,
+        }, requested_by=by)
+        queued += 1
+
+    run.status = "deactivating" if stage == "deactivate" else "reactivating"
+    run.stage_note = f"{len(rows)} design(s) across {queued} account(s)."
+    return queued

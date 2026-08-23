@@ -1,2 +1,3 @@
-STOP now actually stops the node, within one design, keeping everything checked.
-New: STOP SCANNING - REVIEW WHAT WE FOUND, and scan_limit_per_account for testing.
+The design catalogue is now kept between runs: added, removed and returned
+designs are tracked, vague tags are flagged instead of cycled forever, and a
+sweep can run automatically with pause/resume.

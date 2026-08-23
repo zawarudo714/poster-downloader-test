@@ -1316,6 +1316,25 @@ class StoreScanRun(Base):
     deactivate_started_at  = Column(DateTime, nullable=True)
     reactivate_started_at  = Column(DateTime, nullable=True)
 
+    # ── Automatic mode ──────────────────────────────────────────────────
+    # `auto` means the stages hand over to each other with no button in
+    # between. The two gates exist because deactivating a live listing costs
+    # money if the scan misread the site — so this is opt-in, and once you
+    # trust a few manual sweeps it saves an evening of waiting.
+    auto        = Column(Integer, nullable=False, default=0)
+
+    # PAUSE is not a stop. A paused run keeps everything it has found and
+    # holds its place in the sequence; the pipeline is RELEASED while it
+    # waits, which is the whole point — you pause precisely because you want
+    # Photoshop and the daily uploads to have the machine for a while.
+    paused_at   = Column(DateTime, nullable=True)
+    paused_by   = Column(String(64), nullable=True)
+
+    #   full | missing_only
+    # A recheck after reactivation only needs the designs that were missing,
+    # which turns a six-hour sweep into a few minutes.
+    scan_mode   = Column(String(16), nullable=False, default="full")
+
 
 class StoreDesign(Base):
     """
@@ -1363,4 +1382,89 @@ class StoreDesign(Base):
     __table_args__ = (
         UniqueConstraint("run_id", "design_id", name="uq_store_design_run"),
         Index("ix_store_design_run_status", "run_id", "status"),
+    )
+
+
+class StoreListing(Base):
+    """
+    Our catalogue of a marketplace account's designs, kept between runs.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS IS NOT PER RUN
+    ════════════════════════════════════════════════════════════════════════
+    `StoreDesign` (above, now superseded) held one row per design PER RUN, so
+    every sweep started from nothing and the interesting questions could not
+    be asked at all: has this design been missing for three sweeps running?
+    Did the account gain designs since last week? Did one disappear?
+
+    A catalogue answers those. A scan now UPDATES it rather than rebuilding
+    it, which also means the first sweep is what creates it and every later
+    sweep only records what changed.
+
+    ════════════════════════════════════════════════════════════════════════
+    "MISSING" IS NOT ALWAYS BROKEN — HENCE THE COUNTERS
+    ════════════════════════════════════════════════════════════════════════
+    The visibility check searches a design's own primary tag and pages 25
+    deep. For a specific tag that is conclusive. For a tag like "Queen",
+    which has tens of thousands of results, a perfectly healthy design sits
+    far beyond page 25 and reads MISSING every single time — and would be
+    deactivated and reactivated forever, achieving nothing.
+
+    So `fix_attempts` counts how many times we have already tried the
+    deactivate/reactivate cure on this design. A design still missing after
+    several is far more likely to have a vague tag than a broken listing, and
+    the screen says so instead of quietly looping.
+
+    `excluded` is the owner's answer to that: designs he has checked by hand
+    and does not want scanned. Reversible, because a tag can be edited.
+    """
+    __tablename__ = "store_listings"
+
+    id          = Column(Integer, primary_key=True)
+    account_id  = Column(Integer, ForeignKey("upload_accounts.id"),
+                         nullable=False, index=True)
+    marketplace = Column(String(32), nullable=False, index=True)
+    design_id   = Column(String(32), nullable=False, index=True)
+
+    url         = Column(Text, nullable=True)
+    title       = Column(String(255), nullable=True)
+    search_tag  = Column(String(255), nullable=True)
+
+    # ── What the catalogue is for ───────────────────────────────────────
+    # first_seen/last_seen answer "what did this account gain or lose".
+    # A design in our catalogue that stops appearing in the store listing
+    # has been deleted at the marketplace — kept as a row with `removed_at`
+    # set, never deleted here, because the history is the point.
+    first_seen_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    last_seen_at  = Column(DateTime, default=datetime.utcnow, nullable=False)
+    removed_at    = Column(DateTime, nullable=True)
+
+    #   unknown | visible | missing | error
+    status        = Column(String(16), nullable=False, default="unknown",
+                           index=True)
+    status_error  = Column(Text, nullable=True)
+    last_checked_at = Column(DateTime, nullable=True)
+
+    # Consecutive scans reporting missing. Reset to 0 the moment it is seen,
+    # so this is "how long has it been broken", not "how often ever".
+    consecutive_missing = Column(Integer, nullable=False, default=0)
+    # Completed deactivate+reactivate cycles. The number that separates "a
+    # listing that fell out of the index" from "a tag too vague to search".
+    fix_attempts  = Column(Integer, nullable=False, default=0)
+    last_fixed_at = Column(DateTime, nullable=True)
+
+    # ── In-flight state for the current cure ────────────────────────────
+    # Set when WE turn it off, cleared when we turn it back on. Reactivation
+    # works from these and never from the marketplace's inactive list, which
+    # on one real account holds 379 designs the owner turned off himself.
+    deactivated_at = Column(DateTime, nullable=True)
+    action_error   = Column(Text, nullable=True)
+
+    # ── The owner's override ────────────────────────────────────────────
+    excluded       = Column(Integer, nullable=False, default=0, index=True)
+    exclude_reason = Column(Text, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "design_id", name="uq_listing_account_design"),
+        Index("ix_listing_account_status", "account_id", "status"),
     )

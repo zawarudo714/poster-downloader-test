@@ -26,35 +26,14 @@
     </div>
   </section>
 
-  {# ── Designs ──────────────────────────────────────────────────────────
-     Missing first, because that is the list being decided on. Visible ones
-     are counted rather than listed: several thousand rows of "fine" would
-     bury the handful that are not. #}
-  <section class="panel" data-designs-panel hidden>
-    <div class="panel-head">
-      <span>WHAT THE SCAN FOUND
-        {{ info("Every design that is not simply visible. MISSING means it did not appear when searching its own primary tag — those are the ones that get deactivated and reactivated. ERROR means the page could not be read at all, and those are left alone. UNDER REVIEW means TeePublic is still looking at it, which is not a fault and is also left alone.") }}
-      </span>
-      <span class="filter-row" style="gap:8px">
-        <label class="inline-check">
-          <input type="checkbox" data-only-missing checked> missing only
-        </label>
-        <span class="muted mono" data-designs-count></span>
-      </span>
-    </div>
-    <div class="panel-body" data-designs-list>
-      <div class="muted">Nothing scanned yet.</div>
-    </div>
-  </section>
-
   {# ── Accounts ─────────────────────────────────────────────────────────
-     The store address is edited HERE rather than on the Pipeline page's
-     account form. This is the screen that stops working without it, and the
-     screen you are looking at when you wonder why an account was skipped. #}
+     The catalogue, one line per account. Nine accounts of a thousand
+     designs is not a list anyone reads top to bottom, so the detail is one
+     click away rather than always on screen. #}
   <section class="panel">
     <div class="panel-head">
       <span>ACCOUNTS
-        {{ info("Each account needs its public store address so the scan knows where to read the design list from. It looks like https://www.teepublic.com/user/yourname — open your store in a browser and copy the address bar. An account without one is skipped, and named above so you know which.") }}
+        {{ info("What we know about each account's catalogue, built up over every sweep. DESIGNS is what the store lists right now. MISSING did not appear when searching its own primary tag. VAGUE means the cure has been tried and failed several times, which usually means the tag is too broad to search rather than the listing being broken. Click an account to see its designs.") }}
       </span>
       <span class="muted mono" data-accounts-summary></span>
     </div>
@@ -63,9 +42,52 @@
     </div>
   </section>
 
+  {# ── Designs ──────────────────────────────────────────────────────────
+     Either one account's, or everything missing across all of them. The
+     account badge on each row is what makes the all-accounts view readable
+     without cross-referencing. #}
+  <section class="panel">
+    <div class="panel-head">
+      <span data-designs-title>MISSING — ALL ACCOUNTS
+        {{ info("Designs that did not turn up in search. VAGUE TAG means it has been switched off and on several times and is still not findable — the search only looks 25 pages deep, so a tag like 'Queen' can hide a perfectly healthy design forever. Check those by hand, then EXCLUDE them so they stop being cycled for nothing.") }}
+      </span>
+      <span class="filter-row" style="gap:8px">
+        <select data-filter-status class="input-sm">
+          <option value="missing">missing</option>
+          <option value="all">everything</option>
+          <option value="visible">visible</option>
+          <option value="unknown">not checked yet</option>
+          <option value="error">could not read</option>
+          <option value="excluded">excluded</option>
+        </select>
+        <button class="btn btn-ghost btn-tiny" data-action="all-accounts"
+                type="button">ALL ACCOUNTS</button>
+        <span class="muted mono" data-designs-count></span>
+      </span>
+    </div>
+    <div class="panel-body" data-designs-list>
+      <div class="muted">Nothing scanned yet.</div>
+    </div>
+  </section>
+
+  {# ── Store addresses ──────────────────────────────────────────────────
+     Edited HERE rather than on the Pipeline page's account form. This is
+     the screen that stops working without it, and the screen you are
+     looking at when you wonder why an account was skipped. #}
+  <section class="panel">
+    <div class="panel-head">
+      <span>STORE ADDRESSES
+        {{ info("Each account needs its public store address so the scan knows where to read the design list from. It looks like https://www.teepublic.com/user/yourname — open your store in a browser and copy the address bar. An account without one is skipped, and named above so you know which.") }}
+      </span>
+    </div>
+    <div class="panel-body" data-urls-list>
+      <div class="muted">Loading…</div>
+    </div>
+  </section>
+
   {# ── History ──────────────────────────────────────────────────────────
-     Short and factual. Mostly here to answer "when did I last do this",
-     which is the question that decides whether to run one today. #}
+     Mostly here to answer "when did I last do this", which is the question
+     that decides whether to run one today. #}
   <section class="panel">
     <div class="panel-head">
       <span>PREVIOUS RUNS

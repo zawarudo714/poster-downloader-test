@@ -1022,6 +1022,50 @@ def wall_record_target(
 #  MARKETPLACE LISTING HEALTH
 # ═══════════════════════════════════════════════════════════════════════════
 
+@router.post("/store/catalogue")
+def store_catalogue(
+    payload: dict = Body(...),
+    node: WorkerNode = Depends(require_node),
+    db: Session = Depends(get_db),
+):
+    """
+    The full list of designs an account currently shows, reconciled.
+
+    Sent once per account, before any checking. This is what turns a sweep
+    into a CATALOGUE: the first run creates it, every later run records only
+    what changed — designs added, designs that came back, designs the
+    marketplace no longer lists.
+
+    Returns the designs the node should actually check, which is where
+    `missing_only` and the owner's exclusions are applied. The node does not
+    decide any of that; it asks.
+    """
+    from ..earnings import store_health as SH
+    from ..models import StoreScanRun
+
+    run = db.query(StoreScanRun).filter_by(id=payload.get("run_id")).first()
+    if run is None:
+        raise HTTPException(404, "No such run.")
+    account = db.query(UploadAccount).filter_by(
+        id=payload.get("account_id")).first()
+    if account is None:
+        raise HTTPException(404, "Account not found.")
+
+    changes = SH.sync_catalogue(db, account=account,
+                                marketplace=run.marketplace,
+                                seen=payload.get("designs") or [])
+    db.commit()
+
+    todo = SH.scannable_listings(db, run, account_id=account.id)
+    return JSONResponse({
+        "ok": True,
+        "changes": changes,
+        "check": [{"design_id": r.design_id, "url": r.url,
+                   "title": r.title} for r in todo],
+        "stop": run.status != "scanning" or bool(run.paused_at),
+    })
+
+
 @router.post("/store/design")
 def store_design_result(
     payload: dict = Body(...),
@@ -1029,7 +1073,7 @@ def store_design_result(
     db: Session = Depends(get_db),
 ):
     """
-    One design's verdict from the scan.
+    One design's verdict from the scan, written into the catalogue.
 
     Per design rather than per account, and committed immediately. A scan is
     hours long; a node that dies four hours in must keep everything it had
@@ -1042,19 +1086,19 @@ def store_design_result(
     if run is None:
         raise HTTPException(404, "No such run.")
 
-    SH.record_design(
-        db, run=run,
+    SH.record_check(
+        db,
         account_id=int(payload["account_id"]),
         design_id=str(payload["design_id"]),
-        url=payload.get("url") or "",
+        status=payload.get("status") or "error",
         title=payload.get("title"),
         search_tag=payload.get("search_tag"),
-        status=payload.get("status") or "error",
+        url=payload.get("url"),
         error=payload.get("error"),
     )
     db.commit()
 
-    # ── THIS REPLY IS HOW A SCAN GETS STOPPED ────────────────────────────
+    # ── THIS REPLY IS HOW A SCAN GETS STOPPED OR PAUSED ──────────────────
     #
     # The node has no other way to hear about a button pressed here. It
     # posts one of these per design anyway, so the answer rides along for
@@ -1066,8 +1110,8 @@ def store_design_result(
     # on scanning for another twenty minutes.
     return JSONResponse({
         "ok": True,
-        "stop": run.status != "scanning",
-        "reason": run.status,
+        "stop": run.status != "scanning" or bool(run.paused_at),
+        "reason": "paused" if run.paused_at else run.status,
     })
 
 
@@ -1085,14 +1129,19 @@ def store_action_result(
     would, on falling over halfway, lose the record of everything it had
     already deactivated — and those are exactly the designs that would then
     never be switched back on.
-    """
-    from ..models import StoreDesign
 
-    row = db.query(StoreDesign).filter_by(
-        run_id=payload.get("run_id"),
+    A completed cure — off and then on again — bumps `fix_attempts`. That
+    counter is the evidence behind the vague-tag flag: a design still
+    missing after several cures almost certainly has a tag too broad for a
+    25-page search rather than a broken listing.
+    """
+    from ..models import StoreListing
+
+    row = db.query(StoreListing).filter_by(
+        account_id=payload.get("account_id"),
         design_id=str(payload.get("design_id") or "")).first()
     if row is None:
-        raise HTTPException(404, "No such design in this run.")
+        raise HTTPException(404, "That design is not in the catalogue.")
 
     error = payload.get("error")
     row.action_error = error
@@ -1100,7 +1149,14 @@ def store_action_result(
         if payload.get("action") == "deactivate":
             row.deactivated_at = datetime.utcnow()
         else:
-            row.reactivated_at = datetime.utcnow()
+            row.deactivated_at = None
+            row.fix_attempts = (row.fix_attempts or 0) + 1
+            row.last_fixed_at = datetime.utcnow()
+            # Its state is now genuinely unknown until something rechecks it.
+            # Leaving it as "missing" would be a claim we have not earned;
+            # calling it "visible" would be a lie. Unknown is the honest one
+            # and it is what the missing-only recheck looks for.
+            row.status = "unknown"
     db.commit()
     return JSONResponse({"ok": True})
 
@@ -1115,9 +1171,9 @@ def store_stage_done(
     A stage finished. Move the run to whatever comes next.
 
     The run advances HERE rather than on the node, because what comes next is
-    policy: after a scan it is a person, after a deactivation it is a person
-    again, and after reactivation the run is over and the pipeline restarts.
-    The node knows none of that and should not.
+    policy: on a manual run it is a person, on an automatic one it is the
+    next stage, and after reactivation the run is over and the pipeline
+    restarts. The node knows none of that and should not.
     """
     from ..earnings import store_health as SH
     from ..models import StoreScanRun
@@ -1127,7 +1183,6 @@ def store_stage_done(
         raise HTTPException(404, "No such run.")
 
     stage = payload.get("stage")
-    counts = SH.counts(db, run)
 
     # A stage that failed must NOT advance the run. Ending it here is also
     # what releases the pipeline — otherwise a run that died on its first
@@ -1140,21 +1195,39 @@ def store_stage_done(
         db.commit()
         return JSONResponse({"ok": True, "status": run.status})
 
+    tally = SH.counts(db, run, run.marketplace)
+
     if stage == "scan" and run.status == "scanning":
         run.status = "reviewing"
-        run.stage_note = (f"{counts['missing']} missing of {counts['checked']} "
+        run.stage_note = (f"{tally['missing']} missing of {tally['checked']} "
                           f"checked.")
     elif stage == "deactivate" and run.status == "deactivating":
         run.status = "confirming"
-        run.stage_note = (f"{counts['deactivated']} deactivated"
-                          + (f", {counts['action_errors']} refused"
-                             if counts["action_errors"] else "") + ".")
+        run.stage_note = (f"{tally['deactivated']} deactivated"
+                          + (f", {tally['action_errors']} refused"
+                             if tally["action_errors"] else "") + ".")
     elif stage == "reactivate" and run.status == "reactivating":
         # The last stage, so this is also where the pipeline is released —
         # by the run ENDING, not by anyone flipping anything back.
         SH.finish_run(db, run, status="done",
-                      note=f"{counts['reactivated']} of "
-                           f"{counts['deactivated']} back on.")
+                      note=f"{tally['missing']} were missing; "
+                           f"all have been switched off and back on.")
 
-    db.commit()
-    return JSONResponse({"ok": True, "status": run.status})
+    # ── AUTOMATIC MODE HANDS OVER HERE ───────────────────────────────────
+    #
+    # `next_stage` returns None for a manual run and for a paused one, so an
+    # automatic run is the only thing that moves without a button. It also
+    # returns None once reactivation is done, because there is nothing after
+    # it — the run has already ended above.
+    #
+    # If the next stage turns out to have no work, the run ENDS rather than
+    # sitting in a stage with nothing in it holding the pipeline.
+    nxt = SH.next_stage(run)
+    if nxt:
+        queued = SH.dispatch_stage(db, run, nxt, by="auto")
+        if not queued:
+            SH.finish_run(db, run, status="done",
+                          note="Nothing left to do — every design was visible.")
+        db.commit()
+
+    return JSONResponse({"ok": True, "status": run.status, "next": nxt})

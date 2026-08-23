@@ -628,6 +628,13 @@ DEFAULTS: dict[str, Any] = {
     # than a code constant because that is exactly when you need to change it
     # and exactly when editing code is most annoying.
     "scan_limit_per_account": 0,
+    # After this many completed deactivate/reactivate cycles, a design that is
+    # STILL missing is flagged as a probable vague tag rather than cycled
+    # again. The search only pages 25 deep; a tag like "Queen" has tens of
+    # thousands of results, so a healthy design can read MISSING forever and
+    # no amount of cycling will change that. 2 because the cure is reliable
+    # when it is the right cure — a third failure is evidence, not bad luck.
+    "scan_vague_after_fixes": 2,
 
     # ── How many failures in a row before an account is parked ───────────
     # Only applies to failures the node marks as "might be systemic" — a

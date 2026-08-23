@@ -427,16 +427,44 @@ class StoreHealthStage:
                     emit(f"  {name}: could not clear the wall up front ({e})")
 
             emit(f"→ {name}: reading the store listing")
-            designs = list_designs(store_url, session, emit, uploader.driver)
+            listed = list_designs(store_url, session, emit, uploader.driver)
+            if not listed:
+                raise RuntimeError(
+                    f"No designs found at {store_url}. Check the store "
+                    f"address on the TeePublic tab.")
+
+            # ── THE SERVER DECIDES WHAT TO CHECK ─────────────────────────
+            #
+            # We post the whole listing; it reconciles that against the
+            # catalogue — what is new, what came back, what the marketplace
+            # no longer shows — and answers with the designs actually worth
+            # checking. That is where a missing-only recheck and the owner's
+            # exclusions are applied.
+            #
+            # None of that is decided here on purpose. The node holds no
+            # policy, and "which designs matter" is policy.
+            reply = self.client.post("/store/catalogue", {
+                "run_id": run_id, "account_id": account["id"],
+                "designs": listed,
+            }) or {}
+            changed = reply.get("changes") or {}
+            if changed.get("added") or changed.get("removed") or changed.get("returned"):
+                emit(f"  {name}: {changed.get('added', 0)} new, "
+                     f"{changed.get('returned', 0)} back, "
+                     f"{changed.get('removed', 0)} no longer listed")
+
+            designs = reply.get("check") or []
+            if reply.get("stop"):
+                stop.set()
+                emit(f"  {name}: stopped before checking anything.")
+                return counts
+
             if limit:
                 designs = designs[:limit]
                 emit(f"  {name}: limited to the first {limit} for testing "
                      f"(scan_limit_per_account)")
-            emit(f"→ {name}: {len(designs)} designs to check")
-            if not designs:
-                raise RuntimeError(
-                    f"No designs found at {store_url}. Check the store "
-                    f"address on the TeePublic tab.")
+            emit(f"→ {name}: {len(listed)} designs listed, "
+                 f"{len(designs)} to check")
 
             for index, design in enumerate(designs, start=1):
                 if stop.is_set():
@@ -530,12 +558,12 @@ class StoreHealthStage:
                                          wall_tries)
                     else:
                         self._reactivate(uploader, did)
-                    self._report(run_id, did, action, None)
+                    self._report(run_id, account["id"], did, action, None)
                     done += 1
                 except Exception as e:
                     detail = f"{type(e).__name__}: {e}"
                     uploader.emit(f"  ✗ {label}: {detail}", level="error")
-                    self._report(run_id, did, action, detail)
+                    self._report(run_id, account["id"], did, action, detail)
                     failed += 1
         except Exception as e:
             # Anything that escaped the per-design handler — almost always
@@ -627,8 +655,8 @@ class StoreHealthStage:
         uploader.js_click(publish, what="publish")
         time.sleep(2)
 
-    def _report(self, run_id: int, design_id: str, action: str,
-                error: Optional[str]) -> None:
+    def _report(self, run_id: int, account_id: int, design_id: str,
+                action: str, error: Optional[str]) -> None:
         """
         Say what happened to this one design, immediately.
 
@@ -638,8 +666,8 @@ class StoreHealthStage:
         """
         try:
             self.client.post("/store/action", {
-                "run_id": run_id, "design_id": design_id,
-                "action": action, "error": error,
+                "run_id": run_id, "account_id": account_id,
+                "design_id": design_id, "action": action, "error": error,
             })
         except Exception as e:
             self.log(f"Could not report {action} of {design_id}: {e}",

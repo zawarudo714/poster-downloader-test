@@ -1,18 +1,19 @@
 /*
  * TeePublic listing health.
  *
- * The page has one job: make it obvious what the run is doing and what you
- * can do next. Everything else is detail underneath that.
+ * Two jobs: make it obvious what the run is doing and what you can do next,
+ * and let you read a catalogue of several thousand designs without drowning
+ * in it. Hence per-account summaries with the detail one click away, rather
+ * than one enormous list.
  *
- * It polls while a run is active, because a scan takes hours and the whole
- * point is being able to glance at it. It stops polling when nothing is
- * running, so an idle tab costs nothing.
+ * Polls only while something is actually moving. A run waiting at a gate
+ * changes when you press a button, so there is nothing to refresh for.
  */
 (function () {
   'use strict';
 
   var API = '/admin/api/store';
-  var state = { onlyMissing: true, timer: null };
+  var state = { account: null, accountName: '', status: 'missing', timer: null };
 
   function q(sel) { return document.querySelector(sel); }
   function esc(s) {
@@ -22,9 +23,9 @@
     });
   }
   function when(iso) {
-    if (!iso) return '—';
+    if (!iso) return 'never';
     var d = new Date(iso);
-    return isNaN(d) ? '—' : d.toLocaleString();
+    return isNaN(d) ? 'never' : d.toLocaleString();
   }
 
   async function getJSON(url) {
@@ -44,160 +45,185 @@
     return data;
   }
 
-  // ── The run panel ────────────────────────────────────────────────────
-  //
-  // Written as a sentence about what is happening plus the one button that
-  // makes sense right now. A stage list with four greyed-out buttons would
-  // be more "complete" and much harder to act on.
+  // ── The run ──────────────────────────────────────────────────────────
   function renderRun(data) {
-    var run = data.run;
-    var el = q('[data-run-panel]');
-    var summary = q('[data-run-summary]');
+    var run = data.run, el = q('[data-run-panel]'), summary = q('[data-run-summary]');
 
     if (!run) {
       summary.textContent = '';
       var blocked = data.blocked || [];
-      // A run that FAILED released the pipeline correctly and is therefore
-      // "not running" — but it is the most important thing on the page, and
-      // burying it in the history list would read as "nothing happened".
       var last = (data.history || [])[0];
-      var failed = last && last.status === 'failed'
-        ? '<p class="quota-note"><strong>The last sweep failed.</strong> '
-          + esc(last.note) + '</p>'
-        : '';
-      el.innerHTML = failed +
-        '<p>Nothing running. A sweep checks every design on ' + data.ready +
-        ' account(s) and pauses Photoshop and uploads until it is done.</p>' +
+      var t = data.totals || {};
+      el.innerHTML =
+        (last && last.status === 'failed'
+          ? '<p class="quota-note"><strong>The last sweep failed.</strong> '
+            + esc(last.note) + '</p>' : '') +
         (blocked.length
           ? '<p class="quota-note">' + blocked.length + ' account(s) will be '
-            + 'SKIPPED because they have no store address: '
-            + esc(blocked.join(', ')) + '. Add it below.</p>'
+            + 'SKIPPED — no store address: ' + esc(blocked.join(', ')) + '</p>'
           : '') +
-        (data.wall_paths
-          ? ''
-          : '<p class="quota-note">No mouse paths recorded yet. Scanning is '
-            + 'fine without them, but turning designs off and on again may '
-            + 'hit the wall and stop. Record some with RECORD_PATHS.bat on '
-            + 'the worker machine.</p>') +
-        '<p><button class="btn btn-accent" data-action="start" type="button"' +
-        (data.ready ? '' : ' disabled') + '>START A SWEEP</button></p>';
+        (data.wall_paths ? ''
+          : '<p class="quota-note">No mouse paths recorded yet. Run '
+            + 'RECORD_PATHS.bat on the worker machine before a sweep.</p>') +
+        '<p>Nothing running. ' + (t.total || 0) + ' designs known across '
+        + data.ready + ' account(s)'
+        + (t.missing ? ', <strong>' + t.missing + ' currently missing</strong>' : '')
+        + '.</p>' +
+        '<p><label class="inline-check"><input type="checkbox" data-auto> '
+        + 'run it all automatically — no confirmation between stages</label></p>' +
+        '<p><button class="btn btn-accent" data-action="start" type="button"'
+        + (data.ready ? '' : ' disabled') + '>FULL SWEEP</button> ' +
+        '<button class="btn btn-ghost" data-action="start-missing" type="button"'
+        + (t.missing ? '' : ' disabled') + '>RECHECK THE ' + (t.missing || 0)
+        + ' MISSING</button></p>' +
+        '<p class="muted">A recheck only looks at designs already marked '
+        + 'missing, so it takes minutes rather than hours.</p>';
       return;
     }
 
     var c = run.counts || {};
-    summary.textContent = 'run #' + run.id + ' · started ' + when(run.started_at);
+    summary.textContent = 'run #' + run.id + ' · ' + run.mode
+      + (run.auto ? ' · automatic' : ' · step by step')
+      + ' · started ' + when(run.started_at);
 
     var body = '';
-    if (run.status === 'scanning') {
-      body =
-        '<p><strong>Scanning.</strong> ' + c.checked + ' of ' + c.total +
-        ' designs checked' + (c.missing ? ', ' + c.missing + ' missing so far' : '') +
-        '.</p>' +
-        '<p class="muted">Everything else on the worker machine is paused. ' +
-        'This can take hours — the page updates itself.</p>' +
-        // Stop early but KEEP the results. Distinct from STOP THIS RUN,
-        // which throws them away — and it is the one you want when testing
-        // the later stages, or when you have simply seen enough.
-        (c.checked
-          ? '<p><button class="btn btn-accent" data-action="stop-scanning" ' +
-            'type="button">STOP SCANNING — REVIEW THE ' + c.checked +
-            ' CHECKED SO FAR</button></p>'
-          : '');
+    if (run.paused) {
+      body = '<p><strong>Paused</strong> at the ' + esc(run.status) + ' stage'
+        + (run.paused_by ? ' by ' + esc(run.paused_by) : '') + '.</p>' +
+        '<p class="muted">Photoshop and uploads have the machine back. '
+        + 'Nothing is lost — resuming carries on from here.</p>' +
+        (c.deactivated
+          ? '<p class="quota-note">' + c.deactivated + ' design(s) are '
+            + 'switched OFF while this is paused.</p>' : '') +
+        '<p><button class="btn btn-accent" data-action="resume" type="button">'
+        + 'RESUME</button></p>';
+    } else if (run.status === 'scanning') {
+      body = '<p><strong>Scanning.</strong> ' + c.checked + ' of ' + c.total
+        + ' checked' + (c.missing ? ', ' + c.missing + ' missing' : '') + '.</p>'
+        + '<p class="muted">Everything else on the worker machine is paused. '
+        + 'The page updates itself.</p>'
+        + (c.checked
+            ? '<p><button class="btn btn-accent" data-action="stop-scanning" '
+              + 'type="button">STOP SCANNING — REVIEW THE ' + c.checked
+              + ' CHECKED</button></p>' : '');
     } else if (run.status === 'reviewing') {
-      body =
-        '<p><strong>' + c.missing + ' design(s) are missing from search</strong>' +
-        ' out of ' + c.checked + ' checked.</p>' +
-        (c.errors ? '<p class="muted">' + c.errors + ' could not be read and '
-                    + 'will be left alone.</p>' : '') +
-        '<p class="muted">Next step turns those ' + c.missing + ' off. Nothing ' +
-        'happens until you press it.</p>' +
-        '<p><button class="btn btn-accent" data-action="deactivate" type="button">' +
-        'DEACTIVATE ' + c.missing + ' DESIGN(S)</button></p>';
+      body = '<p><strong>' + c.missing + ' missing</strong> of ' + c.checked
+        + ' checked.'
+        + (c.vague ? ' ' + c.vague + ' look like vague tags and will be left '
+                     + 'alone.' : '') + '</p>'
+        + '<p><button class="btn btn-accent" data-action="deactivate" '
+        + 'type="button">DEACTIVATE THEM</button></p>';
     } else if (run.status === 'deactivating') {
-      body = '<p><strong>Deactivating.</strong> ' + c.deactivated + ' of ' +
-             c.missing + ' done.</p>';
+      body = '<p><strong>Deactivating.</strong> ' + c.deactivated + ' done.</p>';
     } else if (run.status === 'confirming') {
-      body =
-        '<p><strong>' + c.deactivated + ' design(s) are now off.</strong>' +
-        (c.action_errors ? ' ' + c.action_errors + ' refused — listed below.' : '') +
-        '</p>' +
-        // Said plainly because this is the dangerous pause: stopping here
-        // leaves live listings switched off, which costs money quietly.
-        '<p class="quota-note">These are OFF right now. They only come back ' +
-        'when you press the button below.</p>' +
-        '<p><button class="btn btn-accent" data-action="reactivate" type="button">' +
-        'REACTIVATE ' + c.deactivated + ' DESIGN(S)</button></p>';
+      body = '<p><strong>' + c.deactivated + ' are now off.</strong></p>'
+        + '<p class="quota-note">These are OFF right now. They come back when '
+        + 'you press the button below.</p>'
+        + '<p><button class="btn btn-accent" data-action="reactivate" '
+        + 'type="button">REACTIVATE THEM</button></p>';
     } else if (run.status === 'reactivating') {
-      body = '<p><strong>Reactivating.</strong> ' + c.reactivated + ' of ' +
-             c.deactivated + ' back on.</p>';
+      body = '<p><strong>Reactivating.</strong> ' + c.deactivated
+        + ' still to go.</p>';
     }
 
     el.innerHTML = body +
       '<p class="muted mono">' + esc(run.note || '') + '</p>' +
-      '<p><button class="btn btn-ghost btn-tiny" data-action="abandon" ' +
-      'type="button">STOP THIS RUN</button> ' +
-      '<span class="muted">— releases Photoshop and uploads straight away.</span></p>';
-  }
-
-  // ── Designs ──────────────────────────────────────────────────────────
-  function renderDesigns(run) {
-    var panel = q('[data-designs-panel]');
-    if (!run || !(run.designs || []).length) {
-      panel.hidden = !run;
-      if (run) {
-        q('[data-designs-list]').innerHTML =
-          '<p class="muted">Every design checked so far is visible — nothing '
-          + 'to do.</p>';
-        q('[data-designs-count]').textContent = run.visible_sample + ' visible';
-      }
-      return;
-    }
-    panel.hidden = false;
-
-    var rows = run.designs.filter(function (d) {
-      return state.onlyMissing ? d.status === 'missing' : true;
-    });
-    q('[data-designs-count]').textContent =
-      rows.length + ' shown · ' + run.visible_sample + ' visible';
-
-    q('[data-designs-list]').innerHTML =
-      '<table class="data-table"><thead><tr>' +
-      '<th>DESIGN</th><th>ACCOUNT</th><th>STATE</th><th></th>' +
-      '</tr></thead><tbody>' +
-      rows.map(function (d) {
-        var note = d.reactivated ? 'back on'
-                 : d.deactivated ? 'turned off'
-                 : d.action_error ? esc(d.action_error)
-                 : d.error ? esc(d.error) : '';
-        return '<tr><td>' +
-          (d.url ? '<a href="' + esc(d.url) + '" target="_blank" rel="noopener">'
-                   + esc(d.title) + '</a>' : esc(d.title)) +
-          ' <span class="muted mono">#' + esc(d.design_id) + '</span></td>' +
-          '<td>' + esc(d.account) + '</td>' +
-          '<td' + (d.status === 'missing' ? ' class="danger"' : '') + '>' +
-          esc(d.status) + '</td>' +
-          '<td class="muted">' + note + '</td></tr>';
-      }).join('') +
-      '</tbody></table>';
+      (run.paused ? '' :
+        '<p><button class="btn btn-ghost btn-tiny" data-action="pause" '
+        + 'type="button">PAUSE</button> ' +
+        '<button class="btn btn-ghost btn-tiny" data-action="abandon" '
+        + 'type="button">STOP THIS RUN</button> ' +
+        '<span class="muted">— pause gives the machine back and keeps your '
+        + 'place; stop ends the run.</span></p>');
   }
 
   // ── Accounts ─────────────────────────────────────────────────────────
   function renderAccounts(list) {
     q('[data-accounts-summary]').textContent =
-      list.filter(function (a) { return a.ready; }).length +
-      ' of ' + list.length + ' ready';
+      list.reduce(function (n, a) { return n + (a.designs || 0); }, 0)
+      + ' designs · ' + list.length + ' accounts';
 
     q('[data-accounts-list]').innerHTML = list.length
-      ? '<table class="data-table"><thead><tr><th>ACCOUNT</th>' +
-        '<th>STORE ADDRESS</th><th></th></tr></thead><tbody>' +
-        list.map(function (a) {
-          return '<tr><td>' + esc(a.name) +
-            (a.ready ? '' : ' <span class="danger">· no address</span>') +
-            '</td><td><input type="text" style="width:100%" ' +
-            'data-store-url="' + a.id + '" value="' + esc(a.store_url) + '" ' +
-            'placeholder="https://www.teepublic.com/user/yourname"></td>' +
-            '<td><button class="btn btn-ghost btn-tiny" ' +
-            'data-save-url="' + a.id + '" type="button">SAVE</button></td></tr>';
+      ? '<table class="data-table"><thead><tr><th>ACCOUNT</th><th>DESIGNS</th>'
+        + '<th>VISIBLE</th><th>MISSING</th><th>VAGUE</th><th>EXCLUDED</th>'
+        + '<th>GONE</th><th>LAST CHECKED</th></tr></thead><tbody>'
+        + list.map(function (a) {
+            return '<tr data-open-account="' + a.id + '" style="cursor:pointer">'
+              + '<td><strong>' + esc(a.name) + '</strong>'
+              + (a.ready ? '' : ' <span class="danger">· no address</span>')
+              + '</td>'
+              + '<td>' + (a.designs || 0) + '</td>'
+              + '<td>' + (a.visible || 0) + '</td>'
+              + '<td' + (a.missing ? ' class="danger"' : '') + '>'
+              + (a.missing || 0) + '</td>'
+              + '<td>' + (a.vague || 0) + '</td>'
+              + '<td>' + (a.excluded || 0) + '</td>'
+              + '<td>' + (a.removed || 0) + '</td>'
+              + '<td class="muted mono">' + when(a.checked_at) + '</td></tr>';
+          }).join('') + '</tbody></table>'
+      : '<p class="muted">No TeePublic accounts yet.</p>';
+  }
+
+  // ── Designs ──────────────────────────────────────────────────────────
+  async function loadDesigns() {
+    var el = q('[data-designs-list]');
+    q('[data-designs-title]').firstChild.nodeValue =
+      (state.status === 'missing' ? 'MISSING' : state.status.toUpperCase())
+      + ' — ' + (state.account ? state.accountName : 'ALL ACCOUNTS') + ' ';
+
+    try {
+      var url = API + '/designs?status=' + encodeURIComponent(state.status)
+        + (state.account ? '&account_id=' + state.account : '');
+      var rows = (await getJSON(url)).designs || [];
+      q('[data-designs-count]').textContent = rows.length + ' shown';
+
+      if (!rows.length) {
+        el.innerHTML = '<p class="muted">Nothing here.</p>';
+        return;
+      }
+      el.innerHTML =
+        '<table class="data-table"><thead><tr><th>DESIGN</th><th>ACCOUNT</th>'
+        + '<th>TAG</th><th>STATE</th><th>TRIED</th><th></th></tr></thead><tbody>'
+        + rows.map(function (d) {
+            // The flag that matters: several failed cures means the TAG is
+            // probably the problem, not the listing. Said in words rather
+            // than left as a number nobody would interpret.
+            var note = d.excluded ? '<span class="muted">excluded'
+                         + (d.exclude_reason ? ' — ' + esc(d.exclude_reason) : '')
+                         + '</span>'
+                     : d.vague ? '<span class="danger">VAGUE TAG — check by hand</span>'
+                     : d.deactivated ? '<span class="muted">switched off</span>'
+                     : d.action_error ? '<span class="danger">' + esc(d.action_error) + '</span>'
+                     : d.error ? '<span class="muted">' + esc(d.error) + '</span>' : '';
+            return '<tr><td>'
+              + (d.url ? '<a href="' + esc(d.url) + '" target="_blank" '
+                         + 'rel="noopener">' + esc(d.title) + '</a>'
+                       : esc(d.title))
+              + ' <span class="muted mono">#' + esc(d.design_id) + '</span></td>'
+              + '<td><span class="muted">' + esc(d.account) + '</span></td>'
+              + '<td class="muted">' + esc(d.tag || '—') + '</td>'
+              + '<td' + (d.status === 'missing' ? ' class="danger"' : '') + '>'
+              + esc(d.status) + '</td>'
+              + '<td class="muted mono">' + d.fix_attempts + '×</td>'
+              + '<td>' + note + ' <button class="btn btn-ghost btn-tiny" '
+              + 'data-toggle-exclude="' + d.id + '" data-excluded="'
+              + (d.excluded ? '1' : '0') + '">'
+              + (d.excluded ? 'SCAN AGAIN' : 'EXCLUDE') + '</button></td></tr>';
+          }).join('') + '</tbody></table>';
+    } catch (e) {
+      el.innerHTML = '<p class="muted">Could not load: ' + esc(e.message) + '</p>';
+    }
+  }
+
+  function renderUrls(list) {
+    q('[data-urls-list]').innerHTML = list.length
+      ? '<table class="data-table"><tbody>' + list.map(function (a) {
+          return '<tr><td>' + esc(a.name) + '</td>'
+            + '<td><input type="text" style="width:100%" data-store-url="'
+            + a.id + '" value="' + esc(a.store_url) + '" '
+            + 'placeholder="https://www.teepublic.com/user/yourname"></td>'
+            + '<td><button class="btn btn-ghost btn-tiny" data-save-url="'
+            + a.id + '" type="button">SAVE</button></td></tr>';
         }).join('') + '</tbody></table>'
       : '<p class="muted">No TeePublic accounts yet.</p>';
   }
@@ -205,27 +231,26 @@
   function renderHistory(rows) {
     q('[data-history-list]').innerHTML = rows.length
       ? '<table class="data-table"><tbody>' + rows.map(function (r) {
-          return '<tr><td>#' + r.id + '</td><td>' + esc(r.status) + '</td>' +
-            '<td class="muted mono">' + when(r.started_at) + '</td>' +
-            '<td class="muted">' + esc(r.note) + '</td></tr>';
+          return '<tr><td>#' + r.id + '</td><td>' + esc(r.status) + '</td>'
+            + '<td class="muted">' + esc(r.mode) + (r.auto ? ' · auto' : '')
+            + '</td><td class="muted mono">' + when(r.started_at) + '</td>'
+            + '<td class="muted">' + esc(r.note) + '</td></tr>';
         }).join('') + '</tbody></table>'
       : '<p class="muted">None yet.</p>';
   }
 
-  // ── Loading ──────────────────────────────────────────────────────────
   async function reload() {
     try {
       var data = await getJSON(API + '/overview');
       renderRun(data);
-      renderDesigns(data.run);
       renderAccounts(data.accounts || []);
+      renderUrls(data.accounts || []);
       renderHistory(data.history || []);
+      await loadDesigns();
 
-      // Poll only while something is actually moving. A run waiting at a
-      // gate changes only when you press a button, so there is nothing to
-      // refresh for.
-      var moving = data.run && ['scanning', 'deactivating', 'reactivating']
-        .indexOf(data.run.status) >= 0;
+      var run = data.run;
+      var moving = run && !run.paused
+        && ['scanning', 'deactivating', 'reactivating'].indexOf(run.status) >= 0;
       clearTimeout(state.timer);
       if (moving) state.timer = setTimeout(reload, 5000);
     } catch (e) {
@@ -234,55 +259,88 @@
     }
   }
 
+  function act(url, body, confirmText, after) {
+    if (confirmText && !confirm(confirmText)) return;
+    postJSON(url, body).then(function (r) {
+      if (after) after(r);
+      reload();
+    }).catch(function (err) { alert(err.message); });
+  }
+
   document.addEventListener('click', function (e) {
-    var t = e.target.closest('[data-action], [data-save-url]');
+    var row = e.target.closest('[data-open-account]');
+    var t = e.target.closest('[data-action], [data-save-url], [data-toggle-exclude]');
+
+    if (row && !t) {
+      state.account = Number(row.dataset.openAccount);
+      state.accountName = row.querySelector('strong').textContent;
+      loadDesigns();
+      return;
+    }
     if (!t) return;
 
     if (t.dataset.saveUrl) {
-      var input = q('[data-store-url="' + t.dataset.saveUrl + '"]');
-      postJSON(API + '/account-url', {
-        id: Number(t.dataset.saveUrl), store_url: input.value.trim()
-      }).then(reload).catch(function (err) { alert(err.message); });
+      act(API + '/account-url', {
+        id: Number(t.dataset.saveUrl),
+        store_url: q('[data-store-url="' + t.dataset.saveUrl + '"]').value.trim()
+      });
+      return;
+    }
+    if (t.dataset.toggleExclude) {
+      var on = t.dataset.excluded === '1';
+      var reason = on ? '' : (prompt('Why exclude it? (optional)') || '');
+      act(API + '/listing', { id: Number(t.dataset.toggleExclude),
+                              excluded: !on, reason: reason });
       return;
     }
 
-    var action = t.dataset.action;
-    if (action === 'start') {
-      if (!confirm('Start a sweep? Photoshop and uploads pause until it is done.')) return;
-      postJSON(API + '/start').then(reload)
-        .catch(function (err) { alert(err.message); });
-    } else if (action === 'stop-scanning') {
-      if (!confirm('Stop scanning and review what has been found so far?\n\n'
-                   + 'Everything already checked is kept. The worker stops '
-                   + 'within one design.')) return;
-      postJSON(API + '/stop-scanning').then(function (r) {
-        alert('Stopped after ' + r.checked + ' design(s) — ' + r.missing
-              + ' missing.');
-        reload();
-      }).catch(function (err) { alert(err.message); });
-    } else if (action === 'deactivate' || action === 'reactivate') {
-      var word = action === 'deactivate'
-        ? 'Turn the missing designs OFF? They stay off until you reactivate them.'
-        : 'Turn them back ON?';
-      if (!confirm(word)) return;
-      postJSON(API + '/advance', { stage: action }).then(reload)
-        .catch(function (err) { alert(err.message); });
-    } else if (action === 'abandon') {
-      if (!confirm('Stop this run? Anything already deactivated stays off.')) return;
-      postJSON(API + '/abandon', {}).then(function (r) {
-        if (r.left_deactivated) {
-          alert(r.left_deactivated + ' design(s) were left switched off. '
-                + 'Reactivate them from TeePublic, or run another sweep.');
-        }
-        reload();
-      }).catch(function (err) { alert(err.message); });
+    var a = t.dataset.action, auto = !!(q('[data-auto]') || {}).checked;
+    if (a === 'start') {
+      act(API + '/start', { auto: auto },
+          'Start a full sweep? Photoshop and uploads pause until it is done.');
+    } else if (a === 'start-missing') {
+      act(API + '/start', { auto: auto, missing_only: true },
+          'Recheck only the designs currently marked missing?');
+    } else if (a === 'deactivate') {
+      act(API + '/advance', { stage: 'deactivate' },
+          'Turn the missing designs OFF? They stay off until reactivated.');
+    } else if (a === 'reactivate') {
+      act(API + '/advance', { stage: 'reactivate' }, 'Turn them back ON?');
+    } else if (a === 'stop-scanning') {
+      act(API + '/stop-scanning', {},
+          'Stop scanning and review what has been found so far?',
+          function (r) { alert('Stopped after ' + r.checked + ' — ' + r.missing
+                               + ' missing.'); });
+    } else if (a === 'pause') {
+      act(API + '/pause', {},
+          'Pause? Photoshop and uploads get the machine back and you can '
+          + 'resume later.',
+          function (r) {
+            if (r.left_deactivated) {
+              alert(r.left_deactivated + ' design(s) are switched OFF while '
+                    + 'this is paused.');
+            }
+          });
+    } else if (a === 'resume') {
+      act(API + '/resume', {});
+    } else if (a === 'abandon') {
+      act(API + '/abandon', {},
+          'Stop this run? Anything already deactivated stays off.',
+          function (r) {
+            if (r.left_deactivated) {
+              alert(r.left_deactivated + ' design(s) were left switched off.');
+            }
+          });
+    } else if (a === 'all-accounts') {
+      state.account = null; state.accountName = '';
+      loadDesigns();
     }
   });
 
   document.addEventListener('change', function (e) {
-    if (e.target.matches('[data-only-missing]')) {
-      state.onlyMissing = e.target.checked;
-      reload();
+    if (e.target.matches('[data-filter-status]')) {
+      state.status = e.target.value;
+      loadDesigns();
     }
   });
 

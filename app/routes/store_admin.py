@@ -43,7 +43,7 @@ from ..db import get_db
 from ..earnings import store_health as SH
 from ..earnings import service as earnings_service
 from ..earnings import wall
-from ..models import StoreDesign, StoreScanRun, UploadAccount, User
+from ..models import StoreListing, StoreScanRun, UploadAccount, User
 from ..templating import templates
 
 router = APIRouter(prefix="/admin", tags=["store-health"])
@@ -62,14 +62,39 @@ def store_page(request: Request, admin: User = Depends(require_admin)):
 @router.get("/api/store/overview")
 def api_overview(admin: User = Depends(require_admin),
                  db: Session = Depends(get_db)):
-    """Everything the tab needs, in one request."""
+    """
+    The catalogue, summarised per account, plus whatever run is going.
+
+    Per account rather than one long list, because nine accounts of a
+    thousand designs each is not something anyone reads top to bottom. The
+    detail for one account is a separate request, made when you open it.
+    """
     accounts = SH.accounts_for(db, MARKETPLACE)
     ready, blocked = SH.scannable(accounts)
     run = SH.active_run(db)
+    after = int(P.get_setting(db, "scan_vague_after_fixes"))
 
-    previous = (db.query(StoreScanRun)
-                  .filter(StoreScanRun.status.in_(SH.FINISHED))
-                  .order_by(StoreScanRun.id.desc()).limit(5).all())
+    rows = db.query(StoreListing).filter(
+        StoreListing.marketplace == MARKETPLACE).all()
+    by_account: dict[int, list] = {}
+    for r in rows:
+        by_account.setdefault(r.account_id, []).append(r)
+
+    def summarise(items: list) -> dict:
+        live = [r for r in items if r.removed_at is None]
+        return {
+            "designs":  len(live),
+            "visible":  sum(1 for r in live if r.status == "visible"),
+            "missing":  sum(1 for r in live if r.status == "missing"),
+            "unknown":  sum(1 for r in live if r.status == "unknown"),
+            "errors":   sum(1 for r in live if r.status == "error"),
+            "excluded": sum(1 for r in live if r.excluded),
+            "vague":    sum(1 for r in live if SH.looks_vague(r, after)),
+            "removed":  sum(1 for r in items if r.removed_at),
+            "checked_at": max(
+                (r.last_checked_at for r in live if r.last_checked_at),
+                default=None),
+        }
 
     return JSONResponse({
         "accounts": [{
@@ -77,76 +102,116 @@ def api_overview(admin: User = Depends(require_admin),
             "name": a.name,
             "store_url": a.profile_url or "",
             "ready": bool((a.profile_url or "").strip()),
+            **{k: (v.isoformat() if hasattr(v, "isoformat") else v)
+               for k, v in summarise(by_account.get(a.id, [])).items()},
         } for a in accounts],
         "ready": len(ready),
         "blocked": [a.name for a in blocked],
+        "totals": SH.counts(db, run, MARKETPLACE),
         "run": _run_payload(db, run) if run else None,
         # Recorded mouse paths are needed for the signed-in stages, so the
         # tab says up front if there are none — rather than discovering it
         # three hours into a scan, at the gate.
         "wall_paths": len(wall.paths_for(db, MARKETPLACE)),
+        "vague_after": after,
+        "search_pages": int(P.get_setting(db, "scan_max_search_pages")),
         "history": [{
             "id": r.id,
             "status": r.status,
+            "mode": r.scan_mode,
+            "auto": bool(r.auto),
             "started_at": r.started_at.isoformat() if r.started_at else None,
             "finished_at": r.finished_at.isoformat() if r.finished_at else None,
             "note": r.stage_note or "",
-        } for r in previous],
+        } for r in (db.query(StoreScanRun)
+                      .filter(StoreScanRun.status.in_(SH.FINISHED))
+                      .order_by(StoreScanRun.id.desc()).limit(5).all())],
     })
 
 
-def _run_payload(db: Session, run: StoreScanRun) -> dict:
-    counts = SH.counts(db, run)
+@router.get("/api/store/designs")
+def api_designs(account_id: Optional[int] = None,
+                status: str = "missing",
+                admin: User = Depends(require_admin),
+                db: Session = Depends(get_db)):
+    """
+    The designs themselves — one account's, or every account's.
+
+    Defaults to MISSING because that is the list worth reading; `status=all`
+    is there for when you want to look at everything. Each row carries its
+    account name so the all-accounts view can be read without cross-
+    referencing anything.
+    """
+    after = int(P.get_setting(db, "scan_vague_after_fixes"))
     names = {a.id: a.name for a in db.query(UploadAccount).all()}
 
-    rows = (db.query(StoreDesign)
-              .filter(StoreDesign.run_id == run.id)
-              .order_by(StoreDesign.status.desc(), StoreDesign.account_id,
-                        StoreDesign.title)
-              .all())
+    q = db.query(StoreListing).filter(
+        StoreListing.marketplace == MARKETPLACE,
+        StoreListing.removed_at.is_(None))
+    if account_id:
+        q = q.filter(StoreListing.account_id == account_id)
+    if status == "missing":
+        q = q.filter(StoreListing.status == "missing")
+    elif status in ("visible", "unknown", "error"):
+        q = q.filter(StoreListing.status == status)
+    elif status == "excluded":
+        q = q.filter(StoreListing.excluded == 1)
 
+    rows = q.order_by(StoreListing.account_id,
+                      StoreListing.status,
+                      StoreListing.title).limit(3000).all()
+
+    return JSONResponse({"designs": [{
+        "id": r.id,
+        "design_id": r.design_id,
+        "account": names.get(r.account_id, f"#{r.account_id}"),
+        "account_id": r.account_id,
+        "title": r.title or r.design_id,
+        "tag": r.search_tag,
+        "url": r.url,
+        "status": r.status,
+        "error": r.status_error,
+        "missing_runs": r.consecutive_missing or 0,
+        "fix_attempts": r.fix_attempts or 0,
+        # The flag that stops a design being cycled forever for nothing.
+        "vague": SH.looks_vague(r, after),
+        "excluded": bool(r.excluded),
+        "exclude_reason": r.exclude_reason,
+        "deactivated": bool(r.deactivated_at),
+        "action_error": r.action_error,
+        "last_checked": (r.last_checked_at.isoformat()
+                         if r.last_checked_at else None),
+    } for r in rows]})
+
+
+def _run_payload(db: Session, run: StoreScanRun) -> dict:
+    """What the run panel needs. The designs come from /designs separately."""
     return {
         "id": run.id,
         "status": run.status,
         "note": run.stage_note or "",
+        "auto": bool(run.auto),
+        "mode": run.scan_mode,
+        "paused": bool(run.paused_at),
+        "paused_by": run.paused_by,
         "started_at": run.started_at.isoformat() if run.started_at else None,
-        "counts": counts,
+        "counts": SH.counts(db, run, run.marketplace),
         "waiting": run.status in SH.WAITING,
-        # Missing first — that is the list being decided on. Everything else
-        # is context, and a few thousand visible rows would bury it.
-        "designs": [{
-            "design_id": r.design_id,
-            "account": names.get(r.account_id, f"#{r.account_id}"),
-            "title": r.title or r.design_id,
-            "url": r.url,
-            "status": r.status,
-            "error": r.error,
-            "deactivated": bool(r.deactivated_at),
-            "reactivated": bool(r.reactivated_at),
-            "action_error": r.action_error,
-        } for r in rows if r.status != "visible"][:2000],
-        "visible_sample": sum(1 for r in rows if r.status == "visible"),
     }
 
 
-@router.post("/api/store/start")
-def api_start(admin: User = Depends(require_admin),
-              db: Session = Depends(get_db)):
+def _queue_scan(db: Session, run: StoreScanRun, *, by: str) -> int:
     """
-    Begin a sweep, and hand the whole scan to the node as ONE job.
+    Queue the scan job. One definition, so START and RESUME cannot differ.
 
-    One job rather than one per account because the accounts are scanned in
-    parallel THREADS inside it, each holding a single browser open. The node
-    loop is serial, so nine separate jobs would run one after another and a
-    ten-hour scan would become considerably longer.
+    The whole scan is ONE job because the accounts inside it run in parallel
+    threads, each holding a single browser. The node loop is serial, so nine
+    separate jobs would run one after another and a long sweep would become
+    very much longer.
     """
-    try:
-        run = SH.start_run(db, marketplace=MARKETPLACE, by=admin.username)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
     ready, _blocked = SH.scannable(SH.accounts_for(db, MARKETPLACE))
     project = P.resolve_project(db, None)
+    attempts = int(P.get_setting(db, "wall_max_attempts"))
 
     P.create_job(db, kind="store_scan", payload={
         "run_id": run.id,
@@ -154,11 +219,16 @@ def api_start(admin: User = Depends(require_admin),
         "max_search_pages": int(P.get_setting(db, "scan_max_search_pages")),
         "delay_s": P.get_setting(db, "scan_delay_s"),
         "limit_per_account": int(P.get_setting(db, "scan_limit_per_account")),
+        # NOTE: scan_mode is deliberately NOT sent. The node posts the whole
+        # store listing and the SERVER answers with the designs worth
+        # checking — that is where missing-only and the owner's exclusions
+        # are applied. Sending the mode too would be a second place that
+        # decides the same thing.
         # The FULL account payload, not a hand-rolled dict. The node builds a
         # browser from it and that browser wants `selectors` and `timings` —
         # a shorter dict passed here died with KeyError: 'selectors' on the
-        # first real run. Secrets are deliberately excluded: scanning reads
-        # public pages and never signs in, so it has no use for a password.
+        # first real run. Secrets are excluded: scanning reads public pages
+        # and never signs in, so it has no use for a password.
         "accounts": [{
             **P.account_payload(db, a, include_secret=False, project=project),
             "store_url": a.profile_url,
@@ -169,16 +239,33 @@ def api_start(admin: User = Depends(require_admin),
         # logo is the marker that covers both — see service.site_markers.
         "wall_html_markers": earnings_service.site_markers(MARKETPLACE),
         "wall_paths": wall.payload_for(
-            wall.next_paths(db, MARKETPLACE,
-                            int(P.get_setting(db, "wall_max_attempts")))),
+            wall.next_paths(db, MARKETPLACE, attempts)),
         "wall_wait_s": P.get_setting(db, "wall_wait_s"),
-        "wall_max_attempts": int(P.get_setting(db, "wall_max_attempts")),
-    }, requested_by=admin.username)
+        "wall_max_attempts": attempts,
+    }, requested_by=by)
+    return len(ready)
 
+
+@router.post("/api/store/start")
+def api_start(payload: dict = Body(default={}),
+              admin: User = Depends(require_admin),
+              db: Session = Depends(get_db)):
+    """Begin a sweep — full or missing-only, manual or automatic."""
+    try:
+        run = SH.start_run(
+            db, marketplace=MARKETPLACE, by=admin.username,
+            auto=bool(payload.get("auto")),
+            scan_mode=("missing_only" if payload.get("missing_only")
+                       else "full"))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    accounts = _queue_scan(db, run, by=admin.username)
     run.scan_started_at = run.started_at
     log_activity(db, user=admin, action="store_scan_started",
                  target_type="store_run", target_id=run.id,
-                 details={"accounts": len(ready)})
+                 details={"accounts": accounts, "auto": bool(run.auto),
+                          "mode": run.scan_mode})
     db.commit()
     return JSONResponse({"ok": True, "run": run.id})
 
@@ -187,31 +274,21 @@ def api_start(admin: User = Depends(require_admin),
 def api_advance(payload: dict = Body(default={}),
                 admin: User = Depends(require_admin),
                 db: Session = Depends(get_db)):
-    """
-    Pass a gate: start deactivating, or start reactivating.
-
-    ════════════════════════════════════════════════════════════════════════
-    ONE JOB PER ACCOUNT HERE, UNLIKE THE SCAN
-    ════════════════════════════════════════════════════════════════════════
-    These stages are signed in, and each account needs its OWN Chrome profile
-    — two accounts cannot share one browser. Serial is also fine: this stage
-    is minutes, not hours.
-    """
+    """Pass a gate: start deactivating, or start reactivating."""
     run = SH.active_run(db, MARKETPLACE)
     if run is None:
         raise HTTPException(404, "No run in progress.")
 
     want = payload.get("stage")
-    if want == "deactivate" and run.status != "reviewing":
+    expected = {"deactivate": "reviewing", "reactivate": "confirming"}.get(want)
+    if expected is None:
+        raise HTTPException(400, "Unknown stage.")
+    if run.status != expected:
         raise HTTPException(409, f"The run is {run.status}, not waiting to "
-                                 f"deactivate.")
-    if want == "reactivate" and run.status != "confirming":
-        raise HTTPException(409, f"The run is {run.status}, not waiting to "
-                                 f"reactivate.")
+                                 f"{want}.")
 
-    picker = SH.missing_for if want == "deactivate" else SH.deactivated_for
-    rows = picker(db, run)
-    if not rows:
+    queued = SH.dispatch_stage(db, run, want, by=admin.username)
+    if not queued:
         # Nothing to do is a legitimate outcome, not an error: a scan can
         # find everything visible. End the run rather than leaving the
         # pipeline held for a stage with no work in it.
@@ -221,45 +298,107 @@ def api_advance(payload: dict = Body(default={}),
         return JSONResponse({"ok": True, "run": run.id, "queued": 0,
                              "status": run.status})
 
-    by_account: dict[int, list] = {}
-    for row in rows:
-        by_account.setdefault(row.account_id, []).append(row)
-
-    project = P.resolve_project(db, None)
-    attempts = int(P.get_setting(db, "wall_max_attempts"))
-    queued = 0
-
-    for account_id, designs in by_account.items():
-        account = db.query(UploadAccount).filter_by(id=account_id).first()
-        if account is None:
-            continue
-        P.create_job(db, kind=f"store_{want}", payload={
-            "run_id": run.id,
-            "action": want,
-            "account": P.account_payload(db, account, include_secret=True,
-                                         project=project),
-            "settings": P.upload_settings_payload(db, project=project),
-            "designs": [{"design_id": d.design_id, "title": d.title,
-                         "url": d.url} for d in designs],
-            # The same wall that stands in front of the earnings page. These
-            # stages are signed in, so it can appear here too.
-            "wall_html_markers": earnings_service.site_markers(MARKETPLACE),
-            "signed_out_markers": earnings_service.signed_out_markers(MARKETPLACE),
-            "wall_paths": wall.payload_for(
-                wall.next_paths(db, MARKETPLACE, attempts)),
-            "wall_wait_s": P.get_setting(db, "wall_wait_s"),
-            "wall_max_attempts": attempts,
-        }, requested_by=admin.username)
-        queued += 1
-
-    run.status = "deactivating" if want == "deactivate" else "reactivating"
-    run.stage_note = f"{len(rows)} design(s) across {queued} account(s)."
     log_activity(db, user=admin, action=f"store_{want}_started",
                  target_type="store_run", target_id=run.id,
-                 details={"designs": len(rows)})
+                 details={"accounts": queued})
     db.commit()
     return JSONResponse({"ok": True, "run": run.id, "queued": queued,
-                         "designs": len(rows), "status": run.status})
+                         "status": run.status})
+
+
+@router.post("/api/store/pause")
+def api_pause(payload: dict = Body(default={}),
+              admin: User = Depends(require_admin),
+              db: Session = Depends(get_db)):
+    """
+    Hold the run and give Photoshop and uploads the machine back.
+
+    Not a stop: nothing is lost, nothing is undone, and RESUME picks up from
+    the same place. The node hears about it through the reply to its next
+    per-design post, so it winds down within one design.
+    """
+    run = SH.active_run(db, MARKETPLACE)
+    if run is None:
+        raise HTTPException(404, "No run in progress.")
+    if run.paused_at:
+        raise HTTPException(409, "Already paused.")
+
+    SH.pause_run(db, run, by=admin.username)
+    stranded = len(SH.deactivated_for(db, run))
+    log_activity(db, user=admin, action="store_run_paused",
+                 target_type="store_run", target_id=run.id,
+                 details={"left_off": stranded})
+    db.commit()
+    return JSONResponse({"ok": True, "left_deactivated": stranded})
+
+
+@router.post("/api/store/resume")
+def api_resume(admin: User = Depends(require_admin),
+               db: Session = Depends(get_db)):
+    """
+    Carry on from where it stopped.
+
+    A paused run keeps its stage, so resuming a scan re-dispatches the scan
+    job and it skips everything already checked; resuming between stages
+    just re-opens the gate.
+    """
+    run = SH.active_run(db, MARKETPLACE)
+    if run is None:
+        raise HTTPException(404, "No run in progress.")
+    if not run.paused_at:
+        raise HTTPException(409, "Not paused.")
+
+    SH.resume_run(db, run)
+    queued = 0
+    if run.status == "scanning":
+        queued = _queue_scan(db, run, by=admin.username)
+    elif run.auto:
+        nxt = SH.next_stage(run)
+        if nxt:
+            queued = SH.dispatch_stage(db, run, nxt, by=admin.username)
+
+    log_activity(db, user=admin, action="store_run_resumed",
+                 target_type="store_run", target_id=run.id, details={})
+    db.commit()
+    return JSONResponse({"ok": True, "queued": queued, "status": run.status})
+
+
+@router.post("/api/store/listing")
+def api_listing(payload: dict = Body(...),
+                admin: User = Depends(require_admin),
+                db: Session = Depends(get_db)):
+    """
+    Exclude a design from scanning, or put it back.
+
+    The answer to a vague tag. A design whose primary tag is something like
+    "Queen" can never be found inside 25 pages of search, so it reads MISSING
+    every sweep and gets cycled forever for nothing. Excluding it stops that;
+    it stays in the catalogue and stays counted, it is simply not checked.
+
+    Reversible on purpose — a tag can be edited on the marketplace, and then
+    it should be scanned again.
+    """
+    from ..models import StoreListing
+
+    row = db.query(StoreListing).filter_by(id=int(payload.get("id") or 0)).first()
+    if row is None:
+        raise HTTPException(404, "No such design.")
+
+    row.excluded = 1 if payload.get("excluded") else 0
+    row.exclude_reason = (payload.get("reason") or "").strip() or None
+    if not row.excluded:
+        # Back in the queue with a clean slate: its history of failures was
+        # about a tag we have now presumably fixed, and carrying the old
+        # count forward would flag it as vague on the very next sweep.
+        row.consecutive_missing = 0
+        row.fix_attempts = 0
+
+    log_activity(db, user=admin, action="store_listing_excluded",
+                 target_type="store_listing", target_id=row.id,
+                 details={"excluded": bool(row.excluded),
+                          "title": row.title})
+    db.commit()
+    return JSONResponse({"ok": True})
 
 
 @router.post("/api/store/stop-scanning")

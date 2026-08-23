@@ -101,6 +101,12 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     # read stopped uploading too — and vice versa.
     ("upload_accounts",  "earnings_paused_until", "DATETIME"),
     ("upload_accounts",  "earnings_pause_reason", "TEXT"),
+    # Listing-health runs: automatic mode, pause, and the scan mode. Added
+    # after the first working sweeps, so the table already exists.
+    ("store_scan_runs",  "auto",       "INTEGER NOT NULL DEFAULT 0"),
+    ("store_scan_runs",  "paused_at",  "DATETIME"),
+    ("store_scan_runs",  "paused_by",  "VARCHAR(64)"),
+    ("store_scan_runs",  "scan_mode",  "VARCHAR(16) NOT NULL DEFAULT 'full'"),
 ]
 
 # ════════════════════════════════════════════════════════════════════════════

@@ -426,6 +426,21 @@ original script launched and quit a whole Chrome for every design; at 1,881
 designs and 3-5s per launch that was over two hours of doing nothing but
 starting browsers, and it was most of why a scan took ten.
 
+**The search check pages 25 deep, and that is a REAL limit, not a bug.** For
+"Shadow of the Colossus" it is conclusive. For "Queen" it is nowhere near —
+a healthy design sits at page four hundred and reads MISSING every sweep,
+forever. So `store_listings.fix_attempts` counts completed cures, and a
+design still missing after `scan_vague_after_fixes` (2) is FLAGGED rather
+than cycled again. Deactivating a live listing that was never broken costs
+money twice per sweep and achieves nothing.
+
+**The catalogue is kept between runs, and that is what makes the interesting
+questions askable at all.** Has this been missing three sweeps running? Did
+the account gain designs? Did one vanish? A per-run table could answer none
+of them. A design the store no longer lists keeps its row with `removed_at`
+set — never deleted, because "this account lost eleven designs" is only
+answerable if the rows survive.
+
 **Scope note, deliberately open:** a TeePublic project WITH uploading is
 plausible later — the owner's tool already contains a working uploader. This
 tab is therefore marketplace-level (accounts), not project-level, and slots

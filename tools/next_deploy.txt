@@ -1,3 +1,2 @@
-Node needs: pip install -r worker_service/requirements.txt (beautifulsoup4).
-A failed scan stage now fails the run and releases the pipeline instead of
-reporting success over an empty result.
+Scan sends the full account payload (the browser needs selectors/timings) and
+falls back to the browser when TeePublic refuses plain HTTP with 403.

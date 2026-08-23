@@ -153,12 +153,16 @@ def api_start(admin: User = Depends(require_admin),
         "parallel": int(P.get_setting(db, "scan_parallel_accounts")),
         "max_search_pages": int(P.get_setting(db, "scan_max_search_pages")),
         "delay_s": P.get_setting(db, "scan_delay_s"),
+        # The FULL account payload, not a hand-rolled dict. The node builds a
+        # browser from it and that browser wants `selectors` and `timings` —
+        # a shorter dict passed here died with KeyError: 'selectors' on the
+        # first real run. Secrets are deliberately excluded: scanning reads
+        # public pages and never signs in, so it has no use for a password.
         "accounts": [{
-            "id": a.id,
-            "name": a.name,
+            **P.account_payload(db, a, include_secret=False, project=project),
             "store_url": a.profile_url,
-            "settings": P.upload_settings_payload(db, project=project),
         } for a in ready],
+        "settings": P.upload_settings_payload(db, project=project),
     }, requested_by=admin.username)
 
     run.scan_started_at = run.started_at

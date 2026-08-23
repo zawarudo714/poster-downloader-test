@@ -14,9 +14,11 @@ SCAN — no login, no account profile, nothing signed in.
     3. Search the PUBLIC site in a real browser for that tag, and look for
        our design ID among the results.
 
-    Only step 3 needs a browser: TeePublic's search results are not in the
+    Only step 3 NEEDS a browser: TeePublic's search results are not in the
     raw HTML. Steps 1 and 2 are ordinary requests, which is why the bulk of
-    a scan costs almost nothing.
+    a scan costs almost nothing — but they fall back to the browser when
+    refused, because TeePublic answered the very first store page with HTTP
+    403 on the first real run. Cheap must not mean fragile.
 
 DEACTIVATE — signed in, using that account's own Chrome profile.
 
@@ -65,8 +67,47 @@ BASE = "https://www.teepublic.com"
 # /t-shirt/86734220-tomb-raider  ->  86734220
 DESIGN_ID = re.compile(r"/t-shirt/(\d+)-")
 
-UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-      "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+def new_session() -> requests.Session:
+    """
+    A plain session, with NO headers set.
+
+    Deliberately bare, because that is what the owner's working scanner used
+    and it read these pages successfully for months. An earlier version here
+    set a Chrome User-Agent and nothing else, and TeePublic answered the very
+    first store page with HTTP 403 — a request claiming to be Chrome while
+    sending none of the other headers Chrome sends is a worse signature than
+    an honest one.
+
+    Rule: copy the request that is known to work before inventing one.
+    """
+    return requests.Session()
+
+
+def fetch(url: str, session: requests.Session, driver=None) -> Optional[str]:
+    """
+    Page text, over plain HTTP — falling back to the browser if refused.
+
+    Most of a scan is cheap precisely because these pages are ordinary HTML.
+    But "cheap" must not mean "fragile": if the marketplace declines to talk
+    to a plain client, the browser is already open a few lines away and it
+    gets the same page. One page loaded slowly beats an account skipped.
+    """
+    try:
+        reply = session.get(url, timeout=30)
+        if reply.status_code == 200:
+            return reply.text
+        blocked = reply.status_code in (401, 403, 429)
+    except requests.RequestException:
+        blocked = True
+
+    if not blocked or driver is None:
+        return None
+    try:
+        driver.get(url)
+        time.sleep(1.5)
+        return driver.page_source or None
+    except Exception:
+        return None
 
 
 def design_id_from(url: str) -> Optional[str]:
@@ -80,7 +121,7 @@ def design_id_from(url: str) -> Optional[str]:
 # ════════════════════════════════════════════════════════════════════════════
 
 def list_designs(store_url: str, session: requests.Session,
-                 emit: Callable[[str], None]) -> list[dict]:
+                 emit: Callable[[str], None], driver=None) -> list[dict]:
     """
     Every design in a store, with its ID. Pages until a page has none.
 
@@ -93,12 +134,12 @@ def list_designs(store_url: str, session: requests.Session,
 
     found: dict[str, dict] = {}
     for page in range(1, 201):
-        reply = session.get(f"{store_url}?page={page}", timeout=30)
-        if reply.status_code != 200:
-            emit(f"  store page {page}: HTTP {reply.status_code}, stopping")
+        html = fetch(f"{store_url}?page={page}", session, driver)
+        if html is None:
+            emit(f"  store page {page}: could not be read, stopping")
             break
 
-        soup = BeautifulSoup(reply.text, "html.parser")
+        soup = BeautifulSoup(html, "html.parser")
         links = soup.select('a[href*="/t-shirt/"]')
         added = 0
         for link in links:
@@ -117,7 +158,7 @@ def list_designs(store_url: str, session: requests.Session,
     return list(found.values())
 
 
-def design_details(url: str, session: requests.Session) -> tuple:
+def design_details(url: str, session: requests.Session, driver=None) -> tuple:
     """
     (search tag, title, error). Plain HTTP — the design page is public.
 
@@ -127,14 +168,11 @@ def design_details(url: str, session: requests.Session) -> tuple:
     """
     from bs4 import BeautifulSoup
 
-    try:
-        reply = session.get(url, timeout=20)
-    except requests.RequestException as e:
-        return None, None, f"{type(e).__name__}"
-    if reply.status_code != 200:
-        return None, None, f"HTTP {reply.status_code}"
+    html = fetch(url, session, driver)
+    if html is None:
+        return None, None, "page could not be read"
 
-    soup = BeautifulSoup(reply.text, "html.parser")
+    soup = BeautifulSoup(html, "html.parser")
     strip = lambda t: re.sub(r"\s+T-Shirts?$", "", t, flags=re.I).strip()
 
     tag_el = soup.find("h2", class_="m-design-details__primary-tag")
@@ -214,6 +252,7 @@ class StoreHealthStage:
         accounts = payload.get("accounts") or []
         run_id = payload["run_id"]
         workers = max(1, int(payload.get("parallel") or 3))
+        settings = payload.get("settings") or {}
         max_pages = int(payload.get("max_search_pages") or 25)
         delay = float(payload.get("delay_s") or 1)
 
@@ -243,7 +282,7 @@ class StoreHealthStage:
                     account = queue.pop(0)
                 try:
                     got = self._scan_account(job_id, run_id, account,
-                                             max_pages, delay, emit)
+                                             max_pages, delay, emit, settings)
                     with lock:
                         for key in results:
                             results[key] += got.get(key, 0)
@@ -288,29 +327,39 @@ class StoreHealthStage:
 
     def _scan_account(self, job_id: int, run_id: int, account: dict,
                       max_pages: int, delay: float,
-                      emit: Callable[[str], None]) -> dict:
+                      emit: Callable[[str], None],
+                      settings: dict) -> dict:
         """One account, one browser, held open for the whole account."""
         name = account.get("name")
         store_url = (account.get("store_url") or "").split("?")[0].rstrip("/")
-        session = requests.Session()
-        session.headers.update({"User-Agent": UA})
-
-        emit(f"→ {name}: reading the store listing")
-        designs = list_designs(store_url, session, emit)
-        emit(f"→ {name}: {len(designs)} designs to check")
+        session = new_session()
 
         # A throwaway profile: scanning is public, so it must never touch the
         # account's real signed-in session. Nothing here can log us out.
         uploader = MarketplaceUploader(
-            account={**account, "chrome_profile_dir": "", "id": f"scan_{account['id']}"},
-            settings=account.get("settings") or {}, config=self.config,
+            account={**account, "chrome_profile_dir": "",
+                     "id": f"scan_{account['id']}"},
+            settings=settings, config=self.config,
             client=self.client, log=self.log, job_id=None)
 
         counts = {"checked": 0, "missing": 0, "errors": 0}
         try:
+            # Started BEFORE the listing is read, so it can stand in when
+            # plain HTTP is refused — which is exactly what happened on the
+            # first real run, with HTTP 403 on store page 1.
             uploader.start()
+
+            emit(f"→ {name}: reading the store listing")
+            designs = list_designs(store_url, session, emit, uploader.driver)
+            emit(f"→ {name}: {len(designs)} designs to check")
+            if not designs:
+                raise RuntimeError(
+                    f"No designs found at {store_url}. Check the store "
+                    f"address on the TeePublic tab.")
+
             for index, design in enumerate(designs, start=1):
-                tag, title, error = design_details(design["url"], session)
+                tag, title, error = design_details(design["url"], session,
+                                                   uploader.driver)
 
                 if error:
                     status, note = "error", error

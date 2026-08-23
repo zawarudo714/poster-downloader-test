@@ -651,7 +651,8 @@ irrelevant, say why in one line rather than skipping it silently.
 | 5c | Moved a call out of a shared function and dropped it on the way | 3c, 3c-ter |
 | 6 | Correct for two projects, wrong for the third | 1, 3b |
 | 7 | Fixed a bug and left no rule behind | all |
-| 8 | Claimed work with an exit that reports nothing | 3d, 5 |
+| 8 | Claimed work with an exit that reports nothing — including catching an error into a counter | 3d, 5 |
+| 9 | Shipped a dependency the node was never told to install | 3c, 8 |
 
 ### 1. Audit before you build
 
@@ -1106,6 +1107,15 @@ console on an unattended VPS. The reaper released them, the next cycle
 claimed them, and it stranded them again — forever, looking alive the whole
 time.
 
+**Catching an exception into a COUNTER is the same defect wearing a third
+hat.** The store scan wrapped each account in try/except, added 1 to
+`errors`, and then reported the stage finished regardless. A missing library
+therefore produced a job that logged one red line, said "Job finished", and
+advanced the run to "waiting for you" with zero designs checked — so the
+screen would have said "nothing is missing" and been believed. A count is
+not a report. If a thing that was supposed to happen did not, the caller
+must be TOLD, and any state machine downstream must not move on.
+
 **And a REPLY that is ignored is the same defect wearing a different hat.**
 The earnings read posted each page to the server and read one key out of the
 answer — "is there another page" — discarding the error and the stored count.
@@ -1119,6 +1129,31 @@ the work was claimed.** If setup can fail, either claim after it, or catch it
 and report the claim as failed with the real error text. And an error that is
 only written to the node's local log does not exist — the owner cannot read
 that machine.
+
+### 9. A dependency is not deployed by writing it down
+
+The node is updated by COPYING A FOLDER, and copying a folder installs
+nothing. `beautifulsoup4` sat in `requirements.txt` while being absent from
+the box, and the only code using it had a try/except fallback — sensible
+there, fatal to noticing. It surfaced hours after a deploy as a job dying
+once per poll cycle with `No module named 'bs4'`.
+
+So, whenever you add an import the node needs:
+
+1. Add it to `worker_service/requirements.txt` **under its PIP name**, which
+   is not always its import name. `bs4` is a stub package that merely depends
+   on `beautifulsoup4`; installing the stub has left real machines without
+   the library.
+2. Add it to `REQUIRED_MODULES` in `agent.py`, so the agent refuses to start
+   and prints the exact command. A check at startup is loud; a failure at
+   first use is a job that fails forever in a log nobody is reading.
+3. Say in the deploy note that the node needs `pip install -r`.
+
+The general form: **for any machine updated by copying files, a new
+dependency needs a startup check, because there is no install step to hook
+into.** Same reasoning as `preflight()` in `scripts/dev_setup.py`, which
+exists because adding `cryptography` to requirements after a venv already
+existed left setup dying mid-run with a wiped database.
 
 ---
 

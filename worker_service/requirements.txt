@@ -1,6 +1,17 @@
 # Worker node dependencies. Deliberately minimal so the node can be
 # provisioned on a bare Windows box without a build toolchain.
+#
+# After copying this folder to the node, run:
+#     .venv\Scripts\python.exe -m pip install -r worker_service\requirements.txt
+#
+# The agent checks these on startup and refuses to run with a missing one —
+# see `preflight()` in agent.py. A dependency that is merely absent used to
+# surface hours later as a job that failed once per poll cycle.
 requests>=2.31.0
 selenium>=4.16.0
 psutil>=5.9.0
-bs4>=4.12.0
+# beautifulsoup4, NOT "bs4". `bs4` is a stub package on PyPI whose only job is
+# to depend on this one, and it has caused real installs to end up without the
+# library. The import is still `from bs4 import ...`; only the install name
+# differs, which is exactly why it is easy to get wrong.
+beautifulsoup4>=4.12.0

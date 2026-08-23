@@ -46,7 +46,7 @@ from .store_health import StoreHealthStage
 from .uploader import UploadStage
 
 
-AGENT_VERSION = "1.17.0"
+AGENT_VERSION = "1.17.1"
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_CONFIG = HERE / "config.json"
@@ -414,6 +414,48 @@ class Agent:
                 time.sleep(self._current_sleep())
 
 
+#: import name -> what to type at pip. They differ for BeautifulSoup, which
+#: is exactly the one that went missing.
+REQUIRED_MODULES = {
+    "requests":  "requests",
+    "selenium":  "selenium",
+    "psutil":    "psutil",
+    "bs4":       "beautifulsoup4",
+}
+
+
+def preflight() -> list[str]:
+    """
+    Refuse to start with a dependency missing, and say how to fix it.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS EXISTS
+    ════════════════════════════════════════════════════════════════════════
+    `beautifulsoup4` was absent from the node for an unknown length of time
+    and nothing said so. The uploader's only use of it sits behind a
+    try/except with a crude fallback — sensible there — so it degraded
+    quietly. The failure finally surfaced as a scan job dying once per poll
+    cycle with `No module named 'bs4'`, hours after the deploy, in a log the
+    owner had to be looking at.
+
+    Copying a folder is how this node is updated, and a folder copy does not
+    install anything. So the check belongs at STARTUP, where it is loud, and
+    not at first use, where it is a job failure that repeats forever.
+
+    Same shape as `preflight()` in scripts/dev_setup.py, and for the same
+    reason: add a dependency, add it here too.
+    """
+    import importlib
+
+    missing = []
+    for module, package in REQUIRED_MODULES.items():
+        try:
+            importlib.import_module(module)
+        except ImportError:
+            missing.append(package)
+    return missing
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Poster pipeline worker node (Photoshop + marketplace uploads).",
@@ -427,6 +469,16 @@ def main() -> None:
     parser.add_argument("--stages", default="process,upload",
                         help="Comma-separated stages to run locally (process, upload).")
     args = parser.parse_args()
+
+    missing = preflight()
+    if missing:
+        print("\nThis node is missing " + str(len(missing)) + " package(s): "
+              + ", ".join(missing))
+        print("\nInstall them with:\n")
+        print("    .venv\\Scripts\\python.exe -m pip install -r "
+              "worker_service\\requirements.txt\n")
+        print("(or: python -m pip install " + " ".join(missing) + ")\n")
+        sys.exit(1)
 
     config = load_config(args.config)
     stages = {s.strip() for s in args.stages.split(",") if s.strip()}

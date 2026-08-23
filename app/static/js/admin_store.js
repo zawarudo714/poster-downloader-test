@@ -57,7 +57,15 @@
     if (!run) {
       summary.textContent = '';
       var blocked = data.blocked || [];
-      el.innerHTML =
+      // A run that FAILED released the pipeline correctly and is therefore
+      // "not running" — but it is the most important thing on the page, and
+      // burying it in the history list would read as "nothing happened".
+      var last = (data.history || [])[0];
+      var failed = last && last.status === 'failed'
+        ? '<p class="quota-note"><strong>The last sweep failed.</strong> '
+          + esc(last.note) + '</p>'
+        : '';
+      el.innerHTML = failed +
         '<p>Nothing running. A sweep checks every design on ' + data.ready +
         ' account(s) and pauses Photoshop and uploads until it is done.</p>' +
         (blocked.length

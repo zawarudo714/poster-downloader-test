@@ -224,6 +224,7 @@ class StoreHealthStage:
             progress=2)
 
         results = {"checked": 0, "missing": 0, "errors": 0}
+        failures: list[str] = []
         lock = threading.Lock()
         queue = list(accounts)
 
@@ -247,9 +248,11 @@ class StoreHealthStage:
                         for key in results:
                             results[key] += got.get(key, 0)
                 except Exception as e:
-                    emit(f"✗ {account.get('name')}: {type(e).__name__}: {e}")
+                    detail = f"{type(e).__name__}: {e}"
+                    emit(f"✗ {account.get('name')}: {detail}")
                     with lock:
                         results["errors"] += 1
+                        failures.append(f"{account.get('name')}: {detail}")
 
         threads = [threading.Thread(target=worker, daemon=True)
                    for _ in range(min(workers, len(queue)))]
@@ -257,6 +260,27 @@ class StoreHealthStage:
             t.start()
         for t in threads:
             t.join()
+
+        # ── AN ACCOUNT THAT BLEW UP IS NOT A FINISHED SCAN ───────────────
+        #
+        # This used to swallow the exception into a counter and then post
+        # stage-done regardless. A missing library therefore produced a job
+        # that logged one red line, reported "Job finished", and advanced the
+        # run to "waiting for you" with ZERO designs checked — so the screen
+        # would have said "nothing is missing" and been believed.
+        #
+        # A partial scan is worse than none, because the missing list it
+        # shows is silently incomplete. So: any account failing fails the
+        # whole stage, the run is marked failed with the real reason, and
+        # the pipeline is released rather than held by a run going nowhere.
+        if failures:
+            self.client.post("/store/stage-done", {
+                "run_id": run_id, "stage": "scan",
+                "error": "; ".join(failures[:5]),
+            })
+            raise RuntimeError(
+                f"{len(failures)} account(s) could not be scanned: "
+                + "; ".join(failures[:5]))
 
         self.client.post("/store/stage-done",
                          {"run_id": run_id, "stage": "scan"})
@@ -348,6 +372,11 @@ class StoreHealthStage:
 
         done = failed = 0
         try:
+            # start() is the risky step and it sits OUTSIDE the per-design
+            # handler, so a Chrome that will not launch throws past every
+            # `_report` below. Without the outer catch further down, the run
+            # would stay "deactivating" forever — holding Photoshop and
+            # uploads — with the screen showing it politely in progress.
             uploader.start()
             for index, design in enumerate(designs, start=1):
                 did = design["design_id"]
@@ -367,6 +396,17 @@ class StoreHealthStage:
                     uploader.emit(f"  ✗ {label}: {detail}", level="error")
                     self._report(run_id, did, action, detail)
                     failed += 1
+        except Exception as e:
+            # Anything that escaped the per-design handler — almost always
+            # start(). Report the stage as failed so the run ENDS and the
+            # pipeline is released, then re-raise so the job says so too.
+            detail = f"{type(e).__name__}: {e}"
+            self.client.post("/store/stage-done", {
+                "run_id": run_id, "stage": action,
+                "account_id": account["id"],
+                "error": f"{account.get('name')}: {detail}",
+            })
+            raise
         finally:
             uploader.stop()
 

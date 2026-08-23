@@ -1114,6 +1114,17 @@ def store_stage_done(
     stage = payload.get("stage")
     counts = SH.counts(db, run)
 
+    # A stage that failed must NOT advance the run. Ending it here is also
+    # what releases the pipeline — otherwise a run that died on its first
+    # account would hold Photoshop and uploads indefinitely while the screen
+    # showed it politely "scanning".
+    error = (payload.get("error") or "").strip()
+    if error:
+        SH.finish_run(db, run, status="failed",
+                      note=f"{stage} failed — {error[:400]}")
+        db.commit()
+        return JSONResponse({"ok": True, "status": run.status})
+
     if stage == "scan" and run.status == "scanning":
         run.status = "reviewing"
         run.stage_note = (f"{counts['missing']} missing of {counts['checked']} "

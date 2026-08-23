@@ -148,6 +148,22 @@
     </div>
   </section>
 
+  {# ── Recorded mouse paths ──────────────────────────────────────────────
+     Only appears for a marketplace that actually has a wall, so it is simply
+     absent for FineArtAmerica rather than sitting there empty and inviting
+     the question "what am I supposed to put here". #}
+  <section class="panel" data-wall-panel hidden>
+    <div class="panel-head">
+      <span>WALL PATHS
+        {{ info("TeePublic shows a full-page wall before your account page, and its No Thanks control is sealed so it cannot be clicked by name — only by position. These are mouse movements you recorded on the worker machine with RECORD_PATHS.bat. They are used in order, one per read, cycling back to the first at the end. FAILED counts how often a recording did not get through: one path failing is a bad recording, all of them failing means the wall has changed.") }}
+      </span>
+      <span class="muted mono" data-wall-total></span>
+    </div>
+    <div class="panel-body" data-wall-list>
+      <div class="muted">Loading…</div>
+    </div>
+  </section>
+
   {# ── Next payout ───────────────────────────────────────────────────────
      Its own panel because it is the one figure that is NOT a fact. FAA pays
      on the date an order ships and does not publish which orders have

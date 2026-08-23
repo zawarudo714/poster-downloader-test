@@ -589,6 +589,25 @@ DEFAULTS: dict[str, Any] = {
     "earnings_quiet_from":  "22:00",
     "earnings_run_at":      "22:00",
 
+    # ── The interstitial wall ────────────────────────────────────────────
+    # TeePublic serves a full-page wall whose dismiss control is sealed
+    # inside a closed shadow root, so it cannot be clicked by selector — only
+    # by position, from a recorded mouse path. See models.WallPath.
+    #
+    # `wall_wait_s` is how long to let the page settle before deciding we are
+    # looking at the wall rather than a slow account page. It is deliberately
+    # NOT the old bot-wall timer: two numbers that mean different things must
+    # not share one setting, or changing either forces you to move both.
+    "wall_wait_s":          5,
+    # Attempts per read, each using the NEXT recording. Three because a path
+    # that has failed twice is unlikely to work on a third go, and every
+    # extra attempt is another click at a page we may have misread.
+    "wall_max_attempts":    3,
+    # Where the sequential rotation has got to. A single counter across all
+    # accounts, so no account is ever tied to one path. Stored rather than
+    # derived because it must survive both the node and the server restarting.
+    "wall_path_cursor":     0,
+
     # ── How many failures in a row before an account is parked ───────────
     # Only applies to failures the node marks as "might be systemic" — a
     # missing form field. A bot wall or rejected credentials still parks the

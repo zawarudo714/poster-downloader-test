@@ -50,58 +50,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from .client import PipelineClient, PipelineError
 
 
-# Phrases that mean "the site is challenging us, not rejecting the image".
-# Seeing one of these pauses the whole account rather than burning attempts on
-# every queued image — so a false positive is expensive, and there was a bad
-# one here.
-#
-# These are matched against the page's VISIBLE TEXT, never its HTML, and they
-# are all things a challenge page SAYS. Vendor names were the mistake: the old
-# list contained bare "captcha" and "cloudflare", and TeePublic's perfectly
-# ordinary sign-in page mentions "recaptcha" fifteen times in script tags and
-# a dormant widget. "captcha" is a substring of "recaptcha", so the check
-# fired on a page whose visible text reads "Welcome Back!" and parked the
-# account for three hours.
-#
-# Rule for anything added here: it must be a SENTENCE THE USER WOULD SEE, not
-# the name of a product that might merely be loaded.
-# ── TRANSIENT vs HARD, and the difference matters enormously ──────────────
-#
-# Cloudflare's "managed challenge" is an interstitial that SOLVES ITSELF for a
-# real browser in a few seconds and then continues to the page you asked for.
-# FineArtAmerica's "Verify Visitor — please check the box" does not: it waits
-# for a human and will sit there forever.
-#
-# Treating them the same is what parked a TeePublic account. The check ran
-# three seconds after navigating, saw Cloudflare's waiting room, and called it
-# a wall — a browser that would have sailed through never got the chance.
-#
-# So a transient one is WAITED OUT and only becomes a failure if it is still
-# there afterwards. A hard one fails immediately, because waiting on it is
-# just a slower way to fail.
-CHALLENGE_TRANSIENT = (
-    "just a moment",                   # Cloudflare's page title
-    "performing security verification",
-    "checking your browser",
-    "enable javascript and cookies to continue",
-    "verification successful",         # mid-transition; let it finish
-)
-
-CHALLENGE_HARD = (
-    "verify visitor",              # FineArtAmerica's exact wording
-    "please check the box",        # ditto, the line under it
-    "are you human",
-    "verify you are human",
-    "unusual traffic",
-    "access denied",
-    "rate limit",
-    "too many requests",
-)
-
-# Kept as the union so anything still importing it behaves sensibly.
-BOT_MARKERS = CHALLENGE_HARD + CHALLENGE_TRANSIENT
-
-
 def _drive_root(root: Path) -> Path:
     """
     Make a bare Windows drive letter mean the ROOT of that drive.
@@ -518,67 +466,176 @@ class MarketplaceUploader:
                 pause_immediate=False,
             )
 
-    # ── Bot detection ──────────────────────────────────────────────────────
+    # ── The interstitial wall ──────────────────────────────────────────────
 
-    def check_for_bot_wall(self, context: str) -> None:
+    def page_shows(self, markers) -> bool:
         """
-        Look for a challenge page — and wait out the kind that clears itself.
+        Does the page's VISIBLE TEXT contain these words?
 
-        A Cloudflare managed challenge is a WAITING ROOM, not a wall. It runs
-        for a few seconds and then sends the browser on. Failing the moment we
-        see one means never getting past a site that would have let us in, so
-        this polls until it clears or the patience runs out.
-
-        A hard challenge — one asking a human to tick something — is failed at
-        once. There is nobody at that machine to tick it.
+        Visible text, never markup — matching raw HTML once turned an ordinary
+        sign-in page into a three-hour pause, because the word it looked for
+        appeared in a dormant script tag.
         """
-        deadline = time.time() + float(self.t("bot_wall_wait_s", 30))
-        waited = False
+        try:
+            raw = self.driver.page_source or ""
+        except WebDriverException:
+            return False
+        page = _visible_text(raw)
+        return all(m.lower() in page for m in markers)
 
-        while True:
+    def page_shows_any(self, markers) -> bool:
+        try:
+            raw = self.driver.page_source or ""
+        except WebDriverException:
+            return False
+        page = _visible_text(raw)
+        return any(m.lower() in page for m in markers)
+
+    def page_offset(self) -> tuple[int, int]:
+        """
+        Where the web page's top-left corner sits on the screen.
+
+        Only needed by the RECORDER, which captures screen coordinates and has
+        to convert. Replay never uses it: mouse events are dispatched straight
+        into the page, in page coordinates, so the window can be anywhere.
+        """
+        try:
+            box = self.driver.execute_script(
+                "return [window.screenX, window.screenY, "
+                "window.outerHeight - window.innerHeight];")
+            return int(box[0]), int(box[1]) + int(box[2])
+        except (WebDriverException, TypeError, ValueError, IndexError):
+            return 0, 0
+
+    def replay_path(self, points: list) -> None:
+        """
+        Move the mouse along a recorded path, then click where it ended.
+
+        ════════════════════════════════════════════════════════════════════
+        WHY NOT A SELECTOR, AND WHY NOT A JS CLICK
+        ════════════════════════════════════════════════════════════════════
+        The control this aims at is sealed inside a CLOSED shadow root.
+        Selenium cannot find it and page JavaScript cannot reach it. But a
+        mouse event carries a POSITION, and the browser hit-tests whatever is
+        underneath — sealed or not, exactly as it does for a real hand.
+
+        Dispatched through Chrome's own input channel rather than by moving
+        the Windows cursor. Two consequences that decided the design:
+
+          · No desktop session is needed. The nightly reads run with nobody
+            logged in and the screen locked. An OS-level mouse would have
+            required a live Remote Desktop connection kept open forever, and
+            would fail silently the moment it dropped.
+          · The events are genuine browser input — the same kind a real mouse
+            produces, not the synthetic `element.click()` used elsewhere.
+
+        The timings from the recording are honoured, so this takes about as
+        long as the owner's hand did.
+        """
+        if not points:
+            return
+        last_ms = 0
+        for x, y, ms in points:
+            gap = max(0, int(ms) - last_ms)
+            if gap:
+                time.sleep(min(gap, 2000) / 1000.0)
+            last_ms = int(ms)
+            self.driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                "type": "mouseMoved", "x": int(x), "y": int(y), "buttons": 0,
+            })
+
+        x, y, _ms = points[-1]
+        for kind in ("mousePressed", "mouseReleased"):
+            self.driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                "type": kind, "x": int(x), "y": int(y),
+                "button": "left", "buttons": 1, "clickCount": 1,
+            })
+
+    def clear_wall(self, markers: list, paths: list, *, wait_s: float = 5.0,
+                   attempts: int = 3, on_result=None,
+                   signed_out_markers: Optional[list] = None) -> bool:
+        """
+        Get past a full-page interstitial, or say plainly that we could not.
+
+        ════════════════════════════════════════════════════════════════════
+        THE WALL IS DETECTED BY WHAT IS MISSING
+        ════════════════════════════════════════════════════════════════════
+        Not by anything on the wall itself. Its class names are randomised
+        (`tOHY4`, `qrvwN4`) and would break on the site's next deploy while
+        pointing the blame somewhere else entirely.
+
+        So the question asked is "are the figures we came for on this page?".
+        That definition survives the wall being redesigned, renamed, or
+        replaced by a completely different wall — and it is the SAME test
+        used to confirm we got through, so the two can never disagree.
+
+        Returns True if the page is now the one we wanted.
+        """
+        time.sleep(wait_s)
+        if self.page_shows_any(markers):
+            return True                      # never walled in the first place
+
+        # A lapsed session looks EXACTLY like the wall from here — figures
+        # missing, nothing else recognisable. Asked before clicking anything,
+        # because otherwise three recorded paths get spent on a sign-in form
+        # and the report reads "stuck at the wall" when the real answer is
+        # "sign in by hand, it takes two minutes".
+        if signed_out_markers:
             try:
                 raw = self.driver.page_source or ""
-                title = (self.driver.title or "").lower()
             except WebDriverException:
-                return
+                raw = ""
+            if any(m in raw for m in signed_out_markers):
+                raise UploadError(
+                    "Signed out — this is the sign-in page, not the wall. "
+                    "Open this account's Chrome profile with PROFILES.bat, "
+                    "sign in by hand, close Chrome, then press READ NOW.",
+                    pause_minutes=720,
+                    pause_reason="Signed out — needs a manual sign-in",
+                    fatal=True)
 
-            # VISIBLE TEXT, not markup. Script sources, class names and dormant
-            # widgets are not the site talking to us — and matching them is
-            # what turned a normal sign-in page into a three-hour pause.
-            page = _visible_text(raw)
-            haystack = f"{title} {page}"
+        if not paths:
+            raise UploadError(
+                "A wall is in the way and no mouse paths have been recorded "
+                "yet. Run RECORD_PATHS.bat on this machine to record some.",
+                fatal=True)
 
-            hard = [m for m in CHALLENGE_HARD if m in haystack]
-            if hard:
-                break
+        for attempt in range(1, min(attempts, len(paths)) + 1):
+            path = paths[attempt - 1]
+            label = path.get("label") or f"path {path.get('id')}"
+            self.emit(f"  wall in the way — trying {label} "
+                      f"(attempt {attempt} of {attempts})")
+            try:
+                self.replay_path(path.get("points") or [])
+            except WebDriverException as e:
+                self.emit(f"  could not replay {label}: {e}", level="warn")
+                if on_result:
+                    on_result(path.get("id"), False)
+                continue
 
-            soft = [m for m in CHALLENGE_TRANSIENT if m in haystack]
-            if not soft:
-                if waited:
-                    self.emit("Security check cleared on its own — carrying on.",
-                              level="ok")
-                return
+            # It is a real page change, not a box disappearing, so give the
+            # navigation time before judging it.
+            time.sleep(wait_s)
+            worked = self.page_shows_any(markers)
+            if on_result:
+                on_result(path.get("id"), worked)
+            if worked:
+                self.emit(f"  through the wall using {label}", level="ok")
+                return True
+            self.emit(f"  {label} did not get through", level="warn")
 
-            if time.time() >= deadline:
-                hard = soft
-                break
-
-            if not waited:
-                waited = True
-                self.emit(f"Security check in progress ({soft[0]}) — waiting up "
-                          f"to {int(self.t('bot_wall_wait_s', 30))}s for it to "
-                          f"clear itself.")
-            time.sleep(2)
-
-        shot = self.capture_evidence(f"botwall_{context}")
+        shot = self.capture_evidence("wall_stuck")
+        tried = ", ".join(str(p.get("label") or p.get("id"))
+                          for p in paths[:attempts])
         raise UploadError(
-            f"Bot-protection page during {context}, still there after waiting "
-            f"(matched: {', '.join(hard)}). See Diagnostics → Failure Evidence "
-            f"for the page it was showing.",
+            f"Could not get past the wall after {min(attempts, len(paths))} "
+            f"attempts (tried: {tried}). The screenshot shows the page it was "
+            f"looking at — if it is not the usual wall, that is why.",
             pause_minutes=180,
-            pause_reason=f"Bot wall during {context}: {', '.join(hard)}",
+            pause_reason=f"Stuck at the wall (tried: {tried})",
             fatal=True,
         )
+
 
     def capture_evidence(self, label: str) -> Optional[str]:
         """
@@ -840,7 +897,6 @@ class MarketplaceUploader:
         try:
             self.driver.get(self.sel("login_url"))
             time.sleep(self.t("page_load_wait", 2))
-            self.check_for_bot_wall("login")
 
             step = "clicking the artist-login link"
             try:
@@ -875,7 +931,6 @@ class MarketplaceUploader:
                 self.js_click(self.find("login_submit", clickable=True),
                               what="login submit")
                 time.sleep(self.t("login_wait", 2))
-                self.check_for_bot_wall("login submit")
 
                 # Still on a login form means the credentials were rejected.
                 try:
@@ -1005,7 +1060,6 @@ class MarketplaceUploader:
                 self.js_click(link, what="upload button")
             time.sleep(self.t("page_load_wait", 2))
 
-        self.check_for_bot_wall("upload form")
 
         # Confirm we actually landed on the form before going further. Failing
         # here names the real problem instead of surfacing it three steps later
@@ -1041,7 +1095,6 @@ class MarketplaceUploader:
         self.emit("  → confirming upload")
         self.js_click(self.find("upload_confirm", clickable=True), what="upload confirm")
         time.sleep(self.t("upload_wait", 5))
-        self.check_for_bot_wall("image upload")
         mark()
 
         # 4 — fill the listing form
@@ -1395,6 +1448,22 @@ class UploadStage:
         self.log(f"Deleted profile {resolved} ({size // 1024} KB)", level="ok")
         return {"removed": True, "path": str(resolved), "bytes": size}
 
+    def _report_wall_result(self, path_id, worked: bool) -> None:
+        """
+        Tell the server which recording was used and whether it landed.
+
+        Swallows its own errors deliberately: this is bookkeeping, and a
+        server hiccup while reporting a path must not turn a successful read
+        into a failed job. The read itself reports separately.
+        """
+        if not path_id:
+            return
+        try:
+            self.client.post("/wall/result",
+                             {"path_id": int(path_id), "worked": bool(worked)})
+        except Exception:
+            pass
+
     def read_earnings(self, job_id: int, payload: dict) -> dict:
         """
         Fetch an account's ledger pages in the SAME browser the uploader uses.
@@ -1461,6 +1530,16 @@ class UploadStage:
         stored = 0
         problems: list[str] = []
 
+        # Everything about the wall arrives with the job — the words that mean
+        # "we are through", the recorded paths, and the two timings. The node
+        # decides nothing here: which marketplace has a wall, and what its
+        # account page says, are facts the server holds.
+        markers = payload.get("wall_markers") or []
+        paths = payload.get("wall_paths") or []
+        wall_wait_s = float(payload.get("wall_wait_s") or 5)
+        wall_attempts = int(payload.get("wall_max_attempts") or 3)
+        signed_out = payload.get("signed_out_markers") or []
+
         try:
             # Same three exits as run_batch (rule: claimed work must always
             # end in a reported state). A failure here is reported against
@@ -1483,12 +1562,16 @@ class UploadStage:
                                   progress=min(95, 5 + fetched * 4))
                     uploader.driver.get(url)
 
-                    # Every page we fetch, not just the sign-in one. A
-                    # challenge served on the SALES page used to be handed
-                    # straight to the parser, which reported "TeePublic has
-                    # changed it" — sending the reader off to hunt a page
-                    # redesign that had not happened.
-                    uploader.check_for_bot_wall(f"{kind} page {page_no}")
+                    # Every page we fetch, not just the first. A wall served
+                    # on page three is still a wall, and handing it to the
+                    # parser produced "TeePublic has changed it" — sending the
+                    # reader off to hunt a redesign that never happened.
+                    if markers:
+                        uploader.clear_wall(
+                            markers, paths,
+                            wait_s=wall_wait_s, attempts=wall_attempts,
+                            on_result=self._report_wall_result,
+                            signed_out_markers=signed_out)
 
                     html = uploader.driver.page_source
                     fetched += 1

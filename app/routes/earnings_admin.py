@@ -36,7 +36,7 @@ from ..audit import log as log_activity
 from ..auth import require_admin
 from ..db import get_db
 from .. import pipeline as P
-from ..earnings import matching, service
+from ..earnings import matching, service, wall
 from ..models import LedgerEntry, MasterTitle, UploadAccount, User
 from ..templating import templates
 
@@ -110,6 +110,15 @@ def api_overview(
             a["marketplace"] for a in service.accounts_overview(db)
             if a["marketplace"]
         }),
+        # Recorded mouse paths, per marketplace that has a wall. Shown here
+        # rather than on the Pipeline page because this is the screen that
+        # goes blank when they stop working — a setting you cannot find where
+        # you are looking is a setting you do not have.
+        "wall_paths": {
+            site: wall.overview(db, site)
+            for site in P.MARKETPLACES
+            if service.page_markers(site)
+        },
     })
 
 
@@ -310,3 +319,30 @@ def api_read_now(
                  details={"queued": outcome["queued"]})
     db.commit()
     return JSONResponse({"ok": True, "result": outcome})
+
+
+@router.post("/api/earnings/wall-path-delete")
+def api_wall_path_delete(
+    payload: dict = Body(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Bin a recorded mouse path.
+
+    A hard delete, not a disable: a recording that does not work has no
+    residual value, and leaving dead ones in the rotation would mean every
+    read burning attempts on them. Recording another takes ten seconds.
+    """
+    from ..models import WallPath
+
+    row = db.query(WallPath).filter_by(id=int(payload.get("id") or 0)).first()
+    if row is None:
+        raise HTTPException(404, "No such path.")
+
+    label, site = row.label, row.marketplace
+    db.delete(row)
+    log_activity(db, actor=admin.username, action="wall_path_deleted",
+                 detail={"label": label, "marketplace": site})
+    db.commit()
+    return JSONResponse({"ok": True})

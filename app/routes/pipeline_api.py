@@ -627,6 +627,25 @@ def _resolve_job_payload(
             "signin_on_read": earnings_service.signin_on_read(
                 (account.target_site or "").lower()),
         })
+
+        # ── The interstitial wall ────────────────────────────────────────
+        # The words that mean "this is the account page" come from the SAME
+        # place the parser gets them, so the node's idea of success and the
+        # server's cannot drift apart. Enough paths for every attempt are
+        # handed over up front: the node must be able to finish its retries
+        # even if it briefly loses contact after starting.
+        from ..earnings import wall
+        site = (account.target_site or "").lower()
+        attempts = int(P.get_setting(db, "wall_max_attempts"))
+        resolved.update({
+            "wall_markers": earnings_service.page_markers(site),
+            "signed_out_markers": earnings_service.signed_out_markers(site),
+            "wall_paths": wall.payload_for(
+                wall.next_paths(db, site, attempts)),
+            "wall_wait_s": P.get_setting(db, "wall_wait_s"),
+            "wall_max_attempts": attempts,
+        })
+        db.commit()          # the rotation cursor moved
         return resolved
 
     if job.kind == "test_download":
@@ -840,3 +859,155 @@ async def upload_artifact(
     rel = f"_pipeline_artifacts/{kind}/{target.name}"
     db.commit()
     return JSONResponse({"ok": True, "path": rel})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  THE INTERSTITIAL WALL — recorded mouse paths
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# These endpoints serve TWO callers on the same machine: the agent, which
+# replays paths, and the recorder tool the owner runs by hand to create them.
+# Both carry the node token, because both ARE the node — the recorder is not a
+# dashboard feature, it has to run where the mouse and the browser are.
+
+@router.post("/wall/paths")
+def wall_save_path(
+    payload: dict = Body(...),
+    node: WorkerNode = Depends(require_node),
+    db: Session = Depends(get_db),
+):
+    """
+    Accept one recording from the recorder tool.
+
+    Stored on the SERVER, deliberately, even though it was captured on the
+    node. The node holds no configuration by design — it is meant to be
+    rebuildable from nothing — and an evening's recording is exactly the kind
+    of thing that must survive that box being thrown away.
+    """
+    from ..earnings import wall
+
+    try:
+        row = wall.save_path(
+            db,
+            marketplace=str(payload.get("marketplace") or "").lower(),
+            points=payload.get("points") or [],
+            page_width=payload.get("page_width"),
+            page_height=payload.get("page_height"),
+            label=payload.get("label"),
+            created_by=node.name,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    db.commit()
+    return JSONResponse({"ok": True, "id": row.id, "label": row.label})
+
+
+@router.get("/wall/paths")
+def wall_list_paths(
+    marketplace: str = Query(...),
+    node: WorkerNode = Depends(require_node),
+    db: Session = Depends(get_db),
+):
+    """Everything recorded for a marketplace — the recorder's own list."""
+    from ..earnings import wall
+    return JSONResponse({"ok": True,
+                         "paths": wall.overview(db, marketplace.lower())})
+
+
+@router.delete("/wall/paths/{path_id}")
+def wall_delete_path(
+    path_id: int,
+    node: WorkerNode = Depends(require_node),
+    db: Session = Depends(get_db),
+):
+    """Bin a recording that does not work."""
+    from ..models import WallPath
+    row = db.query(WallPath).filter_by(id=path_id).first()
+    if row is None:
+        raise HTTPException(404, "No such path.")
+    db.delete(row)
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
+@router.post("/wall/result")
+def wall_result(
+    payload: dict = Body(...),
+    node: WorkerNode = Depends(require_node),
+    db: Session = Depends(get_db),
+):
+    """
+    Which path was tried, and whether it got through.
+
+    Counted for REPORTING only — never to choose the next path. The question
+    this answers is "is it one bad recording or has the wall changed", and
+    only per-path counts can tell those apart.
+    """
+    from ..earnings import wall
+    wall.record_outcome(db, int(payload.get("path_id") or 0),
+                        worked=bool(payload.get("worked")))
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
+@router.get("/wall/path")
+def wall_one_path(
+    path_id: int = Query(...),
+    node: WorkerNode = Depends(require_node),
+    db: Session = Depends(get_db),
+):
+    """One recording in full, for the recorder's replay button."""
+    from ..earnings import wall
+    from ..models import WallPath
+
+    row = db.query(WallPath).filter_by(id=path_id).first()
+    if row is None:
+        raise HTTPException(404, "No such path.")
+    payload = wall.payload_for([row])
+    if not payload:
+        raise HTTPException(422, "That recording has no usable points.")
+    return JSONResponse(payload[0])
+
+
+@router.get("/wall/record-target")
+def wall_record_target(
+    marketplace: str = Query(...),
+    node: WorkerNode = Depends(require_node),
+    db: Session = Depends(get_db),
+):
+    """
+    Everything the recorder needs to put the wall on screen.
+
+    It opens the page through the SAME uploader the agent uses, with a real
+    account's profile — because the wall has to be the genuine article, in the
+    genuine window size, or the coordinates describe a layout that will never
+    be seen again.
+
+    Any readable account for that marketplace will do; the wall is a property
+    of the site, not of the account.
+    """
+    from ..earnings import service as earnings_service
+
+    site = marketplace.lower()
+    account = next(
+        (a for a in earnings_service.readable_accounts(db, include_paused=True)
+         if (a.target_site or "").lower() == site), None)
+    if account is None:
+        raise HTTPException(
+            404, f"No {site} account exists yet — add one before recording.")
+
+    attached = P.project_ids_for_account(db, account.id)
+    project = P.resolve_project(db, attached[0] if attached else None)
+    pages = earnings_service.page_urls(db, account)
+    if not pages or not pages[0].get("url"):
+        raise HTTPException(422, f"No page URL is configured for {site}.")
+
+    return JSONResponse({
+        "ok": True,
+        "url": pages[0]["url"],
+        "account": P.account_payload(db, account, include_secret=True,
+                                     project=project),
+        "settings": P.upload_settings_payload(db, project=project),
+        "markers": earnings_service.page_markers(site),
+    })

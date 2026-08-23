@@ -1192,3 +1192,73 @@ class TitleAlias(Base):
     __table_args__ = (
         UniqueConstraint("marketplace", "artwork_name", name="uq_alias_market_name"),
     )
+
+
+class WallPath(Base):
+    """
+    One recorded mouse movement that ends on a marketplace's dismiss control.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY A RECORDING AND NOT A SELECTOR
+    ════════════════════════════════════════════════════════════════════════
+    TeePublic serves a full-page interstitial whose "No Thanks" checkbox sits
+    inside a CLOSED shadow root. Closed means sealed: Selenium cannot find the
+    element, and JavaScript running on the page cannot reach it either. There
+    is no selector to write, and no amount of waiting produces one.
+
+    A real mouse click does not need one. It aims at a POSITION, and the
+    browser works out what is underneath — which is how a person clicking it
+    succeeds. So the position is what we store, and the owner supplies it by
+    recording himself moving to it.
+
+    ════════════════════════════════════════════════════════════════════════
+    PAGE COORDINATES, NEVER SCREEN COORDINATES
+    ════════════════════════════════════════════════════════════════════════
+    `points_json` is [[x, y, ms], ...] measured from the TOP-LEFT OF THE WEB
+    PAGE, not of the monitor. The recorder converts as it captures, by asking
+    Chrome where the page currently sits.
+
+    That distinction is the whole reason this survives contact with reality.
+    Screen coordinates break when the window moves, when it is resized, when
+    Chrome grows a bookmarks bar, or when the desktop resolution changes —
+    and they break SILENTLY, clicking empty space and reporting success.
+
+    ════════════════════════════════════════════════════════════════════════
+    PER MARKETPLACE, NOT PER PROJECT
+    ════════════════════════════════════════════════════════════════════════
+    The wall belongs to TeePublic. Both niches meet the same one, and a third
+    niche would too, so these hang off the marketplace name exactly as
+    selectors and capabilities do. A recording is a fact about a WEBSITE.
+    """
+    __tablename__ = "wall_paths"
+
+    id           = Column(Integer, primary_key=True)
+    marketplace  = Column(String(32), nullable=False, index=True)
+    label        = Column(String(64), nullable=True)
+
+    # [[x, y, ms_since_start], ...] in page coordinates. A few hundred points
+    # for a typical path; stored as text because nothing ever queries inside
+    # it — it is replayed whole or not at all.
+    points_json  = Column(Text, nullable=False)
+    duration_ms  = Column(Integer, nullable=False, default=0)
+
+    # The page size it was recorded at. Kept so a recording made at a
+    # different window size can be SPOTTED rather than silently replayed
+    # against a layout it never saw.
+    page_width   = Column(Integer, nullable=True)
+    page_height  = Column(Integer, nullable=True)
+
+    # Outcome history. Never used to pick a path — the rotation is strictly
+    # sequential — only to let the admin see WHICH recording is the bad one
+    # when some work and some do not.
+    use_count    = Column(Integer, nullable=False, default=0)
+    fail_count   = Column(Integer, nullable=False, default=0)
+    last_used_at = Column(DateTime, nullable=True)
+
+    is_enabled   = Column(Integer, nullable=False, default=1)
+    created_by   = Column(String(64), nullable=True)
+    created_at   = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_wall_paths_market", "marketplace", "is_enabled"),
+    )

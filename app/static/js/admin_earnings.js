@@ -149,6 +149,56 @@
     }).join('');
   }
 
+  // ── Recorded mouse paths ─────────────────────────────────────────────
+  //
+  // The panel hides itself when no marketplace in view has a wall, rather
+  // than showing an empty box. A control that cannot do anything here is not
+  // a labelling problem.
+  function renderWallPaths(bySite) {
+    var panel = q('[data-wall-panel]');
+    if (!panel) return;
+
+    var sites = Object.keys(bySite);
+    if (!sites.length) { panel.hidden = true; return; }
+    panel.hidden = false;
+
+    var total = 0;
+    sites.forEach(function (s) { total += (bySite[s] || []).length; });
+    q('[data-wall-total]').textContent = total
+      ? total + ' recording(s)' : 'none recorded yet';
+
+    q('[data-wall-list]').innerHTML = sites.map(function (site) {
+      var rows = bySite[site] || [];
+      if (!rows.length) {
+        return '<p class="muted"><strong>' + esc(site) + '</strong> — nothing '
+          + 'recorded yet. Run RECORD_PATHS.bat on the worker machine; until '
+          + 'then reads of this site will stop at the wall.</p>';
+      }
+      return '<div style="margin-bottom:12px">'
+        + '<div><strong>' + esc(site) + '</strong> <span class="muted">· '
+        + rows.length + ' recording(s)</span></div>'
+        + '<table class="data-table"><thead><tr><th>PATH</th><th>POINTS</th>'
+        + '<th>LENGTH</th><th>USED</th><th>FAILED</th><th></th></tr></thead>'
+        + '<tbody>'
+        + rows.map(function (r) {
+            // A path that has never worked is worth pointing at directly —
+            // that is a bad recording, not a changed wall, and the two have
+            // completely different fixes.
+            var bad = r.used > 0 && r.failed === r.used;
+            return '<tr><td>' + esc(r.label)
+              + (r.enabled ? '' : ' <span class="muted">· off</span>')
+              + '</td><td>' + r.points + '</td>'
+              + '<td>' + (r.duration_ms / 1000).toFixed(1) + 's</td>'
+              + '<td>' + r.used + '</td>'
+              + '<td' + (bad ? ' class="danger"' : '') + '>' + r.failed
+              + (bad ? ' — never worked' : '') + '</td>'
+              + '<td><button type="button" class="btn btn-ghost btn-tiny" '
+              + 'data-wall-delete="' + r.id + '">DELETE</button></td></tr>';
+          }).join('')
+        + '</tbody></table></div>';
+    }).join('');
+  }
+
   // ── Headline figures ─────────────────────────────────────────────────
   function renderSummary(s, caps) {
     // "+$25 today" is the format asked for: the delta is what tells you
@@ -437,6 +487,7 @@
       renderSummary(data.summary, data.capabilities || {});
       applyCapabilities(data.capabilities || {});
       renderOwed(data.owed_by_account || {});
+      renderWallPaths(data.wall_paths || {});
       renderNextPayout(data.next_payout, data.reconcile,
                        data.capabilities || {});
       renderAccounts(data.accounts);
@@ -544,8 +595,16 @@
   });
 
   document.addEventListener('click', function (e) {
-    var t = e.target.closest('[data-action], [data-read-account]');
+    var t = e.target.closest('[data-action], [data-read-account], [data-wall-delete]');
     if (!t) return;
+
+    if (t.dataset.wallDelete) {
+      if (!confirm('Delete this recording? Reads will use the others.')) return;
+      postJSON(API + '/wall-path-delete', { id: Number(t.dataset.wallDelete) })
+        .then(reloadAll)
+        .catch(function (err) { alert('Could not delete: ' + err.message); });
+      return;
+    }
 
     if (t.dataset.action === 'toggle-accounts') {
       var box = q('[data-account-filter]');

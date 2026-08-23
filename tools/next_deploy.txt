@@ -1,2 +1,2 @@
-Reading money and uploading now have one pause each, so a failure in one no
-longer silences the other. A successful read clears its own pause.
+The TeePublic wall is dismissed by replaying a recorded mouse path.
+Cloudflare handling removed. Record paths with RECORD_PATHS.bat on the node.

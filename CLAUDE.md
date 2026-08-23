@@ -334,6 +334,44 @@ the claim while it still passes. `Current Balance` remains the authoritative
 "what you are owed" — never replace it with arithmetic, which is how the page
 once read "probably $1,477.21" against a real $298.28.
 
+## TeePublic behaviour, measured (do not re-derive these)
+
+**TeePublic no longer uses Cloudflare** (observed 2026-08-23, after weeks of
+it). All challenge detection was removed with it — FineArtAmerica never
+challenged the NODE either, only the Linux server, so nothing was left using
+it. If a challenge ever returns, the symptom is three failed mouse paths and
+a screenshot, not a silent stall.
+
+**It DOES serve a full-page interstitial wall**, and its "No Thanks" control
+is an `<input type="checkbox">` inside a **closed shadow root**. Closed means
+sealed: Selenium cannot find it, and page JavaScript cannot reach it either.
+There is no selector to write and waiting does not help. Do not try —
+`querySelector`, `shadowRoot` and text search were all considered and all fail
+by design.
+
+A real click does not need a selector. It carries a POSITION and the browser
+hit-tests what is under it, sealed or not. So the position comes from mouse
+paths the owner records himself (`RECORD_PATHS.bat`), replayed through
+Chrome's own input channel — which also means **no Remote Desktop session is
+needed for playback**, only for recording. An OS-level macro recorder was the
+obvious alternative and was rejected for exactly that reason: it would have
+required a live RDP session forever and failed silently the moment it dropped.
+
+**The wall is detected by what is MISSING**, never by anything on it. Its
+class names are randomised (`tOHY4`, `qrvwN4`) and would break on their next
+deploy while blaming something else entirely. The test is "are the account
+page's own labels here" — the same four the parser needs — so one definition
+serves both "we are stuck" and "we are through" and they cannot disagree.
+
+**A lapsed session looks identical to the wall** and must be ruled out FIRST,
+by the sign-in form's field name. Otherwise three recorded paths get spent
+clicking at a sign-in page and the report reads "stuck at the wall" when the
+answer is two minutes with PROFILES.bat.
+
+**TeePublic keeps you signed in for weeks and punishes knocking; FAA forgets
+you in minutes and does not mind.** Hence `signin_on_read` per marketplace —
+see rule 5b.
+
 ## FineArtAmerica title rules (measured 2026-08-13)
 
 FAA silently rewrites artwork titles. Verified by submitting all 165 distinct
@@ -707,6 +745,15 @@ tool always abandoned because Chrome puts a dialog over it. After moving a
 call, grep for it and count the CALL SITES, not the definition. Zero callers
 of a public method is a defect, not a style question.
 
+**Identify a page by what it SHOULD contain, not by what is wrong with it.**
+The TeePublic wall could have been detected by its own markup — and its class
+names are randomised, so that check would have worked in testing and failed
+on their next deploy while pointing at something else. Detecting it as "the
+labels we came for are absent" survives the wall being redesigned, renamed or
+replaced, and doubles as the proof we got through afterwards. A positive test
+for the thing you want beats a negative test for the thing in the way, and it
+is usually the same amount of code.
+
 **Matching a word in raw HTML is not detection.** A page's markup is full of
 vendor names, class names and script sources that say nothing about what the
 page is DOING. The bot-wall check searched page_source for "captcha", and
@@ -904,7 +951,14 @@ So when a discovery changes how we talk to a marketplace:
 2. **Put it in that site's CAPABILITIES row**, not in the node and not in an
    if-statement. `signin_on_read` sits beside `shape` and `sales` for the
    same reason those do — the next marketplace answers by adding a line.
-3. **Pick the default that fails cheaply.** An unmeasured site signs in:
+3. **A capability that is gone should be DELETED, not disabled.** When
+   TeePublic dropped Cloudflare the whole challenge mechanism went with it,
+   because nothing else was using it — FAA challenges the Linux server, never
+   the node. A defence left lying around is worse than none: the next session
+   reasons about protection that was never firing. (I argued to keep it "for
+   FAA" and was wrong; the measurement was already written down two sections
+   up. Read the file before defending code with it.)
+4. **Pick the default that fails cheaply.** An unmeasured site signs in:
    signing in needlessly costs a slow page, while skipping it when it was
    needed stops the money being read. Wrong in the cheap direction.
 

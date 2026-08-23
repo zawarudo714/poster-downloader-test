@@ -129,6 +129,17 @@ def _soup(html: str):
     return BeautifulSoup(html, "html.parser")
 
 
+# The sign-in page's own field, which no other page has. Matched against raw
+# HTML rather than visible text — legitimate here, and only here, because a
+# form FIELD NAME is structural. The rule this does not break is about vendor
+# words: "recaptcha" appearing in a script tag says nothing about what the
+# page is doing, whereas an input called user[email] is the sign-in form.
+#
+# A module constant so the node can be handed the same strings the parser
+# uses, instead of a second opinion about what "signed out" looks like.
+SIGNED_OUT_MARKERS = ('name="user[email]"', 'id="user_email"')
+
+
 def looks_signed_out(html: str) -> bool:
     """
     Is this the sign-in page rather than the account page?
@@ -137,7 +148,7 @@ def looks_signed_out(html: str) -> bool:
     page uniquely has. Being signed in is inferred from its absence, which is
     exactly what TeePublic's redirect produces.
     """
-    return 'name="user[email]"' in html or 'id="user_email"' in html
+    return any(m in html for m in SIGNED_OUT_MARKERS)
 
 
 def login_fields(html: str) -> dict:

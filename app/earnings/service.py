@@ -139,6 +139,51 @@ CAPABILITIES: dict[str, dict] = {
 }
 
 
+def page_markers(marketplace: str) -> list[str]:
+    """
+    Words that prove we are looking at the page we asked for.
+
+    ════════════════════════════════════════════════════════════════════════
+    THIS IS ALSO HOW THE WALL IS DETECTED
+    ════════════════════════════════════════════════════════════════════════
+    TeePublic's interstitial cannot be recognised by anything ON it — its
+    class names are randomised and would break on their next deploy while
+    blaming something else. So it is detected by what is MISSING: we asked
+    for the account page, and the account page's own words are not there.
+
+    Which makes this one definition doing two jobs — "we are stuck" and "we
+    are through" are the same test, so they can never disagree. Two separate
+    definitions of a good page is precisely how a node and a server end up
+    quietly believing different things.
+
+    Sourced from the labels the PARSER already requires, so adding a
+    marketplace does not mean remembering to update a second list.
+    """
+    return {
+        "teepublic": ["next payment", "this month", "total earned",
+                      "items sold"],
+        # FineArtAmerica has no wall and never has. Empty means "do not look",
+        # which is different from "look and find nothing".
+        "fineartamerica": [],
+    }.get(marketplace, [])
+
+
+def signed_out_markers(marketplace: str) -> list[str]:
+    """
+    How the node can tell a sign-in page from the wall, before clicking.
+
+    Without this, a lapsed session looks exactly like the wall — figures
+    missing, no known challenge — so the node would spend three recorded
+    paths clicking at a sign-in form and then report "stuck at the wall". The
+    fix is a person signing in, and the message has to say so.
+
+    Taken from the reader module rather than restated here, so the node and
+    the parser cannot hold two different ideas of "signed out".
+    """
+    reader = READERS.get(marketplace)
+    return list(getattr(reader, "SIGNED_OUT_MARKERS", ()) or ())
+
+
 def signin_on_read(marketplace: str) -> bool:
     """
     Should a routine read sign in, or arrive already signed in?

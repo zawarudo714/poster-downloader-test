@@ -536,7 +536,12 @@ def jobs_claim(
         # capability would be one more thing to provision on every node for
         # no gain today.
         allowed += ["upload", "test_upload", "earnings_read",
-                    "profile_cleanup"]
+                    "profile_cleanup",
+                    # Listing health rides on the upload capability for the
+                    # same reason earnings reads do: same browser, same
+                    # accounts, same Chrome profiles. A separate capability
+                    # would be one more thing to provision for no gain.
+                    "store_scan", "store_deactivate", "store_reactivate"]
     if kinds:
         allowed = [k for k in allowed if k in kinds]
     if not allowed:
@@ -1011,3 +1016,119 @@ def wall_record_target(
         "settings": P.upload_settings_payload(db, project=project),
         "markers": earnings_service.page_markers(site),
     })
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  MARKETPLACE LISTING HEALTH
+# ═══════════════════════════════════════════════════════════════════════════
+
+@router.post("/store/design")
+def store_design_result(
+    payload: dict = Body(...),
+    node: WorkerNode = Depends(require_node),
+    db: Session = Depends(get_db),
+):
+    """
+    One design's verdict from the scan.
+
+    Per design rather than per account, and committed immediately. A scan is
+    hours long; a node that dies four hours in must keep everything it had
+    already checked, and tomorrow carry on rather than start again.
+    """
+    from ..earnings import store_health as SH
+    from ..models import StoreScanRun
+
+    run = db.query(StoreScanRun).filter_by(id=payload.get("run_id")).first()
+    if run is None:
+        raise HTTPException(404, "No such run.")
+
+    SH.record_design(
+        db, run=run,
+        account_id=int(payload["account_id"]),
+        design_id=str(payload["design_id"]),
+        url=payload.get("url") or "",
+        title=payload.get("title"),
+        search_tag=payload.get("search_tag"),
+        status=payload.get("status") or "error",
+        error=payload.get("error"),
+    )
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
+@router.post("/store/action")
+def store_action_result(
+    payload: dict = Body(...),
+    node: WorkerNode = Depends(require_node),
+    db: Session = Depends(get_db),
+):
+    """
+    One design turned off, or back on — or the reason it would not.
+
+    `deactivated_at` is what reactivation later works from, so it must be
+    written the moment it happens. A stage that reported only at the end
+    would, on falling over halfway, lose the record of everything it had
+    already deactivated — and those are exactly the designs that would then
+    never be switched back on.
+    """
+    from ..models import StoreDesign
+
+    row = db.query(StoreDesign).filter_by(
+        run_id=payload.get("run_id"),
+        design_id=str(payload.get("design_id") or "")).first()
+    if row is None:
+        raise HTTPException(404, "No such design in this run.")
+
+    error = payload.get("error")
+    row.action_error = error
+    if not error:
+        if payload.get("action") == "deactivate":
+            row.deactivated_at = datetime.utcnow()
+        else:
+            row.reactivated_at = datetime.utcnow()
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
+@router.post("/store/stage-done")
+def store_stage_done(
+    payload: dict = Body(...),
+    node: WorkerNode = Depends(require_node),
+    db: Session = Depends(get_db),
+):
+    """
+    A stage finished. Move the run to whatever comes next.
+
+    The run advances HERE rather than on the node, because what comes next is
+    policy: after a scan it is a person, after a deactivation it is a person
+    again, and after reactivation the run is over and the pipeline restarts.
+    The node knows none of that and should not.
+    """
+    from ..earnings import store_health as SH
+    from ..models import StoreScanRun
+
+    run = db.query(StoreScanRun).filter_by(id=payload.get("run_id")).first()
+    if run is None:
+        raise HTTPException(404, "No such run.")
+
+    stage = payload.get("stage")
+    counts = SH.counts(db, run)
+
+    if stage == "scan" and run.status == "scanning":
+        run.status = "reviewing"
+        run.stage_note = (f"{counts['missing']} missing of {counts['checked']} "
+                          f"checked.")
+    elif stage == "deactivate" and run.status == "deactivating":
+        run.status = "confirming"
+        run.stage_note = (f"{counts['deactivated']} deactivated"
+                          + (f", {counts['action_errors']} refused"
+                             if counts["action_errors"] else "") + ".")
+    elif stage == "reactivate" and run.status == "reactivating":
+        # The last stage, so this is also where the pipeline is released —
+        # by the run ENDING, not by anyone flipping anything back.
+        SH.finish_run(db, run, status="done",
+                      note=f"{counts['reactivated']} of "
+                           f"{counts['deactivated']} back on.")
+
+    db.commit()
+    return JSONResponse({"ok": True, "status": run.status})

@@ -88,6 +88,10 @@
                Master level, because an account belongs to a marketplace and
                may belong to no project at all. #}
             <a href="/admin/earnings"  class="navlink {% if active_tab == 'earnings' %}active{% endif %}">Earnings</a>
+            {# Listing health. Master level for the same reason Earnings is:
+               a design belongs to an ACCOUNT, and an account may serve
+               several projects or none. #}
+            <a href="/admin/store"     class="navlink {% if active_tab == 'store' %}active{% endif %}">TeePublic</a>
             <a href="/admin/chat"      class="navlink chat-nav {% if active_tab == 'chat' %}active{% endif %}">Chat<span class="nav-badge" id="nav-chat-badge" hidden>0</span></a>
             <a href="/admin/users"     class="navlink {% if active_tab == 'users' %}active{% endif %}">Users</a>
             <a href="/admin/backups"   class="navlink {% if active_tab == 'backups' %}active{% endif %}">Backups</a>

@@ -1262,3 +1262,105 @@ class WallPath(Base):
     __table_args__ = (
         Index("ix_wall_paths_market", "marketplace", "is_enabled"),
     )
+
+
+class StoreScanRun(Base):
+    """
+    One visibility sweep of a marketplace: scan, deactivate, reactivate.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY A RUN AND NOT THREE BUTTONS
+    ════════════════════════════════════════════════════════════════════════
+    The three stages are not independent. Reactivation must put back EXACTLY
+    what deactivation took down — not "whatever is on the inactive page",
+    which on one real account is 379 designs the owner turned off himself,
+    for his own reasons, over months. A run is what carries that list from
+    one stage to the next.
+
+    It is also what holds the rest of the pipeline still. The hold belongs to
+    the RUN, not to a switch: a run that finishes, fails or is abandoned
+    releases it on the way out, so there is no second edge to be lost and no
+    state that can be left in the wrong position. That lesson came from the
+    quiet window, which was built as a window for the same reason.
+
+    ════════════════════════════════════════════════════════════════════════
+    IT WAITS FOR A PERSON, TWICE, ON PURPOSE
+    ════════════════════════════════════════════════════════════════════════
+    `reviewing` and `confirming` are stages where nothing happens until the
+    admin presses a button. Deactivating a live listing costs money if it is
+    wrong, and a scan that misread the site would otherwise take the whole
+    catalogue down unattended.
+    """
+    __tablename__ = "store_scan_runs"
+
+    id          = Column(Integer, primary_key=True)
+    marketplace = Column(String(32), nullable=False, index=True)
+
+    #   scanning     — reading every design, hours
+    #   reviewing    — waiting for the admin to approve the missing list
+    #   deactivating — turning the missing ones off
+    #   confirming   — waiting for the admin again
+    #   reactivating — turning back on exactly what we turned off
+    #   done | failed | abandoned
+    status      = Column(String(24), nullable=False, default="scanning", index=True)
+    stage_note  = Column(Text, nullable=True)
+
+    started_at  = Column(DateTime, default=datetime.utcnow, nullable=False)
+    started_by  = Column(String(64), nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+
+    # Which stages have been dispatched to the node. Not a status: a stage can
+    # be running while the run's status still says so, and this is what stops
+    # a second dispatch of the same stage.
+    scan_started_at        = Column(DateTime, nullable=True)
+    deactivate_started_at  = Column(DateTime, nullable=True)
+    reactivate_started_at  = Column(DateTime, nullable=True)
+
+
+class StoreDesign(Base):
+    """
+    One design in one run, keyed on the marketplace's own numeric ID.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE ID IS THE KEY, AND THAT IS NOT A DETAIL
+    ════════════════════════════════════════════════════════════════════════
+    It comes free: TeePublic puts it in the design's own address
+    (`/t-shirt/86734220-tomb-raider`), which the store listing already gives
+    us. Nothing extra is fetched to get it.
+
+    Everything downstream matches on it — is this design in the search
+    results, which tile do we deactivate, which page do we republish. The
+    previous tool compared URLs instead, and a design that was sitting on
+    page one of the results read MISSING because the store's copy of the link
+    carried `?store_id=4129428` and the search result's copy did not. A
+    number cannot differ by a query parameter, a relative path, a renamed
+    slug or a trailing slash.
+    """
+    __tablename__ = "store_designs"
+
+    id          = Column(Integer, primary_key=True)
+    run_id      = Column(Integer, ForeignKey("store_scan_runs.id"),
+                         nullable=False, index=True)
+    account_id  = Column(Integer, ForeignKey("upload_accounts.id"),
+                         nullable=False, index=True)
+
+    design_id   = Column(String(32), nullable=False, index=True)   # "86734220"
+    url         = Column(Text, nullable=True)
+    title       = Column(String(255), nullable=True)
+    search_tag  = Column(String(255), nullable=True)   # what we search for
+
+    #   pending | visible | missing | under_review | error
+    status      = Column(String(16), nullable=False, default="pending", index=True)
+    error       = Column(Text, nullable=True)
+    checked_at  = Column(DateTime, nullable=True)
+
+    # Set only when WE did it. Reactivation reads these, never the
+    # marketplace's inactive list — see the run's docstring.
+    deactivated_at   = Column(DateTime, nullable=True)
+    reactivated_at   = Column(DateTime, nullable=True)
+    action_error     = Column(Text, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("run_id", "design_id", name="uq_store_design_run"),
+        Index("ix_store_design_run_status", "run_id", "status"),
+    )

@@ -1,2 +1,2 @@
-The TeePublic wall is dismissed by replaying a recorded mouse path.
-Cloudflare handling removed. Record paths with RECORD_PATHS.bat on the node.
+TeePublic tab: scan every design for search visibility, then deactivate and
+reactivate the missing ones. Holds the pipeline while a run is going.

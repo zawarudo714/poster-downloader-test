@@ -9,6 +9,7 @@ log or diff to work it out — that costs far more to read than these lines.**
 If the top entry looks older than the work in the repo, the difference is
 what has not been deployed yet.
 
+- **2026-08-23 11:02** · `bc645ce5` · The TeePublic wall is dismissed by replaying a recorded mouse path.
 - **2026-08-20 23:31** · `0cd07ae9` · Reading money and uploading now have one pause each, so a failure in one no
 - **2026-08-20 22:43** · `354a27f1` · FAA still signs in to read earnings; TeePublic uses its saved session. Paused
 - **2026-08-20 21:45** · `e034d293` · Reconciliation only runs where we hold the sales; the owed headline names the sites actually selected

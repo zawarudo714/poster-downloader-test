@@ -372,6 +372,47 @@ answer is two minutes with PROFILES.bat.
 you in minutes and does not mind.** Hence `signin_on_read` per marketplace —
 see rule 5b.
 
+**Designs silently drop out of search.** The listing still exists and the
+page still loads; it just stops being findable, earns nothing, and nothing
+tells you. Deactivating and immediately reactivating usually restores it.
+That is what the TeePublic tab automates.
+
+**The numeric design ID is in the design's own address** —
+`/t-shirt/86734220-tomb-raider`. It comes free with the store listing, and
+EVERYTHING matches on it: search results, the deactivate form, the edit page.
+Never compare URLs. The previous tool did, and a design sitting on page one
+of the results read MISSING because the store's copy of the link carried
+`?store_id=4129428` and the search result's copy did not.
+
+**Deactivate is a form POST, not a link.** On the design page:
+`<form class="button_to" method="post" action="/designs/<id>/deactivate">`
+with a one-time `authenticity_token`. So navigating to that address returns
+404 — the button must be pressed on a freshly loaded page — and the old
+tool's `a[href*='/deactivate']` matches nothing there, because it is a
+`<button>`. Reactivate is `/designs/<id>/edit` → tick `#terms` → press
+`button.publish-and-promote-button[value='publish']`.
+
+**NEVER reactivate from the marketplace's inactive list.** One real account
+has 92 active designs and **379 inactive** ones the owner turned off himself
+over months. Republishing "the first N on `/inactive`" cannot tell those
+apart from the handful we just switched off. Reactivate the exact IDs we
+recorded deactivating, and nothing else.
+
+**Search results are not in the raw HTML**, so the visibility check needs a
+real browser. The store listing and the individual design pages ARE plain
+HTML and are fetched with `requests` — which is why most of a scan costs
+almost nothing. Only the search step is expensive.
+
+**One browser per ACCOUNT, held open — never one per design.** The owner's
+original script launched and quit a whole Chrome for every design; at 1,881
+designs and 3-5s per launch that was over two hours of doing nothing but
+starting browsers, and it was most of why a scan took ten.
+
+**Scope note, deliberately open:** a TeePublic project WITH uploading is
+plausible later — the owner's tool already contains a working uploader. This
+tab is therefore marketplace-level (accounts), not project-level, and slots
+beside such a project rather than tangling with it.
+
 ## FineArtAmerica title rules (measured 2026-08-13)
 
 FAA silently rewrites artwork titles. Verified by submitting all 165 distinct
@@ -687,6 +728,15 @@ works, a rejected upload password says nothing about the balance. One shared
 not say which had happened. Hence `earnings_paused_until` beside it. Before
 reusing a status field, ask whether the thing it describes can fail in more
 than one way INDEPENDENTLY; if it can, one field is already wrong.
+
+**A long hold on the pipeline must belong to the WORK, not to a switch.** The
+TeePublic sweep stops Photoshop and uploads for hours, and it stops them
+because a RUN EXISTS — finishing, failing or abandoning the run releases them
+on the way out. There is nothing to remember to turn back on, which matters
+most exactly when something has gone wrong. Same shape as the quiet window,
+one level up. And there must always be a STOP button reachable by the owner:
+with a Photoshop backlog measured in weeks, a half-finished run must never be
+something only a developer can clear.
 
 **And a cooldown must have a way to end early.** A pause set by a failure
 should be cleared by the next SUCCESS, not only by the clock. An account

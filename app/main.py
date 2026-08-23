@@ -15,6 +15,7 @@ from .config import APP_DIR
 from .db import init_db
 from .routes import admin as admin_routes
 from .routes import earnings_admin as earnings_routes
+from .routes import store_admin as store_routes
 from .routes import auth as auth_routes
 from .routes import pipeline_admin as pipeline_admin_routes
 from .routes import pipeline_api as pipeline_api_routes
@@ -191,6 +192,7 @@ app.include_router(pipeline_api_routes.router)
 # Earnings: master-level, read-only. Its own router because it belongs with
 # diagnostics rather than with the pipeline — nothing here dispatches work.
 app.include_router(earnings_routes.router)
+app.include_router(store_routes.router)
 
 
 @app.get("/healthz")

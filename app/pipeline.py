@@ -608,6 +608,21 @@ DEFAULTS: dict[str, Any] = {
     # derived because it must survive both the node and the server restarting.
     "wall_path_cursor":     0,
 
+    # ── Marketplace visibility scan ──────────────────────────────────────
+    # How many accounts are scanned at the same time. Each one holds ONE
+    # browser open for its whole account — not one per design, which is what
+    # the owner's original script did and what made a scan take ten hours.
+    # Three at roughly 400MB each is comfortable on the node's 12GB, and the
+    # pipeline is held anyway while this runs, so Photoshop is not competing.
+    "scan_parallel_accounts": 3,
+    # How deep to page through search results before calling a design
+    # missing. A design that IS visible is usually found on page one; this
+    # bound is what stops a genuinely missing one paging forever.
+    "scan_max_search_pages":  25,
+    # Seconds between designs, per account. Not a rate limit the site asked
+    # for — a courtesy, and the knob to turn if it ever starts complaining.
+    "scan_delay_s":           1,
+
     # ── How many failures in a row before an account is parked ───────────
     # Only applies to failures the node marks as "might be systemic" — a
     # missing form field. A bot wall or rejected credentials still parks the
@@ -2016,6 +2031,13 @@ def intake_open(db: Session, project: Optional[Project] = None) -> bool:
     """
     if str(get_setting(db, "run_mode", project=project) or "run") != "run":
         return False
+    # A marketplace visibility run holds everything: it is hours of browser
+    # work on the same node, and it is a deliberate manual operation. The
+    # hold belongs to the RUN and is released when the run ends, so there is
+    # no switch anyone has to remember to turn back on.
+    from .earnings.store_health import holds_pipeline
+    if holds_pipeline(db):
+        return False
     return not quiet_window_state(db)["blocking"]
 
 
@@ -2082,16 +2104,23 @@ def quiet_window_state(db: Session) -> dict:
 
 
 def run_mode_state(db: Session, project: Optional[Project] = None) -> dict:
+    from .earnings.store_health import holds_pipeline
+
     mode = str(get_setting(db, "run_mode", project=project) or "run")
     quiet = quiet_window_state(db)
+    held = holds_pipeline(db)
     return {
         "mode": mode,
         # "running" must reflect what the dispatcher will ACTUALLY do, not
         # just the switch, or the page says running while nothing moves.
-        "running": mode == "run" and not quiet["blocking"],
-        "reason": (quiet["reason"] if quiet["blocking"]
+        "running": mode == "run" and not quiet["blocking"] and not held,
+        # The store run's sentence wins when it applies, because it is the
+        # most specific answer to "why is nothing happening" — and it names
+        # the screen to go and look at.
+        "reason": (held or quiet["reason"] if (held or quiet["blocking"])
                    else str(get_setting(db, "run_mode_reason", project=project) or "")),
         "quiet": quiet,
+        "store_run": held or "",
     }
 
 

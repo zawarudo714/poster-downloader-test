@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% from "_macros.html" import info %}
+{% block title %}TeePublic · Admin{% endblock %}
+
+{% block content %}
+{#
+   Master level — no `nav_scope`, deliberately. A design belongs to an
+   ACCOUNT, and an account may serve several projects or none. Scoping this
+   to the active project would hide almost every design.
+#}
+<div class="admin-grid" data-no-global-scroll>
+
+  {# ── The run ──────────────────────────────────────────────────────────
+     One panel that changes with the stage, rather than five panels of which
+     four are always irrelevant. What you can do next is the only thing that
+     needs to be obvious. #}
+  <section class="panel">
+    <div class="panel-head">
+      <span>DESIGN VISIBILITY
+        {{ info("TeePublic designs sometimes stop appearing in search. The listing still exists and still loads, but nobody can find it, so it stops earning and nothing tells you. This checks every design on every account, then turns the missing ones off and straight back on again — which usually puts them back in the index. Everything else on the worker machine pauses while a run is going.") }}
+      </span>
+      <span class="muted mono" data-run-summary></span>
+    </div>
+    <div class="panel-body" data-run-panel>
+      <div class="muted">Loading…</div>
+    </div>
+  </section>
+
+  {# ── Designs ──────────────────────────────────────────────────────────
+     Missing first, because that is the list being decided on. Visible ones
+     are counted rather than listed: several thousand rows of "fine" would
+     bury the handful that are not. #}
+  <section class="panel" data-designs-panel hidden>
+    <div class="panel-head">
+      <span>WHAT THE SCAN FOUND
+        {{ info("Every design that is not simply visible. MISSING means it did not appear when searching its own primary tag — those are the ones that get deactivated and reactivated. ERROR means the page could not be read at all, and those are left alone. UNDER REVIEW means TeePublic is still looking at it, which is not a fault and is also left alone.") }}
+      </span>
+      <span class="filter-row" style="gap:8px">
+        <label class="inline-check">
+          <input type="checkbox" data-only-missing checked> missing only
+        </label>
+        <span class="muted mono" data-designs-count></span>
+      </span>
+    </div>
+    <div class="panel-body" data-designs-list>
+      <div class="muted">Nothing scanned yet.</div>
+    </div>
+  </section>
+
+  {# ── Accounts ─────────────────────────────────────────────────────────
+     The store address is edited HERE rather than on the Pipeline page's
+     account form. This is the screen that stops working without it, and the
+     screen you are looking at when you wonder why an account was skipped. #}
+  <section class="panel">
+    <div class="panel-head">
+      <span>ACCOUNTS
+        {{ info("Each account needs its public store address so the scan knows where to read the design list from. It looks like https://www.teepublic.com/user/yourname — open your store in a browser and copy the address bar. An account without one is skipped, and named above so you know which.") }}
+      </span>
+      <span class="muted mono" data-accounts-summary></span>
+    </div>
+    <div class="panel-body" data-accounts-list>
+      <div class="muted">Loading…</div>
+    </div>
+  </section>
+
+  {# ── History ──────────────────────────────────────────────────────────
+     Short and factual. Mostly here to answer "when did I last do this",
+     which is the question that decides whether to run one today. #}
+  <section class="panel">
+    <div class="panel-head">
+      <span>PREVIOUS RUNS
+        {{ info("The last five sweeps and how each one ended. ABANDONED means it was stopped by hand — check whether it left designs deactivated, because those stay off until something puts them back.") }}
+      </span>
+    </div>
+    <div class="panel-body" data-history-list>
+      <div class="muted">None yet.</div>
+    </div>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/admin_store.js?v={{ app_version }}"></script>
+{% endblock %}

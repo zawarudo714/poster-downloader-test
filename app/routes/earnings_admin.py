@@ -342,7 +342,8 @@ def api_wall_path_delete(
 
     label, site = row.label, row.marketplace
     db.delete(row)
-    log_activity(db, actor=admin.username, action="wall_path_deleted",
-                 detail={"label": label, "marketplace": site})
+    log_activity(db, user=admin, action="wall_path_deleted",
+                 target_type="wall_path", target_id=int(payload.get("id") or 0),
+                 details={"label": label, "marketplace": site})
     db.commit()
     return JSONResponse({"ok": True})

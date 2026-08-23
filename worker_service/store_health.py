@@ -56,7 +56,7 @@ import re
 import threading
 import time
 from typing import Callable, Optional
-from urllib.parse import urljoin, urlparse
+from urllib.parse import quote_plus, urljoin, urlparse
 
 import requests
 
@@ -115,6 +115,33 @@ def design_id_from(url: str) -> Optional[str]:
     """The numeric ID out of a design address, or None if it is not one."""
     match = DESIGN_ID.search(urlparse(url).path)
     return match.group(1) if match else None
+
+
+def search_url(tag: str, page: int) -> str:
+    """
+    Page N of a public search, BUILT rather than followed.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY NOT FOLLOW THE "NEXT" LINK
+    ════════════════════════════════════════════════════════════════════════
+    Because there is not always one. TeePublic's pager shows numbers up to 7
+    and then stops offering the next number — page 7 has no "8" on it, only
+    an arrow, and the arrow is not always a plain link either. Following
+    `a[rel="next"]` therefore works perfectly for six pages and then silently
+    gives up, so EVERY design whose match sits beyond page 7 reads MISSING.
+
+    The owner's own scanner hit exactly this and special-cased page 7 in
+    place. That patched one instance of the problem; building the address
+    removes the whole class of it, because the address is a plain pattern the
+    site publishes and it works for page 8 and page 400 alike.
+
+    Page 1 carries no `page=` parameter, matching what the site itself
+    produces — copied rather than assumed.
+    """
+    query = quote_plus(tag)
+    if page <= 1:
+        return f"{BASE}/t-shirts?query={query}"
+    return f"{BASE}/t-shirts?page={page}&query={query}"
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -223,9 +250,9 @@ def appears_in_search(uploader, *, tag: str, design_id: str, max_pages: int,
     from selenium.common.exceptions import WebDriverException
 
     driver = uploader.driver
-    url = f"{BASE}/t-shirts?query={requests.utils.quote(tag)}"
 
     for page in range(1, max_pages + 1):
+        url = search_url(tag, page)
         try:
             driver.get(url)
         except WebDriverException as e:
@@ -257,10 +284,11 @@ def appears_in_search(uploader, *, tag: str, design_id: str, max_pages: int,
             if design_id_from(urljoin(BASE, link.get("href") or "")) == design_id:
                 return True
 
-        nxt = soup.select_one('a[rel="next"]')
-        if not nxt or not nxt.get("href"):
+        # No results at all means we have run off the end of the list. Note
+        # this is the ONLY stop condition: we do not follow a "next" link,
+        # because there is not always one. See search_url.
+        if not results:
             return False
-        url = urljoin(BASE, nxt["href"])
     return False
 
 

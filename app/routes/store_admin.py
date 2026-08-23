@@ -113,8 +113,12 @@ def api_overview(admin: User = Depends(require_admin),
         # tab says up front if there are none — rather than discovering it
         # three hours into a scan, at the gate.
         "wall_paths": len(wall.paths_for(db, MARKETPLACE)),
-        "vague_after": after,
-        "search_pages": int(P.get_setting(db, "scan_max_search_pages")),
+        "settings": {
+            "scan_parallel_accounts": int(P.get_setting(db, "scan_parallel_accounts")),
+            "scan_max_search_pages":  int(P.get_setting(db, "scan_max_search_pages")),
+            "scan_limit_per_account": int(P.get_setting(db, "scan_limit_per_account")),
+            "scan_vague_after_fixes": after,
+        },
         "history": [{
             "id": r.id,
             "status": r.status,
@@ -504,3 +508,42 @@ def api_account_url(payload: dict = Body(...),
                  details={"account": account.name, "url": url})
     db.commit()
     return JSONResponse({"ok": True})
+
+
+@router.post("/api/store/settings")
+def api_settings(payload: dict = Body(...),
+                 admin: User = Depends(require_admin),
+                 db: Session = Depends(get_db)):
+    """
+    The handful of knobs that govern a sweep, edited HERE.
+
+    They are ordinary pipeline settings and could be edited on the Pipeline
+    page — but this is the screen where their effect is visible, and a
+    setting you cannot find where you are looking is a setting you do not
+    have. Written through the same `set_setting`, so there is still exactly
+    one stored value behind both screens.
+    """
+    allowed = {
+        "scan_parallel_accounts": (1, 12),
+        "scan_max_search_pages":  (1, 200),
+        "scan_limit_per_account": (0, 100000),
+        "scan_vague_after_fixes": (1, 20),
+    }
+    changed = {}
+    for key, (low, high) in allowed.items():
+        if key not in payload:
+            continue
+        try:
+            value = int(payload[key])
+        except (TypeError, ValueError):
+            raise HTTPException(400, f"{key} must be a whole number.")
+        if not low <= value <= high:
+            raise HTTPException(
+                400, f"{key} must be between {low} and {high}.")
+        P.set_setting(db, key, value, by=admin.username)
+        changed[key] = value
+
+    log_activity(db, user=admin, action="store_settings_changed",
+                 target_type="store", target_id=None, details=changed)
+    db.commit()
+    return JSONResponse({"ok": True, "changed": changed})

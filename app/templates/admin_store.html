@@ -70,6 +70,38 @@
     </div>
   </section>
 
+  {# ── Settings ─────────────────────────────────────────────────────────
+     Ordinary pipeline settings, edited here because this is the screen
+     where their effect is visible. One stored value behind both screens. #}
+  <section class="panel">
+    <div class="panel-head">
+      <span>SWEEP SETTINGS
+        {{ info("ACCOUNTS AT ONCE is how many browsers run in parallel — more is faster and uses more memory, roughly 400MB each. SEARCH PAGES is how deep to look before calling a design missing; TeePublic shows about 28 results a page, so 25 pages is around 700 results. DESIGNS PER ACCOUNT is a testing limit, 0 means check them all. CURES BEFORE FLAGGING is how many failed off-and-on cycles before a design is marked as a probably-vague tag and left alone.") }}
+      </span>
+      <span class="muted mono" data-settings-status></span>
+    </div>
+    <div class="panel-body">
+      <div class="filter-row" style="gap:14px; flex-wrap:wrap">
+        <label>Accounts at once
+          <input type="number" min="1" max="12" style="width:70px"
+                 data-set="scan_parallel_accounts"></label>
+        <label>Search pages
+          <input type="number" min="1" max="200" style="width:80px"
+                 data-set="scan_max_search_pages"></label>
+        <label>Designs per account (0 = all)
+          <input type="number" min="0" style="width:90px"
+                 data-set="scan_limit_per_account"></label>
+        <label>Cures before flagging
+          <input type="number" min="1" max="20" style="width:70px"
+                 data-set="scan_vague_after_fixes"></label>
+        <button class="btn btn-accent btn-tiny" data-action="save-settings"
+                type="button">SAVE</button>
+      </div>
+      <p class="muted" style="margin-top:8px">Changes apply to the next
+        sweep, not one already running.</p>
+    </div>
+  </section>
+
   {# ── Store addresses ──────────────────────────────────────────────────
      Edited HERE rather than on the Pipeline page's account form. This is
      the screen that stops working without it, and the screen you are

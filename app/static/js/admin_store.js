@@ -228,6 +228,16 @@
       : '<p class="muted">No TeePublic accounts yet.</p>';
   }
 
+  // Only refill a box you are not currently typing into. The page reloads
+  // itself every few seconds while a sweep runs, and overwriting a
+  // half-typed number would make the field unusable.
+  function renderSettings(values) {
+    Object.keys(values).forEach(function (key) {
+      var el = q('[data-set="' + key + '"]');
+      if (el && document.activeElement !== el) el.value = values[key];
+    });
+  }
+
   function renderHistory(rows) {
     q('[data-history-list]').innerHTML = rows.length
       ? '<table class="data-table"><tbody>' + rows.map(function (r) {
@@ -246,6 +256,7 @@
       renderAccounts(data.accounts || []);
       renderUrls(data.accounts || []);
       renderHistory(data.history || []);
+      renderSettings(data.settings || {});
       await loadDesigns();
 
       var run = data.run;
@@ -331,6 +342,20 @@
               alert(r.left_deactivated + ' design(s) were left switched off.');
             }
           });
+    } else if (a === 'save-settings') {
+      var body = {};
+      document.querySelectorAll('[data-set]').forEach(function (el) {
+        body[el.dataset.set] = Number(el.value);
+      });
+      q('[data-settings-status]').textContent = 'Saving…';
+      postJSON(API + '/settings', body).then(function () {
+        q('[data-settings-status]').textContent = 'Saved.';
+        setTimeout(function () {
+          q('[data-settings-status]').textContent = '';
+        }, 2500);
+      }).catch(function (err) {
+        q('[data-settings-status]').textContent = err.message;
+      });
     } else if (a === 'all-accounts') {
       state.account = null; state.accountName = '';
       loadDesigns();

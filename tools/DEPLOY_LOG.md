@@ -9,6 +9,7 @@ log or diff to work it out — that costs far more to read than these lines.**
 If the top entry looks older than the work in the repo, the difference is
 what has not been deployed yet.
 
+- **2026-08-23 17:53** · `6bff3a33` · The design catalogue is now kept between runs: added, removed and returned
 - **2026-08-23 17:03** · `3b54c6a0` · STOP now actually stops the node, within one design, keeping everything checked.
 - **2026-08-23 16:46** · `3cfceca0` · DEPLOY THE SITE TOO - the scan job payload is built server-side.
 - **2026-08-23 16:27** · `2d5afb19` · Scan sends the full account payload (the browser needs selectors/timings) and
@@ -38,4 +39,3 @@ what has not been deployed yet.
 - **2026-08-17 16:13** · `002a8fcb` · Remove completed setup instructions from the Nodes and Test tabs
 - **2026-08-17 15:14** · `fff4ac88` · Audit fixes: no TMDB link or paste-URL box in MUSIK, year column hidden, cost reconciliation
 - **2026-08-17 14:50** · `bf2236bb` · Node-offline alarm on the master dashboard; count uploads, not just processing
-- **2026-08-17 14:28** · `39cac772` · Show how long ago a node last checked in

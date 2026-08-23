@@ -426,6 +426,14 @@ original script launched and quit a whole Chrome for every design; at 1,881
 designs and 3-5s per launch that was over two hours of doing nothing but
 starting browsers, and it was most of why a scan took ten.
 
+**Page through search by BUILDING the address, never by following a "next"
+link.** TeePublic's pager offers numbers up to 7 and then stops: page 7 has
+no "8" on it, only an arrow. So `a[rel="next"]` works for six pages and then
+silently gives up, and every design whose match sits beyond page 7 reads
+MISSING. The owner's own scanner hit this and special-cased page 7; that
+patches one instance, whereas `?page=N&query=` removes the class. Page 1
+carries no `page=` parameter, matching what the site itself produces.
+
 **The search check pages 25 deep, and that is a REAL limit, not a bug.** For
 "Shadow of the Colossus" it is conclusive. For "Queen" it is nowhere near —
 a healthy design sits at page four hundred and reads MISSING every sweep,

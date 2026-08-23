@@ -1,2 +1,2 @@
-Scan sends the full account payload (the browser needs selectors/timings) and
-falls back to the browser when TeePublic refuses plain HTTP with 403.
+DEPLOY THE SITE TOO - the scan job payload is built server-side.
+The wall is now detected on search pages by the absence of TeePublic's logo.

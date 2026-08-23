@@ -163,6 +163,15 @@ def api_start(admin: User = Depends(require_admin),
             "store_url": a.profile_url,
         } for a in ready],
         "settings": P.upload_settings_payload(db, project=project),
+        # The wall appears on SEARCH pages as well as the account page, and
+        # search pages share none of the account page's labels. The header
+        # logo is the marker that covers both — see service.site_markers.
+        "wall_html_markers": earnings_service.site_markers(MARKETPLACE),
+        "wall_paths": wall.payload_for(
+            wall.next_paths(db, MARKETPLACE,
+                            int(P.get_setting(db, "wall_max_attempts")))),
+        "wall_wait_s": P.get_setting(db, "wall_wait_s"),
+        "wall_max_attempts": int(P.get_setting(db, "wall_max_attempts")),
     }, requested_by=admin.username)
 
     run.scan_started_at = run.started_at
@@ -233,7 +242,7 @@ def api_advance(payload: dict = Body(default={}),
                          "url": d.url} for d in designs],
             # The same wall that stands in front of the earnings page. These
             # stages are signed in, so it can appear here too.
-            "wall_markers": earnings_service.page_markers(MARKETPLACE),
+            "wall_html_markers": earnings_service.site_markers(MARKETPLACE),
             "signed_out_markers": earnings_service.signed_out_markers(MARKETPLACE),
             "wall_paths": wall.payload_for(
                 wall.next_paths(db, MARKETPLACE, attempts)),

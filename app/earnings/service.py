@@ -168,6 +168,38 @@ def page_markers(marketplace: str) -> list[str]:
     }.get(marketplace, [])
 
 
+def site_markers(marketplace: str) -> list[str]:
+    """
+    Proof we are on an ORDINARY page of this site rather than the wall.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THE LOGO
+    ════════════════════════════════════════════════════════════════════════
+    `page_markers` above works for the account page, because that page has
+    its own four labels. The scan visits SEARCH pages, which share nothing
+    with the account page — so they need a marker of their own.
+
+    The header logo is the right one: every ordinary TeePublic page carries
+    it — search results, the store listing, a design's own page — and the
+    interstitial carries nothing at all. One marker therefore covers every
+    page the scan and the deactivation stages touch.
+
+    Matched against raw HTML because a logo is an IMAGE and has no text.
+    That is the same exception the sign-in field name gets, and for the same
+    reason: it is structural, not a vendor word that might merely be loaded.
+
+    Both the class and the asset path are listed so a redesign of one does
+    not take the check down with it. Neither is randomised — compare the
+    wall's own `tOHY4`, which is why the wall is never matched directly.
+    """
+    return {
+        "teepublic": ["vc-header-logo__image",
+                      "assets/logos/tp-full"],
+        # FineArtAmerica has no wall, so there is nothing to prove.
+        "fineartamerica": [],
+    }.get(marketplace, [])
+
+
 def signed_out_markers(marketplace: str) -> list[str]:
     """
     How the node can tell a sign-in page from the wall, before clicking.

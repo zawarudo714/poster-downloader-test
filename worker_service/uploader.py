@@ -138,6 +138,27 @@ def _visible_text(html: str) -> str:
     return re.sub(r"\s+", " ", text).lower()
 
 
+def report_wall_result(client, path_id, worked: bool) -> None:
+    """
+    Tell the server which recorded path was used and whether it landed.
+
+    Module level because TWO stages replay paths — the earnings read and the
+    listing scan — and a second copy of "how do we report a path" is exactly
+    the drift this codebase keeps getting bitten by.
+
+    Swallows its own errors deliberately: this is bookkeeping, and a server
+    hiccup while reporting a path must not turn a successful read into a
+    failed job. The work itself reports separately.
+    """
+    if not path_id:
+        return
+    try:
+        client.post("/wall/result",
+                    {"path_id": int(path_id), "worked": bool(worked)})
+    except Exception:
+        pass
+
+
 def _tail(path: Path, lines: int = 25) -> str:
     """Last few lines of a log file, or '' if there isn't one."""
     try:
@@ -551,9 +572,26 @@ class MarketplaceUploader:
                 "button": "left", "buttons": 1, "clickCount": 1,
             })
 
+    def page_has_markup(self, markers) -> bool:
+        """
+        Is one of these strings in the RAW HTML?
+
+        For markers that are not words on the page — a logo's image, a form
+        field's name. Matching raw HTML is normally the wrong test (see
+        `page_shows`), and the difference is what is being matched: a vendor
+        name in a dormant script tag says nothing about what the page is
+        doing, while the site's own header logo is structural.
+        """
+        try:
+            raw = self.driver.page_source or ""
+        except WebDriverException:
+            return False
+        return any(m in raw for m in markers)
+
     def clear_wall(self, markers: list, paths: list, *, wait_s: float = 5.0,
                    attempts: int = 3, on_result=None,
-                   signed_out_markers: Optional[list] = None) -> bool:
+                   signed_out_markers: Optional[list] = None,
+                   html_markers: Optional[list] = None) -> bool:
         """
         Get past a full-page interstitial, or say plainly that we could not.
 
@@ -564,15 +602,28 @@ class MarketplaceUploader:
         (`tOHY4`, `qrvwN4`) and would break on the site's next deploy while
         pointing the blame somewhere else entirely.
 
-        So the question asked is "are the figures we came for on this page?".
-        That definition survives the wall being redesigned, renamed, or
-        replaced by a completely different wall — and it is the SAME test
-        used to confirm we got through, so the two can never disagree.
+        So the question asked is "is what we came for on this page?". That
+        definition survives the wall being redesigned, renamed, or replaced by
+        a completely different wall — and it is the SAME test used to confirm
+        we got through, so the two can never disagree.
+
+        Two kinds of marker, because two kinds of page:
+
+          · TEXT — words the page shows. The account page's own labels.
+          · HTML — structure it contains. The site's header logo, which is
+            an image and therefore has no text to match. Every ordinary
+            TeePublic page carries it; the wall carries nothing.
+
+        Either kind matching means we are through.
 
         Returns True if the page is now the one we wanted.
         """
+        def ours() -> bool:
+            return (self.page_shows_any(markers)
+                    or (bool(html_markers) and self.page_has_markup(html_markers)))
+
         time.sleep(wait_s)
-        if self.page_shows_any(markers):
+        if ours():
             return True                      # never walled in the first place
 
         # A lapsed session looks EXACTLY like the wall from here — figures
@@ -616,7 +667,7 @@ class MarketplaceUploader:
             # It is a real page change, not a box disappearing, so give the
             # navigation time before judging it.
             time.sleep(wait_s)
-            worked = self.page_shows_any(markers)
+            worked = ours()
             if on_result:
                 on_result(path.get("id"), worked)
             if worked:
@@ -1449,20 +1500,8 @@ class UploadStage:
         return {"removed": True, "path": str(resolved), "bytes": size}
 
     def _report_wall_result(self, path_id, worked: bool) -> None:
-        """
-        Tell the server which recording was used and whether it landed.
-
-        Swallows its own errors deliberately: this is bookkeeping, and a
-        server hiccup while reporting a path must not turn a successful read
-        into a failed job. The read itself reports separately.
-        """
-        if not path_id:
-            return
-        try:
-            self.client.post("/wall/result",
-                             {"path_id": int(path_id), "worked": bool(worked)})
-        except Exception:
-            pass
+        """Thin wrapper so the earnings read can pass a bound method."""
+        report_wall_result(self.client, path_id, worked)
 
     def read_earnings(self, job_id: int, payload: dict) -> dict:
         """

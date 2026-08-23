@@ -60,7 +60,8 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 
-from .uploader import MarketplaceUploader, UploadError
+from .uploader import (MarketplaceUploader, UploadError,
+                       report_wall_result)
 
 BASE = "https://www.teepublic.com"
 
@@ -191,8 +192,8 @@ def design_details(url: str, session: requests.Session, driver=None) -> tuple:
 #  THE SEARCH CHECK — the only part that needs a browser
 # ════════════════════════════════════════════════════════════════════════════
 
-def appears_in_search(driver, *, tag: str, design_id: str, max_pages: int,
-                      emit: Callable[[str], None]) -> bool:
+def appears_in_search(uploader, *, tag: str, design_id: str, max_pages: int,
+                      emit: Callable[[str], None], wall: dict) -> bool:
     """
     Does this design turn up when a customer searches its own primary tag?
 
@@ -200,11 +201,30 @@ def appears_in_search(driver, *, tag: str, design_id: str, max_pages: int,
     normally on page one, so the common case is fast; a missing one is what
     pays the full page cost, which is why a scan takes longer the worse
     things are.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE WALL IS CHECKED ONLY WHEN A PAGE LOOKS EMPTY
+    ════════════════════════════════════════════════════════════════════════
+    The interstitial can appear on a search page too. But asking "is this the
+    wall?" before every page would cost the settling delay on every one of
+    several thousand designs — hours added to a scan to catch something that
+    normally happens once per browser.
+
+    So the cheap test comes first: no results found. THAT is when the two
+    explanations diverge, and telling them apart matters enormously — "no
+    results" means the design is missing and gets deactivated, while "the
+    wall" means we never looked. Getting that backwards would deactivate a
+    healthy catalogue.
+
+    The site's own logo settles it: every ordinary page has it, the wall has
+    none.
     """
     from bs4 import BeautifulSoup
     from selenium.common.exceptions import WebDriverException
 
+    driver = uploader.driver
     url = f"{BASE}/t-shirts?query={requests.utils.quote(tag)}"
+
     for page in range(1, max_pages + 1):
         try:
             driver.get(url)
@@ -215,6 +235,24 @@ def appears_in_search(driver, *, tag: str, design_id: str, max_pages: int,
 
         soup = BeautifulSoup(driver.page_source or "", "html.parser")
         results = soup.select('a[href*="/t-shirt/"]')
+
+        # Empty AND no logo => we are looking at the wall, not at an empty
+        # result set. Clear it and read the same page again before believing
+        # anything about this design.
+        if not results and wall.get("html_markers") \
+                and not uploader.page_has_markup(wall["html_markers"]):
+            emit("      the wall is in the way — clearing it")
+            uploader.clear_wall(
+                [], wall.get("paths") or [],
+                wait_s=wall.get("wait_s", 5),
+                attempts=wall.get("attempts", 3),
+                on_result=wall.get("on_result"),
+                html_markers=wall["html_markers"])
+            driver.get(url)
+            time.sleep(1.5)
+            soup = BeautifulSoup(driver.page_source or "", "html.parser")
+            results = soup.select('a[href*="/t-shirt/"]')
+
         for link in results:
             if design_id_from(urljoin(BASE, link.get("href") or "")) == design_id:
                 return True
@@ -253,6 +291,16 @@ class StoreHealthStage:
         run_id = payload["run_id"]
         workers = max(1, int(payload.get("parallel") or 3))
         settings = payload.get("settings") or {}
+        # Everything about the interstitial, decided by the server. The node
+        # does not know which marketplaces have one.
+        wall = {
+            "html_markers": payload.get("wall_html_markers") or [],
+            "paths":        payload.get("wall_paths") or [],
+            "wait_s":       float(payload.get("wall_wait_s") or 5),
+            "attempts":     int(payload.get("wall_max_attempts") or 3),
+            "on_result":    lambda pid, ok: report_wall_result(
+                                    self.client, pid, ok),
+        }
         max_pages = int(payload.get("max_search_pages") or 25)
         delay = float(payload.get("delay_s") or 1)
 
@@ -282,7 +330,8 @@ class StoreHealthStage:
                     account = queue.pop(0)
                 try:
                     got = self._scan_account(job_id, run_id, account,
-                                             max_pages, delay, emit, settings)
+                                             max_pages, delay, emit, settings,
+                                             wall)
                     with lock:
                         for key in results:
                             results[key] += got.get(key, 0)
@@ -328,7 +377,7 @@ class StoreHealthStage:
     def _scan_account(self, job_id: int, run_id: int, account: dict,
                       max_pages: int, delay: float,
                       emit: Callable[[str], None],
-                      settings: dict) -> dict:
+                      settings: dict, wall: dict) -> dict:
         """One account, one browser, held open for the whole account."""
         name = account.get("name")
         store_url = (account.get("store_url") or "").split("?")[0].rstrip("/")
@@ -349,6 +398,25 @@ class StoreHealthStage:
             # first real run, with HTTP 403 on store page 1.
             uploader.start()
 
+            # Meet the wall ONCE, up front, on a page we do not care about.
+            # Dismissing it sets whatever the site remembers, so the rest of
+            # this account's thousands of pages go straight through — and the
+            # per-page check below stays a rare fallback rather than a
+            # five-second tax on every design.
+            if wall.get("html_markers"):
+                try:
+                    uploader.driver.get(store_url or BASE)
+                    uploader.clear_wall(
+                        [], wall.get("paths") or [],
+                        wait_s=wall.get("wait_s", 5),
+                        attempts=wall.get("attempts", 3),
+                        on_result=wall.get("on_result"),
+                        html_markers=wall["html_markers"])
+                except Exception as e:
+                    # Not fatal here. If the wall is genuinely blocking, the
+                    # first search page will say so with the same check.
+                    emit(f"  {name}: could not clear the wall up front ({e})")
+
             emit(f"→ {name}: reading the store listing")
             designs = list_designs(store_url, session, emit, uploader.driver)
             emit(f"→ {name}: {len(designs)} designs to check")
@@ -365,8 +433,8 @@ class StoreHealthStage:
                     status, note = "error", error
                 else:
                     visible = appears_in_search(
-                        uploader.driver, tag=tag, design_id=design["design_id"],
-                        max_pages=max_pages, emit=emit)
+                        uploader, tag=tag, design_id=design["design_id"],
+                        max_pages=max_pages, emit=emit, wall=wall)
                     status, note = ("visible" if visible else "missing"), None
                     if not visible:
                         counts["missing"] += 1
@@ -409,7 +477,7 @@ class StoreHealthStage:
         action = payload["action"]            # deactivate | reactivate
         account = payload["account"]
         designs = payload.get("designs") or []
-        markers = payload.get("wall_markers") or []
+        html_markers = payload.get("wall_html_markers") or []
         paths = payload.get("wall_paths") or []
         signed_out = payload.get("signed_out_markers") or []
         wall_wait = float(payload.get("wall_wait_s") or 5)
@@ -434,8 +502,9 @@ class StoreHealthStage:
                               progress=min(95, int(index / max(1, len(designs)) * 90)))
                 try:
                     if action == "deactivate":
-                        self._deactivate(uploader, design, markers, paths,
-                                         signed_out, wall_wait, wall_tries)
+                        self._deactivate(uploader, design, html_markers,
+                                         paths, signed_out, wall_wait,
+                                         wall_tries)
                     else:
                         self._reactivate(uploader, did)
                     self._report(run_id, did, action, None)
@@ -464,7 +533,7 @@ class StoreHealthStage:
                           "account_id": account["id"]})
         return {"done": done, "failed": failed, "account": account.get("name")}
 
-    def _deactivate(self, uploader, design: dict, markers, paths,
+    def _deactivate(self, uploader, design: dict, html_markers, paths,
                     signed_out, wall_wait, wall_tries) -> None:
         """
         Press Deactivate on the design's own page.
@@ -481,10 +550,14 @@ class StoreHealthStage:
 
         # Same wall that stands in front of the earnings page. Detected by
         # the absence of what we came for, exactly as it is there.
-        if markers:
-            uploader.clear_wall(["manage", "deactivate"], paths,
+        # Detected by the site's own header logo, not by words on the
+        # MANAGE bar. One marker covers every page these stages touch —
+        # design pages, edit pages, search — and the wall carries none of it.
+        if html_markers:
+            uploader.clear_wall([], paths,
                                 wait_s=wall_wait, attempts=wall_tries,
-                                signed_out_markers=signed_out)
+                                signed_out_markers=signed_out,
+                                html_markers=html_markers)
         time.sleep(1)
 
         selector = f"form[action='/designs/{did}/deactivate'] button[type='submit']"

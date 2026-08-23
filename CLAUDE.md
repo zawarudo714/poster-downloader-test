@@ -359,9 +359,27 @@ required a live RDP session forever and failed silently the moment it dropped.
 
 **The wall is detected by what is MISSING**, never by anything on it. Its
 class names are randomised (`tOHY4`, `qrvwN4`) and would break on their next
-deploy while blaming something else entirely. The test is "are the account
-page's own labels here" — the same four the parser needs — so one definition
-serves both "we are stuck" and "we are through" and they cannot disagree.
+deploy while blaming something else entirely.
+
+Two markers, because two kinds of page:
+
+  * the ACCOUNT page — its own four labels, the same ones the parser needs
+  * everything else (search, store, design, edit) — the **header logo**,
+    `vc-header-logo__image` / `assets/logos/tp-full`. Matched in raw HTML
+    because a logo has no text, which is the same exception the sign-in
+    field name gets and for the same reason: it is structural, not a vendor
+    word that might merely be loaded.
+
+**The logo test is what separates "no search results" from "we never
+looked", and getting that backwards would deactivate a healthy catalogue.**
+An empty results page and the wall are both "no designs found"; only the
+logo tells them apart. So the scan asks the cheap question first — were
+there results? — and only consults the logo when there were none. Asking
+before every page would add the settling delay to every one of several
+thousand designs.
+
+The wall is also cleared ONCE per browser when it opens, on a page we do not
+care about, so the per-page check stays a rare fallback.
 
 **A lapsed session looks identical to the wall** and must be ruled out FIRST,
 by the sign-in form's field name. Otherwise three recorded paths get spent

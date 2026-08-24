@@ -9,6 +9,7 @@ log or diff to work it out — that costs far more to read than these lines.**
 If the top entry looks older than the work in the repo, the difference is
 what has not been deployed yet.
 
+- **2026-08-24 07:38** · `3592bbde` · Counts now say what they mean: 17 of 627 in this continue, not 17 of 1543.
 - **2026-08-24 07:23** · `c5ce73cf` · A wall no longer kills the night: the sweep waits 30/60/90 minutes and retries,
 - **2026-08-23 21:30** · `05083e9f` · A paused or stopped scan no longer counts as a FINISHED scan. Resume carries on
 - **2026-08-23 20:11** · `2cc8cbbd` · Search pages are now addressed directly (?page=N&query=) instead of following a
@@ -38,4 +39,3 @@ what has not been deployed yet.
 - **2026-08-17 19:46** · `95ad52e2` · Pause an upload account only after a RUN of selector failures, not the first one; Earnings 500 fix; storage mount falls back to HTTP; drive-root path fix
 - **2026-08-17 18:46** · `97266e0d` · Fix 500 on the Earnings page — declare its two settings keys in DEFAULTS
 - **2026-08-17 18:41** · `c2dcd306` · Earnings tab (filters, per-design sales, manual matching, nightly read); report upload-session startup failures instead of stranding the batch; fix ADD ACCOUNT modal
-- **2026-08-17 18:02** · `c464e93f` · Fix ADD ACCOUNT modal (broken markup in v61) and release uploads queued against a deleted account

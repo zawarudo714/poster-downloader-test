@@ -49,12 +49,26 @@
   function renderRun(data) {
     var run = data.run, el = q('[data-run-panel]'), summary = q('[data-run-summary]');
 
+    // Live listings switched off and not put back. Shown ABOVE everything
+    // else and whether or not a run is going, because it is money leaking
+    // and it outlives whichever run caused it.
+    var rescue = data.stranded
+      ? '<p class="quota-note"><strong>' + data.stranded + ' design(s) are '
+        + 'switched OFF right now.</strong> They earn nothing until they go '
+        + 'back on.'
+        + (run ? ' Wait for this run to finish, then put them back.'
+               : ' <button class="btn btn-accent btn-tiny" '
+                 + 'data-action="reactivate-all" type="button">SWITCH '
+                 + data.stranded + ' BACK ON</button>')
+        + '</p>'
+      : '';
+
     if (!run) {
       summary.textContent = '';
       var blocked = data.blocked || [];
       var last = (data.history || [])[0];
       var t = data.totals || {};
-      el.innerHTML =
+      el.innerHTML = rescue +
         (last && last.status === 'failed'
           ? '<p class="quota-note"><strong>The last sweep failed.</strong> '
             + esc(last.note) + '</p>' : '') +
@@ -156,7 +170,8 @@
         + 'type="button">SWITCH OFF ' + c.to_deactivate + ' DESIGNS</button></p>';
     } else if (run.status === 'deactivating') {
       body = '<p><strong>Switching the missing designs off.</strong> '
-        + c.deactivated + ' done so far.</p>';
+        + c.deactivated + ' done so far.</p>'
+        + accountProgress(run);
     } else if (run.status === 'confirming') {
       body = '<p><strong>' + c.deactivated + ' designs are switched off.</strong></p>'
         + '<p class="quota-note">These are OFF right now. They come back when '
@@ -165,10 +180,11 @@
         + 'type="button">REACTIVATE THEM</button></p>';
     } else if (run.status === 'reactivating') {
       body = '<p><strong>Switching them back on.</strong> ' + c.deactivated
-        + ' still to go.</p>';
+        + ' still switched off.</p>'
+        + accountProgress(run);
     }
 
-    el.innerHTML = body +
+    el.innerHTML = rescue + body +
       '<p class="muted mono">' + esc(run.note || '') + '</p>' +
       (run.paused ? '' :
         '<p><button class="btn btn-ghost btn-tiny" data-action="pause" '
@@ -177,6 +193,15 @@
         + 'type="button">STOP THIS RUN</button> ' +
         '<span class="muted">— pause gives the machine back and keeps your '
         + 'place; stop ends the run.</span></p>');
+  }
+
+  // These stages run one job per account, and the node does one job at a
+  // time. Saying which account we are on is the difference between "is this
+  // stuck?" and "it is on the third of five".
+  function accountProgress(run) {
+    if (!run.stage_jobs_total) return '';
+    return '<p class="muted">Account ' + (run.stage_jobs_done + 1) + ' of '
+      + run.stage_jobs_total + ' — each account is done in turn.</p>';
   }
 
   // ── Accounts ─────────────────────────────────────────────────────────
@@ -413,6 +438,13 @@
       }).catch(function (err) {
         q('[data-settings-status]').textContent = err.message;
       });
+    } else if (a === 'reactivate-all') {
+      act(API + '/reactivate-all', {},
+          'Switch every design that is currently off back on again?',
+          function (r) {
+            alert('Putting ' + r.designs + ' design(s) back on across '
+                  + r.accounts + ' account(s).');
+          });
     } else if (a === 'all-accounts') {
       state.account = null; state.accountName = '';
       loadDesigns();

@@ -735,6 +735,7 @@ irrelevant, say why in one line rather than skipping it silently.
 | 5 | Added a warning where the state should have been impossible | 8 |
 | 5b | Turned one marketplace's measured behaviour into policy for all of them | 6, 3c-ter |
 | 5c | Moved a call out of a shared function and dropped it on the way | 3c, 3c-ter |
+| 5d | Shipped a mechanism with no invariant watching it — and a test that shared the bug's assumption | 5, 8 |
 | 6 | Correct for two projects, wrong for the third | 1, 3b |
 | 7 | Fixed a bug and left no rule behind | all |
 | 8 | Claimed work with an exit that reports nothing — including catching an error into a counter | 3d, 5 |
@@ -874,6 +875,23 @@ fact.** If the underlying thing is shared, the alarm belongs on the master
 dashboard, and the per-project view explains what it means locally.
 
 ### 3c. Check the FILE, not your intention
+
+**RUN `python tools/preflight.py` BEFORE SAYING ANYTHING IS DONE.** It is
+every mechanical check in this section, automated, and the deploy tool runs
+it too. Each one is there because it caught something real: a `log_activity`
+call with wrong argument names, a missing dictionary key, a renamed `data-`
+hook that silently killed a panel, an orphan closing tag that reparented a
+modal into a hidden section, a settings key absent from DEFAULTS.
+
+`--map` prints every button on every screen and what it calls — the
+enumeration rule 1 asks for, done mechanically rather than from memory.
+
+**When you add a check to it, SABOTAGE-TEST the check.** Break the thing on
+purpose and confirm preflight goes red. Two of the first eight checks were
+written, looked correct, and could not fail: the hook check searched the JS
+for the hook name, and the QUERY contains the name, so it matched itself.
+The same failure as the test that missed the stage-counting bug. A green
+light from a check that cannot go red is worse than no check at all.
 
 Every deletion and every move is a structural edit, and the thing you must
 check is the file that now exists — not the change you meant to make. These
@@ -1142,6 +1160,53 @@ that system, never policy for all of them.** Same shape as rule 6, one level
 out — and the same shape as `processor` and `has_year`, which exist so a
 project's differences are data rather than a template edit.
 
+### 5d. NAME THE INVARIANT, THEN MAKE IT A DIAGNOSTICS CHECK
+
+**Standing instruction from the owner, 2026-08-24.** Every new mechanism
+ships with at least one invariant check. Say so when you deliver it, so he
+knows it happened.
+
+**Why this rule exists, and it is worth being blunt.** The stage-counting
+bug — one account finishing ended the stage and left 178 live listings
+switched off — was written, tested and shipped in one session by the same
+mind. The dispatch function had a heading in capitals saying **"ONE JOB PER
+ACCOUNT"**, and the handler forty lines away ended the stage on the first
+report. And the verification test made ONE run and reported ONE stage,
+because that is how the author pictured it. **The test could not fail: it
+encoded the same assumption as the bug.**
+
+The owner found it by noticing a number going up instead of down.
+
+So be honest about what each rung actually buys:
+
+| | catches | fails when |
+|---|---|---|
+| a rule in this file | what you remember to check | you do not remember |
+| a test | what you imagined going wrong | **it shares your blind spot** |
+| **an invariant** | what nobody imagined | it was never stated |
+| **a Diagnostics check** | it happening for real | nothing — it runs unattended |
+
+Tests assert about FLOW, which is imagination. Invariants assert about
+STATE, which is not. "No design should be switched off while no run is in
+progress" would have gone red within minutes, automatically, with nobody
+watching a log — and it needs no knowledge of how the bug happens.
+
+**The question to ask of every action you build:** what must be true after
+this, that could stop being true? Especially where the answer involves the
+outside world — a listing switched off, an upload half-done, an account
+paused, money owed. Those are the ones that cost real money while looking
+fine.
+
+**Write it into `diagnostics.py`, not into a comment.** That module is
+read-only by design and already runs on demand; a check there is the only
+form of vigilance that survives this session ending.
+
+This also reframes the INTERACTION AUDIT (planned item 8). Tracing every
+interaction is an act of imagination and will inherit whoever's blind spots
+wrote it. Naming every invariant is finite, and each one holds whether or
+not the failure path was anticipated. Do both — but the invariants are the
+part that actually protects him.
+
 ### 6. The third-project test
 
 For every change: **would this still be right for a third project?** If the
@@ -1247,6 +1312,15 @@ So a page the server could not parse produced a run that fetched, stored
 nothing, and reported "Job finished". The screen stayed empty and no line
 anywhere connected the two. If you asked something a question, say what it
 answered.
+
+**And when SEVERAL workers share a stage, one of them finishing is not the
+stage finishing.** Deactivation runs one job per account. The first account
+to report ended the stage for all of them: the run advanced to reactivating
+while a second account was still switching designs OFF, so those designs
+were never on the reactivate list — live listings left hidden, earning
+nothing, with nothing on screen saying so. Count the workers in when you
+dispatch and count them out as they report. The test to apply: **if this
+work is split N ways, does the state machine know N?**
 
 **"The job ended" is not "the work finished", and only the worker knows
 which.** Pausing the store scan ended its job cleanly — every design

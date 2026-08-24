@@ -487,8 +487,26 @@ def dispatch_stage(db: Session, run: StoreScanRun, stage: str,
     ONE JOB PER ACCOUNT HERE, UNLIKE THE SCAN
     ════════════════════════════════════════════════════════════════════════
     These stages are signed in, and each account needs its OWN Chrome
-    profile — two accounts cannot share one browser. Serial is fine too:
-    this stage is minutes, not hours.
+    profile — two accounts cannot share one browser.
+
+    ════════════════════════════════════════════════════════════════════════
+    MEASURED 2026-08-24: ABOUT AN HOUR PER ACCOUNT, NOT MINUTES
+    ════════════════════════════════════════════════════════════════════════
+    This docstring used to say "serial is fine, this stage is minutes not
+    hours". That was a guess and it was wrong by a factor of about thirty.
+    Every design needs its own freshly loaded page, because the deactivate
+    form carries a one-time token, so the cost is one page load per design
+    and there is no batching to be had.
+
+    On a first sweep of a long-neglected account that is ~100 missing
+    designs an hour each way — five accounts came to roughly ten hours for
+    the two stages together. Steady weekly running is genuinely small, but
+    NOTHING here may assume the stage is short: it is long enough that it
+    must be stoppable, resumable, and survivable across a restart.
+
+    That wrong estimate is also why the queued-job-per-account shape below
+    matters. All the jobs are created UP FRONT, so stopping the run is not
+    enough on its own — see `cancel_queued_jobs`.
 
     Returns how many jobs were queued.
     """
@@ -533,6 +551,10 @@ def dispatch_stage(db: Session, run: StoreScanRun, stage: str,
         queued += 1
 
     run.status = "deactivating" if stage == "deactivate" else "reactivating"
+    # The stage is not over until EVERY account's job has reported. Without
+    # this the first account to finish ended the stage for all of them.
+    run.stage_jobs_total = queued
+    run.stage_jobs_done = 0
     run.stage_note = f"{len(rows)} design(s) across {queued} account(s)."
     return queued
 
@@ -639,3 +661,26 @@ def continue_backlog(db: Session, marketplace: str) -> int:
         StoreListing.excluded == 0).all()
     return sum(1 for r in rows
                if not r.last_checked_at or r.last_checked_at < cutoff)
+
+
+def stranded(db: Session, marketplace: str) -> list[StoreListing]:
+    """
+    Designs we switched OFF and never switched back on.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS IS ITS OWN QUESTION
+    ════════════════════════════════════════════════════════════════════════
+    These are live listings, earning nothing, because something interrupted
+    a run between the two halves of the cure. It happens for boring reasons —
+    a stage that ended early, a run abandoned at the wrong moment, the node
+    dying — and there is no reason the owner should have to reason about
+    WHICH run left them off.
+
+    So the question is asked of the catalogue, not of a run: what is off
+    right now that we turned off? That is also why reactivation has always
+    worked from this rather than from a run's own list.
+    """
+    return (db.query(StoreListing)
+              .filter(StoreListing.marketplace == marketplace,
+                      StoreListing.deactivated_at.isnot(None))
+              .order_by(StoreListing.account_id, StoreListing.title).all())

@@ -1232,17 +1232,43 @@ def store_stage_done(
         run.status = "reviewing"
         run.stage_note = (f"{tally['missing']} missing of {tally['checked']} "
                           f"checked.")
-    elif stage == "deactivate" and run.status == "deactivating":
-        run.status = "confirming"
-        run.stage_note = (f"{tally['deactivated']} deactivated"
-                          + (f", {tally['action_errors']} refused"
-                             if tally["action_errors"] else "") + ".")
-    elif stage == "reactivate" and run.status == "reactivating":
-        # The last stage, so this is also where the pipeline is released —
-        # by the run ENDING, not by anyone flipping anything back.
-        SH.finish_run(db, run, status="done",
-                      note=f"{tally['missing']} were missing; "
-                           f"all have been switched off and back on.")
+    elif stage in ("deactivate", "reactivate") and run.status in (
+            "deactivating", "reactivating"):
+        # ── ONE ACCOUNT FINISHING IS NOT THE STAGE FINISHING ─────────────
+        #
+        # These stages run one job per account. The first account to report
+        # used to end the stage for all of them: the run moved on to
+        # reactivating while a second account was still switching designs
+        # OFF, and those designs were never on the reactivate list — left
+        # live-but-hidden with nothing on screen saying so.
+        #
+        # So the stage ends when every job it dispatched has reported.
+        run.stage_jobs_done = (run.stage_jobs_done or 0) + 1
+        waiting_on = max(0, (run.stage_jobs_total or 1) - run.stage_jobs_done)
+
+        if waiting_on:
+            run.stage_note = (
+                f"{run.stage_jobs_done} of {run.stage_jobs_total} accounts "
+                f"done; still working through the rest.")
+            db.commit()
+            return JSONResponse({"ok": True, "status": run.status,
+                                 "waiting_on": waiting_on})
+
+        if stage == "deactivate":
+            run.status = "confirming"
+            run.stage_note = (f"{tally['deactivated']} switched off"
+                              + (f", {tally['action_errors']} refused"
+                                 if tally["action_errors"] else "") + ".")
+        else:
+            # The last stage, so this is also where the pipeline is released
+            # — by the run ENDING, not by anyone flipping anything back.
+            left = len(SH.stranded(db, run.marketplace))
+            SH.finish_run(
+                db, run, status="done",
+                note=("Every design we switched off is back on."
+                      if not left else
+                      f"{left} design(s) are STILL switched off — use "
+                      f"SWITCH EVERYTHING BACK ON."))
 
     # ── AUTOMATIC MODE HANDS OVER HERE ───────────────────────────────────
     #

@@ -110,6 +110,8 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("store_scan_runs",  "retry_at",    "DATETIME"),
     ("store_scan_runs",  "retry_count", "INTEGER NOT NULL DEFAULT 0"),
     ("store_scan_runs",  "retry_note",  "TEXT"),
+    ("store_scan_runs",  "stage_jobs_total", "INTEGER NOT NULL DEFAULT 0"),
+    ("store_scan_runs",  "stage_jobs_done",  "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 # ════════════════════════════════════════════════════════════════════════════

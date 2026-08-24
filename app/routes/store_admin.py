@@ -112,6 +112,10 @@ def api_overview(admin: User = Depends(require_admin),
         # the scan will work it out. The button says the number so you know
         # before pressing whether it is going to do what you expect.
         "continue_left": SH.continue_backlog(db, MARKETPLACE),
+        # Live listings we switched off and never put back. Surfaced at the
+        # top level rather than inside a run, because the whole point is that
+        # it outlives the run that caused it.
+        "stranded": len(SH.stranded(db, MARKETPLACE)),
         "continue_within_h": int(P.get_setting(db, "scan_continue_within_h")),
         "run": _run_payload(db, run) if run else None,
         # Recorded mouse paths are needed for the signed-in stages, so the
@@ -206,6 +210,8 @@ def _run_payload(db: Session, run: StoreScanRun) -> dict:
         "paused_by": run.paused_by,
         "retry_at": run.retry_at.isoformat() if run.retry_at else None,
         "retry_count": run.retry_count or 0,
+        "stage_jobs_total": run.stage_jobs_total or 0,
+        "stage_jobs_done": run.stage_jobs_done or 0,
         "retry_note": run.retry_note or "",
         "started_at": run.started_at.isoformat() if run.started_at else None,
         "counts": SH.counts(db, run, run.marketplace),
@@ -598,3 +604,51 @@ def wake_due_retries(db: Session) -> int:
     if woken:
         db.commit()
     return woken
+
+
+@router.post("/api/store/reactivate-all")
+def api_reactivate_all(admin: User = Depends(require_admin),
+                       db: Session = Depends(get_db)):
+    """
+    Switch back on everything we ever switched off and did not restore.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS EXISTS SEPARATELY FROM A RUN
+    ════════════════════════════════════════════════════════════════════════
+    A design left switched off is a live listing earning nothing, and it can
+    end up that way for reasons that have nothing to do with the run you are
+    looking at: a stage that ended early, a run abandoned between the two
+    halves of the cure, the node dying mid-account.
+
+    Recovering from that should not require reasoning about WHICH run did it,
+    or walking the whole scan/review/deactivate cycle again to reach a
+    reactivate stage. The question is simply "what is off?" and the answer
+    comes from the catalogue.
+
+    It runs as an ordinary run so it shows its progress, holds the pipeline
+    while it works, and ends cleanly — rather than being an invisible
+    background action with no way to see how far it got.
+    """
+    if SH.active_run(db) is not None:
+        raise HTTPException(
+            409, "A run is already in progress. Wait for it to finish, or "
+                 "stop it, then try again.")
+
+    left = SH.stranded(db, MARKETPLACE)
+    if not left:
+        raise HTTPException(
+            404, "Nothing is switched off — there is nothing to put back.")
+
+    run = StoreScanRun(marketplace=MARKETPLACE, status="reactivating",
+                       started_by=admin.username, scan_mode="recover",
+                       stage_note=f"Putting {len(left)} design(s) back on.")
+    db.add(run)
+    db.flush()
+
+    queued = SH.dispatch_stage(db, run, "reactivate", by=admin.username)
+    log_activity(db, user=admin, action="store_reactivate_all",
+                 target_type="store_run", target_id=run.id,
+                 details={"designs": len(left), "accounts": queued})
+    db.commit()
+    return JSONResponse({"ok": True, "run": run.id,
+                         "designs": len(left), "accounts": queued})

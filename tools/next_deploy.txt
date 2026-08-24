@@ -1,3 +1,3 @@
-Counts now say what they mean: 17 of 627 in this continue, not 17 of 1543.
-The deactivate button promises the number it will actually switch off.
-How far back CONTINUE remembers is editable on the TeePublic tab.
+Deploy now runs tools/preflight.py first: compiles, undefined names, JS parsing,
+template tags, page hooks, button handlers, settings keys, cross-module calls.
+python tools/preflight.py --map lists every button and what it calls.

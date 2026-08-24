@@ -1336,6 +1336,19 @@ class StoreScanRun(Base):
     # `retry_at` and tries again, with the gap growing each time. It does NOT
     # hold the pipeline while it waits — an hour of holding Photoshop for
     # nothing would be the opposite of helpful.
+    # ── HOW MANY WORKERS THIS STAGE IS WAITING ON ───────────────────────
+    # Deactivation and reactivation run ONE JOB PER ACCOUNT, and each job
+    # reports when it finishes. Without counting them, the FIRST account to
+    # finish told the server the whole stage was done: the run advanced to
+    # reactivating while a second account was still switching designs OFF,
+    # and those designs were never on the reactivate list. Live listings
+    # left switched off, with nothing on screen saying so.
+    #
+    # So a stage ends when `stage_jobs_done` reaches `stage_jobs_total`, and
+    # not before.
+    stage_jobs_total = Column(Integer, nullable=False, default=0)
+    stage_jobs_done  = Column(Integer, nullable=False, default=0)
+
     retry_at    = Column(DateTime, nullable=True)
     retry_count = Column(Integer, nullable=False, default=0)
     retry_note  = Column(Text, nullable=True)

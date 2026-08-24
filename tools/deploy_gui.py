@@ -47,6 +47,7 @@ import json
 import queue
 import re
 import subprocess
+import sys
 import threading
 import tkinter as tk
 from pathlib import Path
@@ -587,8 +588,43 @@ class DeployApp:
         threading.Thread(target=self._run, daemon=True,
                          args=(skip_local, skip_server)).start()
 
+    def _preflight(self, repo: Path) -> bool:
+        """
+        Mechanical checks before anything leaves this machine.
+
+        Wired in HERE rather than left as something to remember, because a
+        check you have to remember is a check that runs on the days you were
+        already being careful. Every one of these caught something real; see
+        tools/preflight.py.
+
+        It only inspects the source — no database, no network — so it costs a
+        few seconds and cannot itself break anything.
+        """
+        script = repo / "tools" / "preflight.py"
+        if not script.is_file():
+            return True                       # older checkout: nothing to run
+
+        self._emit("\n$ python tools/preflight.py", "step")
+        proc = subprocess.run([sys.executable, str(script)], cwd=str(repo),
+                              capture_output=True, text=True)
+        self._emit((proc.stdout + proc.stderr).strip(),
+                   "" if proc.returncode == 0 else "err")
+        if proc.returncode == 0:
+            return True
+
+        # Not a hard block. The owner sometimes needs to ship a fix while
+        # something unrelated is mid-edit, and a tool that cannot be
+        # overridden gets worked around instead of used.
+        return messagebox.askyesno(
+            "Preflight found problems",
+            "The checks above found something that usually means a page will "
+            "break.\n\nDeploy anyway?")
+
     def _run(self, skip_local: bool, skip_server: bool) -> None:
         try:
+            if not skip_local and not self._preflight(Path(self.repo_var.get())):
+                self._emit("\nSTOPPED — nothing was sent to the server.", "err")
+                return
             if not skip_local and not self._run_local():
                 self._emit("\nSTOPPED — nothing was sent to the server.", "err")
                 return

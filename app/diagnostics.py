@@ -75,7 +75,8 @@ from sqlalchemy.orm import Session
 from .config import WORKSPACE_DIR
 from .models import (
     AccountProject, MasterTitle, ProcessedImage, Project, Revision,
-    SavedPoster, UploadAccount, UploadTracking, User,
+    SavedPoster, StoreListing, StoreScanRun, UploadAccount, UploadTracking,
+    User,
 )
 from .utils import saved_poster_path
 
@@ -681,6 +682,182 @@ def check_duplicate_hashes(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  LISTING HEALTH — INVARIANTS
+# ════════════════════════════════════════════════════════════════════════════
+#
+# These assert about STATE, not about flow, and that is the whole point.
+#
+# A design switched off and never switched back on is a live listing earning
+# nothing. It happened for real on 2026-08-24: a deactivate stage ended when
+# the FIRST of two accounts reported, the run moved on, and 178 designs were
+# left off with nothing on any screen saying so. It was noticed by eye,
+# because a number on the page was going up instead of down.
+#
+# The bug is fixed. These checks exist because the NEXT one of that shape
+# will be different, and none of them require anyone to have imagined it:
+# they simply ask whether something that must be true still is.
+#
+# Marketplace-level, so they ignore `scope` — a design belongs to an ACCOUNT,
+# and an account may serve several projects or none.
+
+def check_designs_left_switched_off(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: nothing we switched off should still be off once no run is
+    working on it.
+
+    Switching a design off is only ever half of a cure. If the other half
+    never happened — a stage that ended early, a run abandoned in the middle,
+    the node dying — the listing is hidden from customers and there is no
+    other symptom at all. It does not error, it does not appear in a log, it
+    just stops earning.
+    """
+    from .earnings.store_health import active_run
+
+    rows_q = (db.query(StoreListing, UploadAccount.name)
+                .outerjoin(UploadAccount,
+                           UploadAccount.id == StoreListing.account_id)
+                .filter(StoreListing.deactivated_at.isnot(None))
+                .order_by(StoreListing.deactivated_at)
+                .limit(MAX_ROWS))
+    found = rows_q.all()
+    total = (db.query(func.count(StoreListing.id))
+               .filter(StoreListing.deactivated_at.isnot(None)).scalar() or 0)
+    if not total:
+        return _result("designs_switched_off",
+                       "Designs left switched off", "", "ok", [])
+
+    # A run actively working on them is not a fault — that is the cure in
+    # progress. Anything else is.
+    run = active_run(db)
+    working = bool(run and run.status in ("deactivating", "confirming",
+                                          "reactivating")
+                   and not run.paused_at)
+    now = datetime.utcnow()
+
+    rows = [
+        Finding(
+            f"{name or 'unknown account'} — {listing.title or listing.design_id}",
+            f"off since {listing.deactivated_at:%Y-%m-%d %H:%M}"
+            + (f" ({(now - listing.deactivated_at).days}d)"
+               if (now - listing.deactivated_at).days else ""),
+            "/admin/store",
+        )
+        for listing, name in found
+    ]
+
+    return _result(
+        "designs_switched_off",
+        f"{total} design(s) are switched off on the marketplace",
+        ("These were switched off as half of the deactivate/reactivate cure "
+         "and never switched back on. They are hidden from customers and "
+         "earning nothing. Press SWITCH BACK ON at the top of the TeePublic "
+         "tab."
+         if not working else
+         "A run is switching these back on right now — this clears itself. "
+         "If it is still here in an hour, it did not."),
+        "warn" if working else "error", rows, total,
+    )
+
+
+def check_stuck_listing_run(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: a run in a working stage must have work queued for it.
+
+    A run says "deactivating" because it dispatched jobs. If those jobs are
+    gone — finished, failed, reaped — and the run has not moved on, then
+    nothing will ever move it. It holds Photoshop and the uploads for ever
+    while the screen shows it politely in progress.
+    """
+    from .earnings.store_health import FINISHED
+    from .models import PipelineJob
+
+    rows = []
+    active = (db.query(StoreScanRun)
+                .filter(~StoreScanRun.status.in_(FINISHED)).all())
+    for run in active:
+        if run.status not in ("scanning", "deactivating", "reactivating"):
+            continue
+        if run.paused_at or (run.retry_at and run.retry_at > datetime.utcnow()):
+            continue          # deliberately waiting, not stuck
+
+        live = (db.query(func.count(PipelineJob.id))
+                  .filter(PipelineJob.kind.in_(
+                              ("store_scan", "store_deactivate",
+                               "store_reactivate")),
+                          PipelineJob.status.in_(("queued", "running")))
+                  .scalar() or 0)
+        if live:
+            continue
+
+        rows.append(Finding(
+            f"Run #{run.id} says {run.status} but nothing is queued",
+            f"started {run.started_at:%Y-%m-%d %H:%M}"
+            + (f" · {run.stage_jobs_done} of {run.stage_jobs_total} accounts "
+               f"reported" if run.stage_jobs_total else ""),
+            "/admin/store",
+        ))
+
+    return _result(
+        "stuck_listing_run", "A listing run that cannot move",
+        "This run is holding Photoshop and the uploads, but it has no work "
+        "queued to finish with — so it will hold them for ever. Press STOP "
+        "THIS RUN on the TeePublic tab, then check whether anything was left "
+        "switched off.",
+        "error", rows,
+    )
+
+
+def check_listing_catalogue_gaps(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: an account we can scan should have a catalogue, and a design
+    in it should have been checked at some point.
+
+    Catches the quiet cases: an account added and never swept, a store
+    address that stopped working so its designs silently stopped being read,
+    a whole account dropping out of a sweep without anybody noticing which.
+    """
+    from .earnings.store_health import SUPPORTED
+
+    rows = []
+    for acct in (db.query(UploadAccount)
+                   .filter(func.lower(UploadAccount.target_site).in_(SUPPORTED))
+                   .order_by(UploadAccount.name).all()):
+        if not (acct.profile_url or "").strip():
+            continue          # reported on the tab itself, not a fault here
+
+        known = (db.query(func.count(StoreListing.id))
+                   .filter(StoreListing.account_id == acct.id,
+                           StoreListing.removed_at.is_(None)).scalar() or 0)
+        if not known:
+            rows.append(Finding(
+                f"{acct.name} — never scanned",
+                "has a store address but no designs in the catalogue",
+                "/admin/store"))
+            continue
+
+        never = (db.query(func.count(StoreListing.id))
+                   .filter(StoreListing.account_id == acct.id,
+                           StoreListing.removed_at.is_(None),
+                           StoreListing.excluded == 0,
+                           StoreListing.last_checked_at.is_(None)).scalar() or 0)
+        if never:
+            rows.append(Finding(
+                f"{acct.name} — {never} of {known} designs never checked",
+                "a sweep has not reached these yet",
+                "/admin/store"))
+
+    return _result(
+        "listing_catalogue_gaps", "Accounts or designs no sweep has reached",
+        "Not a fault on its own — a new account, or a sweep that has not "
+        "finished. It matters when it persists: those designs could have "
+        "dropped out of search weeks ago and nothing here would know.",
+        "warn", rows,
+    )
+
+
 CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_missing_files,
     check_orphan_files,
@@ -692,6 +869,10 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_uploaded_without_processed,
     check_upload_accounts,
     check_orphaned_bans,
+    # ── Listing-health invariants ───────────────────────────────────────
+    check_designs_left_switched_off,
+    check_stuck_listing_run,
+    check_listing_catalogue_gaps,
     check_orphaned_upload_rows,
     check_unassigned_titles,
     check_duplicate_hashes,

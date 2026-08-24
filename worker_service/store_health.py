@@ -591,6 +591,13 @@ class StoreHealthStage:
             config=self.config, client=self.client, log=self.log, job_id=job_id)
 
         done = failed = 0
+        # Consecutive wall failures. After a run of them it is plainly the
+        # account and not the design: the first real attempt cost 97 minutes
+        # and 98 failures before one path happened to land. Stopping early
+        # and reporting it as transient lets the whole stage wait and come
+        # back, instead of grinding through 178 designs at a minute each.
+        wall_streak = 0
+        give_up_after = int(payload.get("wall_give_up_after") or 5)
         try:
             # start() is the risky step and it sits OUTSIDE the per-design
             # handler, so a Chrome that will not launch throws past every
@@ -598,6 +605,25 @@ class StoreHealthStage:
             # would stay "deactivating" forever — holding Photoshop and
             # uploads — with the screen showing it politely in progress.
             uploader.start()
+
+            # ── MEET THE WALL ONCE, NOT ONCE PER DESIGN ──────────────────
+            #
+            # It is a per-BROWSER thing: the log shows 98 designs failing,
+            # one getting through, then 100+ sailing past untouched. Clearing
+            # it up front costs five seconds; clearing it per design cost an
+            # hour and a half.
+            if html_markers:
+                try:
+                    uploader.driver.get(BASE)
+                    uploader.clear_wall([], paths, wait_s=wall_wait,
+                                        attempts=wall_tries,
+                                        signed_out_markers=signed_out,
+                                        html_markers=html_markers)
+                except Exception as e:
+                    uploader.emit(f"Could not clear the wall up front ({e}) — "
+                                  f"carrying on; each design will check.",
+                                  level="warn")
+
             for index, design in enumerate(designs, start=1):
                 did = design["design_id"]
                 label = design.get("title") or did
@@ -612,11 +638,23 @@ class StoreHealthStage:
                         self._reactivate(uploader, did)
                     self._report(run_id, account["id"], did, action, None)
                     done += 1
+                    wall_streak = 0
                 except Exception as e:
                     detail = f"{type(e).__name__}: {e}"
                     uploader.emit(f"  ✗ {label}: {detail}", level="error")
                     self._report(run_id, account["id"], did, action, detail)
                     failed += 1
+
+                    if getattr(e, "transient", False):
+                        wall_streak += 1
+                        if wall_streak >= give_up_after:
+                            raise UploadError(
+                                f"Gave up on {account.get('name')} after "
+                                f"{wall_streak} designs in a row blocked by "
+                                f"the wall. {done} were done first.",
+                                transient=True, fatal=True)
+                    else:
+                        wall_streak = 0
         except Exception as e:
             # Anything that escaped the per-design handler — almost always
             # start(). Report the stage as failed so the run ENDS and the
@@ -626,6 +664,9 @@ class StoreHealthStage:
                 "run_id": run_id, "stage": action,
                 "account_id": account["id"],
                 "error": f"{account.get('name')}: {detail}",
+                # The wall passes; a rejected password does not. Only the
+                # first is worth sleeping on.
+                "transient": bool(getattr(e, "transient", False)),
             })
             raise
         finally:

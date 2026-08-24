@@ -107,6 +107,9 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("store_scan_runs",  "paused_at",  "DATETIME"),
     ("store_scan_runs",  "paused_by",  "VARCHAR(64)"),
     ("store_scan_runs",  "scan_mode",  "VARCHAR(16) NOT NULL DEFAULT 'full'"),
+    ("store_scan_runs",  "retry_at",    "DATETIME"),
+    ("store_scan_runs",  "retry_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("store_scan_runs",  "retry_note",  "TEXT"),
 ]
 
 # ════════════════════════════════════════════════════════════════════════════

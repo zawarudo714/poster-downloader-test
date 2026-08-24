@@ -9,6 +9,7 @@ log or diff to work it out — that costs far more to read than these lines.**
 If the top entry looks older than the work in the repo, the difference is
 what has not been deployed yet.
 
+- **2026-08-23 21:30** · `05083e9f` · A paused or stopped scan no longer counts as a FINISHED scan. Resume carries on
 - **2026-08-23 20:11** · `2cc8cbbd` · Search pages are now addressed directly (?page=N&query=) instead of following a
 - **2026-08-23 17:53** · `6bff3a33` · The design catalogue is now kept between runs: added, removed and returned
 - **2026-08-23 17:03** · `3b54c6a0` · STOP now actually stops the node, within one design, keeping everything checked.
@@ -38,4 +39,3 @@ what has not been deployed yet.
 - **2026-08-17 18:41** · `c2dcd306` · Earnings tab (filters, per-design sales, manual matching, nightly read); report upload-session startup failures instead of stranding the batch; fix ADD ACCOUNT modal
 - **2026-08-17 18:02** · `c464e93f` · Fix ADD ACCOUNT modal (broken markup in v61) and release uploads queued against a deleted account
 - **2026-08-17 16:13** · `002a8fcb` · Remove completed setup instructions from the Nodes and Test tabs
-- **2026-08-17 15:14** · `fff4ac88` · Audit fixes: no TMDB link or paste-URL box in MUSIK, year column hidden, cost reconciliation

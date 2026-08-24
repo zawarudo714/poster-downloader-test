@@ -37,7 +37,7 @@ releases it on the way out. There is no second edge to lose.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -93,6 +93,14 @@ def holds_pipeline(db: Session) -> Optional[str]:
     # uploads to have the machine back for a while. A pause that kept the
     # hold would be an unhelpful stop with extra steps.
     if run.paused_at:
+        return None
+
+    # ── NOR DOES ONE WAITING OUT A WALL ──────────────────────────────────
+    #
+    # Same reasoning as a pause. Holding Photoshop and the uploads for an
+    # hour and a half while we wait for a marketplace to stop having a
+    # moment would cost far more than the scan is worth.
+    if run.retry_at and run.retry_at > datetime.utcnow():
         return None
 
     tally = counts(db, run, run.marketplace)
@@ -299,6 +307,8 @@ def scannable_listings(db: Session, run: StoreScanRun,
     turns a six-hour sweep into a few minutes, which is the difference
     between checking and not bothering.
     """
+    from ..pipeline import get_setting
+
     q = db.query(StoreListing).filter(
         StoreListing.marketplace == run.marketplace,
         StoreListing.removed_at.is_(None),
@@ -308,11 +318,29 @@ def scannable_listings(db: Session, run: StoreScanRun,
     if run.scan_mode == "missing_only":
         q = q.filter(StoreListing.status == "missing")
 
-    # Skip whatever THIS run has already checked. Without it, resuming a
-    # paused sweep would start again from the top and a pause would cost the
-    # whole scan — which is the opposite of what pause is for.
+    # ── WHAT COUNTS AS "ALREADY DONE" ────────────────────────────────────
+    #
+    # Everything checked at or after the watermark is skipped.
+    #
+    #   full / missing_only — watermark is when THIS run started, so a pause
+    #       resumes where it stopped, and a full sweep still rechecks every
+    #       design. That last part matters: a status is a fact with a DATE on
+    #       it, and a sweep that skipped anything already marked would freeze
+    #       the catalogue and stop noticing designs that newly drop out.
+    #
+    #   continue — watermark goes BACK a few hours, so work done by an
+    #       earlier, interrupted sweep also counts. That is what makes "carry
+    #       on from where last night died" work, and it is deliberately keyed
+    #       on the DESIGN rather than on the run: after a night of stopping
+    #       and starting there is no single run to chain to, and per-account
+    #       would have missed the 50 designs one account stopped short of.
+    watermark = run.started_at
+    if run.scan_mode == "continue":
+        hours = float(get_setting(db, "scan_continue_within_h") or 24)
+        watermark = min(watermark, datetime.utcnow() - timedelta(hours=hours))
+
     return [r for r in q.order_by(StoreListing.account_id, StoreListing.id).all()
-            if not r.last_checked_at or r.last_checked_at < run.started_at]
+            if not r.last_checked_at or r.last_checked_at < watermark]
 
 
 def missing_for(db: Session, run: StoreScanRun,
@@ -509,3 +537,95 @@ def scan_incomplete(db: Session, run: StoreScanRun) -> int:
         rows = rows.filter(StoreListing.status == "missing")
     return sum(1 for r in rows.all()
                if not r.last_checked_at or r.last_checked_at < run.started_at)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  WAITING OUT A TRANSIENT FAILURE
+# ════════════════════════════════════════════════════════════════════════════
+
+def retry_delays(db: Session) -> list[int]:
+    """
+    The gaps, in minutes, from the dashboard. Length = how many attempts.
+
+    Stored as "30,60,90" rather than three settings because they are one
+    decision — how patient to be — and because adding a fourth attempt
+    should not need a code change.
+    """
+    from ..pipeline import get_setting
+
+    raw = str(get_setting(db, "scan_retry_delays_min") or "30,60,90")
+    out = []
+    for part in raw.replace(" ", "").split(","):
+        try:
+            value = int(part)
+        except ValueError:
+            continue
+        if value > 0:
+            out.append(value)
+    return out or [30, 60, 90]
+
+
+def schedule_retry(db: Session, run: StoreScanRun, *, reason: str) -> Optional[int]:
+    """
+    Sleep, then try the stage again. Returns the delay, or None if out of tries.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY RETRY AT ALL — AND WHY SPACED OUT
+    ════════════════════════════════════════════════════════════════════════
+    The wall failed three times in 54 seconds and the run gave up, wasting
+    six and a half hours of an unattended night. Three attempts inside one
+    minute is not three chances: whatever was wrong at 23:13 was still wrong
+    at 23:14. Real gaps turn them into three genuinely different moments.
+
+    This does NOT contradict the rule that a retry can be the cause of a
+    problem — that one is about things the far side COUNTS. Sign-in attempts
+    are counted, and hammering them is how a suspicious address becomes a
+    blocked one. This scan is signed out and reading public pages; loading a
+    search page again half an hour later is indistinguishable from an
+    ordinary visitor. There is no counter to trip.
+
+    Giving up is still the right answer eventually. Three spaced attempts
+    failing means it is not a moment, and something has actually changed.
+    """
+    delays = retry_delays(db)
+    attempt = int(run.retry_count or 0)
+    if attempt >= len(delays):
+        return None
+
+    minutes = delays[attempt]
+    run.retry_count = attempt + 1
+    run.retry_at = datetime.utcnow() + timedelta(minutes=minutes)
+    run.retry_note = reason[:400]
+    run.stage_note = (f"Waiting {minutes} minutes before trying again "
+                      f"(attempt {run.retry_count} of {len(delays)}). {reason[:200]}")
+    return minutes
+
+
+def due_retries(db: Session) -> list[StoreScanRun]:
+    """Runs whose waiting time is up. Asked by the scheduler tick."""
+    now = datetime.utcnow()
+    return [r for r in db.query(StoreScanRun)
+                        .filter(~StoreScanRun.status.in_(FINISHED))
+                        .filter(StoreScanRun.retry_at.isnot(None)).all()
+            if r.retry_at <= now and not r.paused_at]
+
+
+def continue_backlog(db: Session, marketplace: str) -> int:
+    """
+    How many designs a CONTINUE would check right now.
+
+    Computed the same way the scan computes it — anything not checked inside
+    the window — so the number on the button is the number that will actually
+    be done. A button that promises 627 and then does 1,543 is worse than no
+    button.
+    """
+    from ..pipeline import get_setting
+
+    hours = float(get_setting(db, "scan_continue_within_h") or 24)
+    cutoff = datetime.utcnow() - timedelta(hours=hours)
+    rows = db.query(StoreListing).filter(
+        StoreListing.marketplace == marketplace,
+        StoreListing.removed_at.is_(None),
+        StoreListing.excluded == 0).all()
+    return sum(1 for r in rows
+               if not r.last_checked_at or r.last_checked_at < cutoff)

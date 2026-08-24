@@ -268,8 +268,14 @@ class UploadError(RuntimeError):
 
     def __init__(self, message: str, *, pause_minutes: int = 0,
                  pause_reason: Optional[str] = None, fatal: bool = False,
-                 pause_immediate: bool = True):
+                 pause_immediate: bool = True, transient: bool = False):
         super().__init__(message)
+        # TRANSIENT means the far side's problem, not ours, and it is the
+        # kind that passes: an interstitial wall, a maintenance page, a
+        # timeout. Worth waiting out and trying again later. Contrast a
+        # rejected password or a deleted design, where retrying achieves
+        # nothing. The caller decides what to do; this only says which it is.
+        self.transient = transient
         self.pause_minutes = pause_minutes
         self.pause_reason = pause_reason or message
         self.fatal = fatal
@@ -685,6 +691,11 @@ class MarketplaceUploader:
             pause_minutes=180,
             pause_reason=f"Stuck at the wall (tried: {tried})",
             fatal=True,
+            # The wall is the far side having a moment, and moments pass.
+            # Three attempts inside one minute is not three chances — it is
+            # one chance taken three times. Whoever catches this should wait
+            # and come back, not give up on the night's work.
+            transient=True,
         )
 
 

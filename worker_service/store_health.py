@@ -341,6 +341,11 @@ class StoreHealthStage:
 
         results = {"checked": 0, "missing": 0, "errors": 0}
         failures: list[str] = []
+        # Failures the far side will probably not still be having in half an
+        # hour — the wall, a maintenance page, a timeout. Tracked apart from
+        # the rest so the server can wait and come back rather than throwing
+        # away the night.
+        transient: list[str] = []
         lock = threading.Lock()
         queue = list(accounts)
         # Set when the SERVER says the run is no longer scanning — the admin
@@ -377,6 +382,8 @@ class StoreHealthStage:
                     with lock:
                         results["errors"] += 1
                         failures.append(f"{account.get('name')}: {detail}")
+                        if getattr(e, "transient", False):
+                            transient.append(account.get("name"))
 
         threads = [threading.Thread(target=worker, daemon=True)
                    for _ in range(min(workers, len(queue)))]
@@ -401,6 +408,11 @@ class StoreHealthStage:
             self.client.post("/store/stage-done", {
                 "run_id": run_id, "stage": "scan",
                 "error": "; ".join(failures[:5]),
+                # ALL of them being the far side's problem is very different
+                # from one account having a real fault. The first is worth
+                # waiting out; the second is not.
+                "transient": bool(transient) and len(transient) == len(failures),
+                "transient_accounts": transient,
             })
             raise RuntimeError(
                 f"{len(failures)} account(s) could not be scanned: "

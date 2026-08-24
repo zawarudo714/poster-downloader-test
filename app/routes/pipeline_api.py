@@ -1190,6 +1190,21 @@ def store_stage_done(
     # showed it politely "scanning".
     error = (payload.get("error") or "").strip()
     if error:
+        # ── THE FAR SIDE HAVING A MOMENT IS NOT A FAILED RUN ─────────────
+        #
+        # A wall or a maintenance page passes. Giving up on one throws away
+        # the whole unattended night — which is exactly what happened at
+        # 23:14 one evening, costing six and a half hours. So a transient
+        # failure sleeps and comes back, with a growing gap, and only gives
+        # up once spaced attempts have also failed. It does not hold the
+        # pipeline while it waits.
+        if payload.get("transient"):
+            minutes = SH.schedule_retry(db, run, reason=error[:300])
+            if minutes:
+                db.commit()
+                return JSONResponse({"ok": True, "status": run.status,
+                                     "retry_in_min": minutes})
+
         SH.finish_run(db, run, status="failed",
                       note=f"{stage} failed — {error[:400]}")
         db.commit()

@@ -635,6 +635,16 @@ DEFAULTS: dict[str, Any] = {
     # no amount of cycling will change that. 2 because the cure is reliable
     # when it is the right cure — a third failure is evidence, not bad luck.
     "scan_vague_after_fixes": 2,
+    # How long to wait before trying again after a TRANSIENT failure — the
+    # wall, a maintenance page. Growing gaps, and the list length is also how
+    # many times it will try before giving up. Three attempts inside one
+    # minute is not three chances; these are.
+    "scan_retry_delays_min": "30,60,90",
+    # CONTINUE skips designs checked more recently than this. It is what
+    # makes "carry on where the night left off" work without freezing the
+    # catalogue: a design checked 20 hours ago is still current, one checked
+    # last week is not.
+    "scan_continue_within_h": 24,
 
     # ── How many failures in a row before an account is parked ───────────
     # Only applies to failures the node marks as "might be systemic" — a

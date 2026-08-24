@@ -89,8 +89,9 @@ Also planned, stated but not yet built:
    yesterday"), filterable and totalled by site (all / TeePublic / FAA /
    Redbubble later), by account, or by any subset.
 
-   **BUILT for FineArtAmerica, 2026-08-20.** TeePublic still to come — it
-   needs a reader module and an entry in `service.READERS`, nothing else.
+   **BUILT for FineArtAmerica 2026-08-20, and for TeePublic 2026-08-22.**
+   Redbubble or anything else needs a reader module, an entry in
+   `service.READERS` and a `CAPABILITIES` row — nothing else.
    What actually got built, where it differs from the plan above:
 
      * An ACCOUNT EXISTS ONCE — held to, and it is now enforced by the
@@ -131,6 +132,49 @@ Also planned, stated but not yet built:
    acting. These need re-processing through the pipeline once. Intended as a
    deliberate one-off trigger, not a permanent feature — build it as a
    throwaway admin action and delete it afterwards.
+
+8. **THE INTERACTION AUDIT — a whole-system pass, on his explicit
+   instruction, once the foundational mechanisms are all in.** Not a code
+   review and not a test suite: a deliberate trace of every action against
+   every OTHER thing it can touch, written out as a tree.
+
+   **The class of bug it exists to catch** is the one this project keeps
+   producing: two or three mechanisms that are each individually correct,
+   combining into something wrong. Nothing is broken in isolation, so
+   nothing finds it except asking "what else is true while this happens".
+
+   The specimen, 2026-08-23, and it is worth keeping because it is typical:
+   PAUSE worked. The node's stop-reporting worked. RESUME worked. But a
+   pause ended the scan JOB cleanly, the server read a clean job end as a
+   finished SCAN, and resume on an automatic run therefore dispatched a mass
+   deactivation off a sweep that had covered 199 designs of 1,543. Three
+   correct parts, one wrong outcome.
+
+   **His own example, and it is not yet handled:** what happens to the
+   earnings read when FineArtAmerica serves a MAINTENANCE page? Today the
+   parser would fail to find the figures and report "FAA has changed its
+   page" — sending the next session hunting a redesign that never happened.
+   Same shape as the wall being reported as "TeePublic has changed it".
+
+   **How to actually do it, because "be thorough" is worthless:**
+
+   * Enumerate ACTIONS, not screens — every button, every scheduled trigger,
+     every node job, every stage transition.
+   * For each, ask the three questions that have actually caught things
+     here: what else is RUNNING while this happens; what does this leave in
+     a half-state if it stops midway; and what does the far side (a
+     marketplace, the node, the clock) do that we have not seen yet.
+   * Pay special attention where TWO mechanisms both claim the same
+     resource — the node, an account, a browser profile, the pipeline hold.
+     Every serious bug so far has been at one of those seams.
+   * Write the tree down as a file. It is the artefact, not the fixes.
+
+   **Seed it with what is already known** rather than starting cold: the
+   quiet window vs a store run vs a scheduled earnings read; an account
+   paused for uploading vs the same account being read for money; a wall
+   appearing during a scan vs during a deactivation; a node going offline
+   mid-stage in each of the six stages; a marketplace serving maintenance,
+   a redesign, or a challenge to any of the three readers.
 
 Concretely, this means:
 
@@ -679,6 +723,7 @@ irrelevant, say why in one line rather than skipping it silently.
 | # | The shape it catches | Related |
 |---|---|---|
 | 1 | Built without enumerating what is already on the screen | 3b |
+| 1b | Built exactly what was asked and silently lost a capability | 1, 2 |
 | 2 | Fixed the asked-for thing, left its neighbours broken | 1, 6 |
 | 3 | Said "verified" without naming a test | 3c |
 | 3b | Reasoned from where a thing is SHOWN, not what depends on it | 3d, 6 |
@@ -714,6 +759,44 @@ TMDB. Renaming made it worse, because now it looked right.
 title, save an image, tap the saved image, flag it, then look at the worker's
 view. Most dead mechanisms are not on the page at load; they appear after a
 click, which is exactly where a text search cannot go.
+
+### 1b. If his instruction would break something, SAY SO BEFORE BUILDING
+
+His words, 2026-08-24: *"if i give you a direction that messes up something,
+mention it first before building. Dont just blindly implement it if you think
+it would contradict something, then I will give you confirmation or
+alteration or decide not to implement."*
+
+He describes the OUTCOME he wants, in his own words, from what he can see on
+the screen. He is not describing the mechanism, and he cannot see what else
+depends on it. So an instruction that is perfectly clear can still conflict
+with something he is not looking at.
+
+The incident: an overnight sweep died at 11pm, and in the morning pressing
+FULL SWEEP restarted from design 1 — three accounts already scanned were
+scanned again. He said: make it never scan from scratch, skip anything
+already marked visible or missing.
+
+Taken literally that breaks the tool. A design's status is a fact with a
+DATE on it. "Skip anything already marked" means a design marked visible
+last week is never checked again, the catalogue freezes, and the whole point
+— noticing that a design has newly dropped out — quietly stops working.
+
+What he actually wanted was narrower: an INTERRUPTED sweep should carry on
+rather than start over. That is a property of the RUN, not of the design.
+
+So when an instruction conflicts:
+
+1. **Say what it would break, concretely**, in terms of something he cares
+   about — money, a screen going wrong, work repeating. Not "that violates
+   an invariant".
+2. **Offer the version that gets him what he actually wanted.** He is
+   describing a symptom; find the cause.
+3. **Then stop and ask.** Do not build either version until he answers.
+
+The failure mode this prevents is worse than a bug: building exactly what
+was asked and quietly losing a capability nobody notices is missing until
+the day it matters.
 
 ### 2. When you implement something, revise everything it touches
 

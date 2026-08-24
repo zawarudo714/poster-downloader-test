@@ -71,11 +71,25 @@
         + '.</p>' +
         '<p><label class="inline-check"><input type="checkbox" data-auto> '
         + 'run it all automatically — no confirmation between stages</label></p>' +
-        '<p><button class="btn btn-accent" data-action="start" type="button"'
+        '<p>'
+        + (data.continue_left && data.continue_left < (t.total || 0)
+            ? '<button class="btn btn-accent" data-action="start-continue" '
+              + 'type="button">CONTINUE — ' + data.continue_left
+              + ' LEFT TO CHECK</button> ' : '')
+        + '<button class="btn ' + (data.continue_left && data.continue_left < (t.total || 0)
+            ? 'btn-ghost' : 'btn-accent') + '" data-action="start" type="button"'
         + (data.ready ? '' : ' disabled') + '>FULL SWEEP</button> ' +
         '<button class="btn btn-ghost" data-action="start-missing" type="button"'
         + (t.missing ? '' : ' disabled') + '>RECHECK THE ' + (t.missing || 0)
         + ' MISSING</button></p>' +
+        (data.continue_left && data.continue_left < (t.total || 0)
+          ? '<p class="muted">CONTINUE skips the '
+            + ((t.total || 0) - data.continue_left) + ' designs already checked '
+            + 'in the last ' + data.continue_within_h + ' hours — use it when a '
+            + 'sweep was interrupted. FULL SWEEP rechecks everything, which is '
+            + 'what you want normally, because a design that was fine last week '
+            + 'may not be fine today.</p>'
+          : '') +
         '<p class="muted">A recheck only looks at designs already marked '
         + 'missing, so it takes minutes rather than hours.</p>';
       return;
@@ -87,7 +101,17 @@
       + ' · started ' + when(run.started_at);
 
     var body = '';
-    if (run.paused) {
+    if (run.retry_at && new Date(run.retry_at) > new Date()) {
+      // Not a failure and not a pause: the far side had a moment and we are
+      // waiting it out. Photoshop and uploads have the machine meanwhile.
+      body = '<p><strong>Waiting to try again</strong> at '
+        + when(run.retry_at) + ' (attempt ' + run.retry_count + ').</p>'
+        + '<p class="muted">' + esc(run.retry_note) + '</p>'
+        + '<p class="muted">Photoshop and uploads have the machine until '
+        + 'then. Nothing is lost.</p>'
+        + '<p><button class="btn btn-accent" data-action="resume" '
+        + 'type="button">TRY NOW</button></p>';
+    } else if (run.paused) {
       body = '<p><strong>Paused</strong> at the ' + esc(run.status) + ' stage'
         + (run.paused_by ? ' by ' + esc(run.paused_by) : '') + '.</p>' +
         '<p class="muted">Photoshop and uploads have the machine back. '
@@ -270,7 +294,8 @@
       // wrong is worse than one that is slow.
       var run = data.run;
       var moving = run
-        && ['scanning', 'deactivating', 'reactivating'].indexOf(run.status) >= 0;
+        && (['scanning', 'deactivating', 'reactivating'].indexOf(run.status) >= 0
+            || !!run.retry_at);
       clearTimeout(state.timer);
       if (moving) state.timer = setTimeout(reload, run.paused ? 15000 : 5000);
     } catch (e) {
@@ -316,10 +341,15 @@
 
     var a = t.dataset.action, auto = !!(q('[data-auto]') || {}).checked;
     if (a === 'start') {
-      act(API + '/start', { auto: auto },
-          'Start a full sweep? Photoshop and uploads pause until it is done.');
+      act(API + '/start', { auto: auto, mode: 'full' },
+          'Start a FULL sweep? Every design is rechecked, including ones '
+          + 'checked recently. Photoshop and uploads pause until it is done.');
+    } else if (a === 'start-continue') {
+      act(API + '/start', { auto: auto, mode: 'continue' },
+          'Carry on from where the last sweep stopped? Designs checked in '
+          + 'the last day are skipped.');
     } else if (a === 'start-missing') {
-      act(API + '/start', { auto: auto, missing_only: true },
+      act(API + '/start', { auto: auto, mode: 'missing_only' },
           'Recheck only the designs currently marked missing?');
     } else if (a === 'deactivate') {
       act(API + '/advance', { stage: 'deactivate' },

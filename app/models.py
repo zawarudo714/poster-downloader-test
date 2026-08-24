@@ -1330,7 +1330,17 @@ class StoreScanRun(Base):
     paused_at   = Column(DateTime, nullable=True)
     paused_by   = Column(String(64), nullable=True)
 
-    #   full | missing_only
+    # ── Waiting out a transient failure ─────────────────────────────────
+    # The wall, a maintenance page, a timeout: the far side having a moment.
+    # Rather than throwing away the night's work, the run sleeps until
+    # `retry_at` and tries again, with the gap growing each time. It does NOT
+    # hold the pipeline while it waits — an hour of holding Photoshop for
+    # nothing would be the opposite of helpful.
+    retry_at    = Column(DateTime, nullable=True)
+    retry_count = Column(Integer, nullable=False, default=0)
+    retry_note  = Column(Text, nullable=True)
+
+    #   full | missing_only | continue
     # A recheck after reactivation only needs the designs that were missing,
     # which turns a six-hour sweep into a few minutes.
     scan_mode   = Column(String(16), nullable=False, default="full")

@@ -1,2 +1,3 @@
-A paused or stopped scan no longer counts as a FINISHED scan. Resume carries on
-scanning and skips what it already did, and never acts on an incomplete sweep.
+A wall no longer kills the night: the sweep waits 30/60/90 minutes and retries,
+releasing the pipeline while it waits. New CONTINUE button picks up unchecked
+designs without rescanning what was done in the last 24 hours.

@@ -293,6 +293,21 @@ def _scheduler_loop():
             except Exception:
                 log.exception("Earnings read failed")
 
+            # ── Is a listing sweep waiting to try again? ─────────────────
+            # A wall or a maintenance page makes a sweep sleep rather than
+            # give up. Nothing else would ever wake it: the node cannot
+            # queue its own work, so the clock has to live here.
+            try:
+                from .db import SessionLocal
+                from .routes.store_admin import wake_due_retries
+                _db = SessionLocal()
+                try:
+                    wake_due_retries(_db)
+                finally:
+                    _db.close()
+            except Exception:
+                log.exception("Listing-sweep retry failed")
+
             # ── Is image generation still running? ───────────────────────
             # Wrapped in its own try so a failure here can never stop the
             # backups. Losing a day's backup to a watchdog would be a poor

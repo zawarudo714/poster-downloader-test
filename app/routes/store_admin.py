@@ -108,6 +108,11 @@ def api_overview(admin: User = Depends(require_admin),
         "ready": len(ready),
         "blocked": [a.name for a in blocked],
         "totals": SH.counts(db, run, MARKETPLACE),
+        # What a CONTINUE would pick up right now, worked out the same way
+        # the scan will work it out. The button says the number so you know
+        # before pressing whether it is going to do what you expect.
+        "continue_left": SH.continue_backlog(db, MARKETPLACE),
+        "continue_within_h": int(P.get_setting(db, "scan_continue_within_h")),
         "run": _run_payload(db, run) if run else None,
         # Recorded mouse paths are needed for the signed-in stages, so the
         # tab says up front if there are none — rather than discovering it
@@ -198,6 +203,9 @@ def _run_payload(db: Session, run: StoreScanRun) -> dict:
         "mode": run.scan_mode,
         "paused": bool(run.paused_at),
         "paused_by": run.paused_by,
+        "retry_at": run.retry_at.isoformat() if run.retry_at else None,
+        "retry_count": run.retry_count or 0,
+        "retry_note": run.retry_note or "",
         "started_at": run.started_at.isoformat() if run.started_at else None,
         "counts": SH.counts(db, run, run.marketplace),
         "waiting": run.status in SH.WAITING,
@@ -259,8 +267,7 @@ def api_start(payload: dict = Body(default={}),
         run = SH.start_run(
             db, marketplace=MARKETPLACE, by=admin.username,
             auto=bool(payload.get("auto")),
-            scan_mode=("missing_only" if payload.get("missing_only")
-                       else "full"))
+            scan_mode=str(payload.get("mode") or "full"))
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -559,3 +566,30 @@ def api_settings(payload: dict = Body(...),
                  target_type="store", target_id=None, details=changed)
     db.commit()
     return JSONResponse({"ok": True, "changed": changed})
+
+
+def wake_due_retries(db: Session) -> int:
+    """
+    Re-dispatch any sweep whose waiting time is up. Called by the scheduler.
+
+    Lives here rather than in the service module because it needs to QUEUE A
+    JOB, and `_queue_scan` is the one definition of how a scan is queued. A
+    second copy that built the payload itself is exactly how the retried
+    sweep would end up subtly different from the original — and the retry is
+    the one nobody is watching.
+    """
+    woken = 0
+    for run in SH.due_retries(db):
+        run.retry_at = None
+        if run.status == "scanning":
+            _queue_scan(db, run, by="retry")
+        elif run.auto:
+            nxt = SH.next_stage(run)
+            if nxt:
+                SH.dispatch_stage(db, run, nxt, by="retry")
+        run.stage_note = (f"Trying again after waiting "
+                          f"(attempt {run.retry_count}).")
+        woken += 1
+    if woken:
+        db.commit()
+    return woken

@@ -2082,19 +2082,11 @@ def skip_revise(
     return JSONResponse({"ok": True})
 
 
-@router.post("/title/{master_id}/clear_admin_note")
-def clear_admin_note(
-    master_id: int,
-    user_role: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    """Admin clears their own note (used when the title's been re-handled)."""
-    t = db.query(MasterTitle).filter_by(id=master_id).first()
-    if not t:
-        raise HTTPException(404, "Title not found.")
-    t.admin_note = None
-    db.commit()
-    return JSONResponse({"ok": True})
+# `POST /title/{id}/clear_admin_note` was removed on 2026-08-24. It had no
+# button, no form and no fetch anywhere on the site — it could only ever have
+# been called by hand. An endpoint with zero callers is not a spare part; it
+# is something a future session has to read and reason about before deciding
+# it does nothing. The note is still cleared wherever it is actually edited.
 
 
 @router.get("/revisions", response_class=HTMLResponse)

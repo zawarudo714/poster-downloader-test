@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% from "_macros.html" import info %}
+{% block title %}Listing check · Admin{% endblock %}
+
+{% block content %}
+{#
+   Master level — no `nav_scope`, deliberately. A listing belongs to an
+   ACCOUNT, and one FineArtAmerica account carries both niches. Showing this
+   inside a project would hide half of it from the other one.
+#}
+<div class="admin-grid" data-no-global-scroll>
+
+  {# ── The sweep ────────────────────────────────────────────────────────
+     One panel that changes with what is happening, rather than several of
+     which most are always irrelevant. #}
+  <section class="panel">
+    <div class="panel-head">
+      <span>IS IT STILL THERE?
+        {{ info("Your database says these images are live on FineArtAmerica. Nobody has ever checked. This opens each listing's own address and notes whether the page loads or comes back as Not Found — nothing is changed on the marketplace and nothing is changed here without you saying so. It reads about 200 listings at a time so Photoshop and uploads keep running in between. You start it by hand; there is no schedule.") }}
+      </span>
+      <span class="muted mono" data-sweep-summary></span>
+    </div>
+    <div class="panel-body" data-sweep-panel>
+      <div class="muted">Loading…</div>
+    </div>
+  </section>
+
+  {# ── Findings ─────────────────────────────────────────────────────────
+     Grouped by what each one MEANS, not by which account it came from.
+     "This listing is gone" and "we could not look" are different problems
+     and want different answers, so they are never in one list. #}
+  <section class="panel">
+    <div class="panel-head">
+      <span>WHAT DOESN'T ADD UP
+        {{ info("Only listings that have actually been checked appear here. NOT ON THE SITE means we believe it is up and the marketplace returned a real Not Found — either it was taken down, or an upload was recorded as a success when it never happened. COULD NOT LOOK is not evidence of anything: the site refused us or had a moment. BACK AGAIN is a listing you previously marked as removed that is loading once more.") }}
+      </span>
+      <span class="muted mono" data-findings-summary></span>
+    </div>
+    <div class="panel-body" data-findings-list>
+      <div class="muted">Loading…</div>
+    </div>
+  </section>
+
+  {# ── Accounts ─────────────────────────────────────────────────────────
+     The artist name lives here because it is the one thing without which
+     nothing works, and because getting it wrong is the expensive mistake.
+     Saving one shows a real address built from it, so a typo is visible in
+     five seconds rather than after an hour of everything reading GONE. #}
+  <section class="panel">
+    <div class="panel-head">
+      <span>ACCOUNTS AND ARTIST NAMES
+        {{ info("The public address of a listing is built from its title and the artist name the marketplace prints on it — for example Golden Reel, not your login and not the account nickname. Copy it from the Artist Name box on any Edit Image page, exactly as it appears. An account without one is skipped entirely, and one with the wrong one will report every single listing as missing.") }}
+      </span>
+      <span class="muted mono" data-accounts-summary></span>
+    </div>
+    <div class="panel-body" data-accounts-list>
+      <div class="muted">Loading…</div>
+    </div>
+  </section>
+
+  {# ── Settings ─────────────────────────────────────────────────────────#}
+  <section class="panel">
+    <div class="panel-head">
+      <span>SETTINGS
+        {{ info("HOW MANY AT A TIME is how many addresses go to the worker machine in one go. It runs one job at a time, so this is really how long Photoshop may be made to wait — 200 is two or three minutes. PAUSE BETWEEN is the gap between requests; these are public pages and nobody counts them, but several thousand in a burst from one address is how a site starts paying attention.") }}
+      </span>
+      <span class="muted mono" data-settings-status></span>
+    </div>
+    <div class="panel-body">
+      <div class="form-row">
+        <label>how many at a time
+          <input type="number" min="20" max="1000" step="10"
+                 data-set="listing_check_chunk">
+        </label>
+        <label>pause between requests (milliseconds)
+          <input type="number" min="0" max="5000" step="50"
+                 data-set="listing_check_gap_ms">
+        </label>
+        <button class="btn btn-ghost" data-action="save-settings" type="button">SAVE</button>
+      </div>
+    </div>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/admin_listings.js?v={{ app_version }}"></script>
+{% endblock %}

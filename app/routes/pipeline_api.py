@@ -541,7 +541,14 @@ def jobs_claim(
                     # same reason earnings reads do: same browser, same
                     # accounts, same Chrome profiles. A separate capability
                     # would be one more thing to provision for no gain.
-                    "store_scan", "store_deactivate", "store_reactivate"]
+                    "store_scan", "store_deactivate", "store_reactivate",
+                    # Listing reconciliation needs NO browser and NO login —
+                    # it is plain HEAD requests. It rides here anyway because
+                    # the Linux server is refused by FineArtAmerica for every
+                    # page, public ones included, while this machine is not.
+                    # The capability being asked for is really "can reach the
+                    # marketplace at all".
+                    "listing_check"]
     if kinds:
         allowed = [k for k in allowed if k in kinds]
     if not allowed:
@@ -1310,3 +1317,114 @@ def store_stage_done(
         db.commit()
 
     return JSONResponse({"ok": True, "status": run.status, "next": nxt})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  LISTING RECONCILIATION
+# ═══════════════════════════════════════════════════════════════════════════
+
+@router.post("/listings/progress")
+def listing_progress(
+    payload: dict = Body(...),
+    node: WorkerNode = Depends(require_node),
+    db: Session = Depends(get_db),
+):
+    """
+    A batch of status codes, mid-chunk. The reply says whether to carry on.
+
+    ════════════════════════════════════════════════════════════════════════
+    POSTED AS IT GOES, NOT AT THE END
+    ════════════════════════════════════════════════════════════════════════
+    Two reasons, and both were learned the expensive way.
+
+    A chunk that reported only at the end would lose everything it had
+    already checked if the machine died halfway — and then re-check it,
+    for ever, because "what is left" is derived from what has been recorded.
+
+    And the REPLY is the only way a node can be stopped. It cannot hear a
+    button; it can only hear an answer to a question it was already asking.
+    The TeePublic scan posted per design and threw the answer away, so
+    pressing STOP ended the run on screen while the node carried on for
+    another twenty minutes.
+    """
+    from .. import listing_check as LC
+
+    results = payload.get("results") or []
+    tally = LC.record(db, results)
+    stop = LC.should_stop(db, payload.get("sweep_id"))
+    db.commit()
+    return JSONResponse({"ok": True, "stored": len(results),
+                         "tally": tally, "stop": stop})
+
+
+@router.post("/listings/chunk-done")
+def listing_chunk_done(
+    payload: dict = Body(...),
+    node: WorkerNode = Depends(require_node),
+    db: Session = Depends(get_db),
+):
+    """
+    One chunk finished. Send the next, or end the sweep.
+
+    What comes next is decided HERE rather than on the node, for the same
+    reason every other stage is: it is policy. The node knows how to fetch a
+    list of addresses and nothing else, which is also what would let this be
+    pointed at a different marketplace without touching it.
+    """
+    from .. import listing_check as LC
+    from ..models import ListingSweep
+    from ..routes.listing_admin import dispatch_chunk
+
+    sweep = db.query(ListingSweep).filter_by(
+        id=payload.get("sweep_id")).first()
+    if sweep is None:
+        raise HTTPException(404, "No such sweep.")
+    if sweep.status in LC.FINISHED:
+        # Stopped by hand while this chunk was in flight. Its results are
+        # already stored and still true; there is simply nothing to continue.
+        return JSONResponse({"ok": True, "status": sweep.status, "next": 0})
+
+    error = (payload.get("error") or "").strip()
+    if error:
+        LC.finish(db, sweep, status="failed", note=f"The check failed — {error[:400]}")
+        db.commit()
+        return JSONResponse({"ok": True, "status": sweep.status})
+
+    # ── A CUT-SHORT CHUNK HAS NOT FINISHED ───────────────────────────────
+    #
+    # Stopping ends the job cleanly, with every address reported and no
+    # failure — indistinguishable from success unless the node says so.
+    if payload.get("partial"):
+        db.commit()
+        return JSONResponse({"ok": True, "status": sweep.status, "next": 0})
+
+    # ── THE GUARD AGAINST A WRONG ARTIST NAME ────────────────────────────
+    #
+    # Checked between chunks so a bad address is caught two minutes in
+    # rather than an hour in. It does NOT assert which explanation is right:
+    # an account really can lose everything, and that is what a ban looks
+    # like. It stops and says both readings.
+    suspect = LC.artist_name_suspect(db, sweep)
+    if suspect:
+        names = ", ".join(f"{s['account']} ({s['gone']} of {s['checked']} "
+                          f"not found)" for s in suspect)
+        LC.finish(db, sweep, status="failed", note=(
+            f"Stopped early. Almost nothing is being found for: {names}. "
+            f"That usually means the artist name is spelled differently on "
+            f"the marketplace than it is here — but it is also what a banned "
+            f"or emptied account looks like. Open one of the addresses below "
+            f"in a browser to see which."))
+        db.commit()
+        return JSONResponse({"ok": True, "status": sweep.status,
+                             "suspect": suspect})
+
+    sent = dispatch_chunk(db, sweep, by="auto")
+    if not sent:
+        tally = LC.counts(db, sweep)
+        LC.finish(db, sweep, status="done", note=(
+            f"Checked {tally['checked_this_run']} listing(s): "
+            f"{tally['live']} still there, {tally['gone']} not found"
+            + (f", {tally['unknown']} we could not look at"
+               if tally["unknown"] else "") + "."))
+    db.commit()
+    return JSONResponse({"ok": True, "status": sweep.status, "next": sent})

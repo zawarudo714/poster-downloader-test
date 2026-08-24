@@ -631,7 +631,9 @@
           <button type="button" class="btn btn-accent btn-tiny" data-action="test-upload">RUN TEST UPLOAD</button>
           <span class="muted mono" data-test-status="upload"></span>
         </div>
-        <div class="pipe-preview" data-test-upload-preview hidden></div>
+        {# A test-upload preview box used to live here. Nothing ever
+           unhid it, so it was an element that could only be invisible —
+           removed rather than left looking like a feature. #}
       </div>
     </section>
 

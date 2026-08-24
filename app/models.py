@@ -769,6 +769,21 @@ class UploadAccount(Base):
     rotation_order    = Column(Integer, nullable=False, default=100)
     rotation_size     = Column(Integer, nullable=True)
 
+    # ── The name the MARKETPLACE prints on the listing ──────────────────
+    # Not the account name, not the login, and NOT derivable from
+    # `profile_url`: one real account's profile is /profiles/elton-odhiambo
+    # while its listings live at .../the-killing-2011-c-GOLDEN-REEL.html.
+    #
+    # FAA fills this field from the account itself, so the uploader has never
+    # set it and we have never recorded it — yet the public address of every
+    # listing is built from it, which is what the reconciliation sweep needs.
+    # It has to be typed in once, exactly as the marketplace holds it.
+    #
+    # One wrong character makes every listing 404. See
+    # listing_check.artist_name_suspect() — a sweep that reports everything
+    # gone is treated as a broken sweep, not as thousands of takedowns.
+    artist_name       = Column(String(128), nullable=True)
+
     is_enabled        = Column(Integer, nullable=False, default=1)
     timing_json       = Column(Text, nullable=True)
     selectors_json    = Column(Text, nullable=True)
@@ -945,6 +960,25 @@ class UploadTracking(Base):
     removed_at         = Column(DateTime, nullable=True)
     removed_reason     = Column(Text, nullable=True)
     created_at         = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # ── What the marketplace ITSELF says about this listing ─────────────
+    #
+    # Deliberately separate from `status` above, and the distinction is the
+    # whole point of the reconciliation sweep: `status` is what WE believe,
+    # these are what we OBSERVED. Writing an observation straight into
+    # `status` would destroy the disagreement, which is the only interesting
+    # thing here — "we think it is up and it is not" is a finding, and a
+    # finding needs both halves to still exist.
+    #
+    # `status` is only changed when a PERSON explains a finding, through the
+    # existing removed/removed_reason columns.
+    #
+    #   live    — the listing's page loads
+    #   gone    — a real HTTP 404
+    #   unknown — we were blocked or the site had a moment. NOT evidence.
+    listing_status     = Column(String(16), nullable=True, index=True)
+    listing_http       = Column(Integer, nullable=True)
+    listing_checked_at = Column(DateTime, nullable=True, index=True)
 
     saved_poster    = relationship("SavedPoster")
     processed_image = relationship("ProcessedImage")
@@ -1513,3 +1547,58 @@ class StoreListing(Base):
         UniqueConstraint("account_id", "design_id", name="uq_listing_account_design"),
         Index("ix_listing_account_status", "account_id", "status"),
     )
+
+
+class ListingSweep(Base):
+    """
+    One pass over a marketplace asking "is each listing we believe in still
+    there?". Manual only — the owner starts it when he wants it.
+
+    ════════════════════════════════════════════════════════════════════════
+    THIS IS NOT A StoreScanRun, AND INHERITING ONE WOULD BE WRONG
+    ════════════════════════════════════════════════════════════════════════
+    The TeePublic run carries stages, a review gate, a confirm gate, a
+    deactivate/reactivate cure, per-account jobs and a pipeline hold. Every
+    one of those is DEAD here, and copying them would have meant carrying
+    machinery that can only ever be switched off:
+
+      · There are no stages. It reads and reports; nothing is changed on the
+        marketplace, so there is nothing to approve before it happens.
+      · There is no cure. A FineArtAmerica listing is live or deleted — no
+        hidden state, so nothing to switch off and back on.
+      · It does not hold the pipeline. HEAD requests cost nothing and change
+        nothing; making Photoshop wait an hour for them would be pure loss.
+
+    What is left is genuinely small: a start time, a status, and a note.
+
+    ════════════════════════════════════════════════════════════════════════
+    EVERY FIGURE IS DERIVED, NOTHING IS COUNTED
+    ════════════════════════════════════════════════════════════════════════
+    There is no `checked` column and no `total` column on purpose. Progress
+    is "how many upload rows carry a `listing_checked_at` at or after
+    `started_at`", asked of the table each time.
+
+    That is the lesson from the deactivation stage, where a counter kept by
+    hand went out of step and 178 live listings were left switched off while
+    the screen showed everything as fine. A count has to be maintained by
+    every path that touches it; a query is simply true.
+    """
+    __tablename__ = "listing_sweeps"
+
+    id          = Column(Integer, primary_key=True)
+    marketplace = Column(String(32), nullable=False, index=True,
+                         default="fineartamerica")
+
+    #   running | done | failed | abandoned
+    status      = Column(String(16), nullable=False, default="running",
+                         index=True)
+    note        = Column(Text, nullable=True)
+
+    started_at  = Column(DateTime, default=datetime.utcnow, nullable=False)
+    started_by  = Column(String(64), nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+
+    # Chunks dispatched to the worker machine that never reported. Lets a
+    # stalled sweep retry a few times and then give up saying so, rather
+    # than sitting "running" for ever with nothing working on it.
+    attempts    = Column(Integer, nullable=False, default=0)

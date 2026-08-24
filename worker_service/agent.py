@@ -42,11 +42,12 @@ from typing import Optional
 
 from .client import PipelineClient, PipelineError, load_config
 from .processor import ProcessStage
+from .listing_check import ListingCheckStage
 from .store_health import StoreHealthStage
 from .uploader import UploadStage
 
 
-AGENT_VERSION = "1.23.0"
+AGENT_VERSION = "1.24.0"
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_CONFIG = HERE / "config.json"
@@ -69,6 +70,7 @@ class Agent:
         # Marketplace listing health: scan, deactivate, reactivate. Rides on
         # the upload capability — same browser, same accounts, same profiles.
         self.store_health = StoreHealthStage(self.client, config, self.log)
+        self.listing_check = ListingCheckStage(self.client, config, self.log)
 
         self.hostname = socket.gethostname()
         self._last_idle_log = 0.0
@@ -236,6 +238,8 @@ class Agent:
                 result = self.store_health.scan(job_id, payload)
             elif kind in ("store_deactivate", "store_reactivate"):
                 result = self.store_health.act(job_id, payload)
+            elif kind == "listing_check":
+                result = self.listing_check.run(job_id, payload)
             elif kind == "test_upload":
                 result = self.uploader.test_upload(job_id, payload)
             elif kind == "process":

@@ -1,6 +1,7 @@
-TeePublic switching stages made stoppable, resumable and self-repairing.
-One account at a time instead of all queued up front; PAUSE and STOP now
-reach the deactivate/reactivate loops; a run whose worker dies restarts
-itself or ends and releases the pipeline. New SWITCH OFF THE KNOWN MISSING
-button (no scan first) and a CANCEL button on jobs. Node must be updated
-too: agent 1.23.0.
+New LISTING CHECK tab (master level, beside TeePublic): opens each FAA
+listing's own address and reports whether it still loads. Read-only, HEAD
+requests, no browser and no sign-in — it does NOT hold the pipeline. Manual
+only, no schedule. Each account needs its artist name typed in first, and a
+sweep where almost everything reads GONE stops itself rather than reporting
+thousands of takedowns. Also removed two dead controls. Node must be updated
+too: agent 1.24.0.

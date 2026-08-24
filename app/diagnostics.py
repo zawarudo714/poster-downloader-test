@@ -870,6 +870,64 @@ def check_orphaned_listing_jobs(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def check_listing_sweep_believable(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: a listing check that found almost nothing is a broken check.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS IS AN INVARIANT AND NOT A NICETY
+    ════════════════════════════════════════════════════════════════════════
+    Every listing address is built from an artist name typed in by hand. One
+    wrong character and EVERY listing on that account returns 404 — and the
+    screen would report thousands of copyright takedowns, confidently, with
+    nothing to suggest it was nonsense. The owner cannot read the database;
+    a confidently wrong screen is the most expensive thing this system can
+    produce.
+
+    So the claim "most of an account's catalogue has vanished" has to earn
+    itself. Stated about STATE — what the rows now say — rather than about
+    the sweep that produced them, so it holds however they got that way,
+    including a route nobody has thought of.
+
+    It deliberately does not assert which explanation is right. An account
+    really can lose everything: that is what a ban looks like. Opening one
+    address settles it in ten seconds, so the finding says to do that.
+
+    The sweep itself already stops when this trips, so a finding here means
+    either that guard was bypassed or the rows were left behind by an older
+    sweep. Both are worth seeing.
+    """
+    from . import listing_check as LC
+    from .models import UploadTracking
+
+    rows = []
+    for account in LC.ready(db)[0]:
+        checked = (db.query(UploadTracking)
+                     .filter(UploadTracking.account_id == account.id,
+                             UploadTracking.listing_checked_at.isnot(None))
+                     .all())
+        if len(checked) < 20:
+            continue
+        gone = sum(1 for r in checked if r.listing_status == "gone")
+        if gone / len(checked) < 0.5:
+            continue
+        rows.append(Finding(
+            f"{account.name}: {gone} of {len(checked)} listings report GONE",
+            f"artist name on file is '{account.artist_name}'",
+            "/admin/listings",
+        ))
+
+    return _result(
+        "listing_sweep_believable", "A listing check nobody should believe",
+        "Almost every listing on this account came back as Not Found. That "
+        "is usually the artist name being spelled differently on the "
+        "marketplace than it is here — but it is also what a banned or "
+        "emptied account looks like. Open one listing address on the Listing "
+        "check tab before treating any of it as real.",
+        "warn", rows,
+    )
+
+
 def check_listing_catalogue_gaps(db: Session, scope: Scope) -> CheckResult:
     """
     INVARIANT: an account we can scan should have a catalogue, and a design
@@ -933,6 +991,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_designs_left_switched_off,
     check_stuck_listing_run,
     check_orphaned_listing_jobs,
+    check_listing_sweep_believable,
     check_listing_catalogue_gaps,
     check_orphaned_upload_rows,
     check_unassigned_titles,

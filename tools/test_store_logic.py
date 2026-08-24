@@ -46,14 +46,38 @@ It was deleted rather than kept as a guard that guarded nothing.
 from __future__ import annotations
 
 import ast
+import re
 import sys
 import types
 import typing
 from datetime import datetime, timedelta
 from pathlib import Path
 
-SOURCE = Path(__file__).resolve().parent.parent / "app" / "earnings" / "store_health.py"
+APP = Path(__file__).resolve().parent.parent / "app"
+SOURCE = APP / "earnings" / "store_health.py"
+LISTING = APP / "listing_check.py"
 UNDER_TEST = ("_not_failed_this_run", "stage_should_stop")
+LISTING_UNDER_TEST = ("slug", "verdict")
+
+
+def _exec(path: Path, names: tuple, extra: dict):
+    """Execute just the named functions from a file, with stand-ins."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    ns = {"Optional": typing.Optional, "Session": typing.Any,
+          "datetime": datetime, "re": re, **extra}
+    picked = [n for n in tree.body
+              if isinstance(n, ast.FunctionDef) and n.name in names]
+    if len(picked) != len(names):
+        raise SystemExit(
+            f"Could not find {set(names) - {n.name for n in picked}} in "
+            f"{path.name} — renamed? This test is now blind.")
+    mod = ast.Module(
+        [ast.ImportFrom(module="__future__",
+                        names=[ast.alias(name="annotations")], level=0)] + picked,
+        [])
+    ast.fix_missing_locations(mod)
+    exec(compile(mod, str(path), "exec"), ns)
+    return [ns[n] for n in names]
 
 
 def load(src: str):
@@ -78,6 +102,54 @@ def load(src: str):
     ast.fix_missing_locations(mod)
     exec(compile(mod, str(SOURCE), "exec"), ns)
     return ns["_not_failed_this_run"], ns["stage_should_stop"]
+
+
+def listing_cases() -> list[tuple[str, bool]]:
+    """
+    The FineArtAmerica address rule, and what a status code means.
+
+    Both are cheap to get wrong and silent when wrong. A bad slug makes a
+    live listing read as a copyright takedown; treating a 403 as GONE does
+    the same thing to thousands at once.
+
+    The six addresses below are REAL listings from two live shops, checked
+    by hand on 2026-08-24. They are the only reason to believe the rule.
+    """
+    slug, verdict = _exec(LISTING, LISTING_UNDER_TEST, {})
+    url = lambda t, a: f"{slug(t)}-{slug(a)}.html"
+    return [
+        ("real listing: Alicia Keys - #B",
+         url("Alicia Keys - #B", "White And Black")
+         == "alicia-keys-b-white-and-black.html"),
+        ("real listing: Nickelback - #A",
+         url("Nickelback - #A", "White And Black")
+         == "nickelback-a-white-and-black.html"),
+        ("real listing: Snoop Dogg - #A",
+         url("Snoop Dogg - #A", "White And Black")
+         == "snoop-dogg-a-white-and-black.html"),
+        ("real listing: Brother Bear - 2003 A",
+         url("Brother Bear - 2003 A", "Golden Reel")
+         == "brother-bear-2003-a-golden-reel.html"),
+        ("real listing: The Killing - 2011 C",
+         url("The Killing - 2011 C", "Golden Reel")
+         == "the-killing-2011-c-golden-reel.html"),
+        ("real listing: Patriot Games - 1992 A",
+         url("Patriot Games - 1992 A", "Golden Reel")
+         == "patriot-games-1992-a-golden-reel.html"),
+        ("a title that is only punctuation gives an empty slug, not a hyphen",
+         slug("- # -") == ""),
+
+        ("200 means the listing is there", verdict(200) == "live"),
+        ("404 is the ONLY thing that means gone", verdict(404) == "gone"),
+        ("403 means we could not look — the Linux server gets this for "
+         "every page, live or not",
+         verdict(403) == "unknown"),
+        ("429 means we were throttled, not that anything is missing",
+         verdict(429) == "unknown"),
+        ("500 means the site had a moment", verdict(500) == "unknown"),
+        ("no status at all — the request never completed",
+         verdict(None) == "unknown"),
+    ]
 
 
 def obj(**kw):
@@ -149,9 +221,24 @@ SABOTAGE = [
      "        return True\n    return row.action_error_at"),
 ]
 
+# The listing rules live in a different file, so they get their own list.
+LISTING_SABOTAGE = [
+    ("every live listing would read as a copyright takedown",
+     'return re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")',
+     'return re.sub(r"[^a-z0-9]+", "", (text or "").lower())'),
+    ("the separator would survive and no address would ever match",
+     'r"[^a-z0-9]+"', 'r"[^a-z0-9 ]+"'),
+    ("being blocked would be recorded as the listing being gone",
+     '    if http == 404:\n        return "gone"\n    return "unknown"',
+     '    return "gone"'),
+    ("a deleted listing would be recorded as healthy",
+     '    if http == 404:\n        return "gone"',
+     '    if http == 404:\n        return "live"'),
+]
+
 
 def run_suite(src: str) -> list[tuple[str, bool]]:
-    return cases(*load(src))
+    return cases(*load(src)) + listing_cases()
 
 
 def main() -> int:
@@ -174,6 +261,26 @@ def main() -> int:
                                  run_suite(src.replace(find, repl, 1)))
             except Exception:
                 caught = True
+            print(f"{'CAUGHT ' if caught else 'MISSED '} {cost}")
+            bad += 0 if caught else 1
+
+        # The listing rules live in their own file, so they are broken on
+        # disk and put back. Uglier than the in-memory swap above, and
+        # unavoidable: `run_suite` reads that file itself.
+        listing_src = LISTING.read_text(encoding="utf-8")
+        for cost, find, repl in LISTING_SABOTAGE:
+            if find not in listing_src:
+                print(f"??      could not apply — {cost}")
+                bad += 1
+                continue
+            LISTING.write_text(listing_src.replace(find, repl, 1),
+                               encoding="utf-8")
+            try:
+                caught = not all(ok for _, ok in run_suite(src))
+            except Exception:
+                caught = True
+            finally:
+                LISTING.write_text(listing_src, encoding="utf-8")
             print(f"{'CAUGHT ' if caught else 'MISSED '} {cost}")
             bad += 0 if caught else 1
         print()

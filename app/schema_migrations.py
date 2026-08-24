@@ -119,6 +119,16 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     # Stops a design that cannot be switched off from being handed out
     # forever now that the stage's end is derived from the catalogue.
     ("store_listings",   "action_error_at",  "DATETIME"),
+    # ── Listing reconciliation ──────────────────────────────────────────
+    # The name the marketplace prints on a listing. Not the account name and
+    # not derivable from the profile URL, but the public address is built
+    # from it, so it has to be typed in once per account.
+    ("upload_accounts",  "artist_name",      "VARCHAR(128)"),
+    # What the marketplace itself said, kept APART from `status` — which is
+    # what we believe. The disagreement between the two is the finding.
+    ("upload_tracking",  "listing_status",     "VARCHAR(16)"),
+    ("upload_tracking",  "listing_http",       "INTEGER"),
+    ("upload_tracking",  "listing_checked_at", "DATETIME"),
 ]
 
 # ════════════════════════════════════════════════════════════════════════════

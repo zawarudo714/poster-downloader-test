@@ -652,6 +652,33 @@ DEFAULTS: dict[str, Any] = {
     # uploads all night doing nothing, so the run gives up and says so.
     "store_stage_max_attempts": 3,
 
+    # ── Listing reconciliation (does the marketplace still show it?) ─────
+    # How many addresses go out in one job. The worker machine runs ONE job
+    # at a time, so this is really "how long may Photoshop be made to wait" —
+    # 200 HEAD requests is two or three minutes. A single job covering all
+    # 4,811 would block the pipeline for an hour, which a read-only check
+    # has no right to do.
+    "listing_check_chunk": 200,
+    # Pause between requests, milliseconds. These are public pages we are
+    # entitled to and nothing counts them, but several thousand in a burst
+    # from one address is how a site that was indifferent becomes interested.
+    "listing_check_gap_ms": 300,
+    # ── The guard against a wrong artist name ───────────────────────────
+    # The address is built from a name typed in by hand. One wrong character
+    # makes EVERY listing on that account 404, and the screen would report
+    # thousands of copyright takedowns. Above this fraction gone, the sweep
+    # says the address is probably wrong instead of presenting findings.
+    # 0.5 because a real account losing half its catalogue is already worth
+    # stopping over, whichever of the two explanations is true.
+    "listing_check_alarm_ratio": 0.5,
+    # …but only once enough of that account has been seen for the fraction
+    # to mean anything. Three gone out of three is not a pattern.
+    "listing_check_min_sample": 20,
+    # Give up on a sweep after this many chunks are dispatched and never
+    # reported. Same reasoning as store_stage_max_attempts: retry the dull
+    # causes, then stop rather than loop.
+    "listing_check_max_attempts": 3,
+
     # ── How many failures in a row before an account is parked ───────────
     # Only applies to failures the node marks as "might be systemic" — a
     # missing form field. A bot wall or rejected credentials still parks the

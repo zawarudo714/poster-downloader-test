@@ -327,6 +327,23 @@ def _scheduler_loop():
             except Exception:
                 log.exception("Stalled listing-run sweep failed")
 
+            # ── Is a marketplace listing sweep stuck? ────────────────────
+            # Same invariant, different feature: a sweep that says "running"
+            # must have a job running. This one holds nothing, so a stall
+            # costs a wrong screen rather than an idle pipeline — but a
+            # screen that lies all night is still a defect.
+            try:
+                from .db import SessionLocal
+                from .routes.listing_admin import sweep_stalled
+                _db = SessionLocal()
+                try:
+                    for note in sweep_stalled(_db):
+                        log.warning("Stalled listing sweep repaired — %s", note)
+                finally:
+                    _db.close()
+            except Exception:
+                log.exception("Stalled listing-sweep check failed")
+
             # ── Is image generation still running? ───────────────────────
             # Wrapped in its own try so a failure here can never stop the
             # backups. Losing a day's backup to a watchdog would be a poor

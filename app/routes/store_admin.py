@@ -30,6 +30,7 @@ looking is a setting you do not have.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
@@ -212,10 +213,19 @@ def _run_payload(db: Session, run: StoreScanRun) -> dict:
         "retry_count": run.retry_count or 0,
         "stage_jobs_total": run.stage_jobs_total or 0,
         "stage_jobs_done": run.stage_jobs_done or 0,
+        "stage_attempts": run.stage_attempts or 0,
         "retry_note": run.retry_note or "",
         "started_at": run.started_at.isoformat() if run.started_at else None,
         "counts": SH.counts(db, run, run.marketplace),
         "waiting": run.status in SH.WAITING,
+        # Designs this run tried to switch and could not. They are SKIPPED
+        # from here on, so they have to be said out loud — a stage quietly
+        # passing over work and then reporting success is how a run claims
+        # to have finished something it never did.
+        "stuck": [{"title": r.title or r.design_id,
+                   "why": (r.action_error or "")[:160]}
+                  for r in SH.stuck_for(db, run)[:25]],
+        "stuck_total": len(SH.stuck_for(db, run)),
     }
 
 
@@ -305,7 +315,7 @@ def api_advance(payload: dict = Body(default={}),
         raise HTTPException(409, f"The run is {run.status}, not waiting to "
                                  f"{want}.")
 
-    queued = SH.dispatch_stage(db, run, want, by=admin.username)
+    queued = SH.begin_stage(db, run, want, by=admin.username)
     if not queued:
         # Nothing to do is a legitimate outcome, not an error: a scan can
         # find everything visible. End the run rather than leaving the
@@ -333,7 +343,13 @@ def api_pause(payload: dict = Body(default={}),
 
     Not a stop: nothing is lost, nothing is undone, and RESUME picks up from
     the same place. The node hears about it through the reply to its next
-    per-design post, so it winds down within one design.
+    per-design post, so it winds down within one design — in the switching
+    stages as well as the scan, which was not true until the action loops
+    started reading that reply instead of discarding it.
+
+    Any QUEUED job is cancelled outright. There is nothing for it to carry
+    on from and leaving it would mean the node starting a fresh account the
+    moment the pause began, which is the opposite of pausing.
     """
     run = SH.active_run(db, MARKETPLACE)
     if run is None:
@@ -342,6 +358,11 @@ def api_pause(payload: dict = Body(default={}),
         raise HTTPException(409, "Already paused.")
 
     SH.pause_run(db, run, by=admin.username)
+    for job in SH.jobs_for_run(db, run, statuses=("queued",)):
+        job.status = "cancelled"
+        job.finished_at = datetime.utcnow()
+        P.append_job_log(db, job, "Cancelled — run paused", level="warn")
+
     stranded = len(SH.deactivated_for(db, run))
     log_activity(db, user=admin, action="store_run_paused",
                  target_type="store_run", target_id=run.id,
@@ -382,10 +403,25 @@ def api_resume(admin: User = Depends(require_admin),
         run.status = "scanning"
         run.stage_note = f"Carrying on — {left} design(s) still to check."
         queued = _queue_scan(db, run, by=admin.username)
+    elif run.status in ("deactivating", "reactivating"):
+        # ── RESUMING AN ACTION STAGE HAS TO SEND THE WORK AGAIN ──────────
+        #
+        # Pausing stops the node mid-account, so there is no job left to
+        # carry on by itself. This branch did not exist: resuming a paused
+        # deactivation cleared the pause and dispatched nothing, so the run
+        # sat in `deactivating` for ever holding Photoshop and the uploads,
+        # while the screen showed it running. It was only ever tested from
+        # a paused SCAN, where re-dispatch happens above.
+        stage = ("deactivate" if run.status == "deactivating"
+                 else "reactivate")
+        run.stage_attempts = 0
+        queued = SH.dispatch_stage(db, run, stage, by=admin.username)
+        if not queued:
+            SH.advance_after_stage(db, run, stage)
     elif run.auto:
         nxt = SH.next_stage(run)
         if nxt:
-            queued = SH.dispatch_stage(db, run, nxt, by=admin.username)
+            queued = SH.begin_stage(db, run, nxt, by=admin.username)
 
     log_activity(db, user=admin, action="store_run_resumed",
                  target_type="store_run", target_id=run.id, details={})
@@ -498,11 +534,23 @@ def api_abandon(payload: dict = Body(default={}),
                   note=(payload.get("reason") or "Stopped by hand.")
                        + (f" {len(stranded)} design(s) left deactivated."
                           if stranded else ""))
+
+    # ── STOPPING THE RUN MUST STOP THE WORK ──────────────────────────────
+    #
+    # It did not. Ending the run set a status and released the pipeline, and
+    # the node's queued jobs sat untouched — so it claimed the next account
+    # and carried on switching designs off for two more hours while the tab
+    # read "abandoned". The screen and the machine disagreed and only the
+    # machine was right. A running job also hears about it through the reply
+    # to its next per-design report.
+    killed = SH.cancel_run_jobs(db, run, why="run stopped by hand")
+
     log_activity(db, user=admin, action="store_run_abandoned",
                  target_type="store_run", target_id=run.id,
-                 details={"left_off": len(stranded)})
+                 details={"left_off": len(stranded), "jobs_cancelled": killed})
     db.commit()
-    return JSONResponse({"ok": True, "left_deactivated": len(stranded)})
+    return JSONResponse({"ok": True, "left_deactivated": len(stranded),
+                         "jobs_cancelled": killed})
 
 
 @router.post("/api/store/account-url")
@@ -594,16 +642,58 @@ def wake_due_retries(db: Session) -> int:
         run.retry_at = None
         if run.status == "scanning":
             _queue_scan(db, run, by="retry")
+        elif run.status in ("deactivating", "reactivating"):
+            stage = "deactivate" if run.status == "deactivating" else "reactivate"
+            SH.dispatch_stage(db, run, stage, by="retry")
         elif run.auto:
             nxt = SH.next_stage(run)
             if nxt:
-                SH.dispatch_stage(db, run, nxt, by="retry")
+                SH.begin_stage(db, run, nxt, by="retry")
         run.stage_note = (f"Trying again after waiting "
                           f"(attempt {run.retry_count}).")
         woken += 1
     if woken:
         db.commit()
     return woken
+
+
+def sweep_stalled_runs(db: Session) -> list[str]:
+    """
+    Get any stuck run moving again, or end it. Called by the scheduler tick.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS EXISTS AT ALL
+    ════════════════════════════════════════════════════════════════════════
+    A run that is switching designs must have one job switching them. If the
+    worker machine reboots, or Chrome will not start, or somebody cancels
+    the job, nothing will ever move that run again: it sits in `deactivating`
+    for ever, holding Photoshop and the daily uploads, while the screen
+    politely reports work in progress. That costs a whole night and there is
+    no symptom you could see.
+
+    The invariant is stated about STATE — "a run in an action stage has a
+    live job" — rather than about the sequence of events, so it holds
+    however the job died, including in ways nobody thought of. That is the
+    difference between this and a test: a test can only check the ways its
+    author imagined.
+
+    Recovery is tried before giving up, because the usual cause is dull and
+    the work itself is fine. `repair_stalled` owns that judgement.
+    """
+    notes: list[str] = []
+    for run in SH.stalled_runs(db):
+        try:
+            notes.append(f"run #{run.id}: {SH.repair_stalled(db, run)}")
+        except Exception as e:
+            # Repair itself failing must still END the run. Leaving it
+            # stalled would hold the pipeline exactly as before, and the
+            # sweeper would try again for ever with nothing on screen.
+            SH.finish_run(db, run, status="failed",
+                          note=f"Could not restart this run: {e}")
+            notes.append(f"run #{run.id}: failed to restart — {e}")
+    if notes:
+        db.commit()
+    return notes
 
 
 @router.post("/api/store/reactivate-all")
@@ -645,10 +735,59 @@ def api_reactivate_all(admin: User = Depends(require_admin),
     db.add(run)
     db.flush()
 
-    queued = SH.dispatch_stage(db, run, "reactivate", by=admin.username)
+    queued = SH.begin_stage(db, run, "reactivate", by=admin.username)
     log_activity(db, user=admin, action="store_reactivate_all",
                  target_type="store_run", target_id=run.id,
                  details={"designs": len(left), "accounts": queued})
     db.commit()
     return JSONResponse({"ok": True, "run": run.id,
                          "designs": len(left), "accounts": queued})
+
+
+@router.post("/api/store/deactivate-missing")
+def api_deactivate_missing(admin: User = Depends(require_admin),
+                           db: Session = Depends(get_db)):
+    """
+    Switch off everything currently marked missing — without a scan first.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE MIRROR OF SWITCH BACK ON, AND FOR THE SAME REASON
+    ════════════════════════════════════════════════════════════════════════
+    "Missing" is a fact recorded on the DESIGN, not on the run that found
+    it, so it survives the run being stopped, failing, or being abandoned
+    halfway. Requiring a fresh scan to act on facts we already hold would
+    mean hours of re-reading the marketplace to learn nothing new.
+
+    It is deliberately the mirror image: reactivation asks "what is switched
+    off?", this asks "what is missing?", and both ask the catalogue.
+
+    The usual caution still applies and is not bypassed — vague tags and
+    excluded designs are held back by `missing_for`, exactly as they are
+    when a scan leads into this stage. The only thing skipped is the
+    re-reading, not the judgement.
+    """
+    if SH.active_run(db) is not None:
+        raise HTTPException(
+            409, "A run is already in progress. Wait for it to finish, or "
+                 "stop it, then try again.")
+
+    run = StoreScanRun(marketplace=MARKETPLACE, status="deactivating",
+                       started_by=admin.username, scan_mode="fix")
+    db.add(run)
+    db.flush()
+
+    todo = SH.stage_work(db, run, "deactivate")
+    if not todo:
+        db.rollback()
+        raise HTTPException(
+            404, "Nothing is marked missing — there is nothing to switch off.")
+
+    designs = sum(len(v) for v in todo.values())
+    run.stage_note = f"Switching off {designs} design(s) already known missing."
+    queued = SH.begin_stage(db, run, "deactivate", by=admin.username)
+    log_activity(db, user=admin, action="store_deactivate_missing",
+                 target_type="store_run", target_id=run.id,
+                 details={"designs": designs, "accounts": len(todo)})
+    db.commit()
+    return JSONResponse({"ok": True, "run": run.id, "designs": designs,
+                         "accounts": len(todo), "queued": queued})

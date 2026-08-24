@@ -1134,8 +1134,19 @@ def store_action_result(
     counter is the evidence behind the vague-tag flag: a design still
     missing after several cures almost certainly has a tag too broad for a
     25-page search rather than a broken listing.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE REPLY IS ALSO THE STOP BUTTON
+    ════════════════════════════════════════════════════════════════════════
+    A node cannot hear a button; it can only hear an ANSWER to something it
+    was already asking. It asks this on every design, so `stop` rides along
+    for free and PAUSE lands within one design instead of at the end of the
+    account. The scan already worked this way. These stages threw the reply
+    away, so pausing reached the screen and nothing else — the run showed
+    "paused" while designs kept going off, for up to an hour.
     """
-    from ..models import StoreListing
+    from ..earnings import store_health as SH
+    from ..models import StoreListing, StoreScanRun
 
     row = db.query(StoreListing).filter_by(
         account_id=payload.get("account_id"),
@@ -1143,10 +1154,15 @@ def store_action_result(
     if row is None:
         raise HTTPException(404, "That design is not in the catalogue.")
 
+    action = payload.get("action")
     error = payload.get("error")
     row.action_error = error
+    # The timestamp is what stops a design that cannot be switched from
+    # being handed out again and again now that the stage's end is derived
+    # from the catalogue rather than counted.
+    row.action_error_at = datetime.utcnow() if error else None
     if not error:
-        if payload.get("action") == "deactivate":
+        if action == "deactivate":
             row.deactivated_at = datetime.utcnow()
         else:
             row.deactivated_at = None
@@ -1157,8 +1173,11 @@ def store_action_result(
             # calling it "visible" would be a lie. Unknown is the honest one
             # and it is what the missing-only recheck looks for.
             row.status = "unknown"
+
+    run = db.query(StoreScanRun).filter_by(id=payload.get("run_id")).first()
+    stop = SH.stage_should_stop(db, run, action or "deactivate")
     db.commit()
-    return JSONResponse({"ok": True})
+    return JSONResponse({"ok": True, "stop": stop})
 
 
 @router.post("/store/stage-done")
@@ -1222,8 +1241,18 @@ def store_stage_done(
     #
     # The run stays where it is. Resuming re-queues the scan and carries on.
     if payload.get("partial") or run.paused_at:
-        run.stage_note = (f"Stopped early — {tally['checked']} of "
-                          f"{tally['total']} checked so far.")
+        if stage == "scan":
+            run.stage_note = (f"Stopped early — {tally['checked']} of "
+                              f"{tally['total']} checked so far.")
+        else:
+            # Say it in the words of the stage that was actually stopped.
+            # This branch used to report a deactivation as "N of M checked",
+            # which describes a scan and would send the next reader hunting
+            # for a scan that was not running.
+            verb = "off" if stage == "deactivate" else "back on"
+            left = sum(len(v) for v in SH.stage_work(db, run, stage).values())
+            run.stage_note = (f"Stopped early — {left} design(s) still to "
+                              f"switch {verb}. Resuming carries on from here.")
         db.commit()
         return JSONResponse({"ok": True, "status": run.status,
                              "partial": True})
@@ -1236,52 +1265,45 @@ def store_stage_done(
             "deactivating", "reactivating"):
         # ── ONE ACCOUNT FINISHING IS NOT THE STAGE FINISHING ─────────────
         #
-        # These stages run one job per account. The first account to report
-        # used to end the stage for all of them: the run moved on to
+        # These stages work one account at a time. The first account to
+        # report used to end the stage for all of them: the run moved on to
         # reactivating while a second account was still switching designs
         # OFF, and those designs were never on the reactivate list — left
         # live-but-hidden with nothing on screen saying so.
         #
-        # So the stage ends when every job it dispatched has reported.
-        run.stage_jobs_done = (run.stage_jobs_done or 0) + 1
-        waiting_on = max(0, (run.stage_jobs_total or 1) - run.stage_jobs_done)
-
-        if waiting_on:
-            run.stage_note = (
-                f"{run.stage_jobs_done} of {run.stage_jobs_total} accounts "
-                f"done; still working through the rest.")
+        # The counter that fixed it has now been replaced by something that
+        # cannot fall out of step at all: the stage is over when NO ACCOUNT
+        # HAS WORK LEFT, asked of the catalogue. A count has to be kept
+        # correct; this is simply true or not.
+        run.stage_attempts = 0
+        if SH.stage_work(db, run, stage):
+            SH.dispatch_stage(db, run, stage, by="auto")
             db.commit()
-            return JSONResponse({"ok": True, "status": run.status,
-                                 "waiting_on": waiting_on})
+            return JSONResponse({
+                "ok": True, "status": run.status,
+                "waiting_on": max(0, (run.stage_jobs_total or 1)
+                                     - (run.stage_jobs_done or 0)),
+            })
 
-        if stage == "deactivate":
-            run.status = "confirming"
-            run.stage_note = (f"{tally['deactivated']} switched off"
-                              + (f", {tally['action_errors']} refused"
-                                 if tally["action_errors"] else "") + ".")
-        else:
-            # The last stage, so this is also where the pipeline is released
-            # — by the run ENDING, not by anyone flipping anything back.
-            left = len(SH.stranded(db, run.marketplace))
-            SH.finish_run(
-                db, run, status="done",
-                note=("Every design we switched off is back on."
-                      if not left else
-                      f"{left} design(s) are STILL switched off — use "
-                      f"SWITCH EVERYTHING BACK ON."))
+        # Nothing left. `advance_after_stage` owns what happens next —
+        # including handing over to reactivation on an automatic run — so
+        # that the button, this report and the stall sweeper cannot each
+        # have their own idea of what follows a finished stage.
+        SH.advance_after_stage(db, run, stage)
+        db.commit()
+        return JSONResponse({"ok": True, "status": run.status})
 
     # ── AUTOMATIC MODE HANDS OVER HERE ───────────────────────────────────
     #
-    # `next_stage` returns None for a manual run and for a paused one, so an
-    # automatic run is the only thing that moves without a button. It also
-    # returns None once reactivation is done, because there is nothing after
-    # it — the run has already ended above.
+    # Only the scan reaches this now; the action stages return above. It
+    # returns None for a manual run and for a paused one, so an automatic
+    # run is the only thing that moves without a button.
     #
     # If the next stage turns out to have no work, the run ENDS rather than
     # sitting in a stage with nothing in it holding the pipeline.
     nxt = SH.next_stage(run)
     if nxt:
-        queued = SH.dispatch_stage(db, run, nxt, by="auto")
+        queued = SH.begin_stage(db, run, nxt, by="auto")
         if not queued:
             SH.finish_run(db, run, status="done",
                           note="Nothing left to do — every design was visible.")

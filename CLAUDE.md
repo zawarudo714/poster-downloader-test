@@ -446,6 +446,15 @@ Never compare URLs. The previous tool did, and a design sitting on page one
 of the results read MISSING because the store's copy of the link carried
 `?store_id=4129428` and the search result's copy did not.
 
+**Switching designs costs about an hour per account, measured 2026-08-24.**
+Every design needs its own freshly loaded page, because the deactivate form
+carries a one-time token — so it is one page load per design and there is no
+batching available. A neglected account with ~100 missing designs is an hour
+to switch off and an hour to switch back on; five accounts came to roughly
+ten hours. Weekly running is small, but never write code that assumes this
+stage is short: it must be stoppable, resumable and survivable across a
+reboot. (This file previously said "minutes, not hours". It was a guess.)
+
 **Deactivate is a form POST, not a link.** On the design page:
 `<form class="button_to" method="post" action="/designs/<id>/deactivate">`
 with a one-time `authenticity_token`. So navigating to that address returns
@@ -728,7 +737,7 @@ irrelevant, say why in one line rather than skipping it silently.
 | 3 | Said "verified" without naming a test | 3c |
 | 3b | Reasoned from where a thing is SHOWN, not what depends on it | 3d, 6 |
 | 3c | Trusted the edit you meant to make over the file that exists | 3, 5 |
-| 3c-bis | Invented an external value instead of looking it up or asking | 3c-ter |
+| 3c-bis | Invented an external value instead of looking it up or asking — including a DURATION guessed in a comment that a whole design then rested on | 3c-ter |
 | 3c-ter | Built a second path to something that already works — or theorised about a difference instead of reading the thing that works, or retried something the far side counts | 3b, 3d |
 | 3d | Debugged the screen instead of the machine doing the work | 3b, 8 |
 | 4 | Shipped without saying what else could break | 2 |
@@ -738,7 +747,7 @@ irrelevant, say why in one line rather than skipping it silently.
 | 5d | Shipped a mechanism with no invariant watching it — and a test that shared the bug's assumption | 5, 8 |
 | 6 | Correct for two projects, wrong for the third | 1, 3b |
 | 7 | Fixed a bug and left no rule behind | all |
-| 8 | Claimed work with an exit that reports nothing — including catching an error into a counter | 3d, 5 |
+| 8 | Claimed work with an exit that reports nothing — including catching an error into a counter, queueing work nothing can cancel, or fixing one loop of several | 3d, 5 |
 | 9 | Shipped a dependency the node was never told to install | 3c, 8 |
 
 ### 1. Audit before you build
@@ -893,6 +902,29 @@ for the hook name, and the QUERY contains the name, so it matched itself.
 The same failure as the test that missed the stage-counting bug. A green
 light from a check that cannot go red is worse than no check at all.
 
+**Sabotage the EXISTING checks too, not only the new one, and sabotage the
+thing you actually care about.** Adding the jobs CANCEL button turned up two
+holes in checks that had been passing for weeks:
+
+  * the hook check knew `q` and `querySelector` but not `querySelectorAll`,
+    which is how that button collects itself — so a whole class of control
+    was never checked at all. A check with a hole reads as coverage.
+  * `page hooks exist` compared each template against each script it loads,
+    so a shared script's hooks had to appear on EVERY page loading it.
+    Three false failures at once from `admin.js`, whose lightbox hooks live
+    on one page of the three.
+
+And the first attempt at sabotage tested the wrong thing: renaming the
+button's `data-` attribute proved nothing about "endpoints have buttons",
+because the fetch was still there. **Say which check you expect to go red
+before you break anything**, or you will confirm a check that was never
+looking.
+
+**A hole is normally at the edge of the pattern you wrote, so enumerate the
+variants.** Every way this codebase asks for a hook. Every way a caller
+writes a URL parameter — `${id}`, `{{ u.id }}`, `' + id + '`. A regex that
+handles one of three is two-thirds blind and silent about it.
+
 Every deletion and every move is a structural edit, and the thing you must
 check is the file that now exists — not the change you meant to make. These
 are not code review opinions, they are mechanical checks a script can do in
@@ -1013,6 +1045,22 @@ The general form: **for anything outside this codebase — a marketplace, an
 API, an OS behaviour — the code must either read the value at runtime, take
 it from a setting, or be told it. Inventing it is not an option, and neither
 is inferring it from a plausible-looking pattern.**
+
+**A guessed DURATION is the same defect, and it is easier to miss because it
+usually lives in a comment rather than in code.** `dispatch_stage` said
+"serial is fine, this stage is minutes not hours". Measured, it is about an
+hour per account — wrong by a factor of thirty, and the whole design rested
+on it: no stop check, no resume, all the jobs queued up front, because none
+of that matters for something that takes two minutes. The owner found out by
+watching it run all day.
+
+So: if a design decision depends on how long something takes, either measure
+it or write down that the figure is a guess and what breaks if it is wrong.
+And whenever a real measurement contradicts a comment, **correct the comment
+in the same edit** — a stale estimate is trusted exactly as much as a
+verified one, because nothing distinguishes them on the page. This applies
+to advice given in CHAT too: I told him parallel accounts would save four
+minutes when the true answer was six hours, and he made a decision on it.
 
 ### 3c-ter. If something in this system ALREADY does it, reuse that path
 
@@ -1318,9 +1366,27 @@ stage finishing.** Deactivation runs one job per account. The first account
 to report ended the stage for all of them: the run advanced to reactivating
 while a second account was still switching designs OFF, so those designs
 were never on the reactivate list — live listings left hidden, earning
-nothing, with nothing on screen saying so. Count the workers in when you
-dispatch and count them out as they report. The test to apply: **if this
+nothing, with nothing on screen saying so. The test to apply: **if this
 work is split N ways, does the state machine know N?**
+
+**And the better answer to that question is usually "do not split it, and
+do not count".** Counting the workers in and out was the first fix and it
+worked, but a counter has to be kept correct by every path that touches it,
+and there are always more paths than you listed. The version that replaced
+it asks the CATALOGUE instead — is there any account with work left? — and
+sends one account at a time. Nothing to increment, nothing to lose, and a
+node that dies cannot leave a total unreachable for ever. **Prefer a
+condition you can DERIVE over a number you have to MAINTAIN**; same reason
+the quiet window is a window rather than a switch, and `scan_incomplete` a
+query rather than a flag.
+
+**Creating all the work up front is what makes stopping impossible.** The
+five deactivation jobs — one per account — were queued together, so
+STOP THIS RUN ended the run, released the pipeline, and did nothing at all
+to them: the node claimed the next one and switched live listings off for
+two more hours while the tab read "abandoned". Before queueing N pieces of
+work, ask what CANCELS them, and whether the person pressing stop can reach
+every one. One at a time costs nothing when the worker is serial anyway.
 
 **"The job ended" is not "the work finished", and only the worker knows
 which.** Pausing the store scan ended its job cleanly — every design
@@ -1339,6 +1405,15 @@ A node cannot hear a button; it can only hear an answer to something it was
 already asking. Before adding a polling endpoint for "should I stop", check
 whether the work already talks to the server on a loop — it almost always
 does, and the answer rides along for free.
+
+**Fixing that in ONE loop is not fixing it.** The scan learned to read the
+reply; the deactivate and reactivate loops kept discarding theirs, so PAUSE
+worked on the stage that took hours and did nothing on the two stages that
+switch live listings — the ones where continuing costs money. It looked
+fixed from the screen, and the gap only showed up when a run had to be
+stopped at the wrong moment. **When a mechanism has several instances, list
+them and say which ones you changed**; "the loop now checks" is a claim
+about one loop.
 
 Concretely: **an exception must never be able to escape past the point where
 the work was claimed.** If setup can fail, either claim after it, or catch it

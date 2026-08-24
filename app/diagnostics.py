@@ -770,9 +770,20 @@ def check_stuck_listing_run(db: Session, scope: Scope) -> CheckResult:
     gone — finished, failed, reaped — and the run has not moved on, then
     nothing will ever move it. It holds Photoshop and the uploads for ever
     while the screen shows it politely in progress.
+
+    ════════════════════════════════════════════════════════════════════════
+    IT MUST BE THIS RUN'S OWN JOBS
+    ════════════════════════════════════════════════════════════════════════
+    The first version counted every live store job in the table, not the
+    ones belonging to the run being examined. Any other sweep's job — even a
+    different marketplace's — therefore counted as proof that THIS run was
+    fine, and the check could report all-clear over a genuinely dead run.
+    Same shape as scoping a query without its project.
+
+    The scheduler now repairs this automatically every few minutes, so a
+    finding here means repair ALSO failed — which is worth seeing.
     """
-    from .earnings.store_health import FINISHED
-    from .models import PipelineJob
+    from .earnings.store_health import FINISHED, jobs_for_run
 
     rows = []
     active = (db.query(StoreScanRun)
@@ -783,13 +794,7 @@ def check_stuck_listing_run(db: Session, scope: Scope) -> CheckResult:
         if run.paused_at or (run.retry_at and run.retry_at > datetime.utcnow()):
             continue          # deliberately waiting, not stuck
 
-        live = (db.query(func.count(PipelineJob.id))
-                  .filter(PipelineJob.kind.in_(
-                              ("store_scan", "store_deactivate",
-                               "store_reactivate")),
-                          PipelineJob.status.in_(("queued", "running")))
-                  .scalar() or 0)
-        if live:
+        if jobs_for_run(db, run):
             continue
 
         rows.append(Finding(
@@ -806,6 +811,61 @@ def check_stuck_listing_run(db: Session, scope: Scope) -> CheckResult:
         "queued to finish with — so it will hold them for ever. Press STOP "
         "THIS RUN on the TeePublic tab, then check whether anything was left "
         "switched off.",
+        "error", rows,
+    )
+
+
+def check_orphaned_listing_jobs(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: no job may still be waiting to switch designs for a run that
+    has already ended.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE INCIDENT, 2026-08-24
+    ════════════════════════════════════════════════════════════════════════
+    A stage created one job per account UP FRONT — five jobs for five
+    accounts. Stopping the run ended the run and released the pipeline, and
+    did nothing whatsoever to those jobs. The node calmly claimed the next
+    one and carried on switching live listings off for another two hours,
+    while the tab said "abandoned".
+
+    Cancelling on the way out now makes that impossible rather than merely
+    detectable, and dispatching one account at a time means there is only
+    ever one job to cancel. This check is the proof that both held — and it
+    is stated about STATE, so it fires whatever route left the job behind,
+    including one nobody has thought of yet.
+
+    A design switched off by an orphan job is the expensive part: it is a
+    live listing earning nothing, and no run's records will ever say to put
+    it back.
+    """
+    from .earnings.store_health import ACTION_KINDS, FINISHED, LIVE_JOB, _run_id_of
+    from .models import PipelineJob
+
+    ended = {r.id for r in db.query(StoreScanRun)
+                            .filter(StoreScanRun.status.in_(FINISHED)).all()}
+
+    rows = []
+    for job in (db.query(PipelineJob)
+                  .filter(PipelineJob.kind.in_(ACTION_KINDS),
+                          PipelineJob.status.in_(LIVE_JOB)).all()):
+        run_id = _run_id_of(job)
+        # A job whose run cannot be identified is just as dangerous: nothing
+        # will ever cancel it, because nothing knows who it belongs to.
+        if run_id is not None and run_id not in ended:
+            continue
+        rows.append(Finding(
+            f"Job #{job.id} ({job.kind}) is still {job.status}",
+            (f"run #{run_id} has already ended" if run_id
+             else "it names no run at all"),
+            "/admin/pipeline",
+        ))
+
+    return _result(
+        "orphaned_listing_jobs", "Switching work left over from a stopped run",
+        "This job will switch designs off or on for a run that is already "
+        "over, and nothing is watching the result. Cancel it on the Pipeline "
+        "tab, then check the TeePublic tab for designs left switched off.",
         "error", rows,
     )
 
@@ -872,6 +932,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     # ── Listing-health invariants ───────────────────────────────────────
     check_designs_left_switched_off,
     check_stuck_listing_run,
+    check_orphaned_listing_jobs,
     check_listing_catalogue_gaps,
     check_orphaned_upload_rows,
     check_unassigned_titles,

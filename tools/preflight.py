@@ -374,33 +374,53 @@ def check_hooks_exist() -> None:
     A renamed hook is the classic UI-overhaul failure: no error, no console
     message, just a panel that silently stops rendering. Hooks the JS creates
     in its own generated HTML count — that is where half of them live.
+
+    ════════════════════════════════════════════════════════════════════════
+    ONE SCRIPT, SEVERAL PAGES
+    ════════════════════════════════════════════════════════════════════════
+    The check is per SCRIPT, against every template that loads it. Doing it
+    per template-and-script PAIR reported three false failures at once:
+    `admin.js` is loaded by the dashboard, the users page and the image
+    browser, and its lightbox hooks live only in the last of those. Demanding
+    each page carry every hook the shared script mentions is asking for
+    something that was never true.
     """
+    used_by: dict[Path, list[Path]] = {}
     for tpl in sorted(TPL.glob("*.html")):
-        scripts = _js_for_template(tpl)
-        if not scripts:
-            continue
-        tpl_src = tpl.read_text(encoding="utf-8", errors="ignore")
-        base = (TPL / "base.html").read_text(encoding="utf-8", errors="ignore")
+        for js in _js_for_template(tpl):
+            used_by.setdefault(js, []).append(tpl)
 
-        for js in scripts:
-            js_src = js.read_text(encoding="utf-8", errors="ignore")
-            wanted = set(re.findall(r"""q\(\s*['"]\[data-([a-z-]+)\]['"]""", js_src))
-            wanted |= set(re.findall(
-                r"""querySelector\(\s*['"]\[data-([a-z-]+)\]['"]""", js_src))
+    base = (TPL / "base.html").read_text(encoding="utf-8", errors="ignore")
 
-            # The QUERIES must be removed before searching this file, or the
-            # check matches itself and can never fail. Found by sabotage:
-            # renaming a hook to a typo left preflight green, because
-            # `q('[data-run-pannel]')` obviously contains "data-run-pannel".
-            built = re.sub(r"""(?:q|querySelector)\(\s*['"]\[data-[a-z-]+\]['"]\)""",
-                           "", js_src)
+    for js, templates in sorted(used_by.items()):
+        tpl_src = "\n".join(t.read_text(encoding="utf-8", errors="ignore")
+                            for t in templates)
+        where = ", ".join(t.name for t in templates)
+        js_src = js.read_text(encoding="utf-8", errors="ignore")
+        # ── EVERY WAY THIS CODEBASE ASKS FOR A HOOK ──────────────────
+        #
+        # It listed only `q` and `querySelector`, so a hook fetched with
+        # `querySelectorAll` was never checked at all — which sabotage
+        # found the day the jobs CANCEL button was added, because that
+        # is exactly how it collects its buttons. A check with a hole in
+        # it is most dangerous where the hole is: it reads as coverage.
+        ASKERS = r"(?:q|querySelector|querySelectorAll|closest)"
+        wanted = set(re.findall(
+            ASKERS + r"""\(\s*['"]\[data-([a-z-]+)\]['"]""", js_src))
 
-            for hook in sorted(wanted):
-                token = f"data-{hook}"
-                if token in tpl_src or token in base or token in built:
-                    continue
-                fail(f"{js.name} looks for [{token}] — not in "
-                     f"{tpl.name}, base.html, or its own generated HTML")
+        # The QUERIES must be removed before searching this file, or the
+        # check matches itself and can never fail. Found by sabotage:
+        # renaming a hook to a typo left preflight green, because
+        # `q('[data-run-pannel]')` obviously contains "data-run-pannel".
+        built = re.sub(ASKERS + r"""\(\s*['"]\[data-[a-z-]+\]['"]""",
+                       "", js_src)
+
+        for hook in sorted(wanted):
+            token = f"data-{hook}"
+            if token in tpl_src or token in base or token in built:
+                continue
+            fail(f"{js.name} looks for [{token}] — not in {where}, "
+                 f"base.html, or its own generated HTML")
 
 
 def check_hidden_ancestors() -> None:
@@ -497,6 +517,107 @@ def check_actions_are_handled() -> None:
 
 # ════════════════════════════════════════════════════════════════════════════
 
+def check_store_logic() -> None:
+    """
+    The only BEHAVIOUR check in here, and it earns its place.
+
+    Everything else above proves the wiring is connected. This runs the two
+    decisions that stop a stage switching live listings — the stop signal and
+    the skip-what-already-failed rule — against worked examples, using the
+    shipped source rather than a copy. See tools/test_store_logic.py, and run
+    it with --sabotage to confirm its checks can still go red.
+    """
+    sys.path.insert(0, str(ROOT / "tools"))
+    try:
+        import test_store_logic as T
+        for label, ok in T.run_suite(T.SOURCE.read_text(encoding="utf-8")):
+            if not ok:
+                fail(f"listing-health rule broken: {label}")
+    except SystemExit as e:                 # the functions were renamed away
+        fail(f"store logic test could not run: {e}")
+    finally:
+        sys.path.pop(0)
+
+
+def check_endpoints_have_buttons() -> None:
+    """
+    An admin endpoint nothing on the site ever calls.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE REVERSE OF "buttons have handlers", AND IT CAUGHT A REAL ONE
+    ════════════════════════════════════════════════════════════════════════
+    `/admin/pipeline/api/jobs/{id}/cancel` had worked since jobs existed and
+    NOTHING had ever called it — so on the day a stopped sweep left two
+    accounts' worth of switching queued, the only way to reach it was the
+    browser's developer console.
+
+    Zero callers of a working endpoint is a defect, not a style question. It
+    is the same shape as `open_work_tab`, which was moved out of one function
+    and never added to the other: the method existed, compiled, had a
+    docstring, and nothing called it, so every upload ran in the wrong tab
+    for months.
+
+    A WARNING rather than a failure, because some endpoints legitimately
+    have no button — the node's own API, and anything called by a script.
+
+    ════════════════════════════════════════════════════════════════════════
+    IT MUST LOOK AT TEMPLATES TOO, NOT JUST JAVASCRIPT
+    ════════════════════════════════════════════════════════════════════════
+    The first version searched only the JS and immediately reported
+    `reset_password` as uncalled — it is a plain `<form method="post">` in
+    admin_users.html and has worked for months. One known-false line is
+    enough to make the whole report something people skim past, which is the
+    same reason the settings check has to know which `get_setting` it is
+    looking at.
+    """
+    posts: dict[str, Path] = {}
+    for path in ROOT.glob("app/routes/*admin*.py"):
+        src = path.read_text(encoding="utf-8")
+        prefix_m = re.search(r'APIRouter\(prefix="([^"]+)"', src)
+        prefix = prefix_m.group(1) if prefix_m else ""
+        for m in re.finditer(r'@router\.post\("([^"]+)"\)', src):
+            posts[prefix + m.group(1)] = path
+
+    callers = "\n".join(
+        p.read_text(encoding="utf-8")
+        for folder, pattern in ((JS, "*.js"), (TPL, "*.html"))
+        if folder.is_dir() for p in folder.glob(pattern))
+
+    for route, path in sorted(posts.items()):
+        # Callers build URLs from a base constant or a Jinja expression, so
+        # the full path almost never appears literally. Match the END of it.
+        #
+        # ── A ONE-WORD TAIL IS NOT ENOUGH, AND THAT WAS FOUND BY SABOTAGE
+        #
+        # The first version matched only the final segment. Deleting the
+        # jobs CANCEL button changed nothing, because the word "cancel" also
+        # appears in `account-cancel` and `node-cancel` — two modal close
+        # buttons that have nothing to do with it. The check could not go
+        # red, which is the failure this whole file exists to prevent.
+        #
+        # So a route with a path parameter is matched across it, which is
+        # specific enough to be about that one endpoint.
+        segments = [s for s in route.split("/") if s]
+        params = [i for i, s in enumerate(segments) if s.startswith("{")]
+        if params and params[0] > 0:
+            pattern = (re.escape(segments[params[0] - 1]) + "/"
+                       # A path parameter is written in a dozen ways by the
+                       # callers — `${id}`, `{{ u.id }}`, `' + id + '`. What
+                       # they all share is no slash, no quote and no line
+                       # break, so that is what is matched rather than any
+                       # one syntax.
+                       + "/".join(r"[^'\"`/\n]{1,40}?" if s.startswith("{")
+                                  else re.escape(s)
+                                  for s in segments[params[0]:]))
+            shown = "/".join(segments[params[0] - 1:])
+        else:
+            pattern = re.escape(segments[-1]) if segments else ""
+            shown = segments[-1] if segments else ""
+        if pattern and not re.search(pattern, callers):
+            warn(f"{path.relative_to(ROOT)}: POST {route} — no button, form "
+                 f"or fetch anywhere calls it (nothing matches '{shown}')")
+
+
 CHECKS = [
     ("python compiles",           check_python_compiles),
     ("no undefined names",        check_undefined_names),
@@ -507,7 +628,9 @@ CHECKS = [
     ("template tags balance",     check_template_tags_balance),
     ("page hooks exist",          check_hooks_exist),
     ("buttons have handlers",     check_actions_are_handled),
+    ("endpoints have buttons",    check_endpoints_have_buttons),
     ("nothing stuck behind hidden", check_hidden_ancestors),
+    ("listing-health rules behave", check_store_logic),
 ]
 
 

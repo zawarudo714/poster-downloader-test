@@ -1,3 +1,6 @@
-Deploy now runs tools/preflight.py first: compiles, undefined names, JS parsing,
-template tags, page hooks, button handlers, settings keys, cross-module calls.
-python tools/preflight.py --map lists every button and what it calls.
+TeePublic switching stages made stoppable, resumable and self-repairing.
+One account at a time instead of all queued up front; PAUSE and STOP now
+reach the deactivate/reactivate loops; a run whose worker dies restarts
+itself or ends and releases the pipeline. New SWITCH OFF THE KNOWN MISSING
+button (no scan first) and a CANCEL button on jobs. Node must be updated
+too: agent 1.23.0.

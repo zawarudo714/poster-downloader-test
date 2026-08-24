@@ -591,6 +591,9 @@ class StoreHealthStage:
             config=self.config, client=self.client, log=self.log, job_id=job_id)
 
         done = failed = 0
+        # Set when the server tells us to stop mid-account. Reported at the
+        # end so a cut-short account is never mistaken for a finished one.
+        cut_short = False
         # Consecutive wall failures. After a run of them it is plainly the
         # account and not the design: the first real attempt cost 97 minutes
         # and 98 failures before one path happened to land. Stopping early
@@ -636,13 +639,13 @@ class StoreHealthStage:
                                          wall_tries)
                     else:
                         self._reactivate(uploader, did)
-                    self._report(run_id, account["id"], did, action, None)
+                    stop = self._report(run_id, account["id"], did, action, None)
                     done += 1
                     wall_streak = 0
                 except Exception as e:
                     detail = f"{type(e).__name__}: {e}"
                     uploader.emit(f"  ✗ {label}: {detail}", level="error")
-                    self._report(run_id, account["id"], did, action, detail)
+                    stop = self._report(run_id, account["id"], did, action, detail)
                     failed += 1
 
                     if getattr(e, "transient", False):
@@ -655,6 +658,22 @@ class StoreHealthStage:
                                 transient=True, fatal=True)
                     else:
                         wall_streak = 0
+
+                # ── THE SERVER SAID STOP ─────────────────────────────────
+                #
+                # Checked after BOTH outcomes, because a run being paused
+                # has nothing to do with whether this particular design
+                # worked. Reported as `partial` so the server knows the
+                # account was cut short and does not read a clean ending as
+                # a finished account — the same mistake that once let a
+                # paused scan advance to a mass deactivation.
+                if stop:
+                    cut_short = True
+                    uploader.emit(
+                        f"Stopping — the server says this run is no longer "
+                        f"switching designs. {done} done, "
+                        f"{len(designs) - index} not started.", level="warn")
+                    break
         except Exception as e:
             # Anything that escaped the per-design handler — almost always
             # start(). Report the stage as failed so the run ENDS and the
@@ -674,8 +693,10 @@ class StoreHealthStage:
 
         self.client.post("/store/stage-done",
                          {"run_id": run_id, "stage": action,
-                          "account_id": account["id"]})
-        return {"done": done, "failed": failed, "account": account.get("name")}
+                          "account_id": account["id"],
+                          "partial": cut_short})
+        return {"done": done, "failed": failed, "cut_short": cut_short,
+                "account": account.get("name")}
 
     def _deactivate(self, uploader, design: dict, html_markers, paths,
                     signed_out, wall_wait, wall_tries) -> None:
@@ -749,19 +770,31 @@ class StoreHealthStage:
         time.sleep(2)
 
     def _report(self, run_id: int, account_id: int, design_id: str,
-                action: str, error: Optional[str]) -> None:
+                action: str, error: Optional[str]) -> bool:
         """
         Say what happened to this one design, immediately.
 
         Per design rather than per batch: a stage that fell over halfway
         would otherwise leave no record of the twenty it had already turned
         off, and reactivation would then miss exactly those twenty.
+
+        RETURNS TRUE WHEN THE SERVER SAYS STOP. The reply used to be thrown
+        away, which meant a node could not be stopped at all once an account
+        was under way: PAUSE and STOP THIS RUN changed the screen while
+        designs kept switching off for the rest of the hour. A node cannot
+        hear a button — only an answer to a question it was already asking,
+        and this is that question.
         """
         try:
-            self.client.post("/store/action", {
+            reply = self.client.post("/store/action", {
                 "run_id": run_id, "account_id": account_id,
                 "design_id": design_id, "action": action, "error": error,
             })
+            return bool((reply or {}).get("stop"))
         except Exception as e:
+            # A report we could not deliver is not an instruction to stop.
+            # Treating a blip as a stop would abandon the account and leave
+            # its designs half switched.
             self.log(f"Could not report {action} of {design_id}: {e}",
                      level="error")
+            return False

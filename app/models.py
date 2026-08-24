@@ -1336,18 +1336,32 @@ class StoreScanRun(Base):
     # `retry_at` and tries again, with the gap growing each time. It does NOT
     # hold the pipeline while it waits — an hour of holding Photoshop for
     # nothing would be the opposite of helpful.
-    # ── HOW MANY WORKERS THIS STAGE IS WAITING ON ───────────────────────
-    # Deactivation and reactivation run ONE JOB PER ACCOUNT, and each job
-    # reports when it finishes. Without counting them, the FIRST account to
-    # finish told the server the whole stage was done: the run advanced to
-    # reactivating while a second account was still switching designs OFF,
-    # and those designs were never on the reactivate list. Live listings
-    # left switched off, with nothing on screen saying so.
+    # ── HOW MANY ACCOUNTS THIS STAGE IS WAITING ON ──────────────────────
+    # Deactivation and reactivation work ONE ACCOUNT AT A TIME, and each
+    # account reports when it finishes. Without counting them, the FIRST
+    # account to finish told the server the whole stage was done: the run
+    # advanced to reactivating while a second account was still switching
+    # designs OFF, and those designs were never on the reactivate list. Live
+    # listings left switched off, with nothing on screen saying so.
     #
-    # So a stage ends when `stage_jobs_done` reaches `stage_jobs_total`, and
-    # not before.
+    # These two are for the SCREEN — "account 3 of 5". They are deliberately
+    # not what ends the stage. The stage ends when there is no account left
+    # with work in it, which is derived from the catalogue every time and so
+    # cannot drift out of step with reality the way a counter can.
     stage_jobs_total = Column(Integer, nullable=False, default=0)
     stage_jobs_done  = Column(Integer, nullable=False, default=0)
+
+    # ── THE ONE ACCOUNT CURRENTLY BEING WORKED ──────────────────────────
+    # The first version created every account's job UP FRONT. Stopping the
+    # run then did nothing to them: the node calmly claimed the next queued
+    # job and carried on switching designs off for another two hours while
+    # the screen said "abandoned". One at a time means there is only ever one
+    # thing to stop — and the node is serial anyway, so nothing is lost.
+    stage_account_id = Column(Integer, nullable=True)
+    # Re-dispatches of the CURRENT account after its job died without
+    # reporting. Reset the moment an account completes, so this is "how many
+    # times has this one account failed to start", not a lifetime total.
+    stage_attempts   = Column(Integer, nullable=False, default=0)
 
     retry_at    = Column(DateTime, nullable=True)
     retry_count = Column(Integer, nullable=False, default=0)
@@ -1482,6 +1496,14 @@ class StoreListing(Base):
     # on one real account holds 379 designs the owner turned off himself.
     deactivated_at = Column(DateTime, nullable=True)
     action_error   = Column(Text, nullable=True)
+    # WHEN that failure happened, and it is load-bearing rather than
+    # decorative. The stage now ends when no account has any work left, and
+    # work is derived from the catalogue — so a design that cannot be
+    # switched off would be handed out again, fail again, and loop forever.
+    # Comparing this against the run's start date is what makes a failure
+    # count as "already tried this run" while still allowing a fresh attempt
+    # next week.
+    action_error_at = Column(DateTime, nullable=True)
 
     # ── The owner's override ────────────────────────────────────────────
     excluded       = Column(Integer, nullable=False, default=0, index=True)

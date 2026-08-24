@@ -112,6 +112,13 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("store_scan_runs",  "retry_note",  "TEXT"),
     ("store_scan_runs",  "stage_jobs_total", "INTEGER NOT NULL DEFAULT 0"),
     ("store_scan_runs",  "stage_jobs_done",  "INTEGER NOT NULL DEFAULT 0"),
+    # One account at a time through the action stages, so there is only ever
+    # one job to cancel when the run is stopped.
+    ("store_scan_runs",  "stage_account_id", "INTEGER"),
+    ("store_scan_runs",  "stage_attempts",   "INTEGER NOT NULL DEFAULT 0"),
+    # Stops a design that cannot be switched off from being handed out
+    # forever now that the stage's end is derived from the catalogue.
+    ("store_listings",   "action_error_at",  "DATETIME"),
 ]
 
 # ════════════════════════════════════════════════════════════════════════════

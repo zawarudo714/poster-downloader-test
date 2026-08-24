@@ -308,6 +308,25 @@ def _scheduler_loop():
             except Exception:
                 log.exception("Listing-sweep retry failed")
 
+            # ── Is a listing sweep stuck with nothing working on it? ─────
+            # The worker machine rebooting mid-account leaves a run in
+            # `deactivating` for ever, holding Photoshop and the uploads all
+            # night while the screen shows work in progress. Nothing else
+            # notices: the node cannot report a crash it did not survive.
+            # Separate try from the retry above so one failing cannot stop
+            # the other.
+            try:
+                from .db import SessionLocal
+                from .routes.store_admin import sweep_stalled_runs
+                _db = SessionLocal()
+                try:
+                    for note in sweep_stalled_runs(_db):
+                        log.warning("Stalled listing run repaired — %s", note)
+                finally:
+                    _db.close()
+            except Exception:
+                log.exception("Stalled listing-run sweep failed")
+
             # ── Is image generation still running? ───────────────────────
             # Wrapped in its own try so a failure here can never stop the
             # backups. Losing a day's backup to a watchdog would be a poor

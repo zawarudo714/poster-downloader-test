@@ -352,6 +352,8 @@ def missing_for(db: Session, run: StoreScanRun,
     The vague ones are deliberately held back. Cycling a design whose tag is
     simply too broad achieves nothing and takes a live listing offline for
     the duration, twice, for no gain.
+
+    So are designs this run has ALREADY failed on — see `_not_failed_this_run`.
     """
     from ..pipeline import get_setting
 
@@ -365,7 +367,7 @@ def missing_for(db: Session, run: StoreScanRun,
     if account_id:
         rows = rows.filter(StoreListing.account_id == account_id)
     return [r for r in rows.order_by(StoreListing.account_id).all()
-            if not looks_vague(r, after)]
+            if not looks_vague(r, after) and _not_failed_this_run(r, run)]
 
 
 def deactivated_for(db: Session, run: StoreScanRun,
@@ -383,7 +385,66 @@ def deactivated_for(db: Session, run: StoreScanRun,
         StoreListing.deactivated_at.isnot(None))
     if account_id:
         q = q.filter(StoreListing.account_id == account_id)
-    return q.order_by(StoreListing.account_id).all()
+    return [r for r in q.order_by(StoreListing.account_id).all()
+            if _not_failed_this_run(r, run)]
+
+
+def _not_failed_this_run(row: StoreListing, run: StoreScanRun) -> bool:
+    """
+    True unless we already tried this design in this run and it would not go.
+
+    ════════════════════════════════════════════════════════════════════════
+    THIS IS WHAT STOPS THE STAGE LOOPING FOREVER
+    ════════════════════════════════════════════════════════════════════════
+    A stage now ends when no account has any work left, and "work left" is
+    derived from the catalogue rather than counted. That is deliberate — a
+    derived answer cannot drift out of step the way a counter did when the
+    first account to finish ended the stage for all five.
+
+    But it has a failure mode of its own: a design that CANNOT be switched
+    off — deleted at the marketplace, already inactive, the session not
+    signed in as its owner — never leaves the list. It would be handed out,
+    fail, and be handed straight back, for as long as the machine is on.
+
+    Comparing the failure's timestamp against the run's start date closes
+    that: failed this run means skip, failed last week means try again. The
+    designs are not hidden — `stuck_for()` counts them and the screen names
+    them, because silently skipping work is how a run reports success over
+    nothing having happened.
+    """
+    if not row.action_error:
+        return True
+    if row.action_error_at is None:
+        # Written before this column existed. Trust the error and skip it;
+        # the next successful action clears both.
+        return False
+    return row.action_error_at < run.started_at
+
+
+def would_deactivate(db: Session, marketplace: str) -> list[StoreListing]:
+    """
+    What a deactivation started RIGHT NOW would switch off.
+
+    Uses an unsaved probe run rather than a second copy of the filtering,
+    because the number on the button has to be the number the button will
+    actually do — and two definitions of "what is missing enough to switch
+    off" would drift apart the first time the vague-tag rule changed. The
+    probe is never added to the session; it exists only to carry the
+    marketplace and a start time.
+    """
+    probe = StoreScanRun(marketplace=marketplace, started_at=datetime.utcnow())
+    return missing_for(db, probe)
+
+
+def stuck_for(db: Session, run: StoreScanRun) -> list[StoreListing]:
+    """Designs this run tried to switch and could not. Named on the screen."""
+    return [
+        r for r in db.query(StoreListing).filter(
+            StoreListing.marketplace == run.marketplace,
+            StoreListing.action_error.isnot(None),
+            StoreListing.action_error_at.isnot(None)).all()
+        if r.action_error_at >= run.started_at
+    ]
 
 
 def counts(db: Session, run: Optional[StoreScanRun] = None,
@@ -411,13 +472,17 @@ def counts(db: Session, run: Optional[StoreScanRun] = None,
     # checked + still-to-do, so it stays put as the run progresses instead of
     # drifting the way a snapshot taken at the start would.
     run_total = checked
-    to_deactivate = 0
+    # What a DEACTIVATE will actually act on — fewer than "missing", because
+    # vague tags and excluded designs are held back and anything already
+    # switched off is not switched off twice. The button must promise the
+    # number it will do.
+    #
+    # Computed with no run as well, because the standalone SWITCH OFF button
+    # exists when nothing is running and a button whose number is always
+    # zero when you can actually press it is worse than no number.
+    to_deactivate = len(would_deactivate(db, marketplace))
     if run is not None and run.status not in FINISHED:
         run_total = checked + len(scannable_listings(db, run))
-        # What the DEACTIVATE button will actually act on — which is fewer
-        # than "missing", because vague tags and excluded designs are held
-        # back and anything already switched off is not switched off twice.
-        # The button must promise the number it will do.
         to_deactivate = len(missing_for(db, run))
 
     return {
@@ -472,22 +537,56 @@ def resume_run(db: Session, run: StoreScanRun) -> None:
     run.paused_by = None
 
 
+def stage_work(db: Session, run: StoreScanRun,
+               stage: str) -> dict[int, list[StoreListing]]:
+    """
+    What is left to do in this stage, by account. Empty means the stage is over.
+
+    Derived from the catalogue every single time, never stored. Both pickers
+    drain themselves as the work happens — deactivating sets `deactivated_at`
+    so the row leaves `missing_for`, reactivating clears it so the row leaves
+    `deactivated_for` — which means "is there anything left" is a question
+    about the world rather than about a counter somebody has to remember to
+    increment.
+
+    That distinction is the whole fix. The counter version advanced the run
+    the moment the FIRST of five accounts reported, and 178 live listings
+    were left switched off with the screen showing everything as fine.
+    """
+    picker = missing_for if stage == "deactivate" else deactivated_for
+    out: dict[int, list[StoreListing]] = {}
+    for row in picker(db, run):
+        out.setdefault(row.account_id, []).append(row)
+    return out
+
+
 def dispatch_stage(db: Session, run: StoreScanRun, stage: str,
                    *, by: str) -> int:
     """
-    Queue the node jobs for a stage. ONE definition, two callers.
-
-    The button on the tab calls it, and an automatic run calls it from
-    `stage-done` when one stage hands over to the next. A second copy of
-    "how do we start a deactivation" is exactly how the manual path and the
-    automatic path would drift into doing subtly different things — and the
-    automatic one is the path nobody is watching.
+    Send ONE account's worth of switching to the node. ONE definition, three
+    callers: the button, an automatic run handing over, and the stall
+    sweeper picking up after a dead job. A second copy of "how do we start a
+    deactivation" is how the manual path and the automatic path drift into
+    doing subtly different things — and the automatic one is the path nobody
+    is watching.
 
     ════════════════════════════════════════════════════════════════════════
-    ONE JOB PER ACCOUNT HERE, UNLIKE THE SCAN
+    ONE ACCOUNT AT A TIME, AND THAT IS THE POINT
     ════════════════════════════════════════════════════════════════════════
-    These stages are signed in, and each account needs its OWN Chrome
-    profile — two accounts cannot share one browser.
+    The first version created every account's job UP FRONT — five jobs, one
+    per account, all queued together. Two consequences, both real:
+
+      · Stopping the run did nothing to them. The node claimed the next
+        queued job and carried on switching designs off for another two
+        hours while the screen read "abandoned".
+      · A node that died mid-account left the stage counter short of its
+        total forever, so the run hung, holding Photoshop and the uploads
+        all night for nothing.
+
+    One at a time means there is only ever ONE thing to cancel and ONE thing
+    to restart. Nothing is lost by it: these stages are signed in, each
+    account needs its own Chrome profile, and the node runs one job at a
+    time regardless — so the jobs were queueing behind each other anyway.
 
     ════════════════════════════════════════════════════════════════════════
     MEASURED 2026-08-24: ABOUT AN HOUR PER ACCOUNT, NOT MINUTES
@@ -496,67 +595,89 @@ def dispatch_stage(db: Session, run: StoreScanRun, stage: str,
     hours". That was a guess and it was wrong by a factor of about thirty.
     Every design needs its own freshly loaded page, because the deactivate
     form carries a one-time token, so the cost is one page load per design
-    and there is no batching to be had.
+    and there is no batching to be had. Five neglected accounts came to
+    roughly ten hours across the two stages.
 
-    On a first sweep of a long-neglected account that is ~100 missing
-    designs an hour each way — five accounts came to roughly ten hours for
-    the two stages together. Steady weekly running is genuinely small, but
-    NOTHING here may assume the stage is short: it is long enough that it
+    NOTHING here may assume the stage is short. It is long enough that it
     must be stoppable, resumable, and survivable across a restart.
 
-    That wrong estimate is also why the queued-job-per-account shape below
-    matters. All the jobs are created UP FRONT, so stopping the run is not
-    enough on its own — see `cancel_queued_jobs`.
-
-    Returns how many jobs were queued.
+    Returns 1 when an account was dispatched, 0 when there is nothing left.
     """
     from .. import pipeline as P
     from . import service as earnings_service
     from . import wall
 
-    picker = missing_for if stage == "deactivate" else deactivated_for
-    rows = picker(db, run)
-    if not rows:
+    work = stage_work(db, run, stage)
+    if not work:
         return 0
 
-    by_account: dict[int, list] = {}
-    for row in rows:
-        by_account.setdefault(row.account_id, []).append(row)
+    # Same order every time, so "account 3 of 5" means the same account it
+    # meant a minute ago. Dictionary order would follow the query, which
+    # changes underneath us as rows drain out of the picker.
+    account_id = sorted(work)[0]
+    designs = work[account_id]
+    account = db.query(UploadAccount).filter_by(id=account_id).first()
+    if account is None:
+        # Its designs would never drain and the stage could never end. Give
+        # up loudly rather than spinning on a row that points nowhere.
+        raise RuntimeError(
+            f"Design(s) in the catalogue belong to account {account_id}, "
+            f"which no longer exists.")
 
     project = P.resolve_project(db, None)
     attempts = int(P.get_setting(db, "wall_max_attempts"))
-    queued = 0
 
-    for account_id, designs in by_account.items():
-        account = db.query(UploadAccount).filter_by(id=account_id).first()
-        if account is None:
-            continue
-        P.create_job(db, kind=f"store_{stage}", payload={
-            "run_id": run.id,
-            "action": stage,
-            "account": P.account_payload(db, account, include_secret=True,
-                                         project=project),
-            "settings": P.upload_settings_payload(db, project=project),
-            "designs": [{"design_id": d.design_id, "title": d.title,
-                         "url": d.url} for d in designs],
-            # The same wall that stands in front of the earnings page. These
-            # stages are signed in, so it can appear here too.
-            "wall_html_markers": earnings_service.site_markers(run.marketplace),
-            "signed_out_markers": earnings_service.signed_out_markers(run.marketplace),
-            "wall_paths": wall.payload_for(
-                wall.next_paths(db, run.marketplace, attempts)),
-            "wall_wait_s": P.get_setting(db, "wall_wait_s"),
-            "wall_max_attempts": attempts,
-        }, requested_by=by)
-        queued += 1
+    P.create_job(db, kind=f"store_{stage}", payload={
+        "run_id": run.id,
+        "action": stage,
+        "account": P.account_payload(db, account, include_secret=True,
+                                     project=project),
+        "settings": P.upload_settings_payload(db, project=project),
+        "designs": [{"design_id": d.design_id, "title": d.title,
+                     "url": d.url} for d in designs],
+        # The same wall that stands in front of the earnings page. These
+        # stages are signed in, so it can appear here too.
+        "wall_html_markers": earnings_service.site_markers(run.marketplace),
+        "signed_out_markers": earnings_service.signed_out_markers(run.marketplace),
+        "wall_paths": wall.payload_for(
+            wall.next_paths(db, run.marketplace, attempts)),
+        "wall_wait_s": P.get_setting(db, "wall_wait_s"),
+        "wall_max_attempts": attempts,
+    }, requested_by=by)
 
     run.status = "deactivating" if stage == "deactivate" else "reactivating"
-    # The stage is not over until EVERY account's job has reported. Without
-    # this the first account to finish ended the stage for all of them.
-    run.stage_jobs_total = queued
+    run.stage_account_id = account_id
+
+    # ── THE FIGURES ARE FOR THE SCREEN, NOT FOR THE STATE MACHINE ────────
+    #
+    # `stage_jobs_total` is fixed by `begin_stage` and then left alone, so
+    # the denominator does not shrink under the reader as accounts drain
+    # out — "account 3 of 5" has to keep meaning the same thing until the
+    # stage ends. What ENDS the stage is `stage_work` coming back empty.
+    if not run.stage_jobs_total:
+        run.stage_jobs_total = len(work)
+    run.stage_jobs_done = max(0, run.stage_jobs_total - len(work))
+
+    verb = "off" if stage == "deactivate" else "back on"
+    run.stage_note = (
+        f"Switching {verb}: {account.name}, {len(designs)} design(s). "
+        f"Account {run.stage_jobs_done + 1} of {run.stage_jobs_total}.")
+    return 1
+
+
+def begin_stage(db: Session, run: StoreScanRun, stage: str, *, by: str) -> int:
+    """
+    Start a stage from scratch — resets the screen's account counter first.
+
+    Separate from `dispatch_stage` because that one is also called to hand
+    over to the NEXT account mid-stage, where resetting the total would make
+    the denominator count down instead of holding still.
+    """
+    run.stage_jobs_total = 0
     run.stage_jobs_done = 0
-    run.stage_note = f"{len(rows)} design(s) across {queued} account(s)."
-    return queued
+    run.stage_attempts = 0
+    run.stage_account_id = None
+    return dispatch_stage(db, run, stage, by=by)
 
 
 def scan_incomplete(db: Session, run: StoreScanRun) -> int:
@@ -595,6 +716,232 @@ def retry_delays(db: Session) -> list[int]:
         if value > 0:
             out.append(value)
     return out or [30, 60, 90]
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  THE JOBS A RUN OWNS
+# ════════════════════════════════════════════════════════════════════════════
+#
+# A run and its node jobs are two different things, and forgetting that is
+# what let a stopped run keep working. Everything below exists so the run is
+# the ONLY thing anyone has to think about: stop the run and its work stops,
+# because stopping the run is what cancels the job.
+
+ACTION_KINDS = ("store_deactivate", "store_reactivate")
+JOB_KINDS = ("store_scan",) + ACTION_KINDS
+LIVE_JOB = ("queued", "running")
+
+
+def _run_id_of(job) -> Optional[int]:
+    import json
+    try:
+        return (json.loads(job.payload_json or "{}") or {}).get("run_id")
+    except (TypeError, ValueError):
+        return None
+
+
+def jobs_for_run(db: Session, run: StoreScanRun, *,
+                 statuses: tuple[str, ...] = LIVE_JOB) -> list:
+    """Node jobs belonging to this run, in whichever states were asked for."""
+    from ..models import PipelineJob
+
+    return [
+        j for j in db.query(PipelineJob).filter(
+            PipelineJob.kind.in_(JOB_KINDS),
+            PipelineJob.status.in_(statuses)).all()
+        if _run_id_of(j) == run.id
+    ]
+
+
+def cancel_run_jobs(db: Session, run: StoreScanRun, *, why: str) -> int:
+    """
+    Cancel every job this run still owns. Returns how many.
+
+    ════════════════════════════════════════════════════════════════════════
+    STOPPING A RUN MUST STOP THE WORK
+    ════════════════════════════════════════════════════════════════════════
+    It did not. `finish_run` set a status and released the pipeline hold, and
+    that was all — the node's queued jobs sat untouched, so it claimed the
+    next account and carried on switching designs off for two more hours
+    while the tab showed the run as abandoned. The screen and the machine
+    disagreed, and only the machine was right.
+
+    A cancelled QUEUED job is never claimed, which is the important half. A
+    cancelled RUNNING one cannot be reached out and stopped — the node hears
+    about it through the reply to its next per-design report, which is why
+    `stage_should_stop` exists below.
+    """
+    from .. import pipeline as P
+
+    killed = 0
+    for job in jobs_for_run(db, run):
+        job.status = "cancelled"
+        job.finished_at = datetime.utcnow()
+        P.append_job_log(db, job, f"Cancelled — {why}", level="warn")
+        killed += 1
+    return killed
+
+
+def stage_should_stop(db: Session, run: Optional[StoreScanRun],
+                      stage: str) -> bool:
+    """
+    Should the node stop switching designs right now?
+
+    Asked on every single per-design report, which is the only channel that
+    exists: a node cannot hear a button, it can only hear an ANSWER to
+    something it was already asking. The scan already worked this way; the
+    action stages threw the reply away, so PAUSE and STOP reached the screen
+    and nothing else, and a paused run went on switching designs off.
+
+    Every reason to stop is DERIVED here rather than stored in a flag,
+    because a flag has two edges and the second one gets lost.
+    """
+    if run is None:
+        return True
+    if run.paused_at is not None:
+        return True
+    # The run has moved on — a stall sweep gave this account to a newer job,
+    # or an admin sent the run somewhere else. Either way this job is stale.
+    #
+    # This one line also covers every ENDED run, because done/failed/
+    # abandoned can never equal deactivating/reactivating. An explicit
+    # `status in FINISHED` above it was written first and then deleted: a
+    # sabotage test showed removing it changed no answer, which means it was
+    # not protecting anything and would have read like a guard that was.
+    expected = "deactivating" if stage == "deactivate" else "reactivating"
+    return run.status != expected
+
+
+def stalled_runs(db: Session) -> list[StoreScanRun]:
+    """
+    Runs in an action stage with no live job doing the work.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE INVARIANT THIS WATCHES
+    ════════════════════════════════════════════════════════════════════════
+    A run that is switching designs must have exactly one job switching
+    them. If it does not, nothing will ever move it again: the node died, the
+    job errored, someone cancelled it. The run then sits in `deactivating`
+    for ever, holding Photoshop and the daily uploads, with the screen
+    politely reporting work in progress.
+
+    That is stated as a property of STATE, not of flow, which is the whole
+    point — it holds however the job died, including ways nobody thought of.
+
+    The claim timeout is borrowed from `reap_stale_claims` deliberately.
+    Two different ideas of "long enough that it must be dead" would drift,
+    and the reaper is the thing that marks the job dead in the first place.
+    """
+    from ..models import PipelineJob
+    from ..pipeline import get_setting
+
+    cutoff = datetime.utcnow() - timedelta(
+        minutes=int(get_setting(db, "claim_timeout_min")))
+
+    out = []
+    for run in db.query(StoreScanRun).filter(
+            StoreScanRun.status.in_(("deactivating", "reactivating"))).all():
+        if run.paused_at or (run.retry_at and run.retry_at > datetime.utcnow()):
+            continue
+        live = [j for j in jobs_for_run(db, run)
+                # A job claimed and then silent past the timeout is dead even
+                # though its row still says "running". Waiting for the reaper
+                # to relabel it would double the time the pipeline is held.
+                if j.status == "queued"
+                or (j.started_at or datetime.utcnow()) > cutoff]
+        if not live:
+            out.append(run)
+    return out
+
+
+def repair_stalled(db: Session, run: StoreScanRun) -> str:
+    """
+    Get a stalled run moving again, or end it. Returns what was done, in words.
+
+    Repair is tried FIRST and giving up comes second, because the common
+    cause is dull — the node rebooted, Chrome would not start once — and the
+    work itself is fine. Retrying the same account more than a few times is
+    not persistence though: it is a loop, and it would hold the pipeline all
+    night doing nothing.
+    """
+    from ..pipeline import get_setting
+
+    stage = "deactivate" if run.status == "deactivating" else "reactivate"
+    limit = int(get_setting(db, "store_stage_max_attempts"))
+
+    if not stage_work(db, run, stage):
+        # Nothing left to do — the work finished and only the report was
+        # lost. Advancing is right, and it is the same decision `stage-done`
+        # would have made, so it goes through the same function.
+        return advance_after_stage(db, run, stage)
+
+    run.stage_attempts = int(run.stage_attempts or 0) + 1
+    if run.stage_attempts > limit:
+        left = sum(len(v) for v in stage_work(db, run, stage).values())
+        finish_run(db, run, status="failed",
+                   note=(f"Gave up: the worker machine stopped reporting "
+                         f"{run.stage_attempts} times in a row with {left} "
+                         f"design(s) still to switch "
+                         f"{'off' if stage == 'deactivate' else 'back on'}. "
+                         f"Photoshop and uploads have the machine back."))
+        cancel_run_jobs(db, run, why="run gave up")
+        return f"failed after {run.stage_attempts} attempts"
+
+    cancel_run_jobs(db, run, why="worker stopped reporting")
+    dispatch_stage(db, run, stage, by="stall-sweeper")
+    return (f"restarted {stage} (attempt {run.stage_attempts} of {limit})")
+
+
+def advance_after_stage(db: Session, run: StoreScanRun, stage: str) -> str:
+    """
+    One stage's work is finished — what happens next. Returns it in words.
+
+    ════════════════════════════════════════════════════════════════════════
+    ONE PLACE DECIDES THIS
+    ════════════════════════════════════════════════════════════════════════
+    Three things can discover that a stage is over: the node reporting, the
+    stall sweeper finding the work already done, and an admin pressing a
+    button. All three come here. When the node's report was the only path,
+    the other two had no way to move a run on at all — which is precisely
+    how a run with every design already switched off still sat in
+    `deactivating` for ever.
+    """
+    if stage_work(db, run, stage):
+        return "still work left"
+
+    run.stage_account_id = None
+    run.stage_attempts = 0
+
+    if stage == "reactivate":
+        stuck = len(stuck_for(db, run))
+        finish_run(db, run, status="done",
+                   note=("Everything we switched off is back on."
+                         + (f" {stuck} design(s) could not be switched and "
+                            f"are listed below." if stuck else "")))
+        return "run finished"
+
+    # Deactivation done. On an automatic run reactivation follows straight
+    # on; on a manual one a person confirms first.
+    run.status = "confirming"
+    run.stage_note = "Everything is switched off. Ready to switch back on."
+    nxt = next_stage(run)
+    if not nxt:
+        return "waiting for you to confirm"
+
+    # ── A NEXT STAGE WITH NOTHING IN IT MUST END THE RUN ─────────────────
+    #
+    # If every design refused to switch off there is nothing to switch back
+    # on. Ignoring that leaves an automatic run parked at `confirming` — a
+    # gate, so it holds Photoshop and the uploads and waits for a button
+    # that an unattended run will never get. Overnight that is the whole
+    # night lost, and the screen would say it was waiting for the owner.
+    if begin_stage(db, run, nxt, by="auto"):
+        return "moved straight on to switching back on"
+
+    finish_run(db, run, status="done",
+               note="Nothing was left switched off, so there was nothing to "
+                    "put back.")
+    return "run finished — nothing to switch back on"
 
 
 def schedule_retry(db: Session, run: StoreScanRun, *, reason: str) -> Optional[int]:

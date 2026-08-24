@@ -645,6 +645,12 @@ DEFAULTS: dict[str, Any] = {
     # catalogue: a design checked 20 hours ago is still current, one checked
     # last week is not.
     "scan_continue_within_h": 24,
+    # How many times to restart ONE account's switching after the worker
+    # machine stopped reporting. The usual cause is dull — a reboot, a Chrome
+    # that would not start — and the work itself is fine, so retrying is
+    # right. But retrying for ever is a loop that holds Photoshop and the
+    # uploads all night doing nothing, so the run gives up and says so.
+    "store_stage_max_attempts": 3,
 
     # ── How many failures in a row before an account is parked ───────────
     # Only applies to failures the node marks as "might be systemic" — a

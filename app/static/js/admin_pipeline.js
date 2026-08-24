@@ -492,12 +492,39 @@
             <td class="mono">${j.progress || 0}%${j.progress_note ? ' · ' + esc(j.progress_note) : ''}</td>
             <td class="mono">${esc(j.claimed_by || '—')}</td>
             <td class="mono">${esc(j.created_at || '')}</td>
-            <td><button class="btn btn-ghost btn-tiny" data-open-job="${j.id}">LOG</button></td>
+            <td><button class="btn btn-ghost btn-tiny" data-open-job="${j.id}">LOG</button>
+              ${['done', 'error', 'cancelled'].includes(j.status) ? ''
+                : ` <button class="btn btn-ghost btn-tiny" data-cancel-job="${j.id}">CANCEL</button>`}
+            </td>
           </tr>`).join('')}
         </tbody>
       </table>`;
     el.querySelectorAll('[data-open-job]').forEach((b) => {
       b.addEventListener('click', () => openConsole(parseInt(b.dataset.openJob, 10)));
+    });
+    // ── THE CANCEL BUTTON THAT WAS NEVER THERE ─────────────────────────
+    //
+    // The endpoint has existed since jobs did, and NOTHING ever called it —
+    // so the only way to stop a queued job was the browser console. That
+    // mattered on the day a stopped sweep left two accounts' worth of
+    // switching queued and there was no way to reach it from the screen.
+    // Zero callers of a working endpoint is a defect, not a style question.
+    el.querySelectorAll('[data-cancel-job]').forEach((b) => {
+      b.addEventListener('click', async () => {
+        const id = parseInt(b.dataset.cancelJob, 10);
+        if (!confirm('Cancel job #' + id + '?\n\nA job that has not started '
+                     + 'yet will never start. One already running stops when '
+                     + 'it next reports in, which can take a minute.')) return;
+        b.disabled = true;
+        try {
+          await postJSON(`${API}/jobs/${id}/cancel`, {});
+          await loadOverview();
+          renderJobs();
+        } catch (err) {
+          b.disabled = false;
+          alert('Could not cancel: ' + err.message);
+        }
+      });
     });
   }
 

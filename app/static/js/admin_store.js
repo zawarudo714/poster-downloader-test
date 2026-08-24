@@ -105,7 +105,28 @@
             + 'may not be fine today.</p>'
           : '') +
         '<p class="muted">A recheck only looks at designs already marked '
-        + 'missing, so it takes minutes rather than hours.</p>';
+        + 'missing, so it takes minutes rather than hours.</p>' +
+        // ── ACT ON WHAT WE ALREADY KNOW, WITHOUT SCANNING AGAIN ─────────
+        //
+        // "Missing" is recorded on the DESIGN, not on the run that found
+        // it, so it survives a run being stopped halfway. Making him scan
+        // for hours to re-learn facts already on file would be busywork —
+        // and the mirror image, SWITCH BACK ON, has always worked this way.
+        (t.to_deactivate
+          ? '<hr class="rule"><p><button class="btn btn-ghost" '
+            + 'data-action="deactivate-missing" type="button">SWITCH OFF THE '
+            + t.to_deactivate + ' ALREADY KNOWN MISSING</button></p>'
+            + '<p class="muted">Goes straight to switching off, with no scan '
+            + 'first — for when a sweep was stopped partway and you just want '
+            + 'it finished. Switching off and back on again is the cure that '
+            + 'usually puts a design back in search.'
+            + (t.missing > t.to_deactivate
+                ? ' ' + (t.missing - t.to_deactivate) + ' of the ' + t.missing
+                  + ' missing are held back as excluded or probably-vague '
+                  + 'tags.'
+                : '')
+            + '</p>'
+          : '');
       return;
     }
 
@@ -170,7 +191,8 @@
         + 'type="button">SWITCH OFF ' + c.to_deactivate + ' DESIGNS</button></p>';
     } else if (run.status === 'deactivating') {
       body = '<p><strong>Switching the missing designs off.</strong> '
-        + c.deactivated + ' done so far.</p>'
+        + c.deactivated + ' switched off so far, ' + c.to_deactivate
+        + ' still to go.</p>'
         + accountProgress(run);
     } else if (run.status === 'confirming') {
       body = '<p><strong>' + c.deactivated + ' designs are switched off.</strong></p>'
@@ -184,7 +206,27 @@
         + accountProgress(run);
     }
 
-    el.innerHTML = rescue + body +
+    // ── WORK THIS RUN GAVE UP ON, SAID OUT LOUD ──────────────────────────
+    //
+    // A design that would not switch is SKIPPED for the rest of the run, so
+    // that the stage can end instead of handing the same failure round for
+    // ever. Skipping quietly and then reporting the stage finished would be
+    // a run claiming to have done something it did not.
+    var stuck = run.stuck_total
+      ? '<p class="quota-note"><strong>' + run.stuck_total + ' design(s) '
+        + 'would not switch and were skipped.</strong> They keep their place '
+        + 'in the catalogue and will be tried again on the next run.<br>'
+        + (run.stuck || []).map(function (s) {
+            return '<span class="mono">' + esc(s.title) + '</span> — '
+                   + esc(s.why);
+          }).join('<br>')
+        + (run.stuck_total > (run.stuck || []).length
+            ? '<br>…and ' + (run.stuck_total - (run.stuck || []).length)
+              + ' more.' : '')
+        + '</p>'
+      : '';
+
+    el.innerHTML = rescue + body + stuck +
       '<p class="muted mono">' + esc(run.note || '') + '</p>' +
       (run.paused ? '' :
         '<p><button class="btn btn-ghost btn-tiny" data-action="pause" '
@@ -444,6 +486,18 @@
           function (r) {
             alert('Putting ' + r.designs + ' design(s) back on across '
                   + r.accounts + ' account(s).');
+          });
+    } else if (a === 'deactivate-missing') {
+      // Spelled out because it switches LIVE listings off with no scan
+      // first, and the confirmation is the only place that can say so.
+      act(API + '/deactivate-missing', {},
+          'Switch off every design already marked missing, without scanning '
+          + 'first?\n\nThey stay off until they are switched back on, and '
+          + 'Photoshop and uploads pause while it works. Roughly an hour per '
+          + 'account.',
+          function (r) {
+            alert('Switching off ' + r.designs + ' design(s) across '
+                  + r.accounts + ' account(s), one account at a time.');
           });
     } else if (a === 'all-accounts') {
       state.account = null; state.accountName = '';

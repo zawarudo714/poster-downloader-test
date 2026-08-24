@@ -122,31 +122,49 @@
         '<p><button class="btn btn-accent" data-action="resume" type="button">'
         + 'RESUME</button></p>';
     } else if (run.status === 'scanning') {
-      body = '<p><strong>Scanning.</strong> ' + c.checked + ' of ' + c.total
-        + ' checked' + (c.missing ? ', ' + c.missing + ' missing' : '') + '.</p>'
-        + '<p class="muted">Everything else on the worker machine is paused. '
-        + 'The page updates itself.</p>'
+      // Counted against what THIS run set out to do, not the whole
+      // catalogue. A CONTINUE covering 627 reporting "17 of 1543" was true
+      // and useless — you could only tell by reading the node's console.
+      var scope = run.mode === 'continue' ? 'in this continue'
+                : run.mode === 'missing_only' ? 'of the ones that were missing'
+                : 'in this sweep';
+      body = '<p><strong>Checking designs.</strong> ' + c.checked + ' of '
+        + c.run_total + ' ' + scope
+        + (c.run_total < c.total
+            ? ' <span class="muted">(' + c.total + ' in the catalogue — the '
+              + 'rest were checked recently)</span>' : '')
+        + '.</p>'
+        + (c.missing
+            ? '<p class="muted">' + c.missing + ' designs are marked missing '
+              + 'across the whole catalogue right now — not all from this run.</p>'
+            : '')
+        + '<p class="muted">Photoshop and uploads are paused while this runs. '
+        + 'This page updates itself.</p>'
         + (c.checked
             ? '<p><button class="btn btn-accent" data-action="stop-scanning" '
-              + 'type="button">STOP SCANNING — REVIEW THE ' + c.checked
-              + ' CHECKED</button></p>' : '');
+              + 'type="button">STOP AND REVIEW THE ' + c.checked
+              + ' CHECKED SO FAR</button></p>' : '');
     } else if (run.status === 'reviewing') {
-      body = '<p><strong>' + c.missing + ' missing</strong> of ' + c.checked
-        + ' checked.'
-        + (c.vague ? ' ' + c.vague + ' look like vague tags and will be left '
-                     + 'alone.' : '') + '</p>'
+      body = '<p><strong>' + c.to_deactivate + ' designs will be switched off '
+        + 'and back on.</strong></p>'
+        + '<p class="muted">' + c.checked + ' checked in this run · '
+        + c.missing + ' missing across the catalogue'
+        + (c.vague ? ' · ' + c.vague + ' held back as probably-vague tags' : '')
+        + (c.excluded ? ' · ' + c.excluded + ' excluded by you' : '')
+        + '.</p>'
         + '<p><button class="btn btn-accent" data-action="deactivate" '
-        + 'type="button">DEACTIVATE THEM</button></p>';
+        + 'type="button">SWITCH OFF ' + c.to_deactivate + ' DESIGNS</button></p>';
     } else if (run.status === 'deactivating') {
-      body = '<p><strong>Deactivating.</strong> ' + c.deactivated + ' done.</p>';
+      body = '<p><strong>Switching the missing designs off.</strong> '
+        + c.deactivated + ' done so far.</p>';
     } else if (run.status === 'confirming') {
-      body = '<p><strong>' + c.deactivated + ' are now off.</strong></p>'
+      body = '<p><strong>' + c.deactivated + ' designs are switched off.</strong></p>'
         + '<p class="quota-note">These are OFF right now. They come back when '
         + 'you press the button below.</p>'
         + '<p><button class="btn btn-accent" data-action="reactivate" '
         + 'type="button">REACTIVATE THEM</button></p>';
     } else if (run.status === 'reactivating') {
-      body = '<p><strong>Reactivating.</strong> ' + c.deactivated
+      body = '<p><strong>Switching them back on.</strong> ' + c.deactivated
         + ' still to go.</p>';
     }
 

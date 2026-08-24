@@ -1353,6 +1353,36 @@ inherits the wrong half of another one.
   where he looked. One stored value, editable from wherever it is relevant.
 - He notices the thing you glossed over. Say the uncomfortable part first.
 
+### Every number and label must make sense to someone who never built this
+
+A count is only meaningful next to the right denominator, and the right
+denominator is the one the person is actually looking at.
+
+The incident, 2026-08-24: a CONTINUE sweep covering 627 designs reported
+**"17 of 1543 checked"**, because the code had `checked` (this run) and
+`total` (the whole catalogue) to hand and printed both. Technically true,
+and he could only tell it was wrong by opening the node's console. What it
+should say is 17 of the 627 THIS run is doing, with 1,543 mentioned as
+context — not as the thing being counted against.
+
+So, before shipping any figure or label:
+
+* **Read it as a stranger.** If the sentence needs you to know how the code
+  works, rewrite it. "17 of 1543" needs you to know there are two different
+  totals in play.
+* **Name the SCOPE of a count**, never just the number: "in this run", "in
+  the last 24 hours", "across all accounts".
+* **A mechanism should announce what it is doing**, in its own words —
+  "waiting to try again at 23:44", not "retry_at set".
+* **Numbers on a button must be the numbers that will happen.** A button
+  saying 627 that then does 1,543 is worse than a button with no number.
+
+This is not polish. He has no other way to verify the system is doing what
+he thinks: he cannot read the database and should not have to read a log on
+an unattended VPS. A screen that is confidently wrong costs him a night.
+
+Being tightened everywhere as part of the INTERACTION AUDIT (planned item 8).
+
 ### Write in plain words. This is a standing instruction, not a preference.
 
 His words, 2026-08-17: *"explain to me step by step using simple words you

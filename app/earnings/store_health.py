@@ -105,8 +105,8 @@ def holds_pipeline(db: Session) -> Optional[str]:
 
     tally = counts(db, run, run.marketplace)
     if run.status == "scanning":
-        seen = (f"{tally['checked']} of {tally['total']}"
-                if tally["total"] else "starting up")
+        seen = (f"{tally['checked']} of {tally['run_total']}"
+                if tally["run_total"] else "starting up")
         return (f"Paused for the {label} visibility scan ({seen} designs "
                 f"checked). Work resumes when the run finishes.")
     if run.status in WAITING:
@@ -401,9 +401,30 @@ def counts(db: Session, run: Optional[StoreScanRun] = None,
         checked = sum(1 for r in live
                       if r.last_checked_at and r.last_checked_at >= run.started_at)
 
+    # ── THE DENOMINATOR THE PERSON IS LOOKING AT ─────────────────────────
+    #
+    # `total` is the whole catalogue. `run_total` is what THIS run set out to
+    # do — which for a CONTINUE is only the backlog. Reporting "17 of 1543"
+    # on a run covering 627 was technically true and completely misleading:
+    # the only way to tell was to open the node's console.
+    #
+    # checked + still-to-do, so it stays put as the run progresses instead of
+    # drifting the way a snapshot taken at the start would.
+    run_total = checked
+    to_deactivate = 0
+    if run is not None and run.status not in FINISHED:
+        run_total = checked + len(scannable_listings(db, run))
+        # What the DEACTIVATE button will actually act on — which is fewer
+        # than "missing", because vague tags and excluded designs are held
+        # back and anything already switched off is not switched off twice.
+        # The button must promise the number it will do.
+        to_deactivate = len(missing_for(db, run))
+
     return {
         "total":        len(live),
         "checked":      checked,
+        "run_total":    run_total,
+        "to_deactivate": to_deactivate,
         "visible":      sum(1 for r in live if r.status == "visible"),
         "missing":      sum(1 for r in live if r.status == "missing"),
         "unknown":      sum(1 for r in live if r.status == "unknown"),
@@ -518,30 +539,19 @@ def dispatch_stage(db: Session, run: StoreScanRun, stage: str,
 
 def scan_incomplete(db: Session, run: StoreScanRun) -> int:
     """
-    How many designs this run still has not looked at. 0 means it finished.
+    How many designs this run still has to check. 0 means it finished.
 
-    DERIVED from the catalogue rather than stored as a flag, so it is right
-    even for a run that was interrupted before anything could be recorded
-    about it — including one already sitting at the wrong stage because an
-    earlier version treated "the job ended" as "the scan finished".
+    Deliberately just a count of `scannable_listings` rather than its own
+    copy of the filtering — two definitions of "what is left" would drift,
+    and this one decides both whether a run may advance to deactivation and
+    what the screen tells you.
 
-    A design counts as checked when its `last_checked_at` is at or after the
-    run started. That is also what makes RESUMING cheap: everything already
-    done is skipped.
+    DERIVED rather than stored, so it is right even for a run interrupted
+    before anything could be recorded about it — including one an earlier
+    version pushed to the review gate when it had merely been paused.
     """
-    rows = db.query(StoreListing).filter(
-        StoreListing.marketplace == run.marketplace,
-        StoreListing.removed_at.is_(None),
-        StoreListing.excluded == 0)
-    if run.scan_mode == "missing_only":
-        rows = rows.filter(StoreListing.status == "missing")
-    return sum(1 for r in rows.all()
-               if not r.last_checked_at or r.last_checked_at < run.started_at)
+    return len(scannable_listings(db, run))
 
-
-# ════════════════════════════════════════════════════════════════════════════
-#  WAITING OUT A TRANSIENT FAILURE
-# ════════════════════════════════════════════════════════════════════════════
 
 def retry_delays(db: Session) -> list[int]:
     """

@@ -76,7 +76,7 @@
   <section class="panel">
     <div class="panel-head">
       <span>SWEEP SETTINGS
-        {{ info("ACCOUNTS AT ONCE is how many browsers run in parallel — more is faster and uses more memory, roughly 400MB each. SEARCH PAGES is how deep to look before calling a design missing; TeePublic shows about 28 results a page, so 25 pages is around 700 results. DESIGNS PER ACCOUNT is a testing limit, 0 means check them all. CURES BEFORE FLAGGING is how many failed off-and-on cycles before a design is marked as a probably-vague tag and left alone.") }}
+        {{ info("ACCOUNTS AT ONCE is how many browsers run in parallel — more is faster and uses more memory, roughly 400MB each. SEARCH PAGES is how deep to look before calling a design missing; TeePublic shows about 28 results a page, so 25 pages is around 700 results. DESIGNS PER ACCOUNT is a testing limit, 0 means check them all. CURES BEFORE FLAGGING is how many failed off-and-on cycles before a design is marked as a probably-vague tag and left alone. The last one decides how much CONTINUE remembers: at 24 it picks up a sweep interrupted last night, but a sweep you stopped three days ago would be started over. Raise it to 72 or 168 if you scan in batches days apart.") }}
       </span>
       <span class="muted mono" data-settings-status></span>
     </div>
@@ -94,6 +94,9 @@
         <label>Cures before flagging
           <input type="number" min="1" max="20" style="width:70px"
                  data-set="scan_vague_after_fixes"></label>
+        <label>CONTINUE skips designs checked within (hours)
+          <input type="number" min="1" max="720" style="width:80px"
+                 data-set="scan_continue_within_h"></label>
         <button class="btn btn-accent btn-tiny" data-action="save-settings"
                 type="button">SAVE</button>
       </div>

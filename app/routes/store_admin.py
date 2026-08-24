@@ -123,6 +123,7 @@ def api_overview(admin: User = Depends(require_admin),
             "scan_max_search_pages":  int(P.get_setting(db, "scan_max_search_pages")),
             "scan_limit_per_account": int(P.get_setting(db, "scan_limit_per_account")),
             "scan_vague_after_fixes": after,
+            "scan_continue_within_h": int(P.get_setting(db, "scan_continue_within_h")),
         },
         "history": [{
             "id": r.id,
@@ -547,6 +548,10 @@ def api_settings(payload: dict = Body(...),
         "scan_max_search_pages":  (1, 200),
         "scan_limit_per_account": (0, 100000),
         "scan_vague_after_fixes": (1, 20),
+        # In HOURS, because the natural sentence is "checked in the last N
+        # hours". 720 is a month, which is as long as a status is worth
+        # trusting at all.
+        "scan_continue_within_h": (1, 720),
     }
     changed = {}
     for key, (low, high) in allowed.items():

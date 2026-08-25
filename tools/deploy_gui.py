@@ -432,6 +432,23 @@ class DeployApp:
                    command=lambda: self._start(skip_local=True)).grid(row=0, column=2)
         ttk.Button(btns, text="Clear log",
                    command=lambda: self._clear()).grid(row=0, column=3, padx=6)
+
+        # ── WHAT IS ON THIS LAPTOP vs WHAT IS ACTUALLY SERVING ──────────
+        #
+        # Side by side and always visible, because the question "did my last
+        # deploy land" was previously answerable only by reading scrollback
+        # or opening an SSH session — and when it went unasked, two days of
+        # work sat on the laptop while every screen said success.
+        #
+        # CHECK LIVE asks the server directly without deploying anything, so
+        # it is safe to press at any time, including while wondering whether
+        # to press DEPLOY at all.
+        self.version_var = tk.StringVar(value="local —  ·  live —")
+        ttk.Label(btns, textvariable=self.version_var).grid(
+            row=0, column=4, padx=(18, 6))
+        ttk.Button(btns, text="Check live",
+                   command=self._start_version_check).grid(row=0, column=5)
+        self._refresh_local_version()
         row += 1
 
         # ── Log ─────────────────────────────────────────────────────────
@@ -682,6 +699,71 @@ class DeployApp:
             self._emit(output, "" if proc.returncode == 0 else "err")
         return proc.returncode, output
 
+    # ── The version label ───────────────────────────────────────────────
+
+    def _refresh_local_version(self, live: str = "") -> None:
+        """
+        Redraw 'local X · live Y'. Called after a deploy and by CHECK LIVE.
+
+        `live` is remembered between calls so a plain local refresh does not
+        wipe an answer we already have — a label that forgets is a label you
+        stop trusting.
+        """
+        if live:
+            self._live_version = live
+        local = local_app_version(Path(self.repo_var.get())) or "—"
+        known = getattr(self, "_live_version", "") or "—"
+        state = "  ✓" if (known == local and known != "—") else ""
+        if known not in ("—", local) and known:
+            state = "  ← NOT what you have"
+        self.version_var.set(f"local {local}  ·  live {known}{state}")
+
+    def _start_version_check(self) -> None:
+        threading.Thread(target=self._check_live_version, daemon=True).start()
+
+    def _check_live_version(self) -> None:
+        """Ask the server what it is serving. Changes nothing."""
+        try:
+            import paramiko
+        except ImportError:
+            self._emit("\nparamiko is not installed. Run:  pip install paramiko",
+                       "err")
+            return
+        try:
+            user, host, port = parse_ssh_target(self.ssh_var.get())
+        except ValueError as e:
+            self._emit(f"\n{e}", "err")
+            return
+
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        try:
+            client.connect(hostname=host, port=port, username=user,
+                           password=self.pw_var.get(), timeout=30,
+                           allow_agent=False, look_for_keys=False)
+            _in, out, _err = client.exec_command(
+                "curl -fsS http://127.0.0.1/healthz", timeout=30)
+            blob = out.read().decode("utf-8", "replace")
+        except Exception as e:
+            self._emit(f"\ncould not ask the server: {e}", "err")
+            return
+        finally:
+            client.close()
+
+        version = version_from_healthz(blob)
+        if not version:
+            # An older build has no version in /healthz, which is itself the
+            # answer: whatever is running predates this check.
+            self._emit(f"\nThe site answered but reported no version "
+                       f"({blob.strip()[:80]}). It is running code older "
+                       f"than the version check.", "err")
+            self._refresh_local_version(live="older")
+            return
+        self._emit(f"\nThe site is serving version {version}.",
+                   "ok" if version == local_app_version(
+                       Path(self.repo_var.get())) else "err")
+        self._refresh_local_version(live=version)
+
     def _run_local(self) -> bool:
         repo = Path(self.repo_var.get())
         remote = self.remote_var.get() or "origin"
@@ -698,7 +780,27 @@ class DeployApp:
             if code != 0:
                 return False
 
+        # ── NEVER PUSH STAGED WORK WITHOUT COMMITTING IT ─────────────────
+        #
+        # This used to say "(no commit message — skipping commit)" in dim
+        # grey and carry on. `git add -A` had already staged everything, so
+        # the push sent the PREVIOUS commit, the server pulled it, rebuilt
+        # happily, and ran old code — while the next line said "Local half
+        # done" in green. Two days of changes never left the laptop and
+        # every screen reported success.
+        #
+        # The message box is empty on every launch by design, so "empty"
+        # cannot be allowed to mean "silently do nothing". A version number
+        # is a poor commit message and an excellent one compared to no
+        # commit at all.
         message = self.msg_var.get().strip()
+        staged = self._git(["diff", "--cached", "--quiet"], repo)[0] != 0
+        if staged and not message:
+            version = local_app_version(repo)
+            message = f"deploy v{version}" if version else "deploy"
+            self._emit(f"\nNo commit message given, and there are staged "
+                       f"changes — committing as {message!r}.", "err")
+
         if message:
             code, output = self._git(["commit", "-m", message], repo)
             # "nothing to commit" is a normal outcome when only the server
@@ -707,7 +809,8 @@ class DeployApp:
             if code != 0 and "nothing to commit" not in output.lower():
                 return False
         else:
-            self._emit("\n(no commit message — skipping commit)", "dim")
+            self._emit("\n(nothing staged — pushing the existing commit)",
+                       "dim")
 
         # The remote and branch are explicit. A bare `git push` follows
         # whatever upstream happens to be set, which is exactly how a commit
@@ -846,6 +949,10 @@ class DeployApp:
             elif live_version:
                 self._emit(f"Site is serving version {live_version} — matches "
                            f"the code you pushed.", "ok")
+
+            # The label is updated whichever way it went, so the window keeps
+            # showing the truth rather than the last good news.
+            self._refresh_local_version(live=live_version or "older")
 
             pushed = getattr(self, "pushed_sha", "")
             if pushed and server_sha:

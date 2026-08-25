@@ -1173,6 +1173,9 @@ def store_action_result(
     # being handed out again and again now that the stage's end is derived
     # from the catalogue rather than counted.
     row.action_error_at = datetime.utcnow() if error else None
+    # WHICH action failed, so a failed switch-off cannot later block a
+    # switch-on. The two are opposites and one field cannot serve both.
+    row.action_error_kind = action if error else None
     if not error:
         if action == "deactivate":
             row.deactivated_at = datetime.utcnow()

@@ -367,7 +367,8 @@ def missing_for(db: Session, run: StoreScanRun,
     if account_id:
         rows = rows.filter(StoreListing.account_id == account_id)
     return [r for r in rows.order_by(StoreListing.account_id).all()
-            if not looks_vague(r, after) and _not_failed_this_run(r, run)]
+            if not looks_vague(r, after)
+            and _not_failed_this_run(r, run, "deactivate")]
 
 
 def deactivated_for(db: Session, run: StoreScanRun,
@@ -386,12 +387,28 @@ def deactivated_for(db: Session, run: StoreScanRun,
     if account_id:
         q = q.filter(StoreListing.account_id == account_id)
     return [r for r in q.order_by(StoreListing.account_id).all()
-            if _not_failed_this_run(r, run)]
+            if _not_failed_this_run(r, run, "reactivate")]
 
 
-def _not_failed_this_run(row: StoreListing, run: StoreScanRun) -> bool:
+def _not_failed_this_run(row: StoreListing, run: StoreScanRun,
+                         stage: str) -> bool:
     """
-    True unless we already tried this design in this run and it would not go.
+    True unless we already tried THIS ACTION on this design in this run and
+    it would not go.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE ACTION MATTERS, AND LEAVING IT OUT LEFT A LISTING HIDDEN
+    ════════════════════════════════════════════════════════════════════════
+    The first version ignored which action had failed, so one error field
+    served two opposite jobs. A design that was successfully switched OFF and
+    then failed a second, duplicate switch-off attempt carried that error
+    into the reactivate stage — and was skipped. It stayed off, earning
+    nothing, with the screen reporting the run finished cleanly.
+
+    Skipping is only ever right for the SAME action: a deactivate that
+    cannot find its button will not find it next time either, whereas a
+    reactivate is cheap, idempotent, and the alternative is a live listing
+    left hidden. Wrong in the cheap direction.
 
     ════════════════════════════════════════════════════════════════════════
     THIS IS WHAT STOPS THE STAGE LOOPING FOREVER
@@ -414,9 +431,16 @@ def _not_failed_this_run(row: StoreListing, run: StoreScanRun) -> bool:
     """
     if not row.action_error:
         return True
+    # An error recorded before the action was tracked. Only the DEACTIVATE
+    # side inherits the old caution: for reactivate, an unattributed failure
+    # must not be a reason to leave a listing switched off.
+    if row.action_error_kind is None and stage != "deactivate":
+        return True
+    if row.action_error_kind and row.action_error_kind != stage:
+        return True
     if row.action_error_at is None:
         # Written before this column existed. Trust the error and skip it;
-        # the next successful action clears both.
+        # the next successful action clears all three.
         return False
     return row.action_error_at < run.started_at
 

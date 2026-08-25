@@ -165,16 +165,43 @@ def cases(not_failed, should_stop) -> list[tuple[str, bool]]:
     return [
         # ── Which designs a stage will act on ────────────────────────────
         ("a design with no failure is acted on",
-         not_failed(obj(action_error=None, action_error_at=None), RUN) is True),
+         not_failed(obj(action_error=None, action_error_at=None,
+                        action_error_kind=None), RUN, "deactivate") is True),
         ("a design that failed EARLIER IN THIS RUN is skipped, so the "
          "stage can finish instead of looping on it",
-         not_failed(obj(action_error="no button", action_error_at=STARTED
-                        + timedelta(minutes=5)), RUN) is False),
+         not_failed(obj(action_error="no button", action_error_kind="deactivate",
+                        action_error_at=STARTED + timedelta(minutes=5)),
+                    RUN, "deactivate") is False),
         ("a design that failed LAST WEEK is tried again",
-         not_failed(obj(action_error="no button", action_error_at=STARTED
-                        - timedelta(days=7)), RUN) is True),
+         not_failed(obj(action_error="no button", action_error_kind="deactivate",
+                        action_error_at=STARTED - timedelta(days=7)),
+                    RUN, "deactivate") is True),
         ("an old failure with no timestamp is skipped rather than looped",
-         not_failed(obj(action_error="old", action_error_at=None), RUN) is False),
+         not_failed(obj(action_error="old", action_error_at=None,
+                        action_error_kind="deactivate"),
+                    RUN, "deactivate") is False),
+
+        # ── A FAILED SWITCH-OFF MUST NOT BLOCK A SWITCH-ON ───────────────
+        # The real case, 24 Aug: a design was switched OFF successfully, a
+        # duplicate job tried again and failed "already inactive", and the
+        # reactivate stage then SKIPPED it — leaving a live listing hidden
+        # while the run reported success.
+        ("a design that failed to switch OFF is still switched back ON",
+         not_failed(obj(action_error="No Deactivate button",
+                        action_error_kind="deactivate",
+                        action_error_at=STARTED + timedelta(minutes=5)),
+                    RUN, "reactivate") is True),
+        ("a design that failed to switch ON this run is not retried "
+         "immediately, so the stage can end",
+         not_failed(obj(action_error="no publish button",
+                        action_error_kind="reactivate",
+                        action_error_at=STARTED + timedelta(minutes=5)),
+                    RUN, "reactivate") is False),
+        ("an error from before we recorded the action never blocks a "
+         "switch-on — a hidden listing is the expensive outcome",
+         not_failed(obj(action_error="old", action_error_kind=None,
+                        action_error_at=STARTED + timedelta(minutes=5)),
+                    RUN, "reactivate") is True),
 
         # ── Whether the worker machine keeps switching designs ───────────
         ("no run at all — stop",
@@ -216,6 +243,9 @@ SABOTAGE = [
      "    return row.action_error_at >= run.started_at"),
     ("failures would be ignored, so the same design loops for ever",
      "    if not row.action_error:\n        return True\n", "    return True\n"),
+    ("a failed switch-OFF would again block switching back ON",
+     "    if row.action_error_kind and row.action_error_kind != stage:\n        return True\n",
+     ""),
     ("old failures with no timestamp would loop for ever",
      "        return False\n    return row.action_error_at",
      "        return True\n    return row.action_error_at"),

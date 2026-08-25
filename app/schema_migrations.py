@@ -133,6 +133,10 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     # legitimately runs for an hour and was being declared dead at 45
     # minutes while it was reporting every sixteen seconds.
     ("pipeline_jobs",    "last_report_at",   "DATETIME"),
+    # WHICH action failed. One error field served both directions, so a
+    # design that could not be switched OFF was then skipped when the run
+    # tried to switch it back ON — and stayed hidden.
+    ("store_listings",   "action_error_kind", "VARCHAR(16)"),
 ]
 
 # ════════════════════════════════════════════════════════════════════════════

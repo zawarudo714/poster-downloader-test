@@ -1,6 +1,5 @@
-The deploy tool now proves the RUNNING site matches the code you pushed, not
-just that the commit arrived. /healthz reports the version, and a mismatch is
-reported loudly and NOT written to the deploy log. Also fixes a real bug: any
-job running longer than 45 minutes was declared abandoned even while it was
-reporting every few seconds, which cancelled a healthy TeePublic switching job
-and re-dispatched its last 8 designs. Node needs the folder copy too.
+Deploy tool: an empty commit message no longer silently skips the commit and
+pushes stale code — that is why versions 103 and 104 never left the laptop. It
+now commits as "deploy vNNN" and says so. New local/live version label with a
+CHECK LIVE button. Also fixes the Listing check tab rendering with no
+navigation, and a preflight check so that cannot happen again.

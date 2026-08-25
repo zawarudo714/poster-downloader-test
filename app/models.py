@@ -1551,6 +1551,15 @@ class StoreListing(Base):
     # count as "already tried this run" while still allowing a fresh attempt
     # next week.
     action_error_at = Column(DateTime, nullable=True)
+    # WHICH action failed — 'deactivate' or 'reactivate'.
+    #
+    # One error field served both directions, and they are opposites. A
+    # design that could not be switched OFF was then skipped when the run
+    # tried to switch it back ON, so a listing that WAS off stayed off and
+    # nothing on the reactivate screen said so. The skip is only ever
+    # correct for the SAME action that failed: retrying a reactivate is
+    # cheap and idempotent, and leaving a live listing hidden is not.
+    action_error_kind = Column(String(16), nullable=True)
 
     # ── The owner's override ────────────────────────────────────────────
     excluded       = Column(Integer, nullable=False, default=0, index=True)

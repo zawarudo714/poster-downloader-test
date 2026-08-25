@@ -36,8 +36,15 @@ LIVE_JOB = ("queued", "running")
 @router.get("/listings", response_class=HTMLResponse)
 def listings_page(request: Request, admin=Depends(require_admin),
                   db: Session = Depends(get_db)):
-    return templates.TemplateResponse("admin_listings.html",
-                                      {"request": request, "admin": admin})
+    # `user` is NOT optional and is not the same as `admin`: base.html picks
+    # which navigation to draw with `user.role`, and Jinja treats a missing
+    # name as falsy rather than raising. Omitting it rendered the page with
+    # NO navigation at all — no error, no warning, just a screen you cannot
+    # leave. `active_tab` is what highlights the current one.
+    return templates.TemplateResponse(
+        request, "admin_listings.html",
+        {"user": admin, "admin": admin, "active_tab": "listings"},
+    )
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -55,8 +62,16 @@ def api_overview(admin=Depends(require_admin), db: Session = Depends(get_db)):
             "name": a.name,
             "artist_name": a.artist_name or "",
             "ready": bool((a.artist_name or "").strip()),
+            # Scoped to THIS marketplace, exactly as `counts()` scopes it.
+            # Without the target_site filter this column counted every
+            # upload row on the account and the panel above counted only
+            # FineArtAmerica ones — so the screen said "19 listings" and
+            # "0 can be checked" at the same time, with no way to tell which
+            # was lying. Two counts on one screen must be countable the same
+            # way or they will eventually disagree.
             "claimed": db.query(UploadTracking).filter_by(
-                account_id=a.id, status="uploaded").count(),
+                account_id=a.id, status="uploaded",
+                target_site=LC.MARKETPLACE).count(),
         } for a in LC.accounts(db)],
         "counts": LC.counts(db, sweep),
         "sweep": _sweep_payload(db, sweep) if sweep else None,

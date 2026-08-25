@@ -551,6 +551,63 @@ def check_actions_are_handled() -> None:
 
 # ════════════════════════════════════════════════════════════════════════════
 
+def check_page_context() -> None:
+    """
+    A page rendered without the context its LAYOUT needs.
+
+    ════════════════════════════════════════════════════════════════════════
+    JINJA FAILS SILENTLY, WHICH IS THE WHOLE PROBLEM
+    ════════════════════════════════════════════════════════════════════════
+    `base.html` chooses which navigation to draw with `{% if user.role ==
+    'admin' %}`. An undefined `user` is falsy, not an error — so a route that
+    forgets to pass it renders a page with NO NAVIGATION AT ALL. No
+    exception, no warning, nothing in a log. Just a screen with no way off
+    it, which is exactly how the Listing check tab shipped.
+
+    Every other check here would pass it: the template parses, its tags
+    balance, its hooks exist, its buttons have handlers. Nothing looks at
+    whether the DATA the layout depends on was supplied.
+
+    A failure, not a warning: there is no legitimate reason for an admin page
+    to render without its navigation.
+    """
+    base = (TPL / "base.html")
+    if not base.is_file():
+        return
+    base_src = base.read_text(encoding="utf-8", errors="ignore")
+
+    # What the layout reads before anything page-specific runs. Derived from
+    # base.html rather than hardcoded, so adding a new layout-level variable
+    # extends this check automatically.
+    required = {name for name in ("user", "active_tab")
+                if re.search(r"\{[%{][^}]*\b" + name + r"\b", base_src)}
+    if not required:
+        return
+
+    # template name -> the context keys each render site passes
+    for path in ROOT.glob("app/routes/*.py"):
+        src = path.read_text(encoding="utf-8")
+        for m in re.finditer(
+                r"""TemplateResponse\((.{0,400}?)\)\s*$""",
+                src, re.M | re.S):
+            call = m.group(1)
+            tpl = re.search(r"""["']([a-z_0-9]+\.html)["']""", call)
+            if not tpl:
+                continue
+            # Which template does it extend? Only base.html's needs apply.
+            page = TPL / tpl.group(1)
+            if not page.is_file():
+                continue
+            if 'extends "base.html"' not in page.read_text(
+                    encoding="utf-8", errors="ignore"):
+                continue
+            given = set(re.findall(r"""["']([a-z_0-9]+)["']\s*:""", call))
+            for name in sorted(required - given):
+                fail(f"{path.relative_to(ROOT)}: renders {tpl.group(1)} "
+                     f"without '{name}' — base.html needs it, and Jinja will "
+                     f"silently render nothing rather than complain")
+
+
 def check_queries_in_loops() -> None:
     """
     A database query inside a loop — one round trip per row.
@@ -795,6 +852,7 @@ CHECKS = [
     ("buttons have handlers",     check_actions_are_handled),
     ("endpoints have buttons",    check_endpoints_have_buttons),
     ("nothing stuck behind hidden", check_hidden_ancestors),
+    ("pages get what the layout needs", check_page_context),
     ("no queries inside loops",   check_queries_in_loops),
     ("zero is not treated as missing", check_falsy_zero_defaults),
     ("listing-health rules behave", check_store_logic),

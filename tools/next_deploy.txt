@@ -1,0 +1,5 @@
+FAA returns 410 for a REMOVED listing and 404 for an address that never
+existed — the listing check had these effectively backwards, so real takedowns
+were being filed as "we could not look" and ignored. Four states now, and the
+wrong-artist-name guard is exact rather than a guess. Deploy tool re-reads the
+deploy note when you press DEPLOY, not only when the window opens.

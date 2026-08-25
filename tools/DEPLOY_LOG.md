@@ -9,6 +9,7 @@ log or diff to work it out — that costs far more to read than these lines.**
 If the top entry looks older than the work in the repo, the difference is
 what has not been deployed yet.
 
+- **2026-08-25 07:55** · `de86461e` · (no message)
 - **2026-08-25 07:38** · `a82f6f7a` · Deploy tool: an empty commit message no longer silently skips the commit and
 - **2026-08-25 07:20** · `c21e035f` · The deploy tool now proves the RUNNING site matches the code you pushed, not
 - **2026-08-25 00:02** · `fea7974e` · (no message)
@@ -38,4 +39,3 @@ what has not been deployed yet.
 - **2026-08-20 15:16** · `e251dee5` · Deleting a marketplace account now removes its Chrome profile from the worker machine
 - **2026-08-20 14:29** · `268e4228` · One Chrome profile per account keyed on id, cleaned before launch; chromedriver log reported on first failure; sale timestamps upgraded from the ledger; quiet-time settings editable; funnel auto-refreshes
 - **2026-08-20 13:20** · `170bbb5d` · Earnings: ledger no longer stops on sales it already has, so payouts are read; balance stored and shown as the headline with a reconciliation check
-- **2026-08-20 11:41** · `7e857061` · Accounts shared across projects (ADD EXISTING); earnings read through the node's Chrome; nightly quiet window at 22:00 with a visible reason

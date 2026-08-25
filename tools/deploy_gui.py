@@ -634,6 +634,23 @@ class DeployApp:
             messagebox.showerror("Deploy", "Enter the SSH password.")
             return
 
+        # ── RE-READ THE DEPLOY NOTE, BECAUSE THE WINDOW OUTLIVES IT ──────
+        #
+        # It used to be read ONCE at startup. But the note is written while
+        # the changes are being made — which is almost always while this
+        # window is already open — so by the time DEPLOY was pressed the
+        # message box had been empty for hours and nobody knew why. That
+        # emptiness then meant "skip the commit", and two days of work never
+        # left the laptop.
+        #
+        # Only when the box is empty: anything typed by hand wins.
+        if not self.msg_var.get().strip():
+            note_msg, note_server = read_deploy_note()
+            if note_msg:
+                self.msg_var.set(note_msg)
+                self.note_server = note_server
+                self._emit(f"\nUsing the deploy note: {note_msg}", "ok")
+
         self.running = True
         self.go_btn.config(state="disabled")
         self._save_settings()

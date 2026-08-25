@@ -44,6 +44,23 @@
     return data;
   }
 
+  // How long a sweep will actually take, in words rather than seconds.
+  // 1.1s per request is MEASURED from the worker machine, not assumed.
+  function estimate(count, gapMs) {
+    // `Number(gapMs) || 300` would be wrong: a gap of ZERO is a legitimate
+    // setting and is falsy, so it fell through to the default and the screen
+    // quoted the same time whether or not you had turned the pause off.
+    var gap = Number(gapMs);
+    if (!isFinite(gap) || gap < 0) gap = 300;
+    var seconds = count * (1.1 + gap / 1000);
+    var mins = Math.round(seconds / 60);
+    if (mins < 1) return 'under a minute';
+    if (mins < 90) return mins + ' minute' + (mins === 1 ? '' : 's');
+    var hours = Math.floor(mins / 60), rest = mins % 60;
+    return hours + ' hour' + (hours === 1 ? '' : 's')
+           + (rest ? ' ' + rest + ' minutes' : '');
+  }
+
   // ── The sweep ────────────────────────────────────────────────────────
   function renderSweep(data) {
     var s = data.sweep, c = data.counts || {}, el = q('[data-sweep-panel]');
@@ -81,10 +98,17 @@
         '<p><button class="btn btn-accent" data-action="start" type="button"'
         + (c.in_scope ? '' : ' disabled') + '>CHECK ALL ' + (c.in_scope || 0)
         + '</button></p>' +
-        '<p class="muted">Roughly ' + Math.max(1, Math.round((c.in_scope || 0)
-          * 0.75 / 60)) + ' minute(s). Nothing is changed on the marketplace '
-        + 'and nothing is changed here — it only looks. Photoshop and uploads '
-        + 'keep running in between.</p>';
+        // ── THE ESTIMATE USES A MEASURED RATE, NOT A GUESSED ONE ────────
+        //
+        // 1.1s per request was measured from the worker machine on
+        // 2026-08-24 (837-1291ms across four addresses), plus whatever gap
+        // is configured. An earlier version assumed 0.75s flat and would
+        // have promised an hour for a job that takes nearly two.
+        '<p class="muted">Roughly ' + estimate(c.in_scope || 0,
+          (data.settings || {}).listing_check_gap_ms)
+        + '. Nothing is changed on the marketplace and nothing is changed '
+        + 'here — it only looks. Photoshop and uploads keep running in '
+        + 'between, so it takes longer on a busy day.</p>';
       return;
     }
 

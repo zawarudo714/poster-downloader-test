@@ -1020,6 +1020,19 @@ class PipelineJob(Base):
     # never need a migration.
     payload_json  = Column(Text, nullable=True)
     result_json   = Column(Text, nullable=True)
+
+    # ── THE HEARTBEAT, AND WHY started_at COULD NOT BE ONE ──────────────
+    # Stamped every time the node writes a log line, which for the long
+    # stages is once per design. "Is this job alive" must be asked of the
+    # last thing it SAID, never of when it began.
+    #
+    # Both the claim reaper and the stalled-run sweeper used `started_at`
+    # against a 45-minute timeout. A store_deactivate job legitimately runs
+    # for an hour — measured, and written down — so at minute 45 a perfectly
+    # healthy job reporting every sixteen seconds was declared abandoned. On
+    # 2026-08-24 that cancelled a live job with 8 designs left, dispatched
+    # those 8 again, and produced a confusing "already inactive" failure.
+    last_report_at = Column(DateTime, nullable=True)
     # Appended live by the worker; streamed to the dashboard's Live Console.
     log_text      = Column(Text, nullable=True)
     error         = Column(Text, nullable=True)

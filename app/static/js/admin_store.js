@@ -490,14 +490,27 @@
     } else if (a === 'deactivate-missing') {
       // Spelled out because it switches LIVE listings off with no scan
       // first, and the confirmation is the only place that can say so.
-      act(API + '/deactivate-missing', {},
+      // The tickbox above applies here too. Saying which way it is set in
+      // the confirmation matters more here than anywhere else: unattended,
+      // the difference is between a finished cure and several hundred live
+      // listings left switched off until somebody notices.
+      act(API + '/deactivate-missing', { auto: auto },
           'Switch off every design already marked missing, without scanning '
           + 'first?\n\nThey stay off until they are switched back on, and '
           + 'Photoshop and uploads pause while it works. Roughly an hour per '
-          + 'account.',
+          + 'account.\n\n'
+          + (auto
+              ? 'AUTOMATIC IS ON: it will switch them back on by itself '
+                + 'straight afterwards, including anything already switched '
+                + 'off from an earlier run.'
+              : 'AUTOMATIC IS OFF: it will stop when everything is switched '
+                + 'off and WAIT for you to press REACTIVATE. Leave it '
+                + 'overnight like this and they stay off until morning.'),
           function (r) {
             alert('Switching off ' + r.designs + ' design(s) across '
-                  + r.accounts + ' account(s), one account at a time.');
+                  + r.accounts + ' account(s), one account at a time.'
+                  + (r.auto ? '\n\nThen switching everything back on by '
+                              + 'itself.' : ''));
           });
     } else if (a === 'all-accounts') {
       state.account = null; state.accountName = '';

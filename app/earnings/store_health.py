@@ -843,12 +843,22 @@ def stalled_runs(db: Session) -> list[StoreScanRun]:
             StoreScanRun.status.in_(("deactivating", "reactivating"))).all():
         if run.paused_at or (run.retry_at and run.retry_at > datetime.utcnow()):
             continue
+        # ── SILENT PAST THE TIMEOUT, NOT MERELY SLOW ─────────────────────
+        #
+        # This compared `started_at`, which meant a job was called dead the
+        # moment it had been RUNNING for 45 minutes — regardless of whether
+        # it was working perfectly. A switching stage takes about an hour
+        # and reports once per design, so on 2026-08-24 a live job with 8
+        # designs left was cancelled and those 8 were dispatched again.
+        #
+        # The question is when the job last SAID something, which is what
+        # `last_report_at` records. `started_at` remains the fallback for a
+        # job that has never reported at all — the case this was written
+        # for, a node that died between claiming and starting.
         live = [j for j in jobs_for_run(db, run)
-                # A job claimed and then silent past the timeout is dead even
-                # though its row still says "running". Waiting for the reaper
-                # to relabel it would double the time the pipeline is held.
                 if j.status == "queued"
-                or (j.started_at or datetime.utcnow()) > cutoff]
+                or (j.last_report_at or j.started_at
+                    or datetime.utcnow()) > cutoff]
         if not live:
             out.append(run)
     return out

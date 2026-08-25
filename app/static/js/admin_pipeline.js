@@ -826,9 +826,20 @@
     return p.toString();
   }
 
+  // A number from a field, falling back ONLY when it is blank or unreadable.
+  // `parseInt(x) || fallback` cannot tell a real zero from an empty box, and
+  // for a daily upload limit those two mean opposite things.
+  function numOr(selector, fallback) {
+    var el = q(selector);
+    var n = parseInt((el && el.value) || '', 10);
+    return isNaN(n) ? fallback : n;
+  }
+
   async function loadTitles(resetPage) {
     if (resetPage !== false) titlesState.page = 1;
-    titlesState.pageSize = parseInt(q('[data-titles-pagesize]').value, 10) || 100;
+    // A page size of zero would show nothing, so the fallback is right here —
+    // written explicitly so it reads as a decision rather than an accident.
+    titlesState.pageSize = Math.max(1, numOr('[data-titles-pagesize]', 100));
 
     const el = q('[data-titles-list]');
     el.innerHTML = '<div class="muted">Loading…</div>';
@@ -1591,8 +1602,12 @@
       email:              q('[data-account-email]').value.trim(),
       profile_url:        q('[data-account-profile]').value.trim(),
       chrome_profile_dir: q('[data-account-chrome]').value.trim(),
-      daily_limit:        parseInt(q('[data-account-limit]').value, 10) || 100,
-      rotation_order:     parseInt(q('[data-account-rotorder]').value, 10) || 100,
+      // `|| 100` treated a deliberate ZERO as "not filled in". A daily limit
+      // of 0 is how you say "do not upload to this account today", and it
+      // became a hundred instead — on a real marketplace, silently. Only a
+      // BLANK field should fall back to the default.
+      daily_limit:        numOr('[data-account-limit]', 100),
+      rotation_order:     numOr('[data-account-rotorder]', 100),
       rotation_size:      q('[data-account-rotsize]').value
                             ? parseInt(q('[data-account-rotsize]').value, 10) : null,
       is_enabled:         q('[data-account-enabled]').checked,

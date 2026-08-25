@@ -450,7 +450,7 @@ def check_hidden_ancestors() -> None:
 
 def button_map() -> dict[str, list[tuple[str, str]]]:
     """
-    {js file: [(action, the endpoint IT calls)]} — read from the source.
+    {js file: [(action, the endpoint IT calls and what it SENDS)]}.
 
     The endpoint is found by looking inside each action's own handler block,
     not by listing every endpoint in the file. A first version did the
@@ -458,6 +458,29 @@ def button_map() -> dict[str, list[tuple[str, str]]]:
     which is not a map — it is the same information you started with,
     rearranged. Same rule as any figure on a screen: it has to answer the
     question you actually asked.
+
+    ════════════════════════════════════════════════════════════════════════
+    IT SHOWS THE REQUEST BODY, AND THAT IS WHY
+    ════════════════════════════════════════════════════════════════════════
+    The map used to print only the address. A bug lived in exactly the space
+    it did not cover: three buttons on one screen sent `{auto, mode}` and a
+    fourth sent `{}`, so the AUTOMATIC tickbox directly above it was read for
+    three of them and silently dropped for the fourth. Unattended, that meant
+    226 live listings switched off and then a run parked at a gate all night
+    waiting for a person.
+
+    Nothing was disconnected, so no check could fail. But side by side the
+    odd one out is obvious:
+
+        start              -> /start              {auto, mode}
+        start-continue     -> /start              {auto, mode}
+        start-missing      -> /start              {auto, mode}
+        deactivate-missing -> /deactivate-missing {}
+
+    A shared control read by SOME handlers and not others is its own class of
+    defect — the same shape as a method with zero callers. This is what makes
+    it visible, and it is a report rather than a failure because both columns
+    have honest reasons to differ.
     """
     out: dict[str, list[tuple[str, str]]] = {}
     for js in sorted(JS.glob("*.js")):
@@ -487,6 +510,17 @@ def button_map() -> dict[str, list[tuple[str, str]]]:
                     or re.search(r"""['"](/admin/[a-z/_-]+)['"]""", body)
                 if call:
                     endpoint = call.group(1)
+                    # What it SENDS. The object literal after the address —
+                    # `{}` is recorded as "{}" rather than blank, because
+                    # "sends nothing" is the interesting answer, not a
+                    # missing one.
+                    sent = re.search(
+                        re.escape(call.group(0)) + r"""[^,]*,\s*\{([^{}]*)\}""",
+                        body)
+                    if sent:
+                        keys = re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\s*:",
+                                          sent.group(1))
+                        endpoint += "  {" + ", ".join(keys) + "}"
                 elif re.search(r"\breload\(|loadDesigns\(|\bhidden\b", body):
                     endpoint = "(page only — no server call)"
             rows.append((action, endpoint))
@@ -516,6 +550,137 @@ def check_actions_are_handled() -> None:
 
 
 # ════════════════════════════════════════════════════════════════════════════
+
+def check_queries_in_loops() -> None:
+    """
+    A database query inside a loop — one round trip per row.
+
+    ════════════════════════════════════════════════════════════════════════
+    FOUND BY LUCK, WHICH IS WHY IT IS NOW A CHECK
+    ════════════════════════════════════════════════════════════════════════
+    `listing_check.findings()` called `accounts(db)` inside its row loop.
+    Invisible against the five rows on the test server; 2,000 queries against
+    the real 4,811. It surfaced only because it was read aloud while
+    answering an unrelated question — nothing would have caught it, and the
+    symptom on production would have been "the page is slow", which sends
+    you looking in the wrong place entirely.
+
+    A WARNING, not a failure: a query inside a loop over three accounts is
+    perfectly reasonable. The point is that it should be a decision rather
+    than an accident, and the fix is almost always to hoist one lookup out.
+
+    ════════════════════════════════════════════════════════════════════════
+    TWO THINGS THE FIRST VERSION GOT WRONG, BOTH FOUND BY SABOTAGE
+    ════════════════════════════════════════════════════════════════════════
+    It scored ZERO against the very bug it was written for. The offending
+    call was `accounts(db)` — a helper that queries — not `db.query`
+    directly, and the check only knew the literal form. A check blind to its
+    own motivating case is the exact failure this file exists to prevent, so
+    it now resolves which FUNCTIONS in the codebase perform queries and
+    counts a call to one of those as a query.
+
+    And it warned 86 times, which is the same thing as warning never. Most
+    were `for` bodies looping over a handful of accounts. It now looks only
+    inside COMPREHENSIONS, which is where a per-row lookup actually hides in
+    this codebase — building a response payload one row at a time.
+    """
+    # ── Which of our own functions perform a query ───────────────────────
+    queriers: set[str] = set()
+    trees: dict[Path, ast.Module] = {}
+    for path in py_files():
+        try:
+            trees[path] = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue
+    for tree in trees.values():
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for call in ast.walk(fn):
+                if (isinstance(call, ast.Call)
+                        and isinstance(call.func, ast.Attribute)
+                        and call.func.attr == "query"):
+                    queriers.add(fn.name)
+                    break
+
+    def is_query(call: ast.AST) -> str:
+        if not isinstance(call, ast.Call):
+            return ""
+        f = call.func
+        if (isinstance(f, ast.Attribute) and f.attr in ("query", "scalar")
+                and isinstance(f.value, ast.Name)
+                and f.value.id in ("db", "session")):
+            return f"{f.value.id}.{f.attr}()"
+        # A call to one of our own querying helpers counts too — that is
+        # what the first version missed entirely.
+        name = (f.id if isinstance(f, ast.Name)
+                else f.attr if isinstance(f, ast.Attribute) else "")
+        return f"{name}()" if name in queriers else ""
+
+    for path, tree in trees.items():
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp,
+                                     ast.GeneratorExp)):
+                continue
+            # A comprehension's FIRST iterable is evaluated once, not per
+            # item, so a query there is fine. Only the element expression
+            # and any condition run repeatedly.
+            inside = ([node.elt] if hasattr(node, "elt")
+                      else [node.key, node.value])
+            for gen in node.generators:
+                inside += gen.ifs
+            for sub in inside:
+                for call in ast.walk(sub):
+                    what = is_query(call)
+                    if what:
+                        warn(f"{path.relative_to(ROOT)}:{call.lineno} — "
+                             f"{what} runs once per item in this "
+                             f"comprehension; hoist it out if the list can "
+                             f"be long")
+
+
+def check_falsy_zero_defaults() -> None:
+    """
+    `Number(x) || 300` — a legitimate ZERO silently becomes the default.
+
+    ════════════════════════════════════════════════════════════════════════
+    ALSO FOUND BY LUCK
+    ════════════════════════════════════════════════════════════════════════
+    The listing-check screen estimated how long a sweep would take from the
+    configured pause between requests. Setting that pause to zero is a
+    perfectly good thing to do — and zero is falsy, so it fell through to
+    300 and the screen quoted the same time whether or not the pause was
+    turned off. Caught only because the estimator happened to be exercised
+    with a zero while testing something else.
+
+    The shape is general: any numeric setting where 0, "" or false is a
+    REAL value the owner might choose. `||` cannot tell those apart from
+    "missing". Use an explicit check instead.
+
+    ════════════════════════════════════════════════════════════════════════
+    `|| 0` IS FINE, AND THE FIRST VERSION DID NOT KNOW THAT
+    ════════════════════════════════════════════════════════════════════════
+    It flagged thirteen lines, every one of them `parseFloat(x) || 0`, where
+    the fallback IS zero so nothing can be lost. It also flagged its own
+    explanatory comment. Thirteen false lines is a report nobody reads —
+    same lesson as the settings check reporting `week_start_day`.
+
+    Only a NON-ZERO fallback can silently replace a real zero, so that is
+    the only thing worth saying.
+    """
+    pattern = re.compile(
+        r"(?:Number|parseInt|parseFloat)\([^;]*?\)\s*\|\|\s*([0-9]*\.?[0-9]+)")
+    for js in sorted(JS.glob("*.js")):
+        src = js.read_text(encoding="utf-8", errors="ignore")
+        for i, line in enumerate(src.splitlines(), start=1):
+            stripped = line.strip()
+            if stripped.startswith(("//", "*", "/*")):
+                continue          # a comment about the bug is not the bug
+            m = pattern.search(line)
+            if m and float(m.group(1)) != 0:
+                warn(f"{js.name}:{i} — falls back to {m.group(1)}, so a real "
+                     f"ZERO here is silently replaced: {stripped[:60]}")
+
 
 def check_store_logic() -> None:
     """
@@ -630,6 +795,8 @@ CHECKS = [
     ("buttons have handlers",     check_actions_are_handled),
     ("endpoints have buttons",    check_endpoints_have_buttons),
     ("nothing stuck behind hidden", check_hidden_ancestors),
+    ("no queries inside loops",   check_queries_in_loops),
+    ("zero is not treated as missing", check_falsy_zero_defaults),
     ("listing-health rules behave", check_store_logic),
 ]
 

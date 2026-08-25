@@ -1722,16 +1722,28 @@ def reap_stale_claims(db: Session) -> dict[str, int]:
         row.claimed_at = None
         row.claimed_by = None
 
-    jobs = (
-        db.query(PipelineJob)
-          .filter(PipelineJob.status == "running",
-                  PipelineJob.started_at.isnot(None),
-                  PipelineJob.started_at < cutoff)
-          .all()
-    )
+    # ── A LONG JOB IS NOT AN ABANDONED ONE ──────────────────────────────
+    #
+    # This compared `started_at` against the timeout, so any job running
+    # longer than 45 minutes was declared abandoned no matter how healthily
+    # it was working. Switching a TeePublic account's designs off takes
+    # about an hour — measured — and reports once per design, so at minute
+    # 45 a job with 8 designs left was killed mid-stride. Those 8 were then
+    # handed out again and came back "already inactive".
+    #
+    # Liveness is now the last thing the job SAID. `started_at` is only the
+    # fallback for a job that has not managed to say anything at all, which
+    # is the case this check was actually written for: a node that died
+    # between claiming and starting.
+    jobs = [
+        j for j in db.query(PipelineJob)
+                     .filter(PipelineJob.status == "running").all()
+        if (j.last_report_at or j.started_at or datetime.utcnow()) < cutoff
+    ]
     for job in jobs:
         job.status = "error"
-        job.error = "Abandoned — worker node stopped reporting."
+        job.error = ("Abandoned — the worker node stopped reporting for "
+                     f"{timeout} minutes.")
         job.finished_at = datetime.utcnow()
 
     return {"posters": len(posters), "uploads": len(rows), "jobs": len(jobs)}
@@ -2070,7 +2082,12 @@ def uploads_today(db: Session, account_id: int, *, day: Optional[date] = None) -
 
 def account_quota(db: Session, account: UploadAccount, *, day: Optional[date] = None) -> dict[str, int]:
     used = uploads_today(db, account.id, day=day)
-    limit = int(account.daily_limit or 100)
+    # `or 100` here turned a deliberate ZERO into a hundred. Setting an
+    # account's daily limit to 0 is the obvious way to say "do not upload to
+    # this one today", and it did the exact opposite — silently, on a real
+    # marketplace. The column is NOT NULL with a default of 100, so None can
+    # only mean a row that predates it.
+    limit = 100 if account.daily_limit is None else int(account.daily_limit)
     return {"used": used, "limit": limit, "remaining": max(0, limit - used)}
 
 
@@ -3172,10 +3189,17 @@ def append_job_log(db: Session, job: PipelineJob, message: str, *, level: str = 
     tails, so the node calls it as it goes rather than dumping at the end —
     that's the difference between watching a failure happen and guessing.
     """
-    stamp = datetime.utcnow().strftime("%H:%M:%S")
+    now = datetime.utcnow()
+    stamp = now.strftime("%H:%M:%S")
     prefix = {"error": "ERROR", "warn": "WARN", "ok": "OK"}.get(level, "")
     line = f"[{stamp}] {prefix + ' ' if prefix else ''}{message}"
     job.log_text = ((job.log_text or "") + line + "\n")[-200_000:]
+    # ── THE HEARTBEAT ───────────────────────────────────────────────────
+    # Every log line the node writes lands here, so this is the one place
+    # that knows a job is still alive. Stamped here rather than at each
+    # caller for the same reason the log itself is: one definition, and no
+    # path that reports progress without also proving it is breathing.
+    job.last_report_at = now
 
 
 def finish_job(

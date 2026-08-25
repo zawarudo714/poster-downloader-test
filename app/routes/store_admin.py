@@ -745,7 +745,8 @@ def api_reactivate_all(admin: User = Depends(require_admin),
 
 
 @router.post("/api/store/deactivate-missing")
-def api_deactivate_missing(admin: User = Depends(require_admin),
+def api_deactivate_missing(payload: dict = Body(default={}),
+                           admin: User = Depends(require_admin),
                            db: Session = Depends(get_db)):
     """
     Switch off everything currently marked missing — without a scan first.
@@ -771,8 +772,19 @@ def api_deactivate_missing(admin: User = Depends(require_admin),
             409, "A run is already in progress. Wait for it to finish, or "
                  "stop it, then try again.")
 
+    # ── THE AUTOMATIC TICKBOX APPLIES HERE TOO ──────────────────────────
+    #
+    # It did not, and that is a bug rather than a decision: the checkbox sits
+    # directly above this button, so ticking it and pressing this plainly
+    # means "do the whole cure". Without `auto` the run switched 226 designs
+    # OFF and then parked at the confirm gate waiting for a person — which
+    # is the worst possible outcome overnight, because the designs are off
+    # and earning nothing until somebody wakes up and presses a button.
+    #
+    # A control that is visible and ignored is worse than one that is absent.
     run = StoreScanRun(marketplace=MARKETPLACE, status="deactivating",
-                       started_by=admin.username, scan_mode="fix")
+                       started_by=admin.username, scan_mode="fix",
+                       auto=1 if payload.get("auto") else 0)
     db.add(run)
     db.flush()
 
@@ -787,7 +799,9 @@ def api_deactivate_missing(admin: User = Depends(require_admin),
     queued = SH.begin_stage(db, run, "deactivate", by=admin.username)
     log_activity(db, user=admin, action="store_deactivate_missing",
                  target_type="store_run", target_id=run.id,
-                 details={"designs": designs, "accounts": len(todo)})
+                 details={"designs": designs, "accounts": len(todo),
+                          "auto": bool(run.auto)})
     db.commit()
     return JSONResponse({"ok": True, "run": run.id, "designs": designs,
-                         "accounts": len(todo), "queued": queued})
+                         "accounts": len(todo), "queued": queued,
+                         "auto": bool(run.auto)})

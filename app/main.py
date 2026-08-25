@@ -11,7 +11,7 @@ Make sure to create the first admin first:
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 
-from .config import APP_DIR
+from .config import APP_DIR, APP_VERSION
 from .db import init_db
 from .routes import admin as admin_routes
 from .routes import earnings_admin as earnings_routes
@@ -199,4 +199,17 @@ app.include_router(listing_routes.router)
 
 @app.get("/healthz")
 def healthz():
-    return {"ok": True}
+    """
+    Is it up, and WHICH VERSION is up.
+
+    The version half was added after a real question that could not be
+    answered: a run behaved like the previous release and there was no way
+    to tell whether the deploy had actually landed, short of opening a page
+    and reading `?v=` out of the HTML source. Docker will happily keep
+    serving the old image if a build was skipped, and nothing said so.
+
+    Deliberately unauthenticated, like the rest of this endpoint — a version
+    number is not a secret, and needing to log in to check a deploy is
+    exactly the friction that stops anyone checking.
+    """
+    return {"ok": True, "version": APP_VERSION}

@@ -118,13 +118,48 @@ VERIFY_CMDS = (
     "git --no-pager log --no-color --oneline -1 && "
     "echo 'SERVER_SHA=' $(git rev-parse HEAD) && "
     "echo '--- container ---' && "
-    "docker compose ps --format '{{.Name}}  {{.Status}}'"
+    "docker compose ps --format '{{.Name}}  {{.Status}}' && "
+    # ── ASK THE RUNNING APP WHAT VERSION IT IS ──────────────────────────
+    #
+    # The commit check above proves the code reached the DISK. It does not
+    # prove the container was rebuilt with it — `git pull` can succeed while
+    # the rebuild is skipped, fails, or quietly reuses a cached image, and
+    # then every line on screen says success while the old code keeps
+    # serving. That happened on 2026-08-24: the tool reported a clean
+    # deploy, the SHA matched, and the site was four versions behind. It
+    # cost a night's unattended run.
+    #
+    # Retried because the container needs a moment to come up after a
+    # rebuild; asking once would report a failure that is only earliness.
+    "echo '--- what the running app says ---' && "
+    "for i in $(seq 1 20); do "
+    "  V=$(curl -fsS http://127.0.0.1/healthz 2>/dev/null) && break; "
+    "  sleep 2; "
+    "done; "
+    "echo \"SERVER_HEALTHZ=$V\""
 )
 
 # Printed by the verify step so the tool can compare what the server is
 # running against what was just pushed, rather than assuming that commands
 # exiting zero means a deploy happened.
 SERVER_SHA_MARKER = "SERVER_SHA="
+SERVER_HEALTH_MARKER = "SERVER_HEALTHZ="
+
+
+def local_app_version(repo: Path) -> str:
+    """The APP_VERSION in the code about to be pushed, or '' if unreadable."""
+    try:
+        src = (repo / "app" / "config.py").read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    m = re.search(r"""^APP_VERSION\s*=\s*["']([^"']+)["']""", src, re.M)
+    return m.group(1) if m else ""
+
+
+def version_from_healthz(blob: str) -> str:
+    """Pull the version out of /healthz, whatever else it carries."""
+    m = re.search(r'"version"\s*:\s*"([^"]+)"', blob or "")
+    return m.group(1) if m else ""
 
 
 # ── Parsing what you typed ──────────────────────────────────────────────────
@@ -726,6 +761,7 @@ class DeployApp:
             commands = split_commands(self.server_text.get("1.0", "end"))
             commands.append(VERIFY_CMDS)
             server_sha = ""
+            server_health = ""
 
             for command in commands:
                 self._emit(f"\n$ {command}", "step")
@@ -749,6 +785,10 @@ class DeployApp:
                     if SERVER_SHA_MARKER in clean:
                         server_sha = clean.split(SERVER_SHA_MARKER, 1)[1].strip()
                         continue          # bookkeeping, not output worth showing
+                    if SERVER_HEALTH_MARKER in clean:
+                        server_health = clean.split(
+                            SERVER_HEALTH_MARKER, 1)[1].strip()
+                        continue
                     self._emit(line.rstrip())
                 code = stdout.channel.recv_exit_status()
                 err = stderr.read().decode("utf-8", "replace").strip()
@@ -767,17 +807,63 @@ class DeployApp:
             # rebuild then runs happily on unchanged code — which is exactly
             # how a whole evening went out to the wrong remote while every
             # line on screen said success.
+            # ── DOES THE RUNNING APP AGREE? ──────────────────────────────
+            #
+            # Checked BEFORE the commit comparison, because it is the
+            # stronger claim and the one that was missing. The commit check
+            # asks whether the code arrived; this asks whether the process
+            # answering requests is actually running it. They can disagree,
+            # and when they do it is always this one that is right.
+            want_version = local_app_version(Path(self.repo_var.get()))
+            live_version = version_from_healthz(server_health)
+            version_ok = True
+
+            if not server_health:
+                self._emit(
+                    "\nWARNING: the site did not answer /healthz, so I cannot "
+                    "tell you which version is live. It may still be starting "
+                    "— reload the page and check.", "err")
+                version_ok = False
+            elif not live_version:
+                self._emit(
+                    f"\nThe site answered but reported no version: "
+                    f"{server_health[:120]}", "err")
+                self._emit(
+                    "That means it is running code older than this check — "
+                    "which is itself the answer: the deploy did not land.",
+                    "err")
+                version_ok = False
+            elif want_version and live_version != want_version:
+                self._emit(
+                    f"\nWARNING: you deployed version {want_version} but the "
+                    f"site is serving version {live_version}.", "err")
+                self._emit(
+                    "The code reached the server and the container did not "
+                    "pick it up. Usually the rebuild was skipped or failed. "
+                    "Try:  cd /opt/poster && docker compose up -d --build "
+                    "--force-recreate", "err")
+                version_ok = False
+            elif live_version:
+                self._emit(f"Site is serving version {live_version} — matches "
+                           f"the code you pushed.", "ok")
+
             pushed = getattr(self, "pushed_sha", "")
             if pushed and server_sha:
-                if server_sha.startswith(pushed[:8]) or pushed.startswith(server_sha[:8]):
+                if ((server_sha.startswith(pushed[:8])
+                     or pushed.startswith(server_sha[:8])) and version_ok):
                     self._emit(f"Server is running {server_sha[:8]} — matches "
                                f"what you pushed.", "ok")
                     # Recorded only here, inside the branch that PROVED the
-                    # server moved. A log that also recorded failed attempts
-                    # would be worse than none — it would answer "what is
-                    # live?" with things that are not.
+                    # server moved — the commit AND the running version. A
+                    # log that also recorded failed attempts would be worse
+                    # than none: it would answer "what is live?" with things
+                    # that are not.
                     self._record_deploy(server_sha, self.msg_var.get().strip())
                     self._consume_note()
+                elif not version_ok:
+                    self._emit(
+                        "\nNOT recorded as deployed — the commit is on the "
+                        "server but the running site does not match it.", "err")
                 else:
                     self._emit(
                         f"\nWARNING: you pushed {pushed[:8]} but the server is "

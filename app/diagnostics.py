@@ -815,6 +815,59 @@ def check_stuck_listing_run(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def check_automatic_run_waiting(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: a run set to AUTOMATIC must never be sitting at a gate.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE INCIDENT, 2026-08-24
+    ════════════════════════════════════════════════════════════════════════
+    "Automatic" means exactly one thing: no stage waits for a person. So a
+    run with `auto` set, not paused, parked at `reviewing` or `confirming`
+    is a contradiction — the setting says nobody is watching and the state
+    says it is waiting for somebody.
+
+    It happened because SWITCH OFF THE KNOWN MISSING created its run without
+    reading the AUTOMATIC tickbox sitting directly above the button. Three
+    other buttons on that screen read it; that one dropped it. Overnight the
+    result would have been several hundred live listings switched off and a
+    run waiting at a gate until morning, earning nothing.
+
+    Every existing check called that healthy. `check_designs_left_switched_
+    off` treats `confirming` as "a run is working on it", which is normally
+    true and was exactly wrong here.
+
+    Stated about STATE rather than about which button was pressed, so it
+    holds for any future path that forgets to carry the setting through —
+    and that is the point, because the bug was not in the stage machinery at
+    all. It was one argument missing at one call site.
+    """
+    from .earnings.store_health import WAITING
+
+    rows = []
+    for run in (db.query(StoreScanRun)
+                  .filter(StoreScanRun.auto == 1,
+                          StoreScanRun.status.in_(WAITING)).all()):
+        if run.paused_at:
+            continue          # paused deliberately stops automatic handover
+        rows.append(Finding(
+            f"Run #{run.id} is set to automatic but is waiting at "
+            f"'{run.status}'",
+            f"started {run.started_at:%Y-%m-%d %H:%M}"
+            + (f" by {run.started_by}" if run.started_by else ""),
+            "/admin/store",
+        ))
+
+    return _result(
+        "automatic_run_waiting", "An automatic run that is waiting for you",
+        "This run was told to run all the way through without stopping, and "
+        "it has stopped anyway. Nothing will move it until you press the "
+        "button on the TeePublic tab — and if designs are switched off right "
+        "now, they are earning nothing while it waits.",
+        "error", rows,
+    )
+
+
 def check_orphaned_listing_jobs(db: Session, scope: Scope) -> CheckResult:
     """
     INVARIANT: no job may still be waiting to switch designs for a run that
@@ -990,6 +1043,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     # ── Listing-health invariants ───────────────────────────────────────
     check_designs_left_switched_off,
     check_stuck_listing_run,
+    check_automatic_run_waiting,
     check_orphaned_listing_jobs,
     check_listing_sweep_believable,
     check_listing_catalogue_gaps,

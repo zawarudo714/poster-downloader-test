@@ -321,7 +321,13 @@ def findings(db: Session, limit: int = 500) -> dict:
     Only rows we have actually looked at appear. "Not yet checked" is not a
     finding, and mixing the two would inflate every number on the screen.
     """
-    names = {a.id: a.name for a in accounts(db)}
+    # Both looked up ONCE. The first version called accounts() inside the
+    # row loop, which is a database query per row — fine against a handful
+    # of test rows and 2,000 queries against the real 4,811. The kind of
+    # thing that only shows up on the machine where it matters.
+    every = accounts(db)
+    names = {a.id: a.name for a in every}
+    artists = {a.id: (a.artist_name or "") for a in every}
 
     checked = (db.query(UploadTracking)
                  .filter(UploadTracking.target_site == MARKETPLACE,
@@ -338,9 +344,7 @@ def findings(db: Session, limit: int = 500) -> dict:
             "http": r.listing_http,
             "checked_at": r.listing_checked_at.isoformat()
                           if r.listing_checked_at else None,
-            "url": listing_url(
-                r, next((a.artist_name for a in accounts(db)
-                         if a.id == r.account_id), "")) or "",
+            "url": listing_url(r, artists.get(r.account_id, "")) or "",
         } for r in rows[:limit]]
 
     # We believe it is up; the marketplace returns a real 404.

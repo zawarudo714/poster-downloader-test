@@ -772,6 +772,11 @@ def jobs_log(
     if payload.get("note"):
         job.progress_note = str(payload["note"])[:255]
 
+    # A request from the node IS a heartbeat, whether or not it carried any
+    # text. `append_job_log` stamps this for every line, but a progress-only
+    # call would otherwise leave the job looking silent — and being called
+    # silent for 45 minutes is what got a healthy job cancelled.
+    job.last_report_at = datetime.utcnow()
     db.commit()
     return JSONResponse({"ok": True})
 

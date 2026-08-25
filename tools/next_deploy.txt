@@ -1,7 +1,6 @@
-New LISTING CHECK tab (master level, beside TeePublic): opens each FAA
-listing's own address and reports whether it still loads. Read-only, HEAD
-requests, no browser and no sign-in — it does NOT hold the pipeline. Manual
-only, no schedule. Each account needs its artist name typed in first, and a
-sweep where almost everything reads GONE stops itself rather than reporting
-thousands of takedowns. Also removed two dead controls. Node must be updated
-too: agent 1.24.0.
+The deploy tool now proves the RUNNING site matches the code you pushed, not
+just that the commit arrived. /healthz reports the version, and a mismatch is
+reported loudly and NOT written to the deploy log. Also fixes a real bug: any
+job running longer than 45 minutes was declared abandoned even while it was
+reporting every few seconds, which cancelled a healthy TeePublic switching job
+and re-dispatched its last 8 designs. Node needs the folder copy too.

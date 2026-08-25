@@ -854,6 +854,7 @@ irrelevant, say why in one line rather than skipping it silently.
 | 5b | Turned one marketplace's measured behaviour into policy for all of them | 6, 3c-ter |
 | 5c | Moved a call out of a shared function and dropped it on the way | 3c, 3c-ter |
 | 5d | Shipped a mechanism with no invariant watching it — and a test that shared the bug's assumption | 5, 8 |
+| 5e | Fixed a bug and left the OWNER as the only thing that could have found it | 5d, 7, 3c |
 | 6 | Correct for two projects, wrong for the third | 1, 3b |
 | 7 | Fixed a bug and left no rule behind | all |
 | 8 | Claimed work with an exit that reports nothing — including catching an error into a counter, queueing work nothing can cancel, or fixing one loop of several | 3d, 5 |
@@ -1070,6 +1071,22 @@ so the visible symptom lands somewhere unrelated to the edit. That is exactly
 how removing finished instructions from the NODES tab made the ADD ACCOUNT
 box on the UPLOAD tab stop appearing.
 
+**A SHARED CONTROL read by some handlers and not others is the same defect
+wearing a fourth hat.** The AUTOMATIC tickbox on the TeePublic tab was read
+by three buttons and silently dropped by the fourth, which created its run
+without it. Nothing was disconnected — the checkbox existed, the hook
+matched, the button had a handler, the endpoint was called — so no check
+could fail. Unattended it would have switched 226 live listings off and then
+parked at a gate until morning.
+
+The general form: **when a screen has a setting that several actions share,
+list the actions and confirm each one carries it.** `preflight.py --map` now
+prints the request body beside each endpoint for exactly this, because the
+odd one out is only obvious side by side:
+
+    start              -> /start              {auto, mode}
+    deactivate-missing -> /deactivate-missing {}          <- this one
+
 **Moving a call OUT of a shared function is a deletion, and needs the same
 proof.** `open_work_tab()` was correctly taken out of `login()` so earnings
 reads would stop running upload hygiene — and never added to `run_batch`. The
@@ -1154,6 +1171,22 @@ The general form: **for anything outside this codebase — a marketplace, an
 API, an OS behaviour — the code must either read the value at runtime, take
 it from a setting, or be told it. Inventing it is not an option, and neither
 is inferring it from a plausible-looking pattern.**
+
+**A TIMEOUT is a guessed duration wearing a number, and it decides whether
+healthy work gets killed.** `claim_timeout_min` is 45 minutes and both the
+claim reaper and the stalled-run sweeper compared it against `started_at` —
+so ANY job running longer than 45 minutes was declared abandoned, however
+well it was working. A TeePublic switching job takes about an hour and
+reports once per design; at minute 45 a live job with 8 designs left was
+cancelled, those 8 were handed out again, and the second attempt failed with
+"already inactive". Both the measurement and the timeout were written down
+in this repo; nobody compared them.
+
+So: **ask a job whether it is ALIVE, never how long it has been going.**
+Liveness is the last thing it SAID — `PipelineJob.last_report_at`, stamped
+by `append_job_log`. `started_at` is only the fallback for something that
+never reported at all. And whenever you add a timeout, find the longest
+thing it applies to and check the two numbers against each other.
 
 **A guessed DURATION is the same defect, and it is easier to miss because it
 usually lives in a comment rather than in code.** `dispatch_stage` said
@@ -1364,6 +1397,77 @@ wrote it. Naming every invariant is finite, and each one holds whether or
 not the failure path was anticipated. Do both — but the invariants are the
 part that actually protects him.
 
+### 5e. FOR EVERY BUG, ASK WHAT WOULD HAVE CAUGHT IT WITHOUT HIM
+
+**Standing instruction from the owner, 2026-08-24, and it applies to EVERY
+issue — one he reports, or one you trip over yourself.** His words: *"always
+ask yourself if I hadn't mentioned it, would it be detected if I decide to
+run a defect check anytime. This needs to happen every time there is an
+issue. Update the evolving notes to cast the net wider."*
+
+**The point is not the bug. It is that HE is currently the detector.**
+Almost every defect in this project was found because he watched a number,
+read a log, or was about to depend on something. That does not scale, it
+does not run at 3am, and it costs him an evening every time. The goal is
+that a defect check he runs on a quiet Tuesday finds the things he would
+otherwise have had to notice first.
+
+So for every bug, answer these three IN THE DELIVERY, in plain words:
+
+1. **What actually found it?** Name it honestly — "you did, by noticing the
+   number going up" is the usual answer and pretending otherwise helps
+   nobody.
+2. **If you had said nothing, what would have found it, and when?** Walk the
+   rungs: preflight, `--map`, the behaviour tests, a Diagnostics invariant.
+   If the answer is "nothing, ever", say exactly that.
+3. **What is being added right now so the answer to 2 changes?** Not a rule
+   to remember — a mechanical check. Then say which rung it landed on.
+
+**Prefer the EARLIEST rung that can catch it**, because they differ in when
+they fire and what they cost:
+
+| rung | fires | catches |
+|---|---|---|
+| `preflight` | before deploy | anything disconnected, in seconds |
+| `preflight --map` | when you read it | the odd one out among peers |
+| behaviour tests | before deploy | a decision computed wrongly |
+| Diagnostics invariant | unattended, for ever | it happening for real |
+
+A Diagnostics check is the safety net, not the goal: it fires after the
+listings are already switched off. If the defect is visible in the SOURCE,
+it belongs in preflight or the map instead.
+
+**The worked example, because it is the reason this rule exists.** The
+AUTOMATIC tickbox was read by three buttons and dropped by a fourth. What
+found it: he did, planning to leave it running overnight. What would have
+found it otherwise: nothing — the checkbox existed, the hook matched, the
+button had a handler, the endpoint was called, and `check_designs_left_
+switched_off` counts `confirming` as "a run is working on it". What was
+added: `--map` now prints the request body beside each endpoint, so a
+handler that drops a shared setting is visible next to its peers; plus an
+invariant that an automatic run must never sit at a gate.
+
+**When the honest answer is "nothing would have caught this and nothing
+mechanical can", say so rather than inventing a check that cannot fail.**
+A green light from a check that was never looking is the failure this whole
+section exists to prevent — see the sabotage rule in 3c.
+
+**Applying this rule BACKWARDS pays immediately.** Running it over the other
+two defects from the same day produced two new preflight checks — a query
+inside a comprehension, and `Number(x) || default` swallowing a real zero.
+Both were written badly first: the query check scored ZERO against its own
+motivating bug (it knew `db.query` but not a helper that queries) and warned
+86 times; the zero check flagged thirteen lines that were all `|| 0`, where
+the fallback IS zero. Sabotage found both. **Always break the new check with
+the original bug and confirm it goes red** — a check derived from a defect
+that cannot detect that defect is the purest form of false comfort.
+
+Fixed, the zero check then found a defect NOBODY had reported: `daily_limit`
+0 became 100 in both the account form and `account_quota`. Setting an
+account's daily limit to zero is the obvious way to say "do not upload here
+today", and it did the opposite, on a real marketplace, silently. That is
+the whole point of this rule — a check found it instead of the owner.
+
 ### 6. The third-project test
 
 For every change: **would this still be right for a third project?** If the
@@ -1414,6 +1518,11 @@ The test is length. This file should get SHARPER as it grows, not longer.
 If an edit makes it longer without making it more useful, it is the wrong
 edit. Not everything is worth writing down — the bar is "would this have
 changed what a future session did".
+
+**Every bug also gets the 5e treatment**, which is the other half of this
+rule: a rule tells the NEXT session what to look for, and a mechanical check
+looks whether or not anybody remembers. Write both, and say plainly when
+only one of them was possible.
 
 **Three things every new rule must do**, because the owner has asked for a
 net rather than a list of anecdotes:

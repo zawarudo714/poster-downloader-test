@@ -129,9 +129,18 @@ VERIFY_CMDS = (
     # deploy, the SHA matched, and the site was four versions behind. It
     # cost a night's unattended run.
     #
+    # ── DISK, EVERY TIME ────────────────────────────────────────────────
+    #
+    # Nothing was watching it. The test box reached 84% full from build cache
+    # alone — forty deploys, nothing pruning — and the first symptom would
+    # have been a deploy dying with "no space left" or SQLite failing a write
+    # mid-transaction, at whatever hour it filled up.
+    "echo '--- disk ---' && "
+    "df -h / | tail -1 && "
+    "echo \"SERVER_FREE_PCT=$(df --output=pcent / | tail -1 | tr -dc '0-9')\" && "
+    "echo '--- what the running app says ---' && "
     # Retried because the container needs a moment to come up after a
     # rebuild; asking once would report a failure that is only earliness.
-    "echo '--- what the running app says ---' && "
     "for i in $(seq 1 20); do "
     "  V=$(curl -fsS http://127.0.0.1/healthz 2>/dev/null) && break; "
     "  sleep 2; "
@@ -144,6 +153,10 @@ VERIFY_CMDS = (
 # exiting zero means a deploy happened.
 SERVER_SHA_MARKER = "SERVER_SHA="
 SERVER_HEALTH_MARKER = "SERVER_HEALTHZ="
+SERVER_FREE_MARKER = "SERVER_FREE_PCT="
+# Above this, say so loudly. Docker build cache grows without
+# limit and a full disk corrupts writes rather than refusing them.
+DISK_WARN_PCT = 80
 
 
 def local_app_version(repo: Path) -> str:
@@ -882,6 +895,7 @@ class DeployApp:
             commands.append(VERIFY_CMDS)
             server_sha = ""
             server_health = ""
+            server_used_pct = ""
 
             for command in commands:
                 self._emit(f"\n$ {command}", "step")
@@ -905,6 +919,10 @@ class DeployApp:
                     if SERVER_SHA_MARKER in clean:
                         server_sha = clean.split(SERVER_SHA_MARKER, 1)[1].strip()
                         continue          # bookkeeping, not output worth showing
+                    if SERVER_FREE_MARKER in clean:
+                        server_used_pct = clean.split(
+                            SERVER_FREE_MARKER, 1)[1].strip()
+                        continue
                     if SERVER_HEALTH_MARKER in clean:
                         server_health = clean.split(
                             SERVER_HEALTH_MARKER, 1)[1].strip()
@@ -934,6 +952,16 @@ class DeployApp:
             # asks whether the code arrived; this asks whether the process
             # answering requests is actually running it. They can disagree,
             # and when they do it is always this one that is right.
+            try:
+                used = int(server_used_pct or 0)
+            except ValueError:
+                used = 0
+            if used >= DISK_WARN_PCT:
+                self._emit(
+                    f"\nWARNING: the server disk is {used}% full. Docker build "
+                    f"cache grows with every deploy and nothing prunes it. "
+                    f"Reclaim it with:  docker builder prune -af", "err")
+
             want_version = local_app_version(Path(self.repo_var.get()))
             live_version = version_from_healthz(server_health)
             version_ok = True

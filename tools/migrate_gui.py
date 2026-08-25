@@ -31,11 +31,18 @@ THE THIRD STACK
       /opt/poster             your working system, port 80 — NEVER TOUCHED
       /opt/poster-rehearsal   throwaway, port 8081, its own database
 
-Only the 49 MB DATABASE is copied. The 8.5 GB of posters is not needed to
-answer "does the schema survive" — and would not fit anyway, since the test
-box has about 9 GB free. The workspace reshape is therefore rehearsed
-against a small fabricated tree instead, which is stated plainly in the
-report rather than glossed over.
+The 49 MB database always travels. The 8.5 GB of posters is OPTIONAL and is
+copied server to server, because both boxes sit in the same datacentre.
+
+That used to be impossible: the test box had 9 GB free, because the
+Dockerfile ended with `COPY . .` and there was no .dockerignore, so every
+build packaged the whole data folder into the image — 25 GB of build cache
+from forty deploys. With that fixed the box has 32 GB free and the real
+tree fits, which is the only way to rehearse the workspace reshape against
+anything other than fabricated folders.
+
+Skip the posters and everything still works except the galleries. The
+report says which of the two was done rather than leaving you to guess.
 
 ════════════════════════════════════════════════════════════════════════════
 ONE STEP PER BUTTON
@@ -225,15 +232,23 @@ STEPS = [
      "Creates /opt/poster-rehearsal on the TEST box with its own database on "
      "port 8081. Your working system is untouched.",
      "_step_build"),
-    ("4. UPGRADE IT AND COMPARE",
+    ("4. COPY THE POSTER FILES  (optional)",
+     "8.5 GB of saved posters, straight from one server to the other. "
+     "Without this the galleries are empty but everything else works.",
+     "_step_workspace"),
+    ("5. UPGRADE IT AND COMPARE",
      "Starts it, lets the migrations run, then compares every row count "
      "before and after. This is the answer we came for.",
      "_step_upgrade"),
-    ("5. BRING THE SETTINGS ACROSS",
+    ("6. BRING THE SETTINGS ACROSS",
      "Copies accounts, mouse paths and settings from the test box into the "
      "rehearsal, then proves a password still decrypts.",
      "_step_settings"),
-    ("6. START AGAIN",
+    ("7. PROMOTE IT TO YOUR TEST BOX",
+     "Makes the rehearsed copy your everyday test system, so you build and "
+     "click against real data. The old one is kept.",
+     "_step_promote"),
+    ("8. START OVER",
      "Deletes the rehearsal stack so the next run begins from a clean copy. "
      "Nothing else is touched.",
      "_step_reset"),
@@ -664,6 +679,7 @@ class App:
 
             before = self._counts(client, f"{REHEARSAL_DIR}/data/poster.db")
             self.state["before"] = before
+            self.state["built"] = True
             self._emit(f"\nbefore the upgrade: "
                        f"{len(before.get('_tables') or [])} tables", "ok")
             for table in WATCH_TABLES:
@@ -674,11 +690,112 @@ class App:
             client.close()
 
     # ════════════════════════════════════════════════════════════════════
-    #  STEP 4 — the actual question
+    #  STEP 4 — the posters, server to server
+    # ════════════════════════════════════════════════════════════════════
+
+    def _step_workspace(self) -> None:
+        """
+        8.5 GB of saved posters, production straight to the test box.
+
+        ════════════════════════════════════════════════════════════════════
+        NOT VIA THE LAPTOP
+        ════════════════════════════════════════════════════════════════════
+        Both machines are in the same Hetzner datacentre, so server to server
+        is minutes. Down to a home connection and back up again is an evening
+        — and the laptop gains nothing by being in the middle.
+
+        That needs the TEST box to be able to reach production, which it
+        cannot today. So a key is installed for the copy and REMOVED
+        afterwards: leaving it would mean anyone who got into the test box
+        could walk into production, which is a poor trade for saving one
+        step next time.
+        """
+        self._header("4. COPYING THE POSTER FILES")
+        prod_dir = self.state.get("prod_dir") or PROD_DIR
+        if not self.state.get("before") and not self.state.get("built"):
+            self._emit("Run step 3 first — there is nowhere to put them.",
+                       "err")
+            return
+
+        source = f"{prod_dir}/data/workspace"
+        prod = self._connect("prod")
+        test = self._connect("test")
+        marker = ""
+        try:
+            size = self._run(prod, f"du -sh {source} 2>/dev/null | cut -f1",
+                             quiet=True)[1].strip()
+            if not size:
+                self._emit(f"No workspace at {source} — nothing to copy.",
+                           "err")
+                return
+            free = self._run(test, "df -BG --output=avail / | tail -1",
+                             quiet=True)[1].strip()
+            self._emit(f"{size} to copy · {free} free on the test box")
+
+            self._emit("giving the test box a key to production, for this "
+                       "copy only…")
+            pub = self._must(test, (
+                "test -f ~/.ssh/id_ed25519 || ssh-keygen -t ed25519 -N '' -q "
+                "-f ~/.ssh/id_ed25519; cat ~/.ssh/id_ed25519.pub"),
+                "could not make a key on the test box").strip().splitlines()[-1]
+            marker = pub.split()[1][:32]
+            self._must(prod, (
+                "mkdir -p ~/.ssh && chmod 700 ~/.ssh && "
+                "touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && "
+                f"grep -q '{marker}' ~/.ssh/authorized_keys || "
+                f"printf '%s\\n' '{pub}' >> ~/.ssh/authorized_keys"),
+                "could not authorise the test box on production")
+
+            user, host, _port = parse_ssh_target(self.prod_var.get())
+            self._emit(f"copying {size} — this is the long part…")
+            # rsync when it is there because it can be re-run without
+            # starting over; tar when it is not, so nothing has to be
+            # installed on a machine mid-migration.
+            code, text = self._run(test, (
+                f"mkdir -p {REHEARSAL_DIR}/data/workspace && "
+                f"if command -v rsync >/dev/null; then "
+                f"  rsync -a -e 'ssh -o StrictHostKeyChecking=no' "
+                f"    {user}@{host}:{source}/ {REHEARSAL_DIR}/data/workspace/ "
+                f"    && echo COPIED_WITH_RSYNC; "
+                f"else "
+                f"  ssh -o StrictHostKeyChecking=no {user}@{host} "
+                f"    'tar -C {prod_dir}/data -cf - workspace' "
+                f"  | tar -C {REHEARSAL_DIR}/data -xf - && echo COPIED_WITH_TAR; "
+                f"fi"), timeout=3600)
+            if code != 0 or "COPIED_WITH" not in text:
+                raise RuntimeError(f"the copy failed\n{text.strip()[:400]}")
+            self._emit(text.strip().splitlines()[-1], "ok")
+
+            # ── COUNT BOTH ENDS. "It finished" is not "it arrived." ─────
+            here = self._run(test, f"find {REHEARSAL_DIR}/data/workspace "
+                                   "-type f | wc -l", quiet=True)[1].strip()
+            there = self._run(prod, f"find {source} -type f | wc -l",
+                              quiet=True)[1].strip()
+            if here != there:
+                self._emit(f"WARNING: {there} files on production, {here} "
+                           f"here. Run this step again — rsync will only "
+                           f"fetch what is missing.", "err")
+            else:
+                self._emit(f"{int(here):,} files, both ends. Matched.", "ok")
+                self.state["workspace_copied"] = True
+        finally:
+            if marker:
+                # Removed whether the copy worked or not. A key left behind
+                # by a failure is exactly the one nobody remembers.
+                self._run(prod, (
+                    f"sed -i '/{marker}/d' ~/.ssh/authorized_keys && "
+                    f"echo removed"), quiet=True)
+                self._emit("test box's access to production removed again.",
+                           "dim")
+            prod.close()
+            test.close()
+
+    # ════════════════════════════════════════════════════════════════════
+    #  STEP 5 — the actual question
     # ════════════════════════════════════════════════════════════════════
 
     def _step_upgrade(self) -> None:
-        self._header("4. UPGRADING THE REHEARSAL AND COMPARING")
+        self._header("5. UPGRADING THE REHEARSAL AND COMPARING")
         if not self.state.get("before"):
             raise RuntimeError("Run step 3 first — I need the before counts.")
 
@@ -750,9 +867,12 @@ class App:
         lines += [f"| {k} | `{t}` | {d} |" for t, k, d in rows]
         lines += [
             "", "## What this did NOT prove", "",
-            "* The workspace reshape ran against a handful of FABRICATED "
-            "folders, not the real 8.5 GB tree. One directory rename per "
-            "worker is the same code path, but the real tree has not moved.",
+            ("* The workspace reshape ran against the REAL poster tree."
+             if self.state.get("workspace_copied") else
+             "* The workspace reshape ran against a handful of FABRICATED "
+             "folders, not the real tree. One directory rename per worker is "
+             "the same code path, but the real tree has not moved. Run step "
+             "4 to test it properly."),
             "* Nothing here touched production. Its database was copied and "
             "read; the machine was not changed.",
             "* A clean rehearsal says the schema survives. It does not say "
@@ -766,11 +886,11 @@ class App:
             self._emit(f"could not write the report: {e}", "err")
 
     # ════════════════════════════════════════════════════════════════════
-    #  STEP 5 — the settings, and whether passwords survive
+    #  STEP 6 — the settings, and whether passwords survive
     # ════════════════════════════════════════════════════════════════════
 
     def _step_settings(self) -> None:
-        self._header("5. BRINGING THE SETTINGS ACROSS")
+        self._header("6. BRINGING THE SETTINGS ACROSS")
         tables = [t for t, _ in SETTINGS_TABLES]
         if self.extras.get():
             tables += [t for t, _ in OPTIONAL_TABLES]
@@ -867,11 +987,112 @@ class App:
             client.close()
 
     # ════════════════════════════════════════════════════════════════════
-    #  STEP 6 — start again
+    #  STEP 7 — make the rehearsal your everyday test system
+    # ════════════════════════════════════════════════════════════════════
+
+    def _step_promote(self) -> None:
+        """
+        Swap the rehearsed data into the test stack you already use.
+
+        ════════════════════════════════════════════════════════════════════
+        WHY SWAP RATHER THAN RUN BOTH
+        ════════════════════════════════════════════════════════════════════
+        Two stacks on one box means one worker machine having to be pointed
+        at one of them, two deploy targets, and accounts that are live in one
+        and disabled in the other. An hour spent testing the wrong one is the
+        obvious outcome.
+
+        After this there is still exactly one test system, at the same
+        address, with the same DEPLOY button — it simply now contains
+        101,605 real titles instead of nineteen rows.
+
+        ════════════════════════════════════════════════════════════════════
+        NOTHING IS DELETED
+        ════════════════════════════════════════════════════════════════════
+        The current database and workspace are RENAMED, not removed. A move
+        within one filesystem is instant and costs no space, and it means
+        this is reversible while you are still deciding whether you like it.
+        """
+        self._header("7. PROMOTING THE REHEARSAL TO YOUR TEST BOX")
+        live = self.state.get("test_dir") or TEST_DIR
+        if not self.state.get("after"):
+            raise RuntimeError("Run step 5 first — I will not promote a copy "
+                               "whose upgrade has not been checked.")
+        rows = self.state.get("compare") or []
+        ok, sentence = verdict_of(rows)
+        if not ok:
+            raise RuntimeError(
+                f"Refusing: the last comparison said — {sentence}")
+
+        if not messagebox.askyesno(
+                "Promote", (
+                    f"Make the rehearsed copy your everyday test system?\n\n"
+                    f"{live} keeps its current database and posters under a "
+                    f"'.before-promote' name, so this can be undone.\n\n"
+                    f"Production is not touched.")):
+            self._emit("cancelled", "dim")
+            return
+
+        stamp = datetime.now().strftime("%Y%m%d-%H%M")
+        client = self._connect("test")
+        try:
+            self._emit("stopping the test stack…")
+            self._run(client, f"cd {live} && docker compose down 2>&1 | tail -3")
+
+            self._emit("setting the current data aside (renamed, not "
+                       "deleted)…")
+            self._must(client, (
+                f"cd {live}/data && "
+                f"[ -f poster.db ] && mv poster.db poster.db.before-promote-{stamp} "
+                f"|| true; "
+                f"[ -d workspace ] && mv workspace workspace.before-promote-{stamp} "
+                f"|| true; ls -1"), "could not set the old data aside")
+
+            self._emit("moving the rehearsed data into place…")
+            self._must(client, (
+                f"mv {REHEARSAL_DIR}/data/poster.db {live}/data/poster.db && "
+                f"if [ -d {REHEARSAL_DIR}/data/workspace ]; then "
+                f"  mv {REHEARSAL_DIR}/data/workspace {live}/data/workspace; "
+                f"else mkdir -p {live}/data/workspace; fi && echo moved"),
+                "could not move the rehearsed data")
+
+            self._emit("starting it again…")
+            self._must(client, f"cd {live} && docker compose up -d 2>&1 | tail -5",
+                       "the test stack would not start")
+
+            health = self._run(client, (
+                "for i in $(seq 1 30); do "
+                "V=$(curl -fsS http://127.0.0.1/healthz 2>/dev/null) && break; "
+                "sleep 2; done; echo \"$V\""), quiet=True)[1].strip()
+            if not health:
+                raise RuntimeError(
+                    "it did not come back up. Put the old data back with:\n"
+                    f"  cd {live}/data && mv poster.db.before-promote-{stamp} "
+                    f"poster.db")
+            self._emit(f"it answered: {health}", "ok")
+
+            counts = self._counts(client, f"{live}/data/poster.db")
+            self._emit("\nyour test box now holds:", "ok")
+            for table in WATCH_TABLES:
+                if counts.get(table) is not None:
+                    self._emit(f"   {table:<16} {counts[table]:,}")
+
+            self._emit(
+                f"\nDone. Same address, same DEPLOY button, real data.\n"
+                f"The old contents are at {live}/data/*.before-promote-{stamp} "
+                f"— delete them once you are happy.", "ok")
+            self._emit(
+                "Every marketplace account is DISABLED if step 6 ran. Turn "
+                "the ones you want back on before testing uploads.", "dim")
+        finally:
+            client.close()
+
+    # ════════════════════════════════════════════════════════════════════
+    #  STEP 8 — start again
     # ════════════════════════════════════════════════════════════════════
 
     def _step_reset(self) -> None:
-        self._header("6. DELETING THE REHEARSAL STACK")
+        self._header("8. DELETING THE REHEARSAL STACK")
         live = self.state.get("test_dir") or TEST_DIR
         # ── THE CALLER WOULD NEVER SEND THAT, AND IT CHECKS ANYWAY ──────
         # A destructive instruction is checked by the thing carrying it out.

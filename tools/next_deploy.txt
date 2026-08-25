@@ -1,5 +1,5 @@
-Added .dockerignore. The Dockerfile ends with COPY . . and there was no ignore
-file, so every build packaged the whole data folder into the image — 8.5GB of
-posters and the database. Production's image was 21.87GB for a 3MB codebase.
-Also SERVERS.bat: one click to a logged-in terminal on either box, using an SSH
-key installed once instead of a saved password.
+Migration tool now copies the poster files server-to-server and can promote the
+rehearsed copy into your everyday test box, so you build and click against real
+data. Promote renames rather than deletes, and refuses if the row comparison
+was not clean. Deploy tool now reports server disk every time and warns above
+80 percent.

@@ -9,6 +9,7 @@ log or diff to work it out — that costs far more to read than these lines.**
 If the top entry looks older than the work in the repo, the difference is
 what has not been deployed yet.
 
+- **2026-08-25 08:56** · `82c60041` · Added .dockerignore. The Dockerfile ends with COPY . . and there was no ignore
 - **2026-08-25 08:01** · `4a49f262` · FAA returns 410 for a REMOVED listing and 404 for an address that never
 - **2026-08-25 07:55** · `de86461e` · (no message)
 - **2026-08-25 07:38** · `a82f6f7a` · Deploy tool: an empty commit message no longer silently skips the commit and
@@ -38,4 +39,3 @@ what has not been deployed yet.
 - **2026-08-20 18:12** · `ae7206d0` · TeePublic earnings (daily snapshots via the node); Earnings page now marketplace-agnostic with owed broken down per account; marketplace names settled on fineartamerica/teepublic
 - **2026-08-20 15:40** · `5de54642` · Quiet-time and earnings-check times editable on the Earnings page, next to the line that describes them
 - **2026-08-20 15:16** · `e251dee5` · Deleting a marketplace account now removes its Chrome profile from the worker machine
-- **2026-08-20 14:29** · `268e4228` · One Chrome profile per account keyed on id, cleaned before launch; chromedriver log reported on first failure; sale timestamps upgraded from the ledger; quiet-time settings editable; funnel auto-refreshes

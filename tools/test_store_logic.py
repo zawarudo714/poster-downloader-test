@@ -140,7 +140,19 @@ def listing_cases() -> list[tuple[str, bool]]:
          slug("- # -") == ""),
 
         ("200 means the listing is there", verdict(200) == "live"),
-        ("404 is the ONLY thing that means gone", verdict(404) == "gone"),
+        # ── THE TWO CODES FAA ACTUALLY USES, MEASURED 25 Aug ─────────────
+        # A listing the owner deleted returned 410; the same address with
+        # two extra letters returned 404. Telling them apart is what
+        # separates a copyright takedown from a mistyped artist name, and
+        # the first version had them effectively backwards — 410 fell
+        # through to "we could not look", so REAL removals were ignored.
+        ("410 means it was REMOVED — the takedown case, the whole point",
+         verdict(410) == "gone"),
+        ("404 means no page ever existed there — our ADDRESS is wrong, "
+         "which is not the same as a takedown",
+         verdict(404) == "no_page"),
+        ("410 and 404 must never give the same answer",
+         verdict(410) != verdict(404)),
         ("403 means we could not look — the Linux server gets this for "
          "every page, live or not",
          verdict(403) == "unknown"),
@@ -259,11 +271,16 @@ LISTING_SABOTAGE = [
     ("the separator would survive and no address would ever match",
      'r"[^a-z0-9]+"', 'r"[^a-z0-9 ]+"'),
     ("being blocked would be recorded as the listing being gone",
-     '    if http == 404:\n        return "gone"\n    return "unknown"',
-     '    return "gone"'),
+     '        return "no_page"\n    return "unknown"',
+     '        return "no_page"\n    return "gone"'),
     ("a deleted listing would be recorded as healthy",
-     '    if http == 404:\n        return "gone"',
-     '    if http == 404:\n        return "live"'),
+     '    if http == 410:\n        return "gone"',
+     '    if http == 410:\n        return "live"'),
+    ("a real takedown would be filed as 'we could not look' and ignored",
+     '    if http == 410:\n        return "gone"          # it was there; it is not any more\n',
+     ''),
+    ("a mistyped artist name would be reported as thousands of takedowns",
+     '        return "no_page"', '        return "gone"'),
 ]
 
 

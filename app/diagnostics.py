@@ -961,22 +961,28 @@ def check_listing_sweep_believable(db: Session, scope: Scope) -> CheckResult:
                      .all())
         if len(checked) < 20:
             continue
-        gone = sum(1 for r in checked if r.listing_status == "gone")
+        # NO_PAGE, not gone. A 410 means the listing really was removed and
+        # every one of those is true — an account emptied by a ban would be
+        # all 410s. A 404 means no page ever existed at that address, and a
+        # whole account of those means we are building addresses nobody
+        # could have visited.
+        gone = sum(1 for r in checked if r.listing_status == "no_page")
         if gone / len(checked) < 0.5:
             continue
         rows.append(Finding(
-            f"{account.name}: {gone} of {len(checked)} listings report GONE",
+            f"{account.name}: {gone} of {len(checked)} addresses have NO PAGE",
             f"artist name on file is '{account.artist_name}'",
             "/admin/listings",
         ))
 
     return _result(
         "listing_sweep_believable", "A listing check nobody should believe",
-        "Almost every listing on this account came back as Not Found. That "
-        "is usually the artist name being spelled differently on the "
-        "marketplace than it is here — but it is also what a banned or "
-        "emptied account looks like. Open one listing address on the Listing "
-        "check tab before treating any of it as real.",
+        "The marketplace says no page has EVER existed at these addresses — "
+        "which is different from saying the listings were removed, and it "
+        "distinguishes the two. So this is almost certainly the artist name "
+        "being spelled differently there than it is here. Fix it on the "
+        "Listing check tab and sweep again before treating any of it as "
+        "missing.",
         "warn", rows,
     )
 

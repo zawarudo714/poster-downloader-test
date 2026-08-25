@@ -543,9 +543,27 @@ rewrites titles on save, so `clean_for_marketplace()` must run first —
 Skip that and every accented or punctuated title reads MISSING while sitting
 there live. This is the payoff for normalising in `render_remote_title`.
 
-**A missing listing returns a REAL HTTP 404**, not a 200 carrying an error
-page. So the check is a status code — no markup to parse and nothing to
-break when FAA redesigns.
+**FAA RETURNS TWO DIFFERENT CODES AND THE DIFFERENCE IS THE WHOLE FEATURE.**
+Measured 25 Aug against a listing the owner deleted by hand and the same
+address with two extra letters:
+
+    410  "Page Removed"    — it existed and is now deleted
+    404  "Page Not Found"  — no page has ever lived at this address
+
+Neither is a 200 carrying an error page, so the check is a status code —
+nothing to parse and nothing to break when FAA redesigns.
+
+**410 is a takedown. 404 means OUR ADDRESS IS WRONG.** For something we
+believe we uploaded, "no page ever existed here" is a mistyped artist name
+or a title that FAA stored differently — not a copyright claim. That makes
+the wrong-name guard exact instead of a guess from proportions.
+
+The first version read 404 as "gone" and let 410 fall through to "we could
+not look", so REAL removals — the entire point of the feature — were filed
+as not-evidence and ignored, while a typo would have been reported as
+thousands of takedowns. Both wrong, and the expensive one was wrong in the
+direction of silence. **When a site offers two codes, find out what each one
+means before collapsing them into one answer.**
 
 **HEAD is honoured**, same statuses as GET. A live page is ~190KB and the
 404 page ~128KB, so across 4,811 images that is the difference between

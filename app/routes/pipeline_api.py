@@ -1417,11 +1417,12 @@ def listing_chunk_done(
         names = ", ".join(f"{s['account']} ({s['gone']} of {s['checked']} "
                           f"not found)" for s in suspect)
         LC.finish(db, sweep, status="failed", note=(
-            f"Stopped early. Almost nothing is being found for: {names}. "
-            f"That usually means the artist name is spelled differently on "
-            f"the marketplace than it is here — but it is also what a banned "
-            f"or emptied account looks like. Open one of the addresses below "
-            f"in a browser to see which."))
+            f"Stopped early. For {names}, the marketplace says NO PAGE HAS "
+            f"EVER EXISTED at these addresses — which is different from "
+            f"saying the listings were removed. The artist name is almost "
+            f"certainly spelled differently on the marketplace than it is "
+            f"here. Open one of the addresses below to confirm, fix the "
+            f"name, and run it again."))
         db.commit()
         return JSONResponse({"ok": True, "status": sweep.status,
                              "suspect": suspect})
@@ -1431,7 +1432,9 @@ def listing_chunk_done(
         tally = LC.counts(db, sweep)
         LC.finish(db, sweep, status="done", note=(
             f"Checked {tally['checked_this_run']} listing(s): "
-            f"{tally['live']} still there, {tally['gone']} not found"
+            f"{tally['live']} still there, {tally['gone']} removed"
+            + (f", {tally['no_page']} with no page at that address"
+               if tally.get("no_page") else "")
             + (f", {tally['unknown']} we could not look at"
                if tally["unknown"] else "") + "."))
     db.commit()

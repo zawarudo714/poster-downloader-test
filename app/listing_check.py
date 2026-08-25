@@ -41,8 +41,11 @@ answers in a fraction of a second.
 Measured 2026-08-24, and all of it is written up in the project brief:
 
   · the address is derivable from the stored title and the artist name
-  · a missing listing returns a real HTTP 404
-  · HEAD is honoured, so ~4,811 checks cost about an hour and no bandwidth
+  · a REMOVED listing returns 410, and an address that never existed
+    returns 404 — two different answers, and telling them apart is what
+    separates a copyright takedown from a mistyped artist name
+  · HEAD is honoured and returns the same codes, so ~4,811 checks cost
+    about two hours and no bandwidth at all
   · a FineArtAmerica listing is live or deleted — there is no hidden state
 
 So: no stages, no gates, no cure, and NO PIPELINE HOLD. Making Photoshop
@@ -215,31 +218,55 @@ def next_chunk(db: Session, sweep: ListingSweep, size: int) -> list[dict]:
 
 def verdict(http: Optional[int]) -> str:
     """
-    Turn a status code into one of three answers.
+    Turn a status code into one of FOUR answers. Measured 2026-08-24/25.
 
     ════════════════════════════════════════════════════════════════════════
-    "NOT THERE" AND "WE COULD NOT LOOK" ARE DIFFERENT ANSWERS
+    FineArtAmerica DISTINGUISHES "REMOVED" FROM "NEVER EXISTED"
     ════════════════════════════════════════════════════════════════════════
-    Only a 404 is evidence that a listing is gone. A 403, a 429, a 5xx or a
-    timeout means we were blocked or the site had a moment, and collapsing
-    those into "gone" would report healthy listings as copyright takedowns —
-    thousands of them, on a screen the owner has no other way to check.
+    Unusually correct of them, and it is the single most useful thing about
+    this whole check:
 
-    Measured: the Linux server gets 403 for every one of these pages, live
-    or missing alike, so this is not hypothetical. It is the same shape as
-    TeePublic's header-logo test, which exists to tell "no search results"
-    apart from "we never actually looked".
+        410  "Page Removed"    — this listing existed and is now deleted
+        404  "Page Not Found"  — no page has ever lived at this address
+
+    Both verified against real listings: one the owner deleted by hand came
+    back 410, the same address with two extra letters came back 404. HEAD
+    returns the same codes as GET, so a sweep never needs to download a page.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE FIRST VERSION HAD THESE EFFECTIVELY BACKWARDS
+    ════════════════════════════════════════════════════════════════════════
+    It read 404 as "gone" and let 410 fall through to "we could not look".
+    So a REAL removal — a copyright takedown, the exact thing this feature
+    exists to find — was filed as not-evidence and silently ignored, while a
+    mistyped artist name was reported as thousands of takedowns. Both wrong,
+    and the expensive one was wrong in the direction of saying nothing.
+
+    ════════════════════════════════════════════════════════════════════════
+    AND "WE COULD NOT LOOK" IS STILL ITS OWN ANSWER
+    ════════════════════════════════════════════════════════════════════════
+    403, 429, 5xx and timeouts mean we were blocked or the site had a
+    moment. The Linux server gets 403 for every one of these pages, live or
+    not, so this is not hypothetical. Same shape as TeePublic's header-logo
+    test: "no results" and "we never looked" must never share an answer.
     """
     if http == 200:
         return "live"
+    if http == 410:
+        return "gone"          # it was there; it is not any more
     if http == 404:
-        return "gone"
+        # No page has ever existed here. For something we believe we
+        # uploaded that almost always means the ADDRESS is wrong — a
+        # mistyped artist name, or a title that FAA stored differently —
+        # not that anything was taken down.
+        return "no_page"
     return "unknown"
 
 
 def record(db: Session, results: list[dict]) -> dict:
     """Write one chunk's observations. Returns the tally for the log."""
-    tally = {"live": 0, "gone": 0, "unknown": 0, "missing_row": 0}
+    tally = {"live": 0, "gone": 0, "no_page": 0, "unknown": 0,
+             "missing_row": 0}
     now = datetime.utcnow()
     for item in results:
         row = db.query(UploadTracking).filter_by(id=item.get("id")).first()
@@ -295,15 +322,26 @@ def artist_name_suspect(db: Session, sweep: ListingSweep) -> list[dict]:
                 if r.listing_checked_at >= sweep.started_at]
         if len(rows) < floor:
             continue
-        gone = sum(1 for r in rows if r.listing_status == "gone")
-        if gone / len(rows) < ratio:
+        # ── IT IS THE 404s THAT MEAN THE ADDRESS IS WRONG ────────────────
+        #
+        # Not the 410s. A 410 says the listing was really there and was
+        # really removed, which is a finding rather than a fault — an
+        # account emptied by a ban would be all 410s and every one of them
+        # would be true. A 404 says no page ever existed at that address,
+        # and a whole account of those means we are building addresses
+        # nobody could ever have visited.
+        #
+        # Before FAA's two codes were measured this had to guess from the
+        # PROPORTION gone, and could not tell a takedown from a typo.
+        no_page = sum(1 for r in rows if r.listing_status == "no_page")
+        if no_page / len(rows) < ratio:
             continue
-        sample = next((r for r in rows if r.listing_status == "gone"), None)
+        sample = next((r for r in rows if r.listing_status == "no_page"), None)
         out.append({
             "account_id": account.id,
             "account": account.name,
             "artist_name": account.artist_name,
-            "gone": gone,
+            "gone": no_page,
             "checked": len(rows),
             "example_url": listing_url(sample, account.artist_name) if sample else "",
         })
@@ -354,6 +392,12 @@ def findings(db: Session, limit: int = 500) -> dict:
     # opposite: a row somebody explained and that is now back. Worth seeing.
     back = [r for r in checked
             if r.status == "removed" and r.listing_status == "live"]
+    # No page has ever existed at that address. Almost always OUR address
+    # is wrong rather than anything being missing, so it is kept well away
+    # from the takedown list — mixing them would send him hunting a
+    # copyright claim over a mistyped name.
+    no_page = [r for r in checked
+               if r.status == "uploaded" and r.listing_status == "no_page"]
     # We could not look. Never presented as evidence of anything.
     unknown = [r for r in checked
                if r.listing_status == "unknown" and r.status == "uploaded"]
@@ -364,6 +408,7 @@ def findings(db: Session, limit: int = 500) -> dict:
 
     return {
         "gone": pack(gone), "gone_total": len(gone),
+        "no_page": pack(no_page), "no_page_total": len(no_page),
         "back": pack(back), "back_total": len(back),
         "unknown": pack(unknown), "unknown_total": len(unknown),
         "impossible": pack(impossible), "impossible_total": len(impossible),
@@ -396,6 +441,7 @@ def counts(db: Session, sweep: Optional[ListingSweep] = None) -> dict:
         "run_total":   len(this_run) + len(sweepable(db, sweep)) if sweep else 0,
         "live":        sum(1 for r in in_scope if r.listing_status == "live"),
         "gone":        sum(1 for r in in_scope if r.listing_status == "gone"),
+        "no_page":     sum(1 for r in in_scope if r.listing_status == "no_page"),
         "unknown":     sum(1 for r in in_scope if r.listing_status == "unknown"),
         "never":       sum(1 for r in in_scope if r.listing_checked_at is None),
     }

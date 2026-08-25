@@ -119,21 +119,23 @@
     // account really can lose everything, and that is what a ban looks
     // like. One address opened by hand settles it in ten seconds.
     var suspect = (s.suspect || []).length
-      ? '<p class="quota-note"><strong>Almost nothing is being found for '
+      ? '<p class="quota-note"><strong>No page has ever existed at these '
+        + 'addresses for '
         + (s.suspect || []).map(function (x) { return esc(x.account); }).join(', ')
         + '.</strong><br>'
         + (s.suspect || []).map(function (x) {
             return esc(x.account) + ': ' + x.gone + ' of ' + x.checked
-              + ' not found, using the artist name <span class="mono">'
+              + ' have no page at all, using the artist name <span class="mono">'
               + esc(x.artist_name) + '</span>'
               + (x.example_url ? '<br><a href="' + esc(x.example_url)
                  + '" target="_blank" rel="noopener" class="mono">'
                  + esc(x.example_url) + '</a>' : '');
           }).join('<br>')
-        + '<br><br>Open that address. If the listing is really there, the '
-        + 'artist name is spelled differently on the marketplace than it is '
-        + 'here — fix it below and run again. If it is really gone, the '
-        + 'account has been emptied or banned.</p>'
+        + '<br><br>The marketplace distinguishes REMOVED from NEVER EXISTED, '
+        + 'and these say never existed — so this is almost certainly the '
+        + 'artist name being spelled differently there than it is here, not '
+        + 'a takedown. Open that address to confirm, fix the name below, and '
+        + 'run it again.</p>'
       : '';
 
     var body;
@@ -144,7 +146,8 @@
       body = '<p><strong>Checking.</strong> ' + (c.checked_this_run || 0)
         + ' of ' + (c.run_total || 0) + ' in this sweep.</p>'
         + '<p class="muted">' + (c.live || 0) + ' still there · '
-        + (c.gone || 0) + ' not found'
+        + (c.gone || 0) + ' removed'
+        + (c.no_page ? ' · ' + c.no_page + ' with no page at that address' : '')
         + (c.unknown ? ' · ' + c.unknown + ' we could not look at' : '')
         + '.</p>'
         + (s.working ? '' : '<p class="quota-note">Waiting for the worker '
@@ -204,10 +207,16 @@
       ? total + ' to look at' : 'nothing to explain';
 
     var html =
-      group('NOT ON THE SITE', f.gone, f.gone_total,
-            'We believe these are live and the marketplace returned a real '
-            + 'Not Found. Either it was taken down, or an upload was written '
-            + 'down as a success and never happened. Open one to see.', true)
+      group('TAKEN DOWN', f.gone, f.gone_total,
+            'The marketplace says these pages were REMOVED — they existed '
+            + 'and now they do not. That is a real takedown, or someone '
+            + 'deleted them by hand. This is the list worth reading.', true)
+      + group('NO PAGE AT THAT ADDRESS', f.no_page, f.no_page_total,
+            'The marketplace says no page has ever existed here — which is '
+            + 'NOT the same as removed. Usually it means the artist name or '
+            + 'the stored title does not match what the marketplace has, so '
+            + 'we are looking in the wrong place. Check the artist name '
+            + 'before treating any of these as missing.', true)
       + group('COULD NOT LOOK', f.unknown, f.unknown_total,
             'The site refused us or had a moment. This is NOT evidence that '
             + 'anything is missing — run the sweep again later and these '

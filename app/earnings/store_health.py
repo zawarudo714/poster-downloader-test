@@ -366,9 +366,10 @@ def missing_for(db: Session, run: StoreScanRun,
         StoreListing.deactivated_at.is_(None))
     if account_id:
         rows = rows.filter(StoreListing.account_id == account_id)
+    give_up = int(get_setting(db, "store_action_give_up_after"))
     return [r for r in rows.order_by(StoreListing.account_id).all()
             if not looks_vague(r, after)
-            and _not_failed_this_run(r, run, "deactivate")]
+            and _not_failed_this_run(r, run, "deactivate", give_up)]
 
 
 def deactivated_for(db: Session, run: StoreScanRun,
@@ -386,12 +387,16 @@ def deactivated_for(db: Session, run: StoreScanRun,
         StoreListing.deactivated_at.isnot(None))
     if account_id:
         q = q.filter(StoreListing.account_id == account_id)
+    # Zero, deliberately: nothing is ever given up on in this direction. See
+    # `_not_failed_this_run` — a listing we hid and cannot unhide earns
+    # nothing every day it stays that way, so it is retried every sweep and
+    # named by `stranded()` in the meantime.
     return [r for r in q.order_by(StoreListing.account_id).all()
-            if _not_failed_this_run(r, run, "reactivate")]
+            if _not_failed_this_run(r, run, "reactivate", 0)]
 
 
 def _not_failed_this_run(row: StoreListing, run: StoreScanRun,
-                         stage: str) -> bool:
+                         stage: str, give_up_after: int) -> bool:
     """
     True unless we already tried THIS ACTION on this design in this run and
     it would not go.
@@ -429,6 +434,23 @@ def _not_failed_this_run(row: StoreListing, run: StoreScanRun,
     them, because silently skipping work is how a run reports success over
     nothing having happened.
     """
+    # ── GIVING UP IS ONLY EVER SAFE IN ONE DIRECTION ────────────────────
+    #
+    # A design that keeps refusing to switch OFF may be flagged and left
+    # alone: it is live, it is earning, and the worst case of ignoring it is
+    # that a search-invisible listing stays invisible.
+    #
+    # A design that keeps refusing to switch back ON may NOT. It is a live
+    # listing we hid, it earns nothing every day it stays hidden, and
+    # "flagged" would quietly become "abandoned". Retrying a republish is
+    # cheap and idempotent, so it is tried every sweep for as long as it
+    # takes — and `stranded()` names it at the top of the tab meanwhile.
+    #
+    # This is the same asymmetry as the one below, for the same reason:
+    # wrong in the cheap direction.
+    if stage == "deactivate" and give_up_after and \
+            (row.action_fail_count or 0) >= give_up_after:
+        return False
     if not row.action_error:
         return True
     # An error recorded before the action was tracked. Only the DEACTIVATE
@@ -458,6 +480,131 @@ def would_deactivate(db: Session, marketplace: str) -> list[StoreListing]:
     """
     probe = StoreScanRun(marketplace=marketplace, started_at=datetime.utcnow())
     return missing_for(db, probe)
+
+
+def judge_counts(stage: str, before, after, switched: int,
+                 cut_short: bool) -> tuple[str, str]:
+    """
+    Do TeePublic's own numbers agree with what we believe we just did?
+
+    ════════════════════════════════════════════════════════════════════════
+    A DIFFERENCE, NEVER A MATCH — AND NEVER A TOTAL
+    ════════════════════════════════════════════════════════════════════════
+    "Inactive should be zero" is meaningless: one real account holds 379
+    designs the owner switched off himself over months and the page cannot
+    tell those apart from ours. Only the CHANGE across our turn is ours.
+
+        switching OFF  ->  their count should RISE by what we switched
+        switching ON   ->  their count should FALL by what we switched
+
+    ════════════════════════════════════════════════════════════════════════
+    THREE ANSWERS, NOT TWO
+    ════════════════════════════════════════════════════════════════════════
+    "They disagree" and "we could not read the number" are completely
+    different, and collapsing them would invent findings out of a failed
+    page load. A turn cut short has no expectation worth testing at all,
+    because designs the node never reached are neither done nor failed.
+
+    Kept as a plain function of five values, with no database and no
+    session, so the behaviour tests can hold it to every combination
+    directly rather than through a run.
+
+    Returns (verdict, sentence-for-a-human).
+    """
+    if before is None or after is None:
+        return ("unreadable",
+                "Could not read TeePublic's own count of switched-off "
+                "designs, so there is nothing to check this against.")
+    if cut_short:
+        return ("skipped",
+                "This account was stopped part-way, so its numbers are not "
+                "expected to add up yet.")
+
+    change = int(after) - int(before)
+    expected = int(switched) if stage == "deactivate" else -int(switched)
+    verb = "switched off" if stage == "deactivate" else "switched back on"
+
+    if change == expected:
+        return ("agreed",
+                f"TeePublic agrees: {abs(expected)} design(s) {verb}.")
+
+    # SAY IT IN THINGS, NOT IN ARITHMETIC. "expected -80, saw -77" needs the
+    # reader to know which way the sign goes; "three did not go back on"
+    # does not.
+    short = abs(expected - change)
+    if stage == "deactivate":
+        detail = (f"we switched {switched} off but their count only rose by "
+                  f"{change} — {short} did not actually go off")
+    else:
+        detail = (f"we switched {switched} back on but their count only fell "
+                  f"by {abs(change)} — {short} are still switched off")
+    return ("mismatch",
+            f"TeePublic disagrees: {detail}. Their inactive count went from "
+            f"{before} to {after}.")
+
+
+def recent_disagreements(db: Session, marketplace: str,
+                         limit: int = 10) -> list[dict]:
+    """
+    The last few times the marketplace's own count did not match ours.
+
+    Shown on the tab, not only in Diagnostics, because this is the screen he
+    is looking at when he wonders whether the sweep actually worked. A
+    finding nobody is shown is a finding that did not happen.
+    """
+    from ..models import StoreCountCheck, UploadAccount as _Acct
+
+    rows = (db.query(StoreCountCheck, _Acct.name)
+              .outerjoin(_Acct, _Acct.id == StoreCountCheck.account_id)
+              .filter(StoreCountCheck.verdict == "mismatch")
+              .order_by(StoreCountCheck.checked_at.desc())
+              .limit(limit).all())
+    return [{"account": name or "unknown account",
+             "stage": check.stage,
+             "note": check.note or "",
+             "at": check.checked_at.isoformat() if check.checked_at else None}
+            for check, name in rows]
+
+
+def flagged(db: Session, marketplace: str) -> list[StoreListing]:
+    """
+    Designs given up on after repeated GENUINE failures. Named, never hidden.
+
+    Flagging is the alternative to two bad options: retrying for ever, which
+    costs a page load in every future sweep and tells nobody, and deleting
+    the row, which loses the history. These sit on the tab with a RETRY
+    button that zeroes the counter — the owner decides, and the machine
+    stops guessing.
+
+    Only the switch-OFF direction can reach this. See `_not_failed_this_run`.
+    """
+    from ..pipeline import get_setting
+
+    give_up = int(get_setting(db, "store_action_give_up_after"))
+    if not give_up:
+        return []
+    return db.query(StoreListing).filter(
+        StoreListing.marketplace == marketplace,
+        StoreListing.removed_at.is_(None),
+        StoreListing.action_fail_count >= give_up).order_by(
+            StoreListing.account_id).all()
+
+
+def unflag(db: Session, marketplace: str,
+           design_ids: Optional[list[str]] = None) -> int:
+    """Give the flagged designs another chance. Returns how many."""
+    q = db.query(StoreListing).filter(
+        StoreListing.marketplace == marketplace,
+        StoreListing.action_fail_count > 0)
+    if design_ids:
+        q = q.filter(StoreListing.design_id.in_([str(d) for d in design_ids]))
+    rows = q.all()
+    for row in rows:
+        row.action_fail_count = 0
+        row.action_error = None
+        row.action_error_at = None
+        row.action_error_kind = None
+    return len(rows)
 
 
 def stuck_for(db: Session, run: StoreScanRun) -> list[StoreListing]:
@@ -654,8 +801,14 @@ def dispatch_stage(db: Session, run: StoreScanRun, stage: str,
     P.create_job(db, kind=f"store_{stage}", payload={
         "run_id": run.id,
         "action": stage,
-        "account": P.account_payload(db, account, include_secret=True,
-                                     project=project),
+        "account": {
+            **P.account_payload(db, account, include_secret=True,
+                                project=project),
+            # Named the same way the scan names it, so the node has one word
+            # for one thing. It is `profile_url` on the row for historical
+            # reasons and renaming that would touch every marketplace.
+            "store_url": account.profile_url or "",
+        },
         "settings": P.upload_settings_payload(db, project=project),
         "designs": [{"design_id": d.design_id, "title": d.title,
                      "url": d.url} for d in designs],
@@ -667,6 +820,16 @@ def dispatch_stage(db: Session, run: StoreScanRun, stage: str,
             wall.next_paths(db, run.marketplace, attempts)),
         "wall_wait_s": P.get_setting(db, "wall_wait_s"),
         "wall_max_attempts": attempts,
+        # ── HOW HARD TO TRY, AND WHEN TO STOP ────────────────────────────
+        # All three were bare numbers in the node's own code, where the
+        # owner cannot reach them. The node holds no policy; every one of
+        # these is a judgement about how much of his evening to spend.
+        "wall_give_up_after": int(P.get_setting(db, "store_wall_give_up_after")),
+        "design_retries": int(P.get_setting(db, "store_design_retries")),
+        # Where the store's own inactive count is printed. Signed-in only,
+        # measured 25 Aug — signed out the same address answers "You do not
+        # have permission to edit this store".
+        "count_check": bool(int(P.get_setting(db, "store_count_check"))),
     }, requested_by=by)
 
     run.status = "deactivating" if stage == "deactivate" else "reactivating"

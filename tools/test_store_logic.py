@@ -56,7 +56,7 @@ from pathlib import Path
 APP = Path(__file__).resolve().parent.parent / "app"
 SOURCE = APP / "earnings" / "store_health.py"
 LISTING = APP / "listing_check.py"
-UNDER_TEST = ("_not_failed_this_run", "stage_should_stop")
+UNDER_TEST = ("_not_failed_this_run", "stage_should_stop", "judge_counts")
 LISTING_UNDER_TEST = ("slug", "verdict")
 
 
@@ -101,7 +101,7 @@ def load(src: str):
         [])
     ast.fix_missing_locations(mod)
     exec(compile(mod, str(SOURCE), "exec"), ns)
-    return ns["_not_failed_this_run"], ns["stage_should_stop"]
+    return tuple(ns[n] for n in UNDER_TEST)
 
 
 def listing_cases() -> list[tuple[str, bool]]:
@@ -172,8 +172,15 @@ STARTED = datetime(2026, 8, 24, 9, 0)
 RUN = obj(started_at=STARTED, status="deactivating", paused_at=None)
 
 
-def cases(not_failed, should_stop) -> list[tuple[str, bool]]:
+def cases(not_failed_raw, should_stop, judge) -> list[tuple[str, bool]]:
     """(what it means in plain words, did it hold)."""
+    # Most cases care about the older rules, so the flag limit defaults to
+    # the shipped 3 and the flag cases pass their own.
+    def not_failed(row, run, stage, give_up_after=3):
+        if not hasattr(row, "action_fail_count"):
+            row.action_fail_count = 0
+        return not_failed_raw(row, run, stage, give_up_after)
+
     return [
         # ── Which designs a stage will act on ────────────────────────────
         ("a design with no failure is acted on",
@@ -214,6 +221,56 @@ def cases(not_failed, should_stop) -> list[tuple[str, bool]]:
          not_failed(obj(action_error="old", action_error_kind=None,
                         action_error_at=STARTED + timedelta(minutes=5)),
                     RUN, "reactivate") is True),
+
+        # ── GIVING UP IS ONLY SAFE IN ONE DIRECTION ──────────────────────
+        # A design that will not switch OFF may be left alone: it is live and
+        # earning. A design that will not switch back ON may not, because it
+        # is a live listing WE hid and every day it stays hidden costs money.
+        ("a design that has failed to switch OFF three times is flagged "
+         "instead of being retried at the front of every future sweep",
+         not_failed(obj(action_error="No Deactivate button",
+                        action_error_kind="deactivate",
+                        action_error_at=STARTED - timedelta(days=30),
+                        action_fail_count=3), RUN, "deactivate") is False),
+        ("two failures is not yet three — still tried",
+         not_failed(obj(action_error="No Deactivate button",
+                        action_error_kind="deactivate",
+                        action_error_at=STARTED - timedelta(days=30),
+                        action_fail_count=2), RUN, "deactivate") is True),
+        ("a design that has failed to switch back ON many times is STILL "
+         "tried — abandoning it would leave a live listing hidden for ever",
+         not_failed(obj(action_error="no publish button",
+                        action_error_kind="reactivate",
+                        action_error_at=STARTED - timedelta(days=30),
+                        action_fail_count=99), RUN, "reactivate") is True),
+
+        # ── DOES THE MARKETPLACE'S OWN COUNT AGREE WITH US ───────────────
+        # The only check here that is not us marking our own homework. It is
+        # what would have caught TALKING HEADS · LITTLE CREATURES, recorded
+        # as republished on 25 Aug while sitting on the inactive tab.
+        ("switching 80 back on and their count falling by 80 — agreed",
+         judge("reactivate", 100, 20, 80, False)[0] == "agreed"),
+        ("switching 80 back on and their count falling by only 77 — three "
+         "did not go back on, and this is the whole point",
+         judge("reactivate", 100, 23, 80, False)[0] == "mismatch"),
+        ("switching 12 off and their count rising by 12 — agreed",
+         judge("deactivate", 30, 42, 12, False)[0] == "agreed"),
+        ("switching 12 off and their count not moving at all — mismatch",
+         judge("deactivate", 30, 30, 12, False)[0] == "mismatch"),
+        ("the 379 designs the owner switched off himself do not matter — "
+         "only the CHANGE across our turn is ours",
+         judge("reactivate", 459, 379, 80, False)[0] == "agreed"),
+        ("a count we could not read is NOT a disagreement",
+         judge("reactivate", None, 20, 80, False)[0] == "unreadable"),
+        ("a count we could not read is not treated as zero either",
+         judge("deactivate", 30, None, 12, False)[0] == "unreadable"),
+        ("an account stopped part-way has no expectation to test",
+         judge("reactivate", 100, 90, 80, True)[0] == "skipped"),
+        ("switching nothing and nothing moving is agreement, not a "
+         "mismatch — a stage with no work must stay quiet",
+         judge("deactivate", 30, 30, 0, False)[0] == "agreed"),
+        ("the sentence says what happened in things, not in arithmetic",
+         "still switched off" in judge("reactivate", 100, 23, 80, False)[1]),
 
         # ── Whether the worker machine keeps switching designs ───────────
         ("no run at all — stop",
@@ -261,6 +318,29 @@ SABOTAGE = [
     ("old failures with no timestamp would loop for ever",
      "        return False\n    return row.action_error_at",
      "        return True\n    return row.action_error_at"),
+    ("a listing WE hid would be abandoned for ever after three failures",
+     '    if stage == "deactivate" and give_up_after and \\',
+     "    if give_up_after and \\"),
+    ("a design that will never switch off would be retried in every sweep "
+     "for ever",
+     "            (row.action_fail_count or 0) >= give_up_after:\n        return False\n",
+     ""),
+    # ── The marketplace's own count ──────────────────────────────────────
+    ("switching designs back on would be checked as if we were switching "
+     "them off, so every clean run would read as a disaster",
+     '    expected = int(switched) if stage == "deactivate" else -int(switched)',
+     "    expected = int(switched)"),
+    ("a number we could not read would be treated as zero, inventing "
+     "findings out of a failed page load",
+     "    if before is None or after is None:\n        return (\"unreadable\",",
+     "    if False:\n        return (\"unreadable\","),
+    ("a disagreement would be reported as agreement, which is the exact "
+     "silence this check exists to break",
+     "    if change == expected:", "    if True:"),
+    ("an account stopped part-way would be reported as a disagreement "
+     "every single time you press pause",
+     "    if cut_short:\n        return (\"skipped\",",
+     "    if False:\n        return (\"skipped\","),
 ]
 
 # The listing rules live in a different file, so they get their own list.

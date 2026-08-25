@@ -63,6 +63,31 @@
         + '</p>'
       : '';
 
+    // ── WHEN TEEPUBLIC'S OWN COUNT DID NOT AGREE WITH OURS ──────────────
+    //
+    // Above everything, like the rescue line, and for the same reason: it
+    // says our records are wrong, which quietly makes every other number on
+    // this page suspect. It outlives the run that produced it.
+    var disagree = (data.disagreements || []).length
+      ? '<p class="quota-note"><strong>TeePublic disagreed with our records '
+        + data.disagreements.length + ' time(s).</strong> Designs we believe '
+        + 'are live may not be.</p><ul class="quota-note">'
+        + data.disagreements.map(function (d) {
+            return '<li>' + esc(d.account) + ' — ' + esc(d.note) + '</li>';
+          }).join('') + '</ul>'
+      : '';
+
+    // Designs the sweep has stopped trying to switch off. Never hidden:
+    // "no longer retried" must not quietly become "forgotten".
+    var givenUp = data.flagged
+      ? '<p class="quota-note">' + data.flagged + ' design(s) have failed to '
+        + 'switch off several sweeps running and are no longer being tried. '
+        + 'They are still live and still earning. '
+        + '<button class="btn btn-tiny" data-action="retry-flagged" '
+        + 'type="button">TRY THESE ' + data.flagged + ' AGAIN</button></p>'
+      : '';
+    rescue = disagree + rescue + givenUp;
+
     if (!run) {
       summary.textContent = '';
       var blocked = data.blocked || [];
@@ -254,8 +279,9 @@
 
     q('[data-accounts-list]').innerHTML = list.length
       ? '<table class="data-table"><thead><tr><th>ACCOUNT</th><th>DESIGNS</th>'
-        + '<th>VISIBLE</th><th>MISSING</th><th>VAGUE</th><th>EXCLUDED</th>'
-        + '<th>GONE</th><th>LAST CHECKED</th></tr></thead><tbody>'
+        + '<th>VISIBLE</th><th>MISSING</th><th>VAGUE</th><th>FLAGGED</th>'
+        + '<th>EXCLUDED</th><th>GONE</th><th>SWITCHED OFF</th>'
+        + '<th>LAST CHECKED</th></tr></thead><tbody>'
         + list.map(function (a) {
             return '<tr data-open-account="' + a.id + '" style="cursor:pointer">'
               + '<td><strong>' + esc(a.name) + '</strong>'
@@ -266,11 +292,38 @@
               + '<td' + (a.missing ? ' class="danger"' : '') + '>'
               + (a.missing || 0) + '</td>'
               + '<td>' + (a.vague || 0) + '</td>'
+              + '<td' + (a.flagged ? ' class="danger"' : '') + '>'
+              + (a.flagged || 0) + '</td>'
               + '<td>' + (a.excluded || 0) + '</td>'
               + '<td>' + (a.removed || 0) + '</td>'
+              + '<td>' + switchedOff(a) + '</td>'
               + '<td class="muted mono">' + when(a.checked_at) + '</td></tr>';
           }).join('') + '</tbody></table>'
       : '<p class="muted">No TeePublic accounts yet.</p>';
+  }
+
+  // ── OURS AND THEIRS, SIDE BY SIDE — AND NEVER COMPARED HERE ───────────
+  //
+  // THESE TWO NUMBERS ARE NOT SUPPOSED TO MATCH, and colouring the row when
+  // they differ would paint every healthy account red. One real account has
+  // 379 designs the owner switched off himself over months; TeePublic
+  // counts those and we do not, because we only count what WE turned off.
+  //
+  // The comparison that IS meaningful is the change across one switching
+  // turn — we switched 80 back on, did their count fall by 80 — and that
+  // lives in `judge_counts` on the server, where both halves are known.
+  // Anything reported here would be a second, wrong definition of the same
+  // question. This cell is context, not a verdict.
+  //
+  // A count we could not read shows as "not read", NEVER as 0: "we could
+  // not look" and "nothing is switched off" are opposite answers.
+  function switchedOff(a) {
+    var ours = a.off_ours || 0;
+    if (a.off_theirs === null || a.off_theirs === undefined) {
+      return ours + ' <span class="muted">· their count not read</span>';
+    }
+    return ours + ' <span class="muted">· TeePublic lists '
+         + a.off_theirs + ' in total</span>';
   }
 
   // ── Designs ──────────────────────────────────────────────────────────
@@ -487,6 +540,10 @@
             alert('Putting ' + r.designs + ' design(s) back on across '
                   + r.accounts + ' account(s).');
           });
+    } else if (a === 'retry-flagged') {
+      act(API + '/retry-flagged', {},
+          'Try the given-up-on designs again on the next sweep?',
+          function (r) { alert(r.message); });
     } else if (a === 'deactivate-missing') {
       // Spelled out because it switches LIVE listings off with no scan
       // first, and the confirmation is the only place that can say so.

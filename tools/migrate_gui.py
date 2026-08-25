@@ -1165,12 +1165,71 @@ class App:
                 "UploadAccount;db=SessionLocal();"
                 "n=db.query(UploadAccount).update({UploadAccount.is_enabled:0});"
                 "db.commit();print('disabled %d account(s)'%n)\""))
+
+            self._park_runs(client)
             self._emit(
                 f"\nOpen http://{parse_ssh_target(self.test_var.get())[1]}:"
                 f"{REHEARSAL_PORT}/ and click around. That is the last thing "
                 f"this tool cannot do for you.", "ok")
         finally:
             client.close()
+
+    def _park_runs(self, client) -> None:
+        """
+        A CARRIED-OVER SWEEP MUST ARRIVE STOPPED.
+
+        ════════════════════════════════════════════════════════════════════
+        WHY THIS EXISTS — 25 Aug, and it acted on a real marketplace
+        ════════════════════════════════════════════════════════════════════
+        The catalogue and the sweep history are carried across so that months
+        of "has this design been missing three sweeps running" is not thrown
+        away. But a sweep is not only history: a row saying `reactivating`
+        is a live INSTRUCTION. The worker machine polls every thirty seconds
+        and has no idea a database was swapped underneath it.
+
+        So the promoted box came up, the machine found work, and started
+        switching real listings on a real store by itself. Nothing was
+        broken — the accounts were disabled, which stops UPLOADS, and this
+        is not an upload. Two protections, one of which did not apply.
+
+        The general shape, and it is worth carrying past this tool:
+        COPYING DATA COPIES INTENTIONS. Anything that means "do this next"
+        must be neutralised on the way in, or it is executed by whatever
+        picks it up first.
+
+        ════════════════════════════════════════════════════════════════════
+        WHAT IS DELIBERATELY *NOT* UNDONE
+        ════════════════════════════════════════════════════════════════════
+        Designs recorded as switched OFF keep that record. They really are
+        off, on TeePublic, right now — clearing it would look tidy and would
+        lose the only list of live listings that are hidden and earning
+        nothing. They show up as STRANDED on the tab, which is exactly the
+        first thing that should be dealt with.
+        """
+        self._emit("\nStopping any sweep that was in progress, so nothing "
+                   "starts switching listings by itself.", "dim")
+        code, text = self._run(client, (
+            f"cd {REHEARSAL_DIR} && docker compose exec -T web python - "
+            "<<'PY'\n"
+            "from app.db import SessionLocal\n"
+            "from app.models import StoreScanRun\n"
+            "from app.earnings import store_health as SH\n"
+            "db=SessionLocal()\n"
+            # finish_run rather than a bare UPDATE: it is the one place that
+            # knows a finished run also RELEASES the pipeline hold. An
+            # UPDATE would leave Photoshop and the uploads held by a run
+            # that no longer exists.
+            "live=[r for r in db.query(StoreScanRun).all()\n"
+            "      if r.status not in SH.FINISHED]\n"
+            "for r in live:\n"
+            "    SH.finish_run(db, r, status='abandoned',\n"
+            "                  note='Stopped by the migration tool — this "
+            "sweep belongs to the system it came from.')\n"
+            "db.commit()\n"
+            "print('stopped %d sweep(s) that were still running'%len(live))\n"
+            "db.close()\n"
+            "PY"))
+        self._emit(text.strip() or "nothing was running", "dim")
 
     def _step_refresh_code(self) -> None:
         """

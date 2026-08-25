@@ -867,6 +867,78 @@ def check_store_logic() -> None:
         sys.path.pop(0)
 
 
+# ── A GUARD IS ONLY A GUARD IF EVERY PATH CALLS IT ──────────────────────
+#
+# (file, what the risky thing looks like, what protects it, plain words).
+#
+# Add a row whenever a protective call has to accompany a risky one. The
+# point is not the individual rule — it is that "somebody remembered" stops
+# being the mechanism.
+GUARDED: list[tuple[str, str, tuple[str, ...], str]] = [
+    ("worker_service/store_health.py", "driver.get(",
+     ("clear_wall(", "_open_page(", "page_is_theirs("),
+     "navigates the browser without consulting the interstitial wall"),
+]
+
+
+def check_guards_are_called() -> None:
+    """
+    Every function doing the risky thing must also do the protective thing.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE BUG THIS EXISTS FOR
+    ════════════════════════════════════════════════════════════════════════
+    Switching a design OFF checked for TeePublic's interstitial wall on every
+    page. Switching one back ON never had. On 25 Aug the wall appeared partway
+    through a reactivation: 79 designs in a row loaded a wall, found no publish
+    button, and were written down as broken designs — three seconds each,
+    against twenty for real work. The give-up guard could not save it either,
+    because that counts failures marked "this was the wall" and the mark is set
+    inside the check that was never called.
+
+    NOTHING WOULD HAVE CAUGHT IT. The code compiled, every name was defined,
+    no hook was missing, no endpoint was orphaned, and the stage reported
+    "Job finished". The owner found it by reading a log.
+
+    So this asks the mechanical version of the question: which functions do
+    the dangerous thing, and do they all do the safe thing? It is the same
+    shape as `--map` printing the request body beside each endpoint — the odd
+    one out is only obvious when its peers are listed next to it.
+
+    ════════════════════════════════════════════════════════════════════════
+    EVERY GUARD MUST BE A CALL — THE FIRST VERSION MATCHED ITSELF
+    ════════════════════════════════════════════════════════════════════════
+    It accepted the bare word `html_markers` as evidence of protection. That
+    word is also the name of a PARAMETER, so putting the original bug back
+    on purpose left the check green: the sabotaged function still mentioned
+    it while doing nothing with it.
+
+    Every entry therefore ends in `(` and names something that is actually
+    invoked. The same failure as the hook check that searched the JS for the
+    hook name and found its own query. A check that cannot go red is worse
+    than no check, because it is counted as coverage.
+    """
+    for rel, risky, guards, what in GUARDED:
+        path = ROOT / rel
+        if not path.exists():
+            fail(f"{rel} is missing — the guard check is now blind")
+            continue
+        src = path.read_text(encoding="utf-8")
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            continue                    # check_python_compiles owns that
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            body = ast.get_source_segment(src, node) or ""
+            if risky not in body:
+                continue
+            if not any(g in body for g in guards):
+                fail(f"{rel}:{node.lineno} — {node.name}() {what} "
+                     f"(expected one of: {', '.join(guards)})")
+
+
 def check_endpoints_have_buttons() -> None:
     """
     An admin endpoint nothing on the site ever calls.
@@ -963,6 +1035,7 @@ CHECKS = [
     ("no queries inside loops",   check_queries_in_loops),
     ("zero is not treated as missing", check_falsy_zero_defaults),
     ("listing-health rules behave", check_store_logic),
+    ("guards are called on every path", check_guards_are_called),
 ]
 
 

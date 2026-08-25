@@ -651,6 +651,31 @@ DEFAULTS: dict[str, Any] = {
     # right. But retrying for ever is a loop that holds Photoshop and the
     # uploads all night doing nothing, so the run gives up and says so.
     "store_stage_max_attempts": 3,
+    # How many designs in a row may be blocked by the wall before the whole
+    # account is given up on and the run waits. Blocked designs cost three
+    # seconds each and tell us nothing, so grinding through 161 of them is
+    # four minutes of writing errors against healthy designs. Was a bare 5
+    # in the node's own code, which is exactly the kind of number the owner
+    # cannot change without editing a file on a machine he does not read.
+    "store_wall_give_up_after": 5,
+    # Immediate second attempts at ONE design after a blocked one. Covers
+    # the wall arriving between two page loads, which clearing it and going
+    # again fixes in seconds. Small on purpose: a wall that is properly in
+    # the way is not beaten by trying harder in the same ten seconds — that
+    # is what the spaced run-level wait above is for.
+    "store_design_retries": 1,
+    # After this many GENUINE failures — the page was ours, the button was
+    # not there — a design is flagged for a person instead of being retried
+    # at the front of every future sweep. Failures caused by the wall never
+    # count here, because the wall says nothing about the design. Same
+    # reasoning and same number as the vague-tag flag above.
+    "store_action_give_up_after": 3,
+    # Read the marketplace's own count of switched-off designs at both ends
+    # of an account's switching turn, and say so when it disagrees with what
+    # we believe we did. Two page loads against an hour of work. A switch
+    # only because it needs to be turnable off from the screen if TeePublic
+    # ever moves the number — never because it is optional in principle.
+    "store_count_check": 1,
 
     # ── Listing reconciliation (does the marketplace still show it?) ─────
     # How many addresses go out in one job. The worker machine runs ONE job

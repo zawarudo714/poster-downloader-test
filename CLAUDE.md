@@ -449,6 +449,36 @@ answer is two minutes with PROFILES.bat.
 you in minutes and does not mind.** Hence `signin_on_read` per marketplace —
 see rule 5b.
 
+**THE WALL ARRIVES MID-RUN, not only at the start.** Measured 25 Aug: an
+account switched 81 designs cleanly at ~20 seconds each, then every
+remaining design failed in three. Clearing it once per browser is still
+right — it is per-browser and clearing per design cost an hour and a half —
+but "once" is not "for the duration". Every page load has to be able to
+notice, which is what `_open_page` is for.
+
+**The tell is SPEED.** Real work takes ~20 seconds a design; a wall fails in
+three, because there is nothing on the page to wait for. A run of failures
+arriving much faster than the successes is one environmental problem
+repeated, never N independent ones. Worth remembering when reading any log
+here.
+
+**A JavaScript click GOES THROUGH the wall and reports success.** This is
+why `js_click` and `real_click` both exist and are not interchangeable.
+Dispatching the event on the element ignores anything drawn on top — correct
+for FineArtAmerica, whose promo bar and inspiration banner sit over every
+page and mean nothing; wrong wherever the thing on top IS the problem. The
+last design attempted before a wall run was recorded as republished and was
+still switched off afterwards, which is exactly what a swallowed click looks
+like. TeePublic's publish and deactivate buttons are pressed for real, and
+an intercepted click is treated as the answer rather than as a nuisance.
+
+**TeePublic's count of switched-off designs needs a SIGNED-IN session.**
+Measured 25 Aug: signed out, `teepublic.com/user/<store>` answers "You do
+not have permission to edit this store" and shows no counts at all. So it
+cannot be a cheap public fetch — it rides along inside the switching job,
+which is already signed in as that account. Found by the link's own address
+(`/inactive`), never by a class name; the classes there are randomised.
+
 **Designs silently drop out of search.** The listing still exists and the
 page still loads; it just stops being findable, earns nothing, and nothing
 tells you. Deactivating and immediately reactivating usually restores it.
@@ -871,11 +901,11 @@ irrelevant, say why in one line rather than skipping it silently.
 | 5 | Added a warning where the state should have been impossible | 8 |
 | 5b | Turned one marketplace's measured behaviour into policy for all of them | 6, 3c-ter |
 | 5c | Moved a call out of a shared function and dropped it on the way | 3c, 3c-ter |
-| 5d | Shipped a mechanism with no invariant watching it — and a test that shared the bug's assumption | 5, 8 |
+| 5d | Shipped a mechanism with no invariant watching it — and a test that shared the bug's assumption, or an invariant that only ever compares our records with our records | 5, 8 |
 | 5e | Fixed a bug and left the OWNER as the only thing that could have found it | 5d, 7, 3c |
 | 6 | Correct for two projects, wrong for the third | 1, 3b |
 | 7 | Fixed a bug and left no rule behind | all |
-| 8 | Claimed work with an exit that reports nothing — including catching an error into a counter, queueing work nothing can cancel, or fixing one loop of several | 3d, 5 |
+| 8 | Claimed work with an exit that reports nothing — including catching an error into a counter, queueing work nothing can cancel, fixing one loop of several, or a guard that only one of several paths calls | 3d, 5 |
 | 9 | Shipped a dependency the node was never told to install | 3c, 8 |
 
 ### 1. Audit before you build
@@ -1047,6 +1077,17 @@ button's `data-` attribute proved nothing about "endpoints have buttons",
 because the fetch was still there. **Say which check you expect to go red
 before you break anything**, or you will confirm a check that was never
 looking.
+
+**MATCH A CALL, NEVER A WORD — this is the commonest way a check reads as
+coverage while looking at nothing.** The guard check written on 25 Aug
+accepted the bare word `html_markers` as evidence that a function consulted
+the wall. That word is also the name of a PARAMETER, so putting the original
+bug back on purpose left the check green: the sabotaged function still
+mentioned it while doing nothing whatever with it. Every entry now ends in
+`(` and names something actually invoked. Same family as the hook check that
+searched the JS and found its own query. **The sabotage is what found it —
+without it this would have shipped as a protection that could not fire,
+guarding a bug that had just cost an evening.**
 
 **A hole is normally at the edge of the pattern you wrote, so enumerate the
 variants.** Every way this codebase asks for a hook. Every way a caller
@@ -1322,6 +1363,26 @@ pointed an account's own `chrome_profile_dir` at the profiles folder and the
 first version cheerfully deleted every account's saved session in one go.
 "The caller would never send that" is not a guard.
 
+**COPYING DATA COPIES INTENTIONS, and they are executed by whatever picks
+them up first.** The migration tool carries the TeePublic catalogue and past
+sweeps across, so months of "has this been missing three sweeps running" is
+not thrown away. But a sweep is not only history: a row reading
+`reactivating` is a live instruction. On 25 Aug the promoted box came up,
+the worker machine polled thirty seconds later, and started switching real
+listings on a real store by itself.
+
+Note WHY the existing protection missed it. Every account is disabled on
+import — which stops UPLOADS, and this was not an upload. One thing with two
+capabilities again (rule 3b), and only one of them was fenced.
+
+So: **anything imported that means "do this next" must arrive neutralised.**
+Not detected afterwards — a run that has already dispatched a job cannot be
+un-dispatched. Now impossible: `_park_runs()` ends every unfinished run on
+the way in, through `finish_run` so the pipeline hold is released with it.
+Note what is deliberately NOT undone — designs recorded as switched OFF keep
+that record, because they really are off on the marketplace and clearing it
+would look tidy while losing the only list of hidden live listings.
+
 Every check on tier 3 is an admission that 1 and 2 were skipped. He would
 rather have well-formed flows than a growing list of warnings. Before adding
 a diagnostic, ask: why can this state not simply be impossible? Sometimes the
@@ -1404,6 +1465,42 @@ this, that could stop being true? Especially where the answer involves the
 outside world — a listing switched off, an upload half-done, an account
 paused, money owed. Those are the ones that cost real money while looking
 fine.
+
+**AN INVARIANT OVER OUR OWN DATA CANNOT CATCH OUR OWN DATA BEING WRONG,
+and that is the blind spot the whole table above shares.** Every check on
+the Diagnostics page compared our records with our records. So on 25 Aug a
+reactivation recorded 80 designs switched back on, one of them was still
+sitting on TeePublic's inactive tab, and nothing internal disagreed with
+anything — because our single record of it said "done". The owner found it
+by opening the store in a browser.
+
+The fix is not a cleverer invariant. It is **one number from outside**, and
+there is usually one available for nothing:
+
+  * FineArtAmerica prints a Current Balance, so our sales minus our payouts
+    has something to land on.
+  * TeePublic prints how many designs are switched off, so a switching turn
+    has something to be checked against.
+
+Two rules for using one, both learned immediately:
+
+  * **Compare a CHANGE, never a total.** One account holds 379 designs the
+    owner switched off himself; their total and ours are not supposed to
+    match and never will. What belongs to us is how their number moved
+    across our turn. The first draft of the screen coloured the row red
+    whenever the two totals differed, which would have flagged every
+    healthy account for ever.
+  * **"They disagree" and "we could not read it" are different answers.**
+    Same shape as 410 vs 404 and as the header-logo test. Collapsing them
+    invents findings out of a failed page load.
+
+And **the outside number needs its own watcher**, because it silently stops
+working if the site moves it: `check_count_check_is_running` reports turns
+that produced no reading at all. A cross-check that has quietly gone blind
+reports agreement for ever.
+
+So for anything that changes the outside world, ask: **what does the far
+side already tell us, for free, that we could be held to?**
 
 **Write it into `diagnostics.py`, not into a comment.** That module is
 read-only by design and already runs on demand; a check there is the only
@@ -1650,6 +1747,33 @@ fixed from the screen, and the gap only showed up when a run had to be
 stopped at the wrong moment. **When a mechanism has several instances, list
 them and say which ones you changed**; "the loop now checks" is a claim
 about one loop.
+
+**And a GUARD is the same defect wearing its worst hat, because a missing
+guard looks like nothing at all.** Switching a design OFF checked for the
+interstitial wall on every page; switching one back ON had never been taught
+about it. On 25 Aug the wall arrived partway through a reactivation and 79
+designs in a row loaded a wall, found no publish button, and were written
+down as broken DESIGNS — three seconds each against twenty for real work,
+and the stage then reported "Job finished".
+
+Two things in that are worth carrying past this bug:
+
+  * **The give-up guard could not fire.** It counts failures marked "this
+    was the wall", and the mark is set inside the check that was never
+    called. A live protection, correct on its own terms, structurally
+    incapable of triggering. Whenever a guard depends on a flag, ask who
+    sets the flag and whether every path reaches them.
+  * **"Whose fault was it" decides whether money is lost.** A failure caused
+    by something in the WAY says nothing about the thing you were acting on,
+    and recording it against that thing takes it out of the work list. Here
+    it would have left live listings hidden while the screen blamed healthy
+    designs. Blocked and broken are different answers; a system that has
+    only one of them will use it for both.
+
+Now enforced mechanically: `preflight.py` has a GUARDED table — (file, the
+risky call, the calls that protect it) — so a new function that navigates
+the browser without consulting the wall fails before deploy. Add a row
+whenever a protective call has to accompany a risky one.
 
 Concretely: **an exception must never be able to escape past the point where
 the work was claimed.** If setup can fail, either claim after it, or catch it

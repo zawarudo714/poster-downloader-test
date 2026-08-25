@@ -1168,6 +1168,31 @@ def store_action_result(
 
     action = payload.get("action")
     error = payload.get("error")
+
+    # ════════════════════════════════════════════════════════════════════
+    # WHOSE FAILURE WAS IT — AND THIS DECIDES WHETHER MONEY IS LOST
+    # ════════════════════════════════════════════════════════════════════
+    # A TRANSIENT failure means we never got a proper look: the site's
+    # interstitial was in the way, or a page timed out. It says nothing
+    # whatever about the design.
+    #
+    # Recording one against the row would take the design out of the work
+    # list — and on the switch-back-ON side that means a live listing stays
+    # hidden and earns nothing, with the screen blaming a design that is
+    # perfectly healthy. Measured 25 Aug: one wall arriving mid-run produced
+    # 79 of exactly these in four minutes.
+    #
+    # So it is written into the JOB LOG, where the reader can see it, and
+    # not against the design. The design simply has not been done yet, which
+    # is the truth.
+    if error and payload.get("transient"):
+        run = db.query(StoreScanRun).filter_by(id=payload.get("run_id")).first()
+        return JSONResponse({
+            "ok": True,
+            "stop": SH.stage_should_stop(db, run, action or "deactivate"),
+            "recorded": False,
+        })
+
     row.action_error = error
     # The timestamp is what stops a design that cannot be switched from
     # being handed out again and again now that the stage's end is derived
@@ -1176,7 +1201,16 @@ def store_action_result(
     # WHICH action failed, so a failed switch-off cannot later block a
     # switch-on. The two are opposites and one field cannot serve both.
     row.action_error_kind = action if error else None
+    if error:
+        # A GENUINE failure — the page was ours and the control was not on
+        # it. Counted so a design that will never switch stops being retried
+        # at the front of every sweep for ever. Only the switch-OFF side
+        # acts on this count; see `_not_failed_this_run`.
+        row.action_fail_count = (row.action_fail_count or 0) + 1
     if not error:
+        # Forgiven. A design that starts working again should not carry a
+        # count from a month ago into a flag today.
+        row.action_fail_count = 0
         if action == "deactivate":
             row.deactivated_at = datetime.utcnow()
         else:
@@ -1192,7 +1226,80 @@ def store_action_result(
     run = db.query(StoreScanRun).filter_by(id=payload.get("run_id")).first()
     stop = SH.stage_should_stop(db, run, action or "deactivate")
     db.commit()
-    return JSONResponse({"ok": True, "stop": stop})
+    return JSONResponse({"ok": True, "stop": stop, "recorded": True})
+
+
+@router.post("/store/inactive-count")
+def store_inactive_count(
+    payload: dict = Body(...),
+    node: WorkerNode = Depends(require_node),
+    db: Session = Depends(get_db),
+):
+    """
+    TeePublic's own count of switched-off designs, before and after a turn.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE ONE NUMBER THAT IS NOT OUR OWN HOMEWORK
+    ════════════════════════════════════════════════════════════════════════
+    Every other check in this system compares our records with our records,
+    so a design recorded as republished that is in fact still switched off
+    is invisible to all of them. That is not hypothetical: on 25 Aug a run
+    logged 80 designs switched back on and one of them — TALKING HEADS ·
+    LITTLE CREATURES — was sitting on the inactive tab afterwards. It was
+    found because the owner opened the store in a browser.
+
+    THE NODE POSTS, THE SERVER JUDGES. Whether two numbers agree is policy:
+    it depends on what we believed we were doing, which only this side
+    knows. The node reads a figure off a page and says what it read.
+
+    The reply carries the sentence so the JOB LOG says it too — a reply that
+    is thrown away is how a page the server could not use produced a job
+    that cheerfully reported "finished".
+    """
+    from ..earnings import store_health as SH
+    from ..models import StoreCountCheck, StoreScanRun, UploadAccount
+
+    run = db.query(StoreScanRun).filter_by(id=payload.get("run_id")).first()
+    if run is None:
+        raise HTTPException(404, "No such run.")
+    account = db.query(UploadAccount).filter_by(
+        id=payload.get("account_id")).first()
+    if account is None:
+        raise HTTPException(404, "No such account.")
+
+    stage = str(payload.get("stage") or "")
+    before, after = payload.get("before"), payload.get("after")
+    switched = int(payload.get("switched") or 0)
+    cut_short = bool(payload.get("cut_short"))
+
+    verdict, note = SH.judge_counts(stage, before, after, switched, cut_short)
+
+    db.add(StoreCountCheck(
+        run_id=run.id, account_id=account.id, stage=stage,
+        before=before, after=after, switched=switched,
+        cut_short=1 if cut_short else 0, verdict=verdict, note=note))
+
+    # The latest reading lives on the account for the accounts table. NULL
+    # stays NULL — "we could not look" must never be written down as zero.
+    if after is not None:
+        account.inactive_count = int(after)
+        account.inactive_checked_at = datetime.utcnow()
+
+    if verdict == "mismatch":
+        # Said on the run as well, because the tab is where he is looking
+        # when he wonders whether the sweep worked. A finding nobody is
+        # shown is a finding that did not happen.
+        run.stage_note = f"{account.name}: {note}"
+        log_activity(db, user=None, action="store_count_mismatch",
+                     target_type="upload_account", target_id=account.id,
+                     details={"account": account.name, "run_id": run.id,
+                              "stage": stage, "before": before,
+                              "after": after, "switched": switched,
+                              "note": note})
+
+    db.commit()
+    return JSONResponse({"ok": True, "verdict": verdict, "note": note,
+                         "mismatch": verdict == "mismatch"})
 
 
 @router.post("/store/stage-done")

@@ -38,6 +38,7 @@ from typing import Any, Callable, Optional
 
 from selenium import webdriver
 from selenium.common.exceptions import (
+    ElementClickInterceptedException, ElementNotInteractableException,
     NoSuchElementException, TimeoutException, WebDriverException,
 )
 from selenium.webdriver.chrome.options import Options
@@ -402,6 +403,71 @@ class MarketplaceUploader:
                 element.click()
             except WebDriverException as e:
                 raise UploadError(f"Could not click {what}: {e}")
+
+    def real_click(self, element, *, what: str = "element") -> None:
+        """
+        Click the way a person does — and TREAT BEING BLOCKED AS THE ANSWER.
+
+        ════════════════════════════════════════════════════════════════════
+        THE OPPOSITE OF `js_click`, ON PURPOSE
+        ════════════════════════════════════════════════════════════════════
+        `js_click` fires the event straight at the element so that anything
+        drawn on top is ignored. That is right for FineArtAmerica, whose
+        promo bar and inspiration banner sit over every page and mean
+        nothing. It is WRONG wherever a thing drawn on top is the very
+        problem you are trying to notice.
+
+        Measured 2026-08-25, and it cost a day of confusion. A TeePublic
+        reactivation run logged 79 designs "switched back on" and one — TALKING
+        HEADS · LITTLE CREATURES — was still sitting on the inactive tab
+        afterwards. It was the last design attempted before the site's
+        interstitial wall appeared. A real click would have been refused by
+        the browser because the wall was over the button; the JavaScript
+        click sailed through, changed nothing, and reported success.
+
+        So this presses it properly:
+
+          · scrolls the element into view, because a real click needs a
+            position and an off-screen button has none;
+          · lets an INTERCEPTED click through as an error rather than
+            papering over it — that is the signal, not a nuisance;
+          · falls back to the JavaScript click only when the browser says
+            the element is not interactable for some other reason.
+
+        Neither method is "better". Use `js_click` where an overlay is
+        expected furniture, and this where an overlay means we are looking
+        at the wrong page.
+        """
+        try:
+            self.driver.execute_script(
+                "arguments[0].scrollIntoView({block: 'center'});", element)
+            time.sleep(0.2)
+        except WebDriverException:
+            pass                     # not fatal; the click may still land
+
+        try:
+            element.click()
+            return
+        except ElementClickInterceptedException as e:
+            # SOMETHING IS OVER THE BUTTON. Transient because the usual
+            # something is the wall, which passes — and because the caller
+            # counts a run of these and stops the account rather than
+            # grinding on. Never swallowed into a JavaScript click: doing
+            # that is exactly how a design was recorded as republished
+            # while it stayed switched off.
+            raise UploadError(
+                f"Something is covering the {what} button — the click was "
+                f"blocked. This is usually the site's interstitial.",
+                transient=True) from e
+        except ElementNotInteractableException:
+            pass                     # hidden or zero-sized; JS can still do it
+        except WebDriverException:
+            pass
+
+        try:
+            self.driver.execute_script("arguments[0].click();", element)
+        except WebDriverException as e:
+            raise UploadError(f"Could not click {what}: {e}")
 
     def open_work_tab(self) -> None:
         """

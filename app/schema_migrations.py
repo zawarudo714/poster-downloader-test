@@ -137,6 +137,15 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     # design that could not be switched OFF was then skipped when the run
     # tried to switch it back ON — and stayed hidden.
     ("store_listings",   "action_error_kind", "VARCHAR(16)"),
+    # How many runs in a row have failed to switch this one design on a page
+    # that was plainly ours. Retrying a genuine failure for ever is how a
+    # broken design quietly costs an hour of every sweep.
+    ("store_listings",   "action_fail_count", "INTEGER NOT NULL DEFAULT 0"),
+    # The marketplace's OWN count of switched-off designs, and when it was
+    # read. The only figure in the system that does not come from our own
+    # records, which is exactly why it can catch us being wrong.
+    ("upload_accounts",  "inactive_count",      "INTEGER"),
+    ("upload_accounts",  "inactive_checked_at", "DATETIME"),
 ]
 
 # ════════════════════════════════════════════════════════════════════════════

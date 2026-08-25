@@ -81,6 +81,8 @@ def api_overview(admin: User = Depends(require_admin),
     for r in rows:
         by_account.setdefault(r.account_id, []).append(r)
 
+    give_up = int(P.get_setting(db, "store_action_give_up_after"))
+
     def summarise(items: list) -> dict:
         live = [r for r in items if r.removed_at is None]
         return {
@@ -92,6 +94,14 @@ def api_overview(admin: User = Depends(require_admin),
             "excluded": sum(1 for r in live if r.excluded),
             "vague":    sum(1 for r in live if SH.looks_vague(r, after)),
             "removed":  sum(1 for r in items if r.removed_at),
+            # Designs the sweep has stopped trying to switch off. Shown so
+            # that "no longer retried" can never quietly become "forgotten".
+            "flagged":  sum(1 for r in live if give_up
+                            and (r.action_fail_count or 0) >= give_up),
+            # WE believe these are switched off right now. Sits beside the
+            # marketplace's own count below, and the two disagreeing is the
+            # entire reason both are on the screen.
+            "off_ours": sum(1 for r in live if r.deactivated_at),
             "checked_at": max(
                 (r.last_checked_at for r in live if r.last_checked_at),
                 default=None),
@@ -103,9 +113,21 @@ def api_overview(admin: User = Depends(require_admin),
             "name": a.name,
             "store_url": a.profile_url or "",
             "ready": bool((a.profile_url or "").strip()),
+            # ── WHAT TEEPUBLIC ITSELF SAYS ──────────────────────────────
+            # NULL means not read, and the screen must say so rather than
+            # printing 0 — "we could not look" and "none are switched off"
+            # are opposite answers.
+            "off_theirs": a.inactive_count,
+            "off_theirs_at": (a.inactive_checked_at.isoformat()
+                              if a.inactive_checked_at else None),
             **{k: (v.isoformat() if hasattr(v, "isoformat") else v)
                for k, v in summarise(by_account.get(a.id, [])).items()},
         } for a in accounts],
+        # Every time the marketplace's own count has disagreed with us.
+        # Top-level rather than inside a run, because the whole point is
+        # that it outlives the run that produced it.
+        "disagreements": SH.recent_disagreements(db, MARKETPLACE),
+        "flagged": len(SH.flagged(db, MARKETPLACE)),
         "ready": len(ready),
         "blocked": [a.name for a in blocked],
         "totals": SH.counts(db, run, MARKETPLACE),
@@ -129,6 +151,10 @@ def api_overview(admin: User = Depends(require_admin),
             "scan_limit_per_account": int(P.get_setting(db, "scan_limit_per_account")),
             "scan_vague_after_fixes": after,
             "scan_continue_within_h": int(P.get_setting(db, "scan_continue_within_h")),
+            "store_wall_give_up_after": int(P.get_setting(db, "store_wall_give_up_after")),
+            "store_design_retries": int(P.get_setting(db, "store_design_retries")),
+            "store_action_give_up_after": give_up,
+            "store_count_check": int(P.get_setting(db, "store_count_check")),
         },
         "history": [{
             "id": r.id,
@@ -584,6 +610,28 @@ def api_account_url(payload: dict = Body(...),
     return JSONResponse({"ok": True})
 
 
+@router.post("/api/store/retry-flagged")
+def api_retry_flagged(payload: dict = Body(default={}),
+                      admin: User = Depends(require_admin),
+                      db: Session = Depends(get_db)):
+    """
+    Put the given-up-on designs back in the queue.
+
+    Flagging stops a design that will never switch from costing a page load
+    in every future sweep. The obvious danger is that "stopped retrying"
+    becomes "quietly forgotten", so the flag is always visible and always
+    reversible from here — the machine stops guessing and the owner decides.
+    """
+    count = SH.unflag(db, MARKETPLACE, payload.get("design_ids") or None)
+    log_activity(db, user=admin, action="store_unflag",
+                 details={"designs": count})
+    db.commit()
+    return JSONResponse({
+        "ok": True, "count": count,
+        "message": (f"{count} design(s) will be tried again on the next "
+                    f"sweep." if count else "Nothing was flagged.")})
+
+
 @router.post("/api/store/settings")
 def api_settings(payload: dict = Body(...),
                  admin: User = Depends(require_admin),
@@ -606,6 +654,18 @@ def api_settings(payload: dict = Body(...),
         # hours". 720 is a month, which is as long as a status is worth
         # trusting at all.
         "scan_continue_within_h": (1, 720),
+        # ── How hard to try, and when to stop ────────────────────────────
+        # All three were bare numbers in the worker machine's own code,
+        # where he cannot reach them — and every one is a judgement about
+        # how much of an evening to spend.
+        "store_wall_give_up_after":  (1, 100),
+        "store_design_retries":      (0, 5),
+        "store_action_give_up_after": (1, 20),
+        # 0 or 1. Reading the marketplace's own count of switched-off
+        # designs costs two page loads against an hour of work; the switch
+        # exists so it can be turned off if TeePublic ever moves the number,
+        # not because the check is optional in principle.
+        "store_count_check":         (0, 1),
     }
     changed = {}
     for key, (low, high) in allowed.items():

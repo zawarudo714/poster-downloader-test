@@ -1040,6 +1040,159 @@ def check_listing_sweep_believable(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def _account_names(db: Session) -> dict[int, str]:
+    """
+    id -> name for every marketplace account, fetched once.
+
+    A helper rather than a lookup inside each row, because these lists can
+    be long and a query per row is a query per row. Preflight now warns
+    about that shape, which is how this got written this way.
+    """
+    return {a_id: name for a_id, name in
+            db.query(UploadAccount.id, UploadAccount.name).all()}
+
+
+def check_marketplace_disagrees(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: what the marketplace says it did must match what we recorded.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE ONLY CHECK ON THIS PAGE THAT IS NOT US MARKING OUR OWN HOMEWORK
+    ════════════════════════════════════════════════════════════════════════
+    Every other invariant here compares our records with our records. That
+    catches a great deal, and it is completely blind to the one thing it
+    most needs to catch: a design recorded as republished which is in fact
+    still switched off. Nothing internal disagrees, so nothing goes red.
+
+    On 25 Aug a reactivation logged 80 designs switched back on and TALKING
+    HEADS · LITTLE CREATURES was sitting on the inactive tab afterwards. It
+    was found because the owner opened the store in a browser. Nothing in
+    this system would ever have said so.
+
+    TeePublic prints its own count of switched-off designs. Read at both
+    ends of an account's turn, the CHANGE across it belongs to us, and any
+    difference is proof our records are wrong.
+    """
+    from .models import StoreCountCheck
+
+    rows_q = (db.query(StoreCountCheck, UploadAccount.name)
+                .outerjoin(UploadAccount,
+                           UploadAccount.id == StoreCountCheck.account_id)
+                .filter(StoreCountCheck.verdict == "mismatch")
+                .order_by(StoreCountCheck.checked_at.desc())
+                .limit(MAX_ROWS))
+    found = rows_q.all()
+    total = (db.query(func.count(StoreCountCheck.id))
+               .filter(StoreCountCheck.verdict == "mismatch").scalar() or 0)
+
+    rows = [
+        Finding(f"{name or 'unknown account'} — "
+                f"{check.checked_at:%Y-%m-%d %H:%M}",
+                check.note or "", "/admin/store")
+        for check, name in found
+    ]
+    return _result(
+        "marketplace_disagrees",
+        f"{total} time(s) the marketplace disagreed with our records"
+        if total else "The marketplace agreed with our records",
+        "We said we switched a number of designs; TeePublic's own count of "
+        "switched-off designs moved by a different number. The designs we "
+        "believe are live may not be. Run a MISSING-ONLY sweep to find out "
+        "which, then switch them again.",
+        "error" if total else "ok", rows, total,
+    )
+
+
+def check_count_check_is_running(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: if the marketplace's own count is switched on, every finished
+    switching turn must have produced a reading.
+
+    ════════════════════════════════════════════════════════════════════════
+    THIS ONE WATCHES THE WATCHER
+    ════════════════════════════════════════════════════════════════════════
+    The check above is only worth having while it is actually looking. If
+    TeePublic moves that number, or renames the link it sits in, the reading
+    silently comes back empty — and the page then reports agreement for ever,
+    over nothing being compared.
+
+    That is the exact failure this project keeps producing: a green light
+    from something that was never looking. So the absence of readings is
+    itself a finding.
+    """
+    from . import pipeline as P
+    from .models import StoreCountCheck
+
+    if not int(P.get_setting(db, "store_count_check") or 0):
+        return _result("count_check_running",
+                       "The marketplace's own count is switched off",
+                       "Nothing is being cross-checked against TeePublic. "
+                       "Turn on 'store_count_check' on the Pipeline page to "
+                       "put it back.", "warn", [], 0)
+
+    recent = (db.query(StoreCountCheck)
+                .order_by(StoreCountCheck.checked_at.desc())
+                .limit(MAX_ROWS).all())
+    unreadable = [c for c in recent if c.verdict == "unreadable"]
+    if not recent:
+        return _result("count_check_running",
+                       "No reading of the marketplace's own count yet",
+                       "Expected — no account has finished a switching turn "
+                       "since this was switched on. It matters if a sweep "
+                       "has run and this is still empty.", "ok", [], 0)
+
+    names = _account_names(db)
+    rows = [
+        Finding(f"{names.get(c.account_id, 'unknown account')} — "
+                f"{c.checked_at:%Y-%m-%d %H:%M}",
+                c.note or "", "/admin/store")
+        for c in unreadable
+    ]
+    return _result(
+        "count_check_running",
+        f"{len(unreadable)} switching turn(s) could not read the "
+        f"marketplace's own count" if unreadable
+        else "The marketplace's own count is being read",
+        "The number is read off the store page while signed in. If it "
+        "cannot be found, TeePublic has probably moved it — and until it is "
+        "fixed, nothing is cross-checking what we believe against what they "
+        "say.",
+        "warn" if unreadable else "ok", rows, len(unreadable),
+    )
+
+
+def check_designs_given_up_on(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: a design the system has stopped trying to fix must be named.
+
+    Flagging exists so a listing that will never switch off stops costing a
+    page load in every future sweep. The danger in that is obvious: it is
+    one short step from "stopped retrying" to "quietly forgotten". So the
+    moment a design is given up on it appears here, with a RETRY button on
+    the tab that puts it back in the queue.
+    """
+    from .earnings.store_health import flagged
+
+    found = flagged(db, "teepublic")
+    names = _account_names(db)
+    rows = [
+        Finding(f"{names.get(r.account_id, 'unknown account')} — "
+                f"{r.title or r.design_id}",
+                (r.action_error or "")[:160], "/admin/store")
+        for r in found[:MAX_ROWS]
+    ]
+    return _result(
+        "designs_given_up_on",
+        f"{len(found)} design(s) the sweep has stopped trying to switch off"
+        if found else "No design has been given up on",
+        "Each of these failed on a page that was plainly ours, several "
+        "sweeps running — so the button genuinely is not there. They are "
+        "still live and still earning; they are simply no longer being "
+        "cured. Look at one by hand, then press RETRY on the TeePublic tab.",
+        "warn" if found else "ok", rows, len(found),
+    )
+
+
 def check_listing_catalogue_gaps(db: Session, scope: Scope) -> CheckResult:
     """
     INVARIANT: an account we can scan should have a catalogue, and a design
@@ -1107,6 +1260,9 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_orphaned_listing_jobs,
     check_listing_sweep_believable,
     check_listing_catalogue_gaps,
+    check_marketplace_disagrees,
+    check_count_check_is_running,
+    check_designs_given_up_on,
     check_orphaned_upload_rows,
     check_unassigned_titles,
     check_duplicate_hashes,

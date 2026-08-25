@@ -844,6 +844,16 @@ class UploadAccount(Base):
     # failures rather than a total. See pipeline.report_upload_failure for
     # why a single one is no longer enough to park the account.
     consecutive_failures  = Column(Integer, nullable=False, default=0)
+    # ── THE MARKETPLACE'S OWN COUNT OF SWITCHED-OFF DESIGNS ─────────────
+    # Read from the store page while signed in, at both ends of a switching
+    # turn. Exactly the same job `marketplace_balance` does above: the one
+    # number that comes from outside our own records, and therefore the only
+    # one that can catch us believing something that is not so.
+    #
+    # NULL means "not read", never "none are off". Collapsing those two
+    # would report a healthy account as evidence of a bug.
+    inactive_count        = Column(Integer, nullable=True)
+    inactive_checked_at   = Column(DateTime, nullable=True)
     created_at        = Column(DateTime, default=datetime.utcnow, nullable=False)
     created_by        = Column(String(64), nullable=True)
 
@@ -1560,6 +1570,18 @@ class StoreListing(Base):
     # correct for the SAME action that failed: retrying a reactivate is
     # cheap and idempotent, and leaving a live listing hidden is not.
     action_error_kind = Column(String(16), nullable=True)
+    # ── HOW MANY TIMES A GENUINE FAILURE HAS HAPPENED ───────────────────
+    # Counted only for failures on a page that was plainly ours — the header
+    # logo was there and the button was not. A design blocked by the wall
+    # records nothing here, because the wall says nothing about the design.
+    #
+    # Past `store_action_give_up_after` the design is FLAGGED: taken out of
+    # the work list and named on screen instead. Without it, a design the
+    # marketplace will never republish is retried at the front of every
+    # sweep for ever, costing a page load each time and telling nobody.
+    # Same shape as `fix_attempts` and the vague-tag flag above; reset to
+    # zero by any success, so a design that starts working is forgiven.
+    action_fail_count = Column(Integer, nullable=False, default=0)
 
     # ── The owner's override ────────────────────────────────────────────
     excluded       = Column(Integer, nullable=False, default=0, index=True)
@@ -1568,6 +1590,82 @@ class StoreListing(Base):
     __table_args__ = (
         UniqueConstraint("account_id", "design_id", name="uq_listing_account_design"),
         Index("ix_listing_account_status", "account_id", "status"),
+    )
+
+
+class StoreCountCheck(Base):
+    """
+    What the marketplace said, against what we believed, for one account's
+    turn at switching designs.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE ONLY CHECK HERE THAT IS NOT US MARKING OUR OWN HOMEWORK
+    ════════════════════════════════════════════════════════════════════════
+    Everything else in this system compares our records with our records. If
+    a design is recorded as republished and is in fact still switched off,
+    no amount of internal consistency will ever notice — and that is not
+    hypothetical. On 25 Aug a reactivation logged 80 designs switched back
+    on; TALKING HEADS · LITTLE CREATURES was still on the inactive tab
+    afterwards, and the only reason anyone found out is that the owner
+    happened to look at the store in a browser.
+
+    TeePublic prints its own count of switched-off designs on the store
+    page. Read it before an account's turn and after, and the difference is
+    a fact from outside our records:
+
+        we switched 80 back on · their count fell by 77 · THREE DID NOT
+
+    ════════════════════════════════════════════════════════════════════════
+    A DIFFERENCE, NEVER A MATCH
+    ════════════════════════════════════════════════════════════════════════
+    "Inactive should be zero" is meaningless here. One real account holds
+    379 designs the owner turned off himself over months, for his own
+    reasons, and nothing on the page distinguishes those from ours. Only the
+    CHANGE across our turn belongs to us.
+
+    ════════════════════════════════════════════════════════════════════════
+    ROWS, NOT A COLUMN ON THE ACCOUNT
+    ════════════════════════════════════════════════════════════════════════
+    The account carries the latest reading for the screen. This keeps every
+    reading, because the useful questions are historical — has this account
+    drifted before, did it start after a particular release, is one account
+    doing it and not the others. A single overwritten column could answer
+    none of them.
+
+    Read-only evidence. Nothing here changes what the pipeline does; it is
+    the same kind of thing as `diagnostics.py`, which is why the invariant
+    that reads it lives there.
+    """
+    __tablename__ = "store_count_checks"
+
+    id          = Column(Integer, primary_key=True)
+    run_id      = Column(Integer, ForeignKey("store_scan_runs.id"),
+                         nullable=False, index=True)
+    account_id  = Column(Integer, ForeignKey("upload_accounts.id"),
+                         nullable=False, index=True)
+    stage       = Column(String(16), nullable=False)   # deactivate|reactivate
+
+    # NULL means the count could not be read — the page did not carry it, or
+    # we never got there. Deliberately NOT zero: "we could not look" and
+    # "nothing is switched off" are opposite answers and collapsing them
+    # would turn a failed read into a fabricated finding.
+    before      = Column(Integer, nullable=True)
+    after       = Column(Integer, nullable=True)
+
+    # What WE believe we did during the turn — successful switches only.
+    switched    = Column(Integer, nullable=False, default=0)
+    # An account stopped halfway has no expectation worth testing, so the
+    # comparison is skipped rather than reported as a disagreement.
+    cut_short   = Column(Integer, nullable=False, default=0)
+
+    #   agreed | mismatch | unreadable | skipped
+    verdict     = Column(String(16), nullable=False, default="skipped",
+                         index=True)
+    note        = Column(Text, nullable=True)
+    checked_at  = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_count_check_run_account", "run_id", "account_id"),
     )
 
 

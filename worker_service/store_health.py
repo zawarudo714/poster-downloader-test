@@ -84,7 +84,8 @@ def new_session() -> requests.Session:
     return requests.Session()
 
 
-def fetch(url: str, session: requests.Session, driver=None) -> Optional[str]:
+def fetch(url: str, session: requests.Session, driver=None,
+          html_markers: Optional[list] = None) -> Optional[str]:
     """
     Page text, over plain HTTP — falling back to the browser if refused.
 
@@ -92,6 +93,18 @@ def fetch(url: str, session: requests.Session, driver=None) -> Optional[str]:
     But "cheap" must not mean "fragile": if the marketplace declines to talk
     to a plain client, the browser is already open a few lines away and it
     gets the same page. One page loaded slowly beats an account skipped.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE BROWSER FALLBACK CAN LAND ON THE WALL, AND MUST SAY SO
+    ════════════════════════════════════════════════════════════════════════
+    It has no mouse paths and no way to clear anything — it is one page load
+    with nobody watching. What it CAN do is refuse to pass the wall's HTML
+    off as the page we asked for: if the site's own header logo is not in
+    what came back, the honest answer is "we could not look".
+
+    None already means exactly that to both callers, so a store listing
+    reads as an account we could not read rather than an account that has
+    lost all its designs.
     """
     try:
         reply = session.get(url, timeout=30)
@@ -106,9 +119,63 @@ def fetch(url: str, session: requests.Session, driver=None) -> Optional[str]:
     try:
         driver.get(url)
         time.sleep(1.5)
-        return driver.page_source or None
+        page = driver.page_source or None
     except Exception:
         return None
+    return page if page_is_theirs(page, html_markers) else None
+
+
+def page_is_theirs(html: Optional[str], html_markers: Optional[list]) -> bool:
+    """
+    Is this the marketplace's own page, or something standing in front of it?
+
+    A NAMED CALL rather than an inline condition, on purpose: preflight
+    checks that every function navigating the browser here also consults the
+    wall, and it can only see a call. An inline `any(m in html ...)` reads as
+    a guard to a person and as nothing at all to the check — which is the
+    same trap as a test that matches its own search term.
+
+    A page with no markers configured is accepted: an unmeasured site should
+    not have every read refused.
+    """
+    if not html:
+        return False
+    if not html_markers:
+        return True
+    return any(m in html for m in html_markers)
+
+
+def _blocked(error: Exception) -> bool:
+    """
+    Was this something in the WAY, rather than something wrong with the
+    design we were acting on?
+
+    ════════════════════════════════════════════════════════════════════════
+    THE MOST EXPENSIVE DISTINCTION IN THIS FILE
+    ════════════════════════════════════════════════════════════════════════
+    Get it wrong in one direction and one bad ten minutes writes permanent
+    errors against dozens of healthy designs — 79 of them on 25 Aug, in four
+    minutes, while a wall sat in front of every page. Those designs then
+    leave the work list, and on the switch-back-ON side that means live
+    listings stay hidden and earn nothing.
+
+    Get it wrong in the other and a design that genuinely will not switch is
+    retried at the front of every sweep for ever, telling nobody.
+
+    Three things mean "in the way", and they are all properties of the
+    ACCOUNT'S BROWSER right now, not of any design:
+
+      · transient      — the wall, a maintenance page, a timeout
+      · pause_minutes  — systemic: signed out, credentials refused
+      · fatal          — the whole account is finished for this turn
+
+    ONE definition, because the retry loop and the reporting line must agree
+    about it. Two copies of this question drifting apart is precisely how a
+    design gets retried and blamed at the same time.
+    """
+    return bool(getattr(error, "transient", False)
+                or getattr(error, "pause_minutes", 0)
+                or getattr(error, "fatal", False))
 
 
 def design_id_from(url: str) -> Optional[str]:
@@ -149,7 +216,8 @@ def search_url(tag: str, page: int) -> str:
 # ════════════════════════════════════════════════════════════════════════════
 
 def list_designs(store_url: str, session: requests.Session,
-                 emit: Callable[[str], None], driver=None) -> list[dict]:
+                 emit: Callable[[str], None], driver=None,
+                 html_markers: Optional[list] = None) -> list[dict]:
     """
     Every design in a store, with its ID. Pages until a page has none.
 
@@ -162,7 +230,7 @@ def list_designs(store_url: str, session: requests.Session,
 
     found: dict[str, dict] = {}
     for page in range(1, 201):
-        html = fetch(f"{store_url}?page={page}", session, driver)
+        html = fetch(f"{store_url}?page={page}", session, driver, html_markers)
         if html is None:
             emit(f"  store page {page}: could not be read, stopping")
             break
@@ -186,7 +254,8 @@ def list_designs(store_url: str, session: requests.Session,
     return list(found.values())
 
 
-def design_details(url: str, session: requests.Session, driver=None) -> tuple:
+def design_details(url: str, session: requests.Session, driver=None,
+                   html_markers: Optional[list] = None) -> tuple:
     """
     (search tag, title, error). Plain HTTP — the design page is public.
 
@@ -196,7 +265,7 @@ def design_details(url: str, session: requests.Session, driver=None) -> tuple:
     """
     from bs4 import BeautifulSoup
 
-    html = fetch(url, session, driver)
+    html = fetch(url, session, driver, html_markers)
     if html is None:
         return None, None, "page could not be read"
 
@@ -479,7 +548,8 @@ class StoreHealthStage:
                     emit(f"  {name}: could not clear the wall up front ({e})")
 
             emit(f"→ {name}: reading the store listing")
-            listed = list_designs(store_url, session, emit, uploader.driver)
+            listed = list_designs(store_url, session, emit, uploader.driver,
+                                  wall.get("html_markers") or None)
             if not listed:
                 raise RuntimeError(
                     f"No designs found at {store_url}. Check the store "
@@ -521,8 +591,9 @@ class StoreHealthStage:
             for index, design in enumerate(designs, start=1):
                 if stop.is_set():
                     break
-                tag, title, error = design_details(design["url"], session,
-                                                   uploader.driver)
+                tag, title, error = design_details(
+                    design["url"], session, uploader.driver,
+                    wall.get("html_markers") or None)
 
                 if error:
                     status, note = "error", error
@@ -601,6 +672,18 @@ class StoreHealthStage:
         # back, instead of grinding through 178 designs at a minute each.
         wall_streak = 0
         give_up_after = int(payload.get("wall_give_up_after") or 5)
+        # Immediate second attempts at ONE design after a blocked one. Small
+        # on purpose: this covers the wall arriving between two page loads,
+        # which clearing it and going again fixes in seconds. A wall that is
+        # properly in the way is not solved by trying harder here — that is
+        # what the run-level wait is for, and it comes back in half an hour
+        # rather than hammering the site now.
+        per_design_retries = int(payload.get("design_retries") or 1)
+        store_url = account.get("store_url") or account.get("profile_url") or ""
+        # TeePublic's own count of switched-off designs, read at both ends of
+        # this account's turn. The only figure here that does not come from
+        # our own records — see `_read_inactive_count`.
+        counted = payload.get("count_check", True)
         try:
             # start() is the risky step and it sits OUTSIDE the per-design
             # handler, so a Chrome that will not launch throws past every
@@ -627,28 +710,90 @@ class StoreHealthStage:
                                   f"carrying on; each design will check.",
                                   level="warn")
 
+            # The marketplace's own figure BEFORE we touch anything. The
+            # server compares it with the one taken afterwards; nothing is
+            # decided here, because "do these numbers agree" is policy.
+            before_count = (
+                self._read_inactive_count(uploader, store_url, html_markers,
+                                          paths, signed_out, wall_wait,
+                                          wall_tries) if counted else None)
+            if before_count is not None:
+                uploader.emit(f"TeePublic says {before_count} design(s) are "
+                              f"switched off before we start.")
+
             for index, design in enumerate(designs, start=1):
                 did = design["design_id"]
                 label = design.get("title") or did
                 uploader.emit(f"[{index}/{len(designs)}] {action} {label}",
                               progress=min(95, int(index / max(1, len(designs)) * 90)))
-                try:
-                    if action == "deactivate":
-                        self._deactivate(uploader, design, html_markers,
-                                         paths, signed_out, wall_wait,
-                                         wall_tries)
-                    else:
-                        self._reactivate(uploader, did)
-                    stop = self._report(run_id, account["id"], did, action, None)
+
+                # ── ONE DESIGN, WITH A SECOND GO IF WE WERE BLOCKED ──────
+                #
+                # A design that failed because something was in the WAY has
+                # told us nothing about itself, so giving up on it after one
+                # look is throwing work away. A design that failed on a page
+                # that was plainly ours has told us everything, and trying
+                # again just costs a page load. Only the first is retried,
+                # and the difference comes from the header-logo test rather
+                # than from guessing.
+                error = None
+                for attempt in range(per_design_retries + 1):
+                    try:
+                        if action == "deactivate":
+                            self._deactivate(uploader, design, html_markers,
+                                             paths, signed_out, wall_wait,
+                                             wall_tries)
+                        else:
+                            self._reactivate(uploader, did, html_markers,
+                                             paths, signed_out, wall_wait,
+                                             wall_tries)
+                        error = None
+                        break
+                    except Exception as e:
+                        error = e
+                        # A FATAL error is about the whole account — three
+                        # mouse paths already failed, or the session is
+                        # signed out. Replaying them two seconds later is
+                        # one chance taken twice, which is the mistake the
+                        # spaced run-level wait exists to correct.
+                        if getattr(e, "fatal", False):
+                            break
+                        if not _blocked(e):
+                            break            # ours, and genuinely broken
+                        if attempt < per_design_retries:
+                            uploader.emit(
+                                f"  blocked on {label} — clearing the way and "
+                                f"trying once more", level="warn")
+
+                if error is None:
+                    stop = self._report(run_id, account["id"], did, action,
+                                        None)
                     done += 1
                     wall_streak = 0
-                except Exception as e:
-                    detail = f"{type(e).__name__}: {e}"
+                else:
+                    detail = f"{type(error).__name__}: {error}"
+                    blocked = _blocked(error)
                     uploader.emit(f"  ✗ {label}: {detail}", level="error")
-                    stop = self._report(run_id, account["id"], did, action, detail)
+                    # A FAILURE THAT IS NOT THE DESIGN'S FAULT MUST NOT BE
+                    # WRITTEN AGAINST IT. A wall, a signed-out session, three
+                    # spent mouse paths — all facts about this browser for
+                    # the next few minutes and none of them about the design.
+                    # Recording one on the row takes the design out of the
+                    # work list, which on the switch-back-ON side leaves a
+                    # live listing hidden while the screen blames a design
+                    # that is perfectly healthy.
+                    stop = self._report(run_id, account["id"], did, action,
+                                        detail, transient=blocked)
                     failed += 1
 
-                    if getattr(e, "transient", False):
+                    # Whatever ends the account, the server hears it from
+                    # the outer handler as a stage failure rather than as a
+                    # job that quietly stopped — so the run either waits and
+                    # comes back or ends saying why.
+                    if getattr(error, "fatal", False):
+                        raise error
+
+                    if blocked:
                         wall_streak += 1
                         if wall_streak >= give_up_after:
                             raise UploadError(
@@ -674,6 +819,31 @@ class StoreHealthStage:
                         f"switching designs. {done} done, "
                         f"{len(designs) - index} not started.", level="warn")
                     break
+
+            # ── AND WHAT DOES TEEPUBLIC SAY NOW ──────────────────────────
+            #
+            # Read here, INSIDE the try, while the signed-in browser is
+            # still open — it is the last thing this account's turn does.
+            # Posted rather than judged: whether the numbers agree is the
+            # server's question, and it is the only one that knows what we
+            # believed we were doing.
+            if counted:
+                after_count = self._read_inactive_count(
+                    uploader, store_url, html_markers, paths, signed_out,
+                    wall_wait, wall_tries)
+                verdict = self.client.post("/store/inactive-count", {
+                    "run_id": run_id, "account_id": account["id"],
+                    "stage": action,
+                    "before": before_count, "after": after_count,
+                    "switched": done, "cut_short": cut_short,
+                }) or {}
+                # SAY WHAT IT ANSWERED. A reply read and discarded is how a
+                # page the server could not use produced a job that reported
+                # "finished" over nothing having been stored.
+                if verdict.get("note"):
+                    uploader.emit(verdict["note"],
+                                  level="error" if verdict.get("mismatch")
+                                  else "ok")
         except Exception as e:
             # Anything that escaped the per-design handler — almost always
             # start(). Report the stage as failed so the run ENDS and the
@@ -698,6 +868,59 @@ class StoreHealthStage:
         return {"done": done, "failed": failed, "cut_short": cut_short,
                 "account": account.get("name")}
 
+    # ── ONE WAY OF ASKING "AM I EVEN ON THE RIGHT PAGE" ─────────────────
+    #
+    # BOTH switching directions go through these two helpers, and that is the
+    # entire point of them existing. The wall check used to live only in
+    # `_deactivate`. On 25 Aug the wall turned up partway through a
+    # reactivation and switching-ON, which had never been taught about it,
+    # loaded 79 walls in a row, found no publish button on any of them, and
+    # wrote 79 design-shaped errors in four minutes — three seconds each,
+    # against twenty for real work.
+    #
+    # The give-up guard could not save it either: that counts failures marked
+    # "this was the wall", and the mark is set inside the check that was
+    # never called. A live guard that cannot fire.
+    #
+    # The general shape, and it is already in CLAUDE.md rule 8: when a
+    # mechanism has several instances, changing one is not changing it.
+
+    def _open_page(self, uploader, url: str, html_markers, paths,
+                   signed_out, wall_wait, wall_tries) -> None:
+        """Go to a page and be sure it is the page, not the wall in front of it."""
+        uploader.driver.get(url)
+        if html_markers:
+            uploader.clear_wall([], paths,
+                                wait_s=wall_wait, attempts=wall_tries,
+                                signed_out_markers=signed_out,
+                                html_markers=html_markers)
+        time.sleep(1)
+
+    def _missing_control(self, uploader, html_markers, what: str,
+                         message: str) -> UploadError:
+        """
+        Turn "the button is not here" into the RIGHT complaint.
+
+        A missing control has two completely different meanings and the
+        report has to say which:
+
+          · the page is ours and the button is genuinely absent — the
+            design's problem. Retrying will not help; it needs a person.
+          · the page is not ours at all — the far side's problem. Nothing
+            about the design is known, and treating it as the design's
+            failure is how one wall became 79 permanent-looking errors.
+
+        Told apart by the site's own header logo, exactly as the wall is.
+        This is the same positive test used everywhere else here, so the two
+        can never disagree about what a good page looks like.
+        """
+        if html_markers and not uploader.page_has_markup(html_markers):
+            return UploadError(
+                f"No {what} — and this is not a TeePublic page at all, so "
+                f"the design tells us nothing. The wall is most likely back.",
+                transient=True)
+        return UploadError(message)
+
     def _deactivate(self, uploader, design: dict, html_markers, paths,
                     signed_out, wall_wait, wall_tries) -> None:
         """
@@ -711,43 +934,40 @@ class StoreHealthStage:
         from selenium.webdriver.common.by import By
 
         did = design["design_id"]
-        uploader.driver.get(design["url"])
-
-        # Same wall that stands in front of the earnings page. Detected by
-        # the absence of what we came for, exactly as it is there.
-        # Detected by the site's own header logo, not by words on the
-        # MANAGE bar. One marker covers every page these stages touch —
-        # design pages, edit pages, search — and the wall carries none of it.
-        if html_markers:
-            uploader.clear_wall([], paths,
-                                wait_s=wall_wait, attempts=wall_tries,
-                                signed_out_markers=signed_out,
-                                html_markers=html_markers)
-        time.sleep(1)
+        self._open_page(uploader, design["url"], html_markers, paths,
+                        signed_out, wall_wait, wall_tries)
 
         selector = f"form[action='/designs/{did}/deactivate'] button[type='submit']"
         try:
             button = uploader.driver.find_element(By.CSS_SELECTOR, selector)
         except Exception:
-            raise UploadError(
+            raise self._missing_control(
+                uploader, html_markers, f"Deactivate button for design {did}",
                 f"No Deactivate button for design {did}. Either the session "
                 f"is not signed in as the owner, or the design is already "
                 f"inactive.")
-        uploader.js_click(button, what="deactivate")
+        uploader.real_click(button, what="deactivate")
         time.sleep(2)
 
-    def _reactivate(self, uploader, design_id: str) -> None:
+    def _reactivate(self, uploader, design_id: str, html_markers, paths,
+                    signed_out, wall_wait, wall_tries) -> None:
         """
         Republish from the design's edit page: accept terms, press publish.
 
-        Unchanged from the owner's working tool except that the ID comes from
-        our own record of what we deactivated, rather than from scraping the
-        marketplace's inactive list.
+        The ID comes from our own record of what we deactivated, never from
+        scraping the marketplace's inactive list — one real account holds 379
+        designs the owner turned off himself and nothing on that page tells
+        them apart from ours.
+
+        THE BUTTON IS PRESSED FOR REAL, not with JavaScript, and that is not
+        a style choice — see `uploader.real_click`. A JavaScript click goes
+        through anything drawn over the button and reports success, which is
+        how one design was recorded as republished while it stayed off.
         """
         from selenium.webdriver.common.by import By
 
-        uploader.driver.get(f"{BASE}/designs/{design_id}/edit")
-        time.sleep(2)
+        self._open_page(uploader, f"{BASE}/designs/{design_id}/edit",
+                        html_markers, paths, signed_out, wall_wait, wall_tries)
 
         try:
             box = uploader.driver.find_element(By.ID, "terms")
@@ -764,13 +984,71 @@ class StoreHealthStage:
         try:
             publish = uploader.driver.find_element(By.CSS_SELECTOR, selector)
         except Exception:
-            raise UploadError(
+            raise self._missing_control(
+                uploader, html_markers,
+                f"publish button on the edit page for design {design_id}",
                 f"No publish button on the edit page for design {design_id}.")
-        uploader.js_click(publish, what="publish")
+        uploader.real_click(publish, what="publish")
         time.sleep(2)
 
+    # ── THE MARKETPLACE'S OWN COUNT, AS A CHECKSUM ──────────────────────
+
+    def _read_inactive_count(self, uploader, store_url: str, html_markers,
+                             paths, signed_out, wall_wait,
+                             wall_tries) -> Optional[int]:
+        """
+        How many designs does TeePublic itself say are switched off?
+
+        ════════════════════════════════════════════════════════════════════
+        WHY BOTHER WHEN WE ALREADY WROTE DOWN WHAT WE DID
+        ════════════════════════════════════════════════════════════════════
+        Because what we wrote down is the thing that can be wrong. Every
+        other check here compares our records against our records. This is
+        the only number in the system that comes from outside them, so it is
+        the only one that can catch us believing a design is live when it is
+        sitting on the inactive tab.
+
+        Same idea as FineArtAmerica's Balance page, whose printed total is
+        used to prove our arithmetic did not miss any rows.
+
+        ════════════════════════════════════════════════════════════════════
+        MEASURED 25 AUG: THIS NEEDS TO BE SIGNED IN
+        ════════════════════════════════════════════════════════════════════
+        Signed out, the same address answers "You do not have permission to
+        edit this store" and shows no counts at all. So it cannot be a cheap
+        public fetch — it rides along inside the switching job, which is
+        already signed in as this exact account with its own Chrome profile.
+        It costs one page load at each end of an hour of work.
+
+        Found by the LINK'S OWN ADDRESS, `/inactive`, not by a class name.
+        The classes on that page are randomised (`tOHY4`, `qrvwN4`) and
+        would break on the site's next deploy while blaming us.
+
+        Returns None when the number is not there. NOT zero — "we could not
+        look" and "nothing is switched off" are opposite answers, and
+        collapsing them would report a healthy account as evidence of a bug.
+        """
+        from selenium.webdriver.common.by import By
+
+        if not store_url:
+            return None
+        try:
+            self._open_page(uploader, store_url, html_markers, paths,
+                            signed_out, wall_wait, wall_tries)
+            links = uploader.driver.find_elements(
+                By.CSS_SELECTOR, "a[href*='/inactive']")
+            for link in links:
+                found = re.search(r"(\d[\d,]*)", link.text or "")
+                if found:
+                    return int(found.group(1).replace(",", ""))
+        except Exception as e:
+            self.log(f"Could not read the inactive count at {store_url}: {e}",
+                     level="warn")
+        return None
+
     def _report(self, run_id: int, account_id: int, design_id: str,
-                action: str, error: Optional[str]) -> bool:
+                action: str, error: Optional[str], *,
+                transient: bool = False) -> bool:
         """
         Say what happened to this one design, immediately.
 
@@ -789,6 +1067,11 @@ class StoreHealthStage:
             reply = self.client.post("/store/action", {
                 "run_id": run_id, "account_id": account_id,
                 "design_id": design_id, "action": action, "error": error,
+                # WHOSE fault it was. A wall says nothing about the design,
+                # so the server records the reason without holding it
+                # against the row — otherwise one bad ten minutes leaves a
+                # live listing switched off and blames a healthy design.
+                "transient": transient,
             })
             return bool((reply or {}).get("stop"))
         except Exception as e:

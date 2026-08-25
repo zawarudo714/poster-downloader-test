@@ -958,8 +958,31 @@ test box at migration time; DATA does not, so an import done on a rehearsal
 is practice and is redone once for real. That is why it is a step in the
 migration tool rather than a tool of its own.
 
-4,821 of 4,865 files map exactly; the other 44 are the dot-truncated titles
-in planned item 7, which need no action.
+**MEASURED 2026-08-25 against the real promoted database, so these are
+facts rather than estimates:**
+
+    4,811  match a live poster exactly
+       44  the dot-truncated titles (planned item 7)
+       10  renumbered — posters deleted and re-saved, all on 2026-04-29
+    ─────
+    4,865
+
+4,811 is also the figure the old notes carry for "images live on
+FineArtAmerica", recorded months earlier by a different route. Two
+independent records agreeing to the image is the best confirmation
+available that the matching rule is right.
+
+The 10 are their own story and need no action: while the first worker was
+learning, extra images were saved and some deleted, and `save_image`
+derives a poster's number from the LIVE COUNT at save time — so deleting
+two shifts every later number. Shawshank is `4,5,6` in the database against
+`1,2,3,4` in the archive. Those three listings are live with no row to
+attach them to, and the posters that ARE on file were never processed, so
+the pipeline correctly treats them as new work.
+
+An earlier version of this file guessed "about 54, the earliest batch" for
+the whole miss and it was repeated as if measured. The owner pushed back —
+"there is no way i deleted 50" — and he was right. 10.
 
 ## Data state (2026-07-30)
 

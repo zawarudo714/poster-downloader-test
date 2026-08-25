@@ -120,6 +120,23 @@ WATCH_TABLES = [
     "revisions", "activity_log", "app_settings",
 ]
 
+# ════════════════════════════════════════════════════════════════════════════
+#  TABLES THE UPGRADE IS SUPPOSED TO ADD TO
+# ════════════════════════════════════════════════════════════════════════════
+# `app_settings` is configuration, not data. Starting the new code creates the
+# projects and writes their overrides — `musik.title_template`, and so on — so
+# it gains rows every time, by design.
+#
+# The first version treated every table alike and reported "app_settings 11
+# before, 15 after — do NOT run this against production", over four rows the
+# upgrade had just been asked to create. A report with a known-false line in
+# it is a report nobody reads, and this one was telling him to abandon a
+# rehearsal that had gone perfectly.
+#
+# For these, rows APPEARING is expected and named; rows DISAPPEARING is still
+# a stop.
+GROWS_BY_DESIGN = {"app_settings"}
+
 
 # ════════════════════════════════════════════════════════════════════════════
 #  THINGS THAT DO NOT NEED A SERVER — so they can be tested
@@ -168,6 +185,13 @@ def count_script(tables: list[str]) -> str:
         "for t in want:\n"
         "    out[t]=con.execute('SELECT COUNT(*) FROM '+t).fetchone()[0] "
         "if t in have else None\n"
+        # The KEYS, not just how many. It is the difference between "+4" and
+        # "musik.title_template, musik.source_search_url, ..." — one of those
+        # is a number to worry about and the other is an answer.
+        "if 'app_settings' in have:\n"
+        "    try: out['_settings']=sorted(r[0] for r in con.execute("
+        "'SELECT key FROM app_settings'))\n"
+        "    except Exception: pass\n"
         "print(json.dumps(out))\n"
     )
 
@@ -199,6 +223,16 @@ def compare_counts(before: dict, after: dict) -> list[tuple[str, str, str]]:
             out.append((table, "LOST", f"had {b} rows, table is gone"))
         elif a == b:
             out.append((table, "same", f"{a} rows"))
+        elif table in GROWS_BY_DESIGN and a > b:
+            # Named rather than silenced. "expected" is a different word
+            # from "same", and the reader should still see the number move.
+            added = ", ".join(sorted(
+                set(after.get("_settings") or []) -
+                set(before.get("_settings") or [])))
+            out.append((table, "added",
+                        f"{a - b} new: {added}" if added
+                        else f"{b} rows before, {a} after — the upgrade "
+                             f"creates these"))
         else:
             out.append((table, "CHANGED",
                         f"{b} rows before, {a} after ({a - b:+d})"))
@@ -207,6 +241,8 @@ def compare_counts(before: dict, after: dict) -> list[tuple[str, str, str]]:
 
 def verdict_of(rows: list[tuple[str, str, str]]) -> tuple[bool, str]:
     """(is it safe, one sentence). LOST or CHANGED means stop."""
+    # "added" is deliberately absent: a settings row the upgrade was
+    # asked to create is not a reason to stop.
     bad = [r for r in rows if r[1] in ("LOST", "CHANGED")]
     if bad:
         return False, (f"{len(bad)} table(s) lost rows or changed count — "
@@ -898,7 +934,8 @@ class App:
 
             self._emit("\n── BEFORE AND AFTER ──", "step")
             for table, kind, detail in rows:
-                tag = {"LOST": "err", "CHANGED": "err", "new": "dim"}.get(kind, "")
+                tag = {"LOST": "err", "CHANGED": "err",
+                       "new": "dim", "added": "dim"}.get(kind, "")
                 self._emit(f"  {kind:<8} {table:<20} {detail}", tag)
             self._emit(f"\n{sentence}", "ok" if ok else "err")
 

@@ -1,5 +1,0 @@
-Listing check now tells a REMOVED listing (410) apart from an address that
-never existed (404) — these were effectively backwards, so real takedowns were
-being ignored. Migration tool clears its fabricated sample files before copying
-the real posters, and can bring the other projects' titles across so MUSIK is
-testable too. Commit box is never blank again.

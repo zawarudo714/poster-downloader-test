@@ -139,14 +139,25 @@ Also planned, stated but not yet built:
 
    Untested against a REAL ban — nothing here has been through one.
 
-7. **Reprocess the dot-truncated legacy titles.** The old JSX did
-   `split('.')[0]` on the filename, so every poster in a title containing a
-   dot overwrote the previous one. Measured on disk: **44 title folders**
-   holding 1 file each where 2-3 were expected (`E.T.`, `Kill Bill Vol. 1`,
-   `Mr. & Mrs. Smith`). The owner recalls 61-65; reconcile the figure before
-   acting. These need re-processing through the pipeline once. Intended as a
-   deliberate one-off trigger, not a permanent feature — build it as a
-   throwaway admin action and delete it afterwards.
+7. **The dot-truncated legacy titles. NO LONGER NEEDS A TOOL — SOLVED BY
+   DOING NOTHING.** The old JSX did `split('.')[0]` on the filename, so
+   every poster in a title containing a dot overwrote the previous one.
+
+   **The figure is 44, confirmed twice** — 44 folders on disk holding one
+   file each, and independently 44 entries in `faa_upload_tracking.json`
+   whose filename carries no poster number (`E_Painted.jpg`,
+   `Kill Bill Vol_Painted.jpg`, `House M_Painted.jpg`). The owner's
+   recollection of 61-65 was high; treat 44 as measured.
+
+   No throwaway admin action is needed, and building one would be wasted
+   work. `import_upload_tracking` cannot match those filenames to a poster,
+   so it files them as orphans with cause `jsx_dot_bug` and writes NO upload
+   record. Those posters therefore look like ordinary unprocessed work and
+   the pipeline paints and uploads them on its next run, correctly indexed.
+
+   Expect one near-duplicate listing per affected title, because the one
+   image that did reach the marketplace is still there. 44 duplicates in
+   ~4,900 listings; tidy by hand or leave.
 
 8. **THE INTERACTION AUDIT — a whole-system pass, on his explicit
    instruction, once the foundational mechanisms are all in.** Not a code
@@ -190,6 +201,90 @@ Also planned, stated but not yet built:
    appearing during a scan vs during a deactivation; a node going offline
    mid-stage in each of the six stages; a marketplace serving maintenance,
    a redesign, or a challenge to any of the three readers.
+
+9. **SPEED. The site is slow now and it was not before, and the reason is
+   not mysterious: it is running on 201,133 titles instead of nineteen.**
+   Requested 2026-08-25 after the promoted test box became noticeably
+   sluggish.
+
+   Every query that was written against a toy database is now doing real
+   work, and SQLite will happily scan 201k rows without complaining. This is
+   NOT a rewrite — it is finding the handful of page loads that scan whole
+   tables and giving them an index or a bound.
+
+   **Measure first, and say the numbers.** Do not guess which page is slow;
+   time them. `EXPLAIN QUERY PLAN` says "SCAN master_titles" in plain words
+   and is the whole diagnosis for most of these.
+
+   Known candidates, found by reading rather than timing, so treat them as
+   leads and not as findings:
+
+     * The master dashboard groups the ENTIRE `master_titles` table by
+       `(project_id, status)` on every load. There is no index on that
+       pair — `ix_master_status_extid` and `ix_master_claim_status` do not
+       cover it. One full scan of 201k rows per visit.
+     * `preflight.py` already warns about six queries running once per item
+       inside a comprehension. Those were harmless at nineteen rows.
+     * Diagnostics walks the disk for 10,092 posters. That one is honestly
+       slow and belongs behind an explicit "run it" rather than a page load.
+     * The worker's Browse All Titles pages 201,133 rows.
+
+   An index is a schema change, so it goes in `schema_migrations.py` as
+   `CREATE INDEX IF NOT EXISTS` — safe, idempotent, and SQLite builds one
+   over 201k rows in seconds.
+
+   The invariant to leave behind: **a page that scans a whole table is a
+   defect once the table is real.** Worth a preflight check that flags a
+   query with no filter on a table known to be large.
+
+10. **THE RETROFIT AUDIT — build the extension points before the next thing
+    needs them.** His words, 2026-08-25: *"we should revamp everything for
+    as little retrospect headache as possible. You have by now seen the
+    pattern when we add stuff."*
+
+    He is right that there is a pattern, and it is worth naming exactly,
+    because it is the same shape every time: **a field that describes one
+    thing gets used for two, and a mechanism built for one marketplace
+    becomes the template for the next.** Every one of these cost a session:
+
+      * `UploadAccount.project_id` — one column could not say "this account
+        serves two niches". Became the `account_projects` link table; the
+        column survives as dead weight.
+      * `paused_until` — one field for an account that cannot upload AND an
+        account that cannot be read for money. Two unrelated failures, each
+        silencing the other. Became `earnings_paused_until` beside it.
+      * `action_error` — one field for "could not switch off" and "could not
+        switch back on", which are opposites. Became `action_error_kind`,
+        and while it was one field a live listing sat hidden.
+      * Marketplace behaviour as if-statements — became `CAPABILITIES` rows
+        only after TeePublic's habits were applied to FineArtAmerica, where
+        they were exactly wrong.
+      * A stage counter — became work derived from the catalogue only after
+        one account finishing ended the stage for five.
+
+    So the audit is not "tidy the code". It is: **for every field and every
+    mechanism, ask what the SECOND user of it will need, and whether it can
+    express that today.** Concretely, walk these and write down the answer:
+
+      * Every column that names a single owner (`project_id`, `account_id`,
+        `target_site`) — can the thing it points at ever be plural?
+      * Every status field — can the thing it describes fail in more than
+        one way independently?
+      * Every mechanism that exists once (a run with stages, a chunked node
+        job, a nightly read, a review gate) — the store sweep, the listing
+        sweep and the earnings read each grew their own. Which parts are
+        genuinely one shared mechanism and which are genuinely different?
+      * Every screen that shows a shared fact inside one project.
+
+    **The known next arrivals, and they are the test:** celebrity portraits
+    from Pinterest, TeePublic as an uploading project rather than only an
+    earning one, Redbubble as a third marketplace, and the master-level
+    Accounts tab. For each, say which existing pieces would be DEAD and
+    which existing field would have to be split — BEFORE building.
+
+    Do this AFTER the interaction audit and BEFORE the UI revamp: the audit
+    tells you which seams leak, this fixes the seams, and the revamp is
+    cheapest once nothing underneath is about to move.
 
 Concretely, this means:
 
@@ -820,19 +915,38 @@ They are being copied to `S:/fineartamerica/GR(Movie&Series)/processed/` with
 rclone (`UPLOAD_TO_STORAGE.bat` next to the Outputs folder), which is a plain
 file copy — no database involvement.
 
-Registering them as `ProcessedImage` rows is a SEPARATE, later step, and it
-has to happen against **production**, because that is the only database that
-still holds the `saved_posters` rows they belong to. The match is:
+**THESE ARE TWO DIFFERENT RECORDS AND ONLY ONE OF THEM IS URGENT.** Confusing
+them wasted a conversation, so it is worth being blunt:
+
+  * **"already on FineArtAmerica"** — `UploadTracking`, imported from
+    `faa_upload_tracking.json`. This is what stops the pipeline uploading
+    all 4,865 a SECOND time, and it needs no files at all. It also WINS over
+    the archive record in `backfill_statuses`, so the tracking import alone
+    is enough to be safe. Steps 6b/6c of `tools/migrate_gui.py`.
+  * **"the finished file is at this path"** — `ProcessedImage`. An index of
+    the archive. Nothing breaks without it; you simply could not re-upload
+    after a ban without hunting through folders. `app/archive_index.py` and
+    the READ THE STORAGE BOX button.
+
+The archive half CANNOT run on the server: the files are on the storage box,
+mounted as a drive letter on the Windows machine, and the database is on
+Linux. Neither can see both. So the machine with the drive lists what is on
+it and posts the paths home — the same split as the listing checker, and the
+reason `scripts/migrate_pipeline.py --processed-root` is now dead. It read a
+local folder that no longer exists on the laptop.
+
+The match is:
 
     folder prefix  -> MasterTitle.external_id      (exact)
     " N_Painted"   -> the Nth poster of that title (exact)
 
-4,821 of 4,865 files map exactly. The other 44 are the titles containing a
-dot — `E.T.`, `Kill Bill Vol. 1`, `Mr. & Mrs. Smith` — where the old JSX did
-`split('.')[0]` on the filename, so every poster in those titles wrote to the
-same truncated name and overwrote each other. Each of those folders now holds
-exactly ONE file with no index in its name. The title is recoverable, the
-per-poster mapping is not; they are cheapest to simply reprocess.
+Both halves must be run against the FINAL database. Settings travel from the
+test box at migration time; DATA does not, so an import done on a rehearsal
+is practice and is redone once for real. That is why it is a step in the
+migration tool rather than a tool of its own.
+
+4,821 of 4,865 files map exactly; the other 44 are the dot-truncated titles
+in planned item 7, which need no action.
 
 ## Data state (2026-07-30)
 
@@ -1077,6 +1191,15 @@ button's `data-` attribute proved nothing about "endpoints have buttons",
 because the fetch was still there. **Say which check you expect to go red
 before you break anything**, or you will confirm a check that was never
 looking.
+
+**A TEST MUST NOT BE HANDED THE RULE IT IS CHECKING.** The archive tests
+lift two functions out of the shipped file and were passed `FOLDER_ID` — the
+pattern that decides which title a path belongs to — as a convenience. Break
+that pattern on purpose so every title number past 9 reads wrong, and all
+eleven checks stayed green: the test was comparing the file against a copy
+of the rule it had supplied itself. `_exec` now lifts module-level values
+out of the file too. Anything a rule depends on comes from the shipped
+source, never from the caller.
 
 **MATCH A CALL, NEVER A WORD — this is the commonest way a check reads as
 coverage while looking at nothing.** The guard check written on 25 Aug
@@ -1587,6 +1710,19 @@ the whole point of this rule — a check found it instead of the owner.
 
 For every change: **would this still be right for a third project?** If the
 answer needs "well, for MUSIK…", it is not finished. See `MULTIPROJECT.md`.
+
+**And the same question about FIELDS, because that is where it keeps
+costing money: can the thing this column names ever be plural, and can the
+thing this status describes fail in more than one way?** `project_id` on an
+account, one `paused_until` for uploading and for reading money, one
+`action_error` for switching off and switching back on — three columns that
+were each correct for their first user and wrong for their second, and each
+one hid a real fault while looking fine. A minute spent on this at the time
+is a session saved later. This is planned item 10.
+
+**Also, and this only became true recently: would this be right on 201,133
+rows?** The database is no longer a toy, and a query with no filter is now a
+full scan on every page load. See planned item 9.
 
 ### 7. Every bug becomes a rule — this file is the memory
 

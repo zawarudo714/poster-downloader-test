@@ -1,13 +1,15 @@
-v120 — the wall now stops a reactivation instead of blaming 79 designs
+v121 — legacy upload history, archive index, and the settings-drift warning
 
 # Everything above the --- is the commit message (first non-comment line).
 # Everything below is extra server work for this deploy only.
 #
-# NOTHING extra is needed on the server: the new columns
-# (store_listings.action_fail_count, upload_accounts.inactive_count /
-# inactive_checked_at) and the new table store_count_checks are applied by
-# app/schema_migrations.py and create_all() on startup.
+# NOTHING extra on the server: the new setting (archive_index_chunk) and the
+# new table (store_count_checks, from v120) are applied on startup.
 #
-# THE WORKER MACHINE MUST BE UPDATED TOO. Copy worker_service\ across and
-# restart the agent — the switch-on wall check, the real click and the
-# inactive-count reading all live there. No new pip packages.
+# THE WORKER MACHINE NEEDS worker_service\ COPIED AGAIN — it gains
+# archive_index.py and the agent learns the "archive_index" job. No new pip
+# packages; it uses os.walk and nothing else.
+#
+# AFTER DEPLOYING, in this order:
+#   1. MIGRATE.bat -> LIST ACCOUNTS -> 6b CHECK -> read the numbers -> 6c
+#   2. Pipeline page -> READ THE STORAGE BOX

@@ -2627,6 +2627,22 @@
       return;
     }
 
+    if (action === 'index-archive') {
+      const el = document.querySelector('[data-archive-status]');
+      el.textContent = 'asking the worker machine…';
+      try {
+        const r = await fetch(`${API}/archive/index`, { method: 'POST' });
+        const d = await r.json();
+        el.textContent = d.message || (d.ok ? 'queued' : 'could not start');
+        el.className = d.ok ? 'muted mono' : 'error mono';
+        await loadArchiveState();
+      } catch (err) {
+        el.textContent = 'Could not start: ' + err.message;
+        el.className = 'error mono';
+      }
+      return;
+    }
+
     if (action === 'upload-gpt-style') {
       if (!styleFile.files || !styleFile.files[0]) {
         styleStatus.textContent = 'pick a file first';
@@ -2645,5 +2661,44 @@
     }
   });
 
+  // ── What is already on the storage box ────────────────────────────────
+  //
+  // Every figure here is DERIVED from the rows, so this can be re-read at
+  // any moment and cannot drift. Says the numbers in things rather than in
+  // percentages: "1,204 of 10,092 have no finished image on file" is
+  // actionable, "88% indexed" is not.
+  async function loadArchiveState() {
+    const line = document.querySelector('[data-archive-state]');
+    const head = document.querySelector('[data-archive-summary]');
+    if (!line) return;
+    try {
+      const r = await fetch(`${API}/archive/state`);
+      if (!r.ok) return;
+      const d = await r.json();
+      head.textContent = d.root || '';
+      let text = `${(d.indexed || 0).toLocaleString()} of `
+        + `${(d.posters || 0).toLocaleString()} finished image(s) are on `
+        + `record`;
+      if (d.missing) {
+        text += `. ${d.missing.toLocaleString()} poster(s) have none — `
+          + `either not processed yet, or processed before the database was `
+          + `keeping track.`;
+      } else {
+        text += ' — nothing is unaccounted for.';
+      }
+      if (d.from_archive) {
+        text += ` ${d.from_archive.toLocaleString()} of them were found by `
+          + `reading the storage box rather than produced here.`;
+      }
+      if (d.job_id) {
+        text += `  A read is running now — job #${d.job_id}.`;
+      }
+      line.textContent = text;
+    } catch (err) {
+      line.textContent = 'Could not read the current state: ' + err.message;
+    }
+  }
+
   load();
+  loadArchiveState();
 })();

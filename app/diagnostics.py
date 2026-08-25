@@ -445,9 +445,15 @@ def check_uploaded_without_processed(db: Session, scope: Scope) -> CheckResult:
     return _result(
         "upload_no_processed", "Live listings with no processed file on record",
         "The image is on the marketplace but the archive has no current "
-        "derivative for it. Expected for the legacy images imported from the "
-        "old laptop workflow. Anything recent means the storage record was "
-        "lost — you would not be able to re-upload it after a ban.",
+        "derivative for it, so you could not re-upload it after a ban "
+        "without hunting through folders.\n\n"
+        "This is EXPECTED straight after a migration: the upload history "
+        "comes from the old tool's own records and needs no files, while "
+        "the files themselves live on the storage box, which only the "
+        "worker machine can see. Press READ THE STORAGE BOX on the Pipeline "
+        "page and most of these should disappear. Whatever is left is "
+        "either work the old Photoshop script destroyed — the titles with a "
+        "dot in the name — or a record genuinely lost.",
         "warn", rows, total,
     )
 
@@ -1040,6 +1046,44 @@ def check_listing_sweep_believable(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def check_two_current_images(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: a poster has at most ONE current processed image.
+
+    `is_current` is what the uploader reads to decide which file to send. If
+    two rows claim it, which image reaches the marketplace depends on the
+    order a query happens to return — so the same poster could list
+    differently on two accounts, and nothing would ever say so.
+
+    Cheap to check and it holds against every path that writes one, not
+    just the one that made it necessary: reprocessing after a script change,
+    the pipeline's own upload, and now the archive index reading the storage
+    box. Those last two can race if two walks are started at once, which is
+    why only one is allowed to run — this is the net under that.
+    """
+    rows_q = (db.query(ProcessedImage.saved_poster_id,
+                       func.count(ProcessedImage.id).label("n"))
+                .filter(ProcessedImage.is_current == 1)
+                .group_by(ProcessedImage.saved_poster_id)
+                .having(func.count(ProcessedImage.id) > 1))
+    found = rows_q.limit(MAX_ROWS).all()
+    total = len(rows_q.all())
+
+    rows = [Finding(f"poster #{poster_id}",
+                    f"{n} images all marked current", "/admin/pipeline")
+            for poster_id, n in found]
+    return _result(
+        "two_current_images",
+        f"{total} poster(s) have more than one current image"
+        if total else "Every poster has at most one current image",
+        "The uploader picks whichever the database hands it first, so the "
+        "same poster could go to two marketplaces looking different. Tell "
+        "whoever built the step that created the second one — this state is "
+        "supposed to be impossible.",
+        "error" if total else "ok", rows, total,
+    )
+
+
 def _account_names(db: Session) -> dict[int, str]:
     """
     id -> name for every marketplace account, fetched once.
@@ -1263,6 +1307,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_marketplace_disagrees,
     check_count_check_is_running,
     check_designs_given_up_on,
+    check_two_current_images,
     check_orphaned_upload_rows,
     check_unassigned_titles,
     check_duplicate_hashes,

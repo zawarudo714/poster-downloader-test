@@ -91,6 +91,13 @@ TEST_DIR = "/opt/poster"
 REHEARSAL_DIR = "/opt/poster-rehearsal"
 REHEARSAL_PORT = 8081
 
+# Where the old uploader keeps its record of what it put on FineArtAmerica.
+# A DEFAULT, not a constant — it is editable in the window, because a laptop
+# gets rebuilt and a folder gets moved. Measured 2026-08-25: 2,077 titles,
+# 4,865 images, all marked uploaded.
+DEFAULT_TRACKING = (Path.home() / "Desktop" / "FineArtAmerica Tell-A-Vision"
+                    / "FAA Autouploader" / "faa_upload_tracking.json")
+
 # ════════════════════════════════════════════════════════════════════════════
 #  WHAT TRAVELS FROM THE TEST BOX
 # ════════════════════════════════════════════════════════════════════════════
@@ -280,6 +287,14 @@ STEPS = [
      "Copies accounts, mouse paths and settings from the test box into the "
      "rehearsal, then proves a password still decrypts.",
      "_step_settings"),
+    ("6b. CHECK THE OLD UPLOAD HISTORY",
+     "Reads faa_upload_tracking.json and says what it WOULD record. Writes "
+     "nothing at all. Run this before 6c.",
+     "_step_history_check"),
+    ("6c. IMPORT THE OLD UPLOAD HISTORY",
+     "Records the images you uploaded to FineArtAmerica by hand, so the "
+     "pipeline never offers them again. Backs up first.",
+     "_step_history_import"),
     ("7. PROMOTE IT TO YOUR TEST BOX",
      "Makes the rehearsed copy your everyday test system, so you build and "
      "click against real data. The old one is kept.",
@@ -370,6 +385,45 @@ class App:
                  "it").grid(row=row, column=1, sticky="w", **pad)
         row += 1
 
+        # ── THE OLD UPLOAD HISTORY ──────────────────────────────────────
+        #
+        # 4,865 images were painted and uploaded to FineArtAmerica by hand
+        # before any of this existed. Nothing in the database knows, so a
+        # bulk greenlight would queue every one of them for a SECOND upload
+        # — real duplicate listings on a real marketplace.
+        #
+        # The file lives on this laptop, so the tool copies it up rather
+        # than asking him to. Typing a path he can get subtly wrong, for a
+        # file that is always in the same place, is a step that exists only
+        # to go wrong.
+        ttk.Label(frm, text="Old upload history").grid(row=row, column=0,
+                                                       sticky="w", **pad)
+        self.tracking = tk.StringVar(
+            value=saved.get("tracking", str(DEFAULT_TRACKING)))
+        ttk.Entry(frm, textvariable=self.tracking).grid(
+            row=row, column=1, sticky="ew", **pad)
+        ttk.Label(frm, text="faa_upload_tracking.json on this laptop",
+                  foreground="#888").grid(row=row, column=2, sticky="w", **pad)
+        row += 1
+
+        # ── PICKED, NEVER TYPED ─────────────────────────────────────────
+        #
+        # The import files 4,865 "already uploaded" records against one
+        # account, and the underlying script CREATES an account when the
+        # name matches nothing. A typo would therefore produce a phantom
+        # account holding all the history and the real one holding none,
+        # with nothing broken-looking anywhere. A list cannot be misspelled.
+        ttk.Label(frm, text="File them against").grid(row=row, column=0,
+                                                      sticky="w", **pad)
+        self.account = tk.StringVar(value=saved.get("account", ""))
+        self.account_box = ttk.Combobox(frm, textvariable=self.account,
+                                        state="readonly", values=[])
+        self.account_box.grid(row=row, column=1, sticky="ew", **pad)
+        ttk.Button(frm, text="LIST ACCOUNTS", width=16,
+                   command=lambda: self._go("_step_list_accounts")).grid(
+            row=row, column=2, sticky="w", **pad)
+        row += 1
+
         # ── OUTSIDE THE NUMBERED LIST, DELIBERATELY ─────────────────────
         #
         # It is not a step in the sequence — it is the answer to "I deployed,
@@ -386,6 +440,19 @@ class App:
                        "Press this after a deploy if you are still testing on "
                        "port 8081. Data is untouched.").pack(
             side="left", padx=10)
+        row += 1
+
+        undo = ttk.Frame(frm)
+        undo.grid(row=row, column=0, columnspan=3, sticky="ew", **pad)
+        ttk.Button(undo, text="PUT IT BACK (undo 6c)", width=34,
+                   command=lambda: self._go("_step_history_undo")).pack(
+            side="left")
+        ttk.Label(undo, foreground="#888", wraplength=720, justify="left",
+                  text="Restores the copy taken just before the upload "
+                       "history was imported. Only reaches back to the last "
+                       "import done in THIS window; older copies are in the "
+                       "rehearsal's data folder named "
+                       "poster.db.before-history-*.").pack(side="left", padx=10)
         row += 1
 
         steps = ttk.LabelFrame(frm, text="Run these in order", padding=8)
@@ -436,7 +503,9 @@ class App:
     def _save(self) -> None:
         data = {"prod": self.prod_var.get(), "test": self.test_var.get(),
                 "extras": self.extras.get(),
-                "other_projects": self.other_projects.get()}
+                "other_projects": self.other_projects.get(),
+                "tracking": self.tracking.get(),
+                "account": self.account.get()}
         if self.remember.get():
             data["prod_pw"] = protect_password(self.prod_pw.get()) or ""
             data["test_pw"] = protect_password(self.test_pw.get()) or ""
@@ -1174,6 +1243,336 @@ class App:
         finally:
             client.close()
 
+    # ════════════════════════════════════════════════════════════════════
+    #  THE OLD UPLOAD HISTORY
+    # ════════════════════════════════════════════════════════════════════
+    #
+    # Two buttons, and the split IS the safety design. CHECK cannot write —
+    # not "does not", cannot — so the only button that can change anything
+    # is reachable only after the harmless one has printed exactly what it
+    # will do, in numbers that can be read.
+    #
+    # A single clever button that decided for itself would be doing its
+    # deciding at the one moment nobody is in a position to disagree.
+
+    def _rehearsal_python(self, client, script: str) -> tuple[int, str]:
+        """Run a snippet inside the rehearsal's container. Returns (code, text)."""
+        return self._run(client, (
+            f"cd {REHEARSAL_DIR} && docker compose exec -T web python - "
+            f"<<'PY'\n{script}\nPY"))
+
+    def _step_list_accounts(self) -> None:
+        """Fill the dropdown from the rehearsal, so nothing has to be typed."""
+        self._header("READING THE ACCOUNT LIST")
+        client = self._connect("test")
+        try:
+            code, text = self._rehearsal_python(client, (
+                "from app.db import SessionLocal\n"
+                "from app.models import UploadAccount\n"
+                "db=SessionLocal()\n"
+                "for a in db.query(UploadAccount).order_by(UploadAccount.name):\n"
+                "    print('%s\\t%s\\t%s'%(a.name, a.target_site or '?',\n"
+                "                          a.artist_name or '(no artist name)'))\n"
+                "db.close()"))
+            names = []
+            for line in text.splitlines():
+                parts = line.rstrip().split("\t")
+                if len(parts) == 3:
+                    names.append(parts[0])
+                    self._emit(f"   {parts[0]:<20} {parts[1]:<16} "
+                               f"lists as: {parts[2]}", "dim")
+            if not names:
+                self._emit("No accounts found. Run step 6 first.", "err")
+                return
+            self.account_box["values"] = names
+            if self.account.get() not in names:
+                self.account.set(names[0])
+            self._emit(f"\nPick the one your hand uploads went to. The name in "
+                       f"the third column is what FineArtAmerica prints on "
+                       f"the listing — that is the one to recognise.", "ok")
+        finally:
+            client.close()
+
+    def _history_paths(self) -> tuple[Path, str]:
+        local = Path(self.tracking.get().strip('" '))
+        if not local.is_file():
+            raise RuntimeError(
+                f"I cannot find {local}. That is the old uploader's record of "
+                f"what it put on FineArtAmerica — it lives beside the FAA "
+                f"Autouploader folder.")
+        return local, f"{REHEARSAL_DIR}/data/faa_upload_tracking.json"
+
+    def _project_counts(self, client) -> dict:
+        """Titles per project, by name. The before/after of the whole step."""
+        code, text = self._rehearsal_python(client, (
+            "from app.db import SessionLocal\n"
+            "from app.models import MasterTitle, Project\n"
+            "db=SessionLocal()\n"
+            "for p in db.query(Project).order_by(Project.id):\n"
+            "    n=db.query(MasterTitle).filter("
+            "MasterTitle.project_id==p.id).count()\n"
+            "    print('%s\\t%d'%(p.name,n))\n"
+            "print('(no project yet)\\t%d'%db.query(MasterTitle).filter("
+            "MasterTitle.project_id.is_(None)).count())\n"
+            "db.close()"))
+        out = {}
+        for line in text.splitlines():
+            parts = line.rstrip().split("\t")
+            if len(parts) == 2 and parts[1].strip().isdigit():
+                out[parts[0]] = int(parts[1])
+        return out
+
+    def _step_history_check(self) -> None:
+        """
+        Say what the import WOULD do. Nothing is written, by construction.
+        """
+        self._header("6b. CHECKING THE OLD UPLOAD HISTORY")
+        local, remote = self._history_paths()
+        account = self.account.get().strip()
+        if not account:
+            raise RuntimeError(
+                "Press LIST ACCOUNTS and pick the account your hand uploads "
+                "went to first. Typing a name that matches nothing would "
+                "create a brand-new account and file all 4,865 records "
+                "against it, which looks like nothing being wrong.")
+
+        client = self._connect("test")
+        try:
+            self._emit(f"copying {local.name} up ({local.stat().st_size:,} bytes)…")
+            sftp = client.open_sftp()
+            try:
+                sftp.put(str(local), remote)
+            finally:
+                sftp.close()
+
+            before = self._project_counts(client)
+            self._emit("\ntitles per project BEFORE:")
+            for name, n in before.items():
+                self._emit(f"   {name:<24} {n:>8,}", "dim")
+
+            self._emit("\nasking what it would do (writing nothing)…")
+            code, text = self._run(client, (
+                f"cd {REHEARSAL_DIR} && docker compose exec -T web python "
+                f"scripts/migrate_pipeline.py --dry-run "
+                f"--tracking /app/data/faa_upload_tracking.json "
+                f"--account-name '{account}'"))
+            self._emit(text.strip())
+
+            after = self._project_counts(client)
+            moved = [n for n in after if after.get(n, 0) != before.get(n, 0)]
+            if moved:
+                self._emit(f"\nA DRY RUN MOVED SOMETHING: {', '.join(moved)}. "
+                           f"That should be impossible — stop and say so "
+                           f"before running 6c.", "err")
+            else:
+                self._emit("\nNothing moved, which is what a dry run must do.",
+                           "ok")
+
+            self.state["history_checked"] = account
+            self.state["history_before"] = before
+            self._emit(
+                "\nRead the three numbers above: how many it would record, "
+                "how many it would set aside, and how many it could not "
+                "place. The set-aside ones are the titles the old Photoshop "
+                "script truncated at the first dot — those are unprocessed "
+                "work the pipeline will redo properly, which is what you "
+                "want. If all three look right, press 6c.", "ok")
+        finally:
+            client.close()
+
+    def _step_history_import(self) -> None:
+        """Do it for real — after a backup, and check its own arithmetic."""
+        self._header("6c. IMPORTING THE OLD UPLOAD HISTORY")
+        account = self.account.get().strip()
+        if self.state.get("history_checked") != account:
+            raise RuntimeError(
+                "Run 6b for this account first. It is the only thing that "
+                "says what this will do, and it is the reason this button is "
+                "safe to press.")
+        local, remote = self._history_paths()
+
+        if not messagebox.askyesno("Import", (
+                f"Record the images you uploaded by hand as already "
+                f"uploaded, against '{account}'?\n\n"
+                f"The database is backed up first and PUT IT BACK undoes "
+                f"this.")):
+            self._emit("cancelled", "dim")
+            return
+
+        client = self._connect("test")
+        try:
+            stamp = datetime.now().strftime("%Y%m%d-%H%M")
+            backup = f"{REHEARSAL_DIR}/data/poster.db.before-history-{stamp}"
+            self._emit("backing the database up first…")
+            self._must(client,
+                       f"cp {REHEARSAL_DIR}/data/poster.db {backup} && "
+                       f"ls -lh {backup}",
+                       "could not take a backup — nothing was changed")
+            self.state["history_backup"] = backup
+
+            before = self.state.get("history_before") or {}
+            self._emit("\nimporting…")
+            code, text = self._run(client, (
+                f"cd {REHEARSAL_DIR} && docker compose exec -T web python "
+                f"scripts/migrate_pipeline.py "
+                f"--tracking /app/data/faa_upload_tracking.json "
+                f"--account-name '{account}'"))
+            self._emit(text.strip())
+
+            # ── DOES IT ADD UP ──────────────────────────────────────────
+            #
+            # The file holds a known number of images. Every one of them was
+            # either recorded, set aside as unplaceable, or is missing — and
+            # the third case must be impossible. Checking it here rather
+            # than trusting the script's own summary means a silent partial
+            # import cannot pass as a success.
+            with open(local, "r", encoding="utf-8") as fh:
+                claimed = sum(len(v) for v in json.load(fh).values()
+                              if isinstance(v, dict))
+            code, tally = self._rehearsal_python(client, (
+                "from app.db import SessionLocal\n"
+                "from app.models import UploadTracking\n"
+                "db=SessionLocal()\n"
+                "print(db.query(UploadTracking).count())\n"
+                "db.close()"))
+            recorded = next((int(l) for l in tally.split() if l.isdigit()), 0)
+            self._emit(f"\nthe file listed {claimed:,} image(s); "
+                       f"{recorded:,} are now on record.")
+            if recorded > claimed:
+                self._emit("More on record than the file listed — something "
+                           "else has written here too. Worth understanding "
+                           "before you promote.", "err")
+
+            after = self._project_counts(client)
+            self._emit("\ntitles per project AFTER:")
+            for name, n in after.items():
+                delta = n - before.get(name, n)
+                mark = "" if not delta else f"   <-- moved by {delta:+,}"
+                self._emit(f"   {name:<24} {n:>8,}{mark}",
+                           "err" if delta and name != "(no project yet)" else "dim")
+
+            # The import gives every title with no project to the default
+            # one. That is right for the imported movie rows and wrong for
+            # anything else, and it is silent, so it is checked out loud.
+            drifted = [n for n, v in after.items()
+                       if n != "(no project yet)"
+                       and n in before and v != before[n]
+                       and n.upper() != "GR(MOVIE&SERIES)"]
+            if drifted:
+                self._emit(
+                    f"\n{', '.join(drifted)} changed size. Titles should not "
+                    f"move between projects here. PUT IT BACK and tell "
+                    f"whoever wrote this before going any further.", "err")
+            else:
+                self._emit("\nNo project gained or lost titles it should not "
+                           "have.", "ok")
+
+            self._emit(
+                f"\nDone. The pipeline will now leave those images alone.\n"
+                f"The files themselves are still only linked once you press "
+                f"READ THE STORAGE BOX on the Pipeline page — that needs the "
+                f"worker machine, which is the only thing with the drive.",
+                "ok")
+        finally:
+            client.close()
+
+    def _step_history_undo(self) -> None:
+        """Put the database back as it was before 6c."""
+        self._header("PUTTING THE DATABASE BACK")
+        backup = self.state.get("history_backup")
+        if not backup:
+            raise RuntimeError("There is no backup from this session to "
+                               "restore. Look in the rehearsal's data folder "
+                               "for a file named poster.db.before-history-*.")
+        if not messagebox.askyesno("Put it back", (
+                f"Replace the rehearsal's database with the copy taken "
+                f"before the import?\n\nAnything done since is lost.")):
+            self._emit("cancelled", "dim")
+            return
+        client = self._connect("test")
+        try:
+            self._run(client, f"cd {REHEARSAL_DIR} && docker compose down "
+                              f"2>&1 | tail -2")
+            self._must(client,
+                       f"cp {backup} {REHEARSAL_DIR}/data/poster.db && echo ok",
+                       "could not restore the backup")
+            self._run(client, f"cd {REHEARSAL_DIR} && docker compose up -d "
+                              f"2>&1 | tail -3")
+            self._emit("Restored. The import has been undone.", "ok")
+        finally:
+            client.close()
+
+    def _settings_drift(self, client) -> None:
+        """
+        SETTINGS TRAVEL. DATA DOES NOT. Say which ones, before it happens.
+
+        ════════════════════════════════════════════════════════════════════
+        THE HOLE THIS CLOSES
+        ════════════════════════════════════════════════════════════════════
+        The migration takes production's DATA fresh but carries the SETTINGS
+        across from the test box — accounts, mouse paths, and every tuned
+        value. That is the right split, and it has a quiet consequence: a
+        number nudged while testing goes to production with everything else,
+        and nothing anywhere says so.
+
+        The dangerous ones are the harmless-looking ones. `scan_limit_per_
+        account` set to 5 to reach the later stages without sitting through
+        ninety designs would silently make every real sweep check five.
+        `store_count_check` switched off while debugging would silently stop
+        the only cross-check that is not us marking our own homework. A
+        daily upload limit lowered for a test would quietly throttle a real
+        account.
+
+        So every value that differs from its shipped default is printed here
+        — deliberately not judged, because most of them ARE deliberate. The
+        list exists so he can look at it once and say "yes, those".
+        """
+        self._emit("settings that differ from their shipped default — these "
+                   "travel with the migration:")
+        code, text = self._rehearsal_python(client, (
+            "from app.db import SessionLocal\n"
+            "from app import pipeline as P\n"
+            "from app.models import AppSetting\n"
+            "db=SessionLocal()\n"
+            "rows=db.query(AppSetting).order_by(AppSetting.key).all()\n"
+            "shown=0\n"
+            "for r in rows:\n"
+            "    key=r.key.split('.')[-1]\n"
+            "    if key not in P.DEFAULTS: continue\n"
+            "    raw=P.DEFAULTS[key]\n"
+            # Structured defaults (timings, selectors, the JSX) are stored as
+            # JSON and never match their Python form character for
+            # character. Listing them would put six permanent entries in
+            # this report, and a list that always cries wolf is read once.
+            "    if isinstance(raw,(dict,list)): continue\n"
+            "    default=str(raw)\n"
+            "    value=str(r.value)\n"
+            "    if value==default: continue\n"
+            # Secrets are shown as changed-or-not and never printed. The
+            # transcript gets pasted into a chat window.
+            "    secret=any(w in r.key for w in ('key','secret','password',"
+            "'token'))\n"
+            "    print('%s\\t%s\\t%s'%(r.key,'(set)' if secret else value[:60],\n"
+            "                          '(hidden)' if secret else default[:40]))\n"
+            "    shown+=1\n"
+            "print('TOTAL\\t%d\\t'%shown)\n"
+            "db.close()"))
+        total = 0
+        for line in text.splitlines():
+            parts = line.rstrip().split("\t")
+            if len(parts) != 3:
+                continue
+            if parts[0] == "TOTAL":
+                total = int(parts[1] or 0)
+                continue
+            self._emit(f"   {parts[0]:<34} {parts[1]:<62} "
+                       f"(default {parts[2]})", "dim")
+        self._emit(
+            f"   {total} changed value(s). Most will be deliberate. Look for "
+            f"anything you set while TESTING — a limit lowered to reach a "
+            f"later stage, a check switched off — because it is about to "
+            f"become how the real system behaves.\n", "ok")
+
     def _park_runs(self, client) -> None:
         """
         A CARRIED-OVER SWEEP MUST ARRIVE STOPPED.
@@ -1439,6 +1838,8 @@ class App:
         stamp = datetime.now().strftime("%Y%m%d-%H%M")
         client = self._connect("test")
         try:
+            self._settings_drift(client)
+
             self._emit("stopping the test stack…")
             self._run(client, f"cd {live} && docker compose down 2>&1 | tail -3")
 

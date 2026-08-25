@@ -677,6 +677,13 @@ DEFAULTS: dict[str, Any] = {
     # ever moves the number — never because it is optional in principle.
     "store_count_check": 1,
 
+    # ── Archive index (what is already on the storage box?) ──────────────
+    # How many file paths the worker machine sends home at a time. It runs
+    # ONE job at a time, so this is really "how long may Photoshop be made
+    # to wait" — the walk itself takes seconds and the server's matching is
+    # the slow half. 200 keeps each round trip under a second or two.
+    "archive_index_chunk": 200,
+
     # ── Listing reconciliation (does the marketplace still show it?) ─────
     # How many addresses go out in one job. The worker machine runs ONE job
     # at a time, so this is really "how long may Photoshop be made to wait" —

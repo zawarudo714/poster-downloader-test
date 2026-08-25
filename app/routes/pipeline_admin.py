@@ -3185,6 +3185,79 @@ def api_storage_test(
     ok, message = check(db, project=_project(request, admin, db))
     return JSONResponse({"ok": ok, "message": message})
 
+
+@router.get("/api/archive/state")
+def api_archive_state(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """How much of this project's finished work has a file on record."""
+    from .. import archive_index as AI
+
+    project = _project(request, admin, db)
+    running = (db.query(PipelineJob)
+                 .filter(PipelineJob.kind == "archive_index",
+                         PipelineJob.status.in_(("queued", "running")))
+                 .order_by(PipelineJob.id.desc()).first())
+    return JSONResponse({
+        **AI.counts(db, project),
+        "root": AI.archive_root(db, project),
+        "job_id": running.id if running else None,
+    })
+
+
+@router.post("/api/archive/index")
+def api_archive_index(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Ask the worker machine to list what is on the storage box.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS IS A BUTTON AND NOT A SCHEDULE
+    ════════════════════════════════════════════════════════════════════════
+    It answers a question that changes only when something big happens — a
+    migration, a restored backup, an archive copied in from outside. Running
+    it nightly would occupy the one worker machine for no new information.
+
+    Safe to press twice. A poster that already has a finished image on file
+    is left alone, so a second run does nothing except tell you the same
+    numbers.
+    """
+    from .. import archive_index as AI
+
+    project = _project(request, admin, db)
+
+    # ONE AT A TIME. Two walks of the same tree would race to create the
+    # same rows, and the second would report conflicts against the first —
+    # findings invented by us rather than found on the disk.
+    existing = (db.query(PipelineJob)
+                  .filter(PipelineJob.kind == "archive_index",
+                          PipelineJob.status.in_(("queued", "running")))
+                  .first())
+    if existing is not None:
+        return JSONResponse({
+            "ok": False, "job_id": existing.id,
+            "message": "It is already running — job #%d." % existing.id})
+
+    root = AI.archive_root(db, project)
+    job = P.create_job(db, kind="archive_index", project_id=project.id,
+                       payload={"root": root,
+                                "chunk": int(P.get_setting(
+                                    db, "archive_index_chunk"))},
+                       requested_by=admin.username)
+    log_activity(db, user=admin, action="archive_index_started",
+                 target_type="project", target_id=project.id,
+                 details={"root": root})
+    db.commit()
+    return JSONResponse({
+        "ok": True, "job_id": job.id,
+        "message": (f"Queued. The worker machine will read {root} and report "
+                    f"back — watch job #{job.id}.")})
+
 @router.get("/review", response_class=HTMLResponse)
 def review_page(
     request: Request,

@@ -452,6 +452,23 @@
       </div>
     </section>
 
+    <section class="panel">
+      <div class="panel-head">
+        <span>FINISHED IMAGES ON THE STORAGE BOX
+          {{ info("Every image the pipeline finishes is written to the storage box and recorded here at the same moment, so this normally takes care of itself. It matters after something big — a migration, a restored backup, or images copied in from outside — because those files are on the drive with nothing in the database pointing at them. The worker machine has the drive mapped and this server does not, so the machine lists what is there and sends the paths back. It never replaces anything: a poster that already has a finished image on record is left exactly as it is, and a file matching no poster is reported rather than attached to something nearby. Safe to press twice.") }}
+        </span>
+        <span class="muted mono" data-archive-summary></span>
+      </div>
+      <div class="panel-body">
+        <p class="muted" data-archive-state>Reading…</p>
+        <div class="filter-row" style="margin-top:12px">
+          <button type="button" class="btn btn-accent"
+                  data-action="index-archive">READ THE STORAGE BOX</button>
+          <span class="muted mono" data-archive-status></span>
+        </div>
+      </div>
+    </section>
+
   </div>
 
   {# ═══════════════════════════════════════════════════════════════ #}

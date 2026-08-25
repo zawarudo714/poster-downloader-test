@@ -551,6 +551,112 @@ def check_actions_are_handled() -> None:
 
 # ════════════════════════════════════════════════════════════════════════════
 
+def check_tool_calls_exist() -> None:
+    """
+    An app function that a TOOL calls by name, and that does not exist.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE TOOLS ARE OUTSIDE EVERY OTHER CHECK
+    ════════════════════════════════════════════════════════════════════════
+    `tools/` scripts drive the app through strings — commands sent over SSH,
+    little programs piped into a container. None of that is imported, so
+    nothing above ever type-checks it, and a wrong name only shows up when
+    the step runs.
+
+    Caught for real while building the migration tool: its password check
+    called `P.decrypt()` and `P.get_account_password()`, neither of which
+    exists. The real name is `decrypt_secret`. That check's entire job is
+    proving account passwords survive the move — it would have failed for
+    the wrong reason, at the worst moment, and been believed.
+
+    Same rule as never inventing a URL or a form field: if it is outside the
+    file you are writing, look it up.
+    """
+    app_defined: set[str] = set()
+    for path in (APP / "pipeline.py", APP / "listing_check.py",
+                 APP / "earnings" / "store_health.py"):
+        if not path.is_file():
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue
+        app_defined |= {n.name for n in ast.walk(tree)
+                        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+
+    for tool in sorted((ROOT / "tools").glob("*.py")):
+        src = tool.read_text(encoding="utf-8", errors="ignore")
+        for name, line in _called_names(src, r"\bP\.([a-z_][a-z_0-9]*)\("):
+            if name not in app_defined:
+                fail(f"tools/{tool.name}:{line} calls P.{name}() — "
+                     f"no such function in the app")
+
+
+def _called_names(src: str, pattern: str) -> list[tuple[str, int]]:
+    """
+    Matches in code and in ORDINARY strings, but never in comments or
+    docstrings.
+
+    ════════════════════════════════════════════════════════════════════════
+    BOTH HALVES WERE GOT WRONG, IN OPPOSITE DIRECTIONS
+    ════════════════════════════════════════════════════════════════════════
+    Searching the raw text flagged this very check's own docstring, which
+    names the invented functions in order to explain them — the same
+    mistake the falsy-zero check made with its comment.
+
+    Blanking every string then silently broke the check completely: these
+    tools drive the app by piping PYTHON SNIPPETS over SSH, so the calls
+    that matter live inside triple-quoted strings. The sabotage stopped
+    firing and the report went green.
+
+    So: comments and docstrings out, every other string in. Docstrings are
+    found through the syntax tree rather than by guessing at quote styles,
+    because "the first string in a function" is a structural fact and
+    pattern-matching quotes is not.
+    """
+    import io
+    import tokenize
+
+    lines = src.splitlines(keepends=True)
+
+    def offset(row: int, col: int) -> int:
+        return sum(len(l) for l in lines[:row - 1]) + col
+
+    blanked = list(src)
+
+    def blank(start: int, end: int) -> None:
+        for i in range(start, min(end, len(blanked))):
+            if blanked[i] != "\n":
+                blanked[i] = " "
+
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(src).readline):
+            if tok.type == tokenize.COMMENT:
+                blank(offset(*tok.start), offset(*tok.end))
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        pass
+
+    try:
+        tree = ast.parse(src)
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.Module, ast.ClassDef,
+                                     ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            body = getattr(node, "body", None) or []
+            first = body[0] if body else None
+            if (isinstance(first, ast.Expr)
+                    and isinstance(first.value, ast.Constant)
+                    and isinstance(first.value.value, str)):
+                blank(offset(first.lineno, first.col_offset),
+                      offset(first.end_lineno, first.end_col_offset))
+    except SyntaxError:
+        pass
+
+    cleaned = "".join(blanked)
+    return [(m.group(1), cleaned[:m.start()].count("\n") + 1)
+            for m in re.finditer(pattern, cleaned)]
+
+
 def check_page_context() -> None:
     """
     A page rendered without the context its LAYOUT needs.
@@ -852,6 +958,7 @@ CHECKS = [
     ("buttons have handlers",     check_actions_are_handled),
     ("endpoints have buttons",    check_endpoints_have_buttons),
     ("nothing stuck behind hidden", check_hidden_ancestors),
+    ("tool calls exist in the app", check_tool_calls_exist),
     ("pages get what the layout needs", check_page_context),
     ("no queries inside loops",   check_queries_in_loops),
     ("zero is not treated as missing", check_falsy_zero_defaults),

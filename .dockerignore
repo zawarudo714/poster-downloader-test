@@ -1,0 +1,58 @@
+# What must NEVER go into the image.
+#
+# ════════════════════════════════════════════════════════════════════════════
+# WHY THIS FILE EXISTS
+# ════════════════════════════════════════════════════════════════════════════
+# The Dockerfile ends with `COPY . .`, and without this file that means the
+# whole build context — including ./data. Measured on production 2026-08-25:
+# a 3 MB codebase produced a 21.87 GB image, because ./data holds the 49 MB
+# database, 8.5 GB of saved posters and every backup.
+#
+# Three things were wrong with that and none of them announced itself:
+#
+#   · every build packaged 10 GB before it could start, so deploys were slow
+#     for a reason nobody had looked at
+#   · the image carried a FROZEN COPY of the database and every poster —
+#     including, since the pipeline arrived, marketplace passwords
+#   · it filled disks. The test box reached 25.77 GB of build cache from 40
+#     builds and was 6 GB from being full, silently
+#
+# Everything under ./data is bind-mounted at runtime, so excluding it here
+# does not remove it from the running container. It only stops a copy being
+# baked in.
+#
+# RULE: anything the app WRITES belongs in ./data and therefore belongs here.
+# If you add a new kind of persistent state, add it in both places.
+
+# ── Runtime state. Mounted in, never built in ───────────────────────────────
+data/
+workspace/
+backups/
+*.db
+*.db-journal
+*.db-wal
+*.sqlite
+
+# ── History and local tooling ───────────────────────────────────────────────
+.git/
+.gitignore
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# ── Windows-side helpers that never run in the container ────────────────────
+# The deploy, migration and server tools run on the laptop. Their settings
+# files hold protected passwords and have no business in an image.
+tools/settings.json
+tools/migrate_settings.json
+tools/servers_settings.json
+tools/faa_pages/
+tools/*.db
+*.bat
+
+# ── Secrets ─────────────────────────────────────────────────────────────────
+# Compose reads .env from the host at run time; a copy inside the image would
+# be a copy nobody remembers is there.
+.env

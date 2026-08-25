@@ -9,6 +9,7 @@ Make sure to create the first admin first:
 """
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .config import APP_DIR, APP_VERSION
@@ -24,6 +25,19 @@ from .routes import worker as worker_routes
 
 
 app = FastAPI(title="Poster Downloader", version="1.0.0")
+
+# Compress text responses (HTML, CSS, JS, JSON) before sending them.
+#
+# Measured 2026-08-25: the app builds the login page in 8.7ms, but the link
+# from this server out to the owner in Kenya was running at 12 KB/sec that
+# day — so a page that costs nothing to produce still took tens of seconds
+# to arrive, and the site felt broken. Nothing here is slow; the wire is.
+# Compression is the only part of that we control, and it typically cuts
+# HTML/CSS/JS by 70-80%.
+#
+# minimum_size skips tiny replies, where the gzip header would cost more
+# than it saves. Images are already compressed and are left alone.
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # Static files (CSS, JS).
 app.mount("/static", StaticFiles(directory=str(APP_DIR / "static")), name="static")

@@ -9,6 +9,7 @@ log or diff to work it out — that costs far more to read than these lines.**
 If the top entry looks older than the work in the repo, the difference is
 what has not been deployed yet.
 
+- **2026-08-25 18:09** · `eb18a279` · deploy v122
 - **2026-08-25 17:52** · `e29893df` · v122 — external_id repeats across projects; the legacy import was matching MUSIK
 - **2026-08-25 17:12** · `6c2f9afc` · v121 — legacy upload history, archive index, and the settings-drift warning
 - **2026-08-25 17:00** · `44676a70` · v121 — legacy upload history, archive index, and the settings-drift warning
@@ -38,4 +39,3 @@ what has not been deployed yet.
 - **2026-08-23 16:05** · `f0994d7c` · TeePublic tab: scan every design for search visibility, then deactivate and
 - **2026-08-23 11:02** · `bc645ce5` · The TeePublic wall is dismissed by replaying a recorded mouse path.
 - **2026-08-20 23:31** · `0cd07ae9` · Reading money and uploading now have one pause each, so a failure in one no
-- **2026-08-20 22:43** · `354a27f1` · FAA still signs in to read earnings; TeePublic uses its saved session. Paused

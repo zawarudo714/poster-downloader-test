@@ -9,6 +9,7 @@ log or diff to work it out — that costs far more to read than these lines.**
 If the top entry looks older than the work in the repo, the difference is
 what has not been deployed yet.
 
+- **2026-08-25 09:55** · `1eb9f747` · deploy v117
 - **2026-08-25 09:50** · `272011a2` · deploy v116
 - **2026-08-25 09:44** · `29106305` · Listing check now tells a REMOVED listing (410) apart from an address that
 - **2026-08-25 09:14** · `0cf6dc6d` · Migration tool now copies the poster files server-to-server and can promote the
@@ -38,4 +39,3 @@ what has not been deployed yet.
 - **2026-08-20 21:04** · `c8834b8d` · Wait out self-clearing security checks instead of failing in three seconds; headless is now per marketplace and off for TeePublic
 - **2026-08-20 20:57** · `04d693e4` · Failure screenshots and page dumps are now viewable on Diagnostics, including from jobs with no project
 - **2026-08-20 18:48** · `4c6241f9` · Bot-wall check reads what the page SAYS, not its HTML — a dormant recaptcha widget was parking accounts for three hours
-- **2026-08-20 18:29** · `c0328ec8` · TeePublic earnings; Earnings page marketplace-agnostic with owed per account; marketplace is a closed list so a typo cannot create a dead account

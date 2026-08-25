@@ -370,6 +370,24 @@ class App:
                  "it").grid(row=row, column=1, sticky="w", **pad)
         row += 1
 
+        # ── OUTSIDE THE NUMBERED LIST, DELIBERATELY ─────────────────────
+        #
+        # It is not a step in the sequence — it is the answer to "I deployed,
+        # is the rehearsal updated too?" (it is not; DEPLOY targets the
+        # working system). Numbering it would imply it belongs in the run.
+        extra = ttk.Frame(frm)
+        extra.grid(row=row, column=0, columnspan=3, sticky="ew", **pad)
+        ttk.Button(extra, text="UPDATE THE REHEARSAL'S CODE", width=34,
+                   command=lambda: self._go("_step_refresh_code")).pack(
+            side="left")
+        ttk.Label(extra, foreground="#888", wraplength=720, justify="left",
+                  text="Deploying updates your working system, NOT the "
+                       "rehearsal — it keeps the code it was given at step 3. "
+                       "Press this after a deploy if you are still testing on "
+                       "port 8081. Data is untouched.").pack(
+            side="left", padx=10)
+        row += 1
+
         steps = ttk.LabelFrame(frm, text="Run these in order", padding=8)
         steps.grid(row=row, column=0, columnspan=3, sticky="ew", **pad)
         steps.columnconfigure(1, weight=1)
@@ -582,6 +600,31 @@ class App:
                     if counts.get(table) is not None:
                         self._emit(f"   {table:<16} {counts[table]:,}")
                 self.state[f"{which}_counts"] = counts
+
+                # ── IS THE REHEARSAL RUNNING STALE CODE? ────────────────
+                #
+                # It gets a SNAPSHOT of the code at step 3 and never moves
+                # again — DEPLOY targets the working system, not this. So
+                # you can spend an afternoon clicking around a version from
+                # this morning and reporting bugs that are already fixed.
+                #
+                # Nothing said so, and nothing would have: the rehearsal has
+                # no version label anywhere on screen.
+                if which == "test":
+                    rehearsal = self._run(
+                        client,
+                        f"grep -m1 '^APP_VERSION' "
+                        f"{REHEARSAL_DIR}/app/config.py 2>/dev/null "
+                        "| cut -d'\"' -f2", quiet=True)[1].strip()
+                    if rehearsal:
+                        self._emit(f"\nrehearsal stack: version {rehearsal}",
+                                   "ok" if rehearsal == version else "err")
+                        if rehearsal != version:
+                            self._emit(
+                                f"That is OLDER than your working system "
+                                f"({version}). Anything you test at port "
+                                f"{REHEARSAL_PORT} is running {rehearsal}. "
+                                f"Press UPDATE THE REHEARSAL'S CODE.", "err")
             finally:
                 client.close()
 
@@ -1126,6 +1169,78 @@ class App:
                 f"\nOpen http://{parse_ssh_target(self.test_var.get())[1]}:"
                 f"{REHEARSAL_PORT}/ and click around. That is the last thing "
                 f"this tool cannot do for you.", "ok")
+        finally:
+            client.close()
+
+    def _step_refresh_code(self) -> None:
+        """
+        Bring the rehearsal's CODE up to date, leaving its data alone.
+
+        ════════════════════════════════════════════════════════════════════
+        WHY THIS IS NOT "RUN STEP 3 AGAIN"
+        ════════════════════════════════════════════════════════════════════
+        Step 3 also fabricates sample poster files and takes the "before"
+        counts. Re-running it against an already-migrated copy would put the
+        fake files back into the real poster tree and record a before that is
+        actually an after — so the next comparison would be migrated against
+        migrated, and would prove nothing while looking like a pass.
+
+        This does the one thing that is safe to repeat: copy the code,
+        rebuild, restart. The database and the posters are untouched.
+        """
+        self._header("UPDATING THE REHEARSAL'S CODE")
+        live = self.state.get("test_dir") or TEST_DIR
+        if live.rstrip("/") == REHEARSAL_DIR.rstrip("/"):
+            raise RuntimeError("Run step 1 first — the working system and the "
+                               "rehearsal have been confused.")
+
+        client = self._connect("test")
+        try:
+            have = self._run(client, f"test -f {REHEARSAL_DIR}/docker-compose.yml "
+                                     "&& echo yes", quiet=True)[1].strip()
+            if have != "yes":
+                raise RuntimeError("There is no rehearsal stack — build one "
+                                   "with step 3.")
+
+            was = self._run(client, f"grep -m1 '^APP_VERSION' "
+                                    f"{REHEARSAL_DIR}/app/config.py "
+                                    "| cut -d'\"' -f2", quiet=True)[1].strip()
+
+            # Everything except data/, .git and the compose file — which is
+            # generated, points at a different port, and must not be
+            # overwritten by the real one.
+            self._must(client, (
+                f"cd {live} && tar --exclude=./data --exclude=./.git "
+                f"--exclude=./backups --exclude=./docker-compose.yml "
+                f"-cf - . | tar -xf - -C {REHEARSAL_DIR}"),
+                "could not copy the code")
+
+            now = self._run(client, f"grep -m1 '^APP_VERSION' "
+                                    f"{REHEARSAL_DIR}/app/config.py "
+                                    "| cut -d'\"' -f2", quiet=True)[1].strip()
+            self._emit(f"code: {was or '?'} -> {now or '?'}")
+
+            self._emit("rebuilding and restarting…")
+            self._must(client, f"cd {REHEARSAL_DIR} && docker compose up -d "
+                               "--build 2>&1 | tail -6",
+                       "the rehearsal would not restart", timeout=1800)
+
+            health = self._run(client, (
+                f"for i in $(seq 1 30); do "
+                f"V=$(curl -fsS http://127.0.0.1:{REHEARSAL_PORT}/healthz "
+                f"2>/dev/null) && break; sleep 2; done; echo \"$V\""),
+                quiet=True)[1].strip()
+            live_version = version_from_healthz(health)
+            if not live_version:
+                raise RuntimeError(f"it did not come back up cleanly: {health}")
+            if live_version != now:
+                # The same trap as the main deploy tool: the files moved and
+                # the container did not pick them up.
+                self._emit(f"WARNING: the files say {now} but it is serving "
+                           f"{live_version}. The rebuild did not take.", "err")
+            else:
+                self._emit(f"now serving version {live_version} — same as your "
+                           f"working system.", "ok")
         finally:
             client.close()
 

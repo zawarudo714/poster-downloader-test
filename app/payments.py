@@ -215,6 +215,35 @@ def _already_paid_poster_ids(db: Session, worker_id: int) -> set[int]:
     return paid
 
 
+def payable_criteria(worker_id: int) -> list:
+    """
+    THE definition of "a poster this worker could be paid for". One copy.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS IS A FUNCTION AND NOT THREE COPIES OF A FILTER
+    ════════════════════════════════════════════════════════════════════════
+    `eligible_poster_ids` excluded admin-added posters — correct, you do not
+    pay a worker for an image you added yourself. `unpaid_dates_before`,
+    which draws the "you forgot to pay these older days" banner, did not.
+
+    So one poster the owner added by hand on 2026-05-18 was counted as
+    unpaid for ever and could never be paid. The banner said "1 unpaid
+    poster", clicking it totalled nothing, and it had been doing that for
+    months. Its own docstring said it returned "currently-eligible" posters,
+    which is what it meant to do and not what it did.
+
+    Two queries that must agree about what counts will eventually disagree
+    if they each carry their own copy of the rules. Now they cannot.
+    """
+    return [
+        SavedPoster.user_id == worker_id,
+        SavedPoster.deleted_at.is_(None),
+        # Anything the ADMIN added is not the worker's work and is never
+        # payable. This is the line that was missing from the banner.
+        SavedPoster.added_by.is_(None),
+    ]
+
+
 def eligible_poster_ids(
     db: Session,
     *,
@@ -229,13 +258,10 @@ def eligible_poster_ids(
     Used by both the preview endpoint (admin browsing what they'd pay for)
     and mark_paid (the actual payment run write).
     """
-    # Posters saved by this worker in [start, end], not deleted, not admin-added.
     base_q = (
         db.query(SavedPoster.id)
           .filter(
-              SavedPoster.user_id == worker_id,
-              SavedPoster.deleted_at.is_(None),
-              SavedPoster.added_by.is_(None),
+              *payable_criteria(worker_id),
               SavedPoster.original_save_date >= start,
               SavedPoster.original_save_date <= end,
           )
@@ -292,11 +318,14 @@ def count_pending_revisions_today(db: Session, worker_id: int) -> int:
     an open / awaiting-approval revision. Surfaced on the worker's dashboard
     as "X not counted until revised" for transparency.
     """
+    # The same definition again. This is shown to the WORKER as "not counted
+    # until revised" — a promise that it will count once the revision is
+    # settled. For an admin-added poster that is never true, so it must not
+    # be in this number either.
     today = local_today()
     base_ids = {
         row[0] for row in db.query(SavedPoster.id).filter(
-            SavedPoster.user_id == worker_id,
-            SavedPoster.deleted_at.is_(None),
+            *payable_criteria(worker_id),
             SavedPoster.original_save_date == today,
         ).all()
     }
@@ -371,12 +400,13 @@ def unpaid_dates_before(
     """
     from sqlalchemy import func as sa_func
 
-    # All non-deleted posters this worker has saved before today.
+    # The SAME definition the payment run uses — see payable_criteria. This
+    # query used to carry its own copy without the admin-added exclusion, so
+    # it counted posters that could never be paid.
     rows = (
         db.query(SavedPoster.id, SavedPoster.original_save_date)
           .filter(
-              SavedPoster.user_id == worker_id,
-              SavedPoster.deleted_at.is_(None),
+              *payable_criteria(worker_id),
               SavedPoster.original_save_date < today,
           )
           .all()

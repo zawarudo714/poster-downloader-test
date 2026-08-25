@@ -1,18 +1,18 @@
 # Migration rehearsal
 
-Run 2026-08-25 09:51. The rehearsal stack answered `{"ok":true,"version":"116"}`.
+Run 2026-08-25 10:53. The rehearsal stack answered `{"ok":true,"version":"117"}`.
 
 **No existing row counts moved. 0 table(s) were created by the upgrade, which is what it is for.**
 
 | | table | detail |
 |---|---|---|
-| same | `master_titles` | 101605 rows |
+| same | `master_titles` | 201133 rows |
 | same | `saved_posters` | 10355 rows |
 | same | `users` | 3 rows |
 | same | `payment_runs` | 15 rows |
 | same | `revisions` | 161 rows |
-| same | `activity_log` | 24654 rows |
-| same | `app_settings` | 15 rows |
+| same | `activity_log` | 24657 rows |
+| same | `app_settings` | 60 rows |
 
 ## What this did NOT prove
 

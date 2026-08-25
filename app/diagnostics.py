@@ -815,6 +815,59 @@ def check_stuck_listing_run(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def check_unpayable_but_counted(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: a poster shown as UNPAID must be one that can actually be paid.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE INCIDENT, 2026-08-25
+    ════════════════════════════════════════════════════════════════════════
+    The Payments screen counted "21 unpaid posters from previous days" and
+    one of them — saved 2026-05-18 — could never be paid, because the OWNER
+    had added it himself and admin-added posters are deliberately excluded
+    from pay. Clicking it totalled nothing. It had been doing that for
+    months and the only symptom was a number that would not go away.
+
+    Two queries carried their own copies of "what counts", and one had an
+    exclusion the other lacked. `payments.payable_criteria` is now the single
+    definition, which makes the mismatch impossible rather than detectable.
+
+    This check remains because the failure is about STATE — a poster in one
+    list and not the other — so it holds for any future divergence, including
+    one that arrives by a route nobody has thought of. And because the thing
+    it protects is money owed to a person, which is the last place to rely on
+    somebody remembering a rule.
+    """
+    from .payments import payable_criteria
+    from .models import Revision
+
+    rows = []
+    for worker in db.query(User).filter(User.role == "worker").all():
+        payable = {r[0] for r in db.query(SavedPoster.id).filter(
+            *payable_criteria(worker.id)).all()}
+        # Everything the OLD, looser rule would have counted.
+        counted = {r[0] for r in db.query(SavedPoster.id).filter(
+            SavedPoster.user_id == worker.id,
+            SavedPoster.deleted_at.is_(None)).all()}
+        stuck = counted - payable
+        if not stuck:
+            continue
+        rows.append(Finding(
+            f"{worker.username}: {len(stuck)} poster(s) can never be paid",
+            "added by an admin, so excluded from pay — they must not appear "
+            "in any unpaid total",
+            "/admin/payments",
+        ))
+
+    return _result(
+        "unpayable_but_counted", "Posters counted as unpaid that cannot be paid",
+        "These posters were added by an admin rather than saved by the "
+        "worker, so the payment run will never include them. If a screen is "
+        "showing them as owed, that number can never reach zero.",
+        "warn", rows,
+    )
+
+
 def check_automatic_run_waiting(db: Session, scope: Scope) -> CheckResult:
     """
     INVARIANT: a run set to AUTOMATIC must never be sitting at a gate.
@@ -1049,6 +1102,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     # ── Listing-health invariants ───────────────────────────────────────
     check_designs_left_switched_off,
     check_stuck_listing_run,
+    check_unpayable_but_counted,
     check_automatic_run_waiting,
     check_orphaned_listing_jobs,
     check_listing_sweep_believable,

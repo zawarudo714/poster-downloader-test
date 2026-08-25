@@ -479,6 +479,14 @@ class DeployApp:
 
         self.root.after(80, self._drain)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        # Alt-tabbing back is exactly when a note written moments ago should
+        # appear — the note is always written while this window sits in the
+        # background. Bound on the ROOT only: child widgets raise FocusIn on
+        # every click, and refilling then would fight whatever is being typed.
+        self.root.bind(
+            "<FocusIn>",
+            lambda e: self._fill_message() if e.widget is self.root else None)
+        self._fill_message()
         self._load_remotes()
 
     # ── Settings ────────────────────────────────────────────────────────
@@ -647,23 +655,7 @@ class DeployApp:
             messagebox.showerror("Deploy", "Enter the SSH password.")
             return
 
-        # ── RE-READ THE DEPLOY NOTE, BECAUSE THE WINDOW OUTLIVES IT ──────
-        #
-        # It used to be read ONCE at startup. But the note is written while
-        # the changes are being made — which is almost always while this
-        # window is already open — so by the time DEPLOY was pressed the
-        # message box had been empty for hours and nobody knew why. That
-        # emptiness then meant "skip the commit", and two days of work never
-        # left the laptop.
-        #
-        # Only when the box is empty: anything typed by hand wins.
-        if not self.msg_var.get().strip():
-            note_msg, note_server = read_deploy_note()
-            if note_msg:
-                self.msg_var.set(note_msg)
-                self.note_server = note_server
-                self._emit(f"\nUsing the deploy note: {note_msg}", "ok")
-
+        self._fill_message()
         self.running = True
         self.go_btn.config(state="disabled")
         self._save_settings()
@@ -730,6 +722,39 @@ class DeployApp:
         return proc.returncode, output
 
     # ── The version label ───────────────────────────────────────────────
+
+    def _fill_message(self, event=None) -> None:
+        """
+        The commit box must NEVER be blank. Called on open, on focus, and
+        again the moment DEPLOY is pressed.
+
+        ════════════════════════════════════════════════════════════════════
+        WHY A BLANK BOX IS THE PROBLEM, NOT THE MISSING NOTE
+        ════════════════════════════════════════════════════════════════════
+        Blank used to mean three different things and looked the same for
+        all of them: no note was written, a note was written and consumed by
+        the last deploy, or the note was written after this window opened.
+        The third case was the common one — the note is written WHILE the
+        changes are made, which is always after the window is already open.
+
+        And blank used to mean "skip the commit", so two days of work sat on
+        the laptop while every screen said success.
+
+        Now the box always shows what WILL be committed. If there is a note
+        it wins; otherwise the version number, which is a poor commit
+        message and an excellent one compared to none. Anything typed by
+        hand beats both — this only ever fills an EMPTY box.
+        """
+        if self.msg_var.get().strip():
+            return
+        note_msg, note_server = read_deploy_note()
+        if note_msg:
+            self.msg_var.set(note_msg)
+            self.note_server = note_server
+            return
+        version = local_app_version(Path(self.repo_var.get()))
+        if version:
+            self.msg_var.set(f"deploy v{version}")
 
     def _refresh_local_version(self, live: str = "") -> None:
         """

@@ -316,6 +316,24 @@ class App:
                  "and their history)").grid(row=row, column=1, sticky="w", **pad)
         row += 1
 
+        # ── THE OTHER PROJECTS' TITLES ──────────────────────────────────
+        #
+        # Production only ever knew about the movie project, so a promoted
+        # copy contains 101,605 movie titles and NOTHING for MUSIK. The
+        # MUSIK list lives only on the test box, and promoting would leave
+        # it in the set-aside file — not deleted, but not testable either.
+        #
+        # Since the whole point of promoting is to have somewhere realistic
+        # to click through EVERY project, they have to travel.
+        self.other_projects = tk.BooleanVar(
+            value=bool(saved.get("other_projects", True)))
+        ttk.Checkbutton(
+            frm, variable=self.other_projects,
+            text="also bring the OTHER projects' titles across (MUSIK) — "
+                 "without this, only the movie project has anything in "
+                 "it").grid(row=row, column=1, sticky="w", **pad)
+        row += 1
+
         steps = ttk.LabelFrame(frm, text="Run these in order", padding=8)
         steps.grid(row=row, column=0, columnspan=3, sticky="ew", **pad)
         steps.columnconfigure(1, weight=1)
@@ -363,7 +381,8 @@ class App:
 
     def _save(self) -> None:
         data = {"prod": self.prod_var.get(), "test": self.test_var.get(),
-                "extras": self.extras.get()}
+                "extras": self.extras.get(),
+                "other_projects": self.other_projects.get()}
         if self.remember.get():
             data["prod_pw"] = protect_password(self.prod_pw.get()) or ""
             data["test_pw"] = protect_password(self.test_pw.get()) or ""
@@ -746,6 +765,27 @@ class App:
                 f"printf '%s\\n' '{pub}' >> ~/.ssh/authorized_keys"),
                 "could not authorise the test box on production")
 
+            # ── CLEAR THE FABRICATED SAMPLES FIRST ──────────────────────
+            #
+            # Step 3 makes one fake poster per worker so the folder reshape
+            # has something to rename. The moment the REAL tree arrives they
+            # are duplicates — and rsync does not delete what it did not put
+            # there, so they survived and made the file count come out two
+            # HIGH. The warning then said "run this again", which could
+            # never fix it, and 8.5 GB was copied a second time for nothing.
+            #
+            # Named distinctively on purpose: a real poster is `N_Painted.png`
+            # inside a numbered title folder, so nothing genuine can match.
+            removed = self._run(test, (
+                f"find {REHEARSAL_DIR}/data/workspace -name '1_Sample.png' "
+                f"-delete -print 2>/dev/null | wc -l"), quiet=True)[1].strip()
+            if removed and removed != "0":
+                self._emit(f"cleared {removed} fabricated sample file(s) — "
+                           f"the real tree replaces them")
+                self._run(test, (
+                    f"find {REHEARSAL_DIR}/data/workspace -type d -empty "
+                    f"-delete 2>/dev/null; true"), quiet=True)
+
             user, host, _port = parse_ssh_target(self.prod_var.get())
             self._emit(f"copying {size} — this is the long part…")
             # rsync when it is there because it can be re-run without
@@ -771,12 +811,31 @@ class App:
                                    "-type f | wc -l", quiet=True)[1].strip()
             there = self._run(prod, f"find {source} -type f | wc -l",
                               quiet=True)[1].strip()
-            if here != there:
-                self._emit(f"WARNING: {there} files on production, {here} "
-                           f"here. Run this step again — rsync will only "
-                           f"fetch what is missing.", "err")
+            # ── FEWER AND MORE ARE DIFFERENT PROBLEMS ────────────────────
+            #
+            # The first version only knew about "fewer here" and told you to
+            # run it again. When the count came out HIGHER — because of the
+            # fabricated samples above — the same advice appeared, could not
+            # possibly help, and 8.5 GB moved a second time.
+            #
+            # A message that is right in one direction and confidently wrong
+            # in the other is worse than no message.
+            n_here, n_there = int(here or 0), int(there or 0)
+            if n_here < n_there:
+                self._emit(
+                    f"INCOMPLETE: {n_there:,} files on production, "
+                    f"{n_here:,} here. Run this step again — it only fetches "
+                    f"what is missing, so it will be quick.", "err")
+            elif n_here > n_there:
+                self._emit(
+                    f"ODD: {n_here:,} files here but only {n_there:,} on "
+                    f"production. Running again will NOT change that — "
+                    f"something put extra files in "
+                    f"{REHEARSAL_DIR}/data/workspace. Harmless for the "
+                    f"rehearsal; worth a look before you promote.", "err")
+                self.state["workspace_copied"] = True
             else:
-                self._emit(f"{int(here):,} files, both ends. Matched.", "ok")
+                self._emit(f"{n_here:,} files, both ends. Matched.", "ok")
                 self.state["workspace_copied"] = True
         finally:
             if marker:
@@ -934,6 +993,9 @@ class App:
                 "the settings copy failed")
             self._emit(out.strip())
 
+            if self.other_projects.get():
+                self._copy_other_projects(client, live_db, target)
+
             # ── DOES A PASSWORD STILL DECRYPT? ──────────────────────────
             #
             # The whole point. Account passwords are encrypted with
@@ -985,6 +1047,92 @@ class App:
                 f"this tool cannot do for you.", "ok")
         finally:
             client.close()
+
+    def _copy_other_projects(self, client, src: str, dst: str) -> None:
+        """
+        Bring every NON-MOVIE project's titles across, so all of them are
+        testable.
+
+        ════════════════════════════════════════════════════════════════════
+        WHY THIS IS NOT JUST ANOTHER TABLE COPY
+        ════════════════════════════════════════════════════════════════════
+        Three things have to be re-pointed, and getting any of them wrong is
+        silent:
+
+          · PROJECT IDs are per-database. Both sides create their projects
+            from the same registry, so the numbers usually agree — but
+            "usually" is not a design. They are matched by SLUG, which is
+            the identity the project brief says never changes.
+          · ROW IDs would collide. The rows are inserted WITHOUT their old
+            id so the database assigns fresh ones, which also means running
+            this twice adds duplicates rather than corrupting anything.
+          · USER IDs differ between the two boxes. A claimed title pointing
+            at a user number that means somebody else is worse than one
+            pointing at nobody, so they are matched by USERNAME and set to
+            nobody when there is no match. `claimed_by_name` survives either
+            way — that is what it is denormalised for.
+
+        Only the TITLES travel. Saved posters, processed images and upload
+        rows for those projects do not: they are a handful on the test box,
+        and you are about to create real ones by walking through as a worker,
+        which is a better test than copied ones.
+        """
+        script = (
+            "import sqlite3,sys\n"
+            "src=sqlite3.connect(sys.argv[1]);dst=sqlite3.connect(sys.argv[2])\n"
+            "def projects(c):\n"
+            "    try: return {r[0]:r[1] for r in c.execute("
+            "'SELECT slug,id FROM projects')}\n"
+            "    except Exception: return {}\n"
+            "sp,dp=projects(src),projects(dst)\n"
+            "if not sp or not dp:\n"
+            "    print('NO PROJECTS TABLE on one side — nothing copied');"
+            "    raise SystemExit(0)\n"
+            # The movie project is what production already IS. Copying it
+            # would duplicate 101,605 rows on top of themselves.
+            "movie='tell-a-vision'\n"
+            "pairs=[(sp[s],dp[s],s) for s in sp if s!=movie and s in dp]\n"
+            "if not pairs:\n"
+            "    print('no other projects to copy'); raise SystemExit(0)\n"
+            "def users(c):\n"
+            "    try: return {r[0]:r[1] for r in c.execute("
+            "'SELECT username,id FROM users')}\n"
+            "    except Exception: return {}\n"
+            "su={v:k for k,v in users(src).items()};du=users(dst)\n"
+            "scols=[r[1] for r in src.execute('PRAGMA table_info(master_titles)')]\n"
+            "dcols=[r[1] for r in dst.execute('PRAGMA table_info(master_titles)')]\n"
+            "use=[c for c in dcols if c in scols and c!='id']\n"
+            "total=0\n"
+            "for sid,did,slug in pairs:\n"
+            "    rows=src.execute('SELECT %s FROM master_titles WHERE "
+            "project_id=?'%','.join(use),(sid,)).fetchall()\n"
+            "    if not rows:\n"
+            "        print('%-16s nothing to copy'%slug); continue\n"
+            "    pi=use.index('project_id') if 'project_id' in use else None\n"
+            "    ci=use.index('claimed_by_id') if 'claimed_by_id' in use else None\n"
+            "    out=[]\n"
+            "    for r in rows:\n"
+            "        r=list(r)\n"
+            "        if pi is not None: r[pi]=did\n"
+            "        if ci is not None and r[ci] is not None:\n"
+            "            r[ci]=du.get(su.get(r[ci],''),None)\n"
+            "        out.append(tuple(r))\n"
+            "    dst.execute('DELETE FROM master_titles WHERE project_id=?',(did,))\n"
+            "    dst.executemany('INSERT INTO master_titles (%s) VALUES (%s)'%("
+            "','.join(use),','.join('?'*len(use))),out)\n"
+            "    total+=len(out)\n"
+            "    print('%-16s %d titles'%(slug,len(out)))\n"
+            "dst.commit()\n"
+            "print('TOTAL %d'%total)\n"
+        ).replace("'", "'\\''")
+
+        self._emit("\nbringing the other projects' titles across…")
+        out = self._must(client, f"python3 -c '{script}' {src} {dst}",
+                         "copying the other projects failed")
+        self._emit(out.strip(), "ok")
+        self._emit("Only the TITLES travel. Saved posters for those projects "
+                   "do not — you will make real ones walking through as a "
+                   "worker, which tests more than a copy would.", "dim")
 
     # ════════════════════════════════════════════════════════════════════
     #  STEP 7 — make the rehearsal your everyday test system
@@ -1076,6 +1224,24 @@ class App:
             for table in WATCH_TABLES:
                 if counts.get(table) is not None:
                     self._emit(f"   {table:<16} {counts[table]:,}")
+
+            # Per PROJECT, not just a grand total. "201,133 titles" tells you
+            # nothing about whether MUSIK is testable; "movie 101,605 · musik
+            # 99,528" tells you exactly that.
+            per = self._run(client, (
+                f"cd {live} && docker compose exec -T web python -c \""
+                "from app.db import SessionLocal;"
+                "from app.models import MasterTitle,Project;"
+                "db=SessionLocal();"
+                "d=db.query(Project).order_by(Project.id).first();"
+                "print(' | '.join('%s %d'%(p.name,"
+                "db.query(MasterTitle).filter("
+                "(MasterTitle.project_id==p.id)|"
+                "((MasterTitle.project_id.is_(None)) if p.id==d.id else False)"
+                ").count()) for p in db.query(Project).order_by(Project.id)));"
+                "db.close()\""), quiet=True)[1].strip()
+            if per:
+                self._emit(f"   titles by project: {per}", "ok")
 
             self._emit(
                 f"\nDone. Same address, same DEPLOY button, real data.\n"

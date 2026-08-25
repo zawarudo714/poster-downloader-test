@@ -1,5 +1,5 @@
-Migration tool now copies the poster files server-to-server and can promote the
-rehearsed copy into your everyday test box, so you build and click against real
-data. Promote renames rather than deletes, and refuses if the row comparison
-was not clean. Deploy tool now reports server disk every time and warns above
-80 percent.
+Listing check now tells a REMOVED listing (410) apart from an address that
+never existed (404) — these were effectively backwards, so real takedowns were
+being ignored. Migration tool clears its fabricated sample files before copying
+the real posters, and can bring the other projects' titles across so MUSIK is
+testable too. Commit box is never blank again.

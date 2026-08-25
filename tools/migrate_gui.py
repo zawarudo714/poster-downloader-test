@@ -519,14 +519,42 @@ class App:
                 name = "PRODUCTION" if which == "prod" else "TEST BOX"
                 self._emit(f"\n── {name} ──", "step")
 
+                # ── THE REHEARSAL MUST NEVER BE MISTAKEN FOR THE REAL ONE ─
+                #
+                # This took the FIRST match of a glob. The moment
+                # /opt/poster-rehearsal existed it sorted ahead of
+                # /opt/poster — because '-' comes before '/' — so step 1
+                # announced the throwaway as the working system, and step 6
+                # then copied the settings database into itself. Nothing was
+                # lost only because both sides were empty.
+                #
+                # Excluded by name, and anything still ambiguous is reported
+                # rather than guessed at.
                 found = self._must(
                     client,
                     "ls -d /root/*/docker-compose.yml /opt/*/docker-compose.yml "
-                    "2>/dev/null | head -1",
+                    f"2>/dev/null | grep -v '^{REHEARSAL_DIR}/'",
                     "could not find the project folder", quiet=True).strip()
-                if not found:
+                candidates = [c for c in found.splitlines() if c.strip()]
+                if not candidates:
                     raise RuntimeError(f"No docker-compose.yml found on {name}.")
-                folder = str(Path(found).parent).replace("\\", "/")
+                if len(candidates) > 1:
+                    self._emit(f"more than one project folder on {name}: "
+                               f"{', '.join(candidates)}", "err")
+                    prefer = PROD_DIR if which == "prod" else TEST_DIR
+                    match = [c for c in candidates if c.startswith(prefer + "/")]
+                    if not match:
+                        raise RuntimeError(
+                            f"Cannot tell which folder on {name} is the real "
+                            f"one. Expected {prefer}.")
+                    candidates = match
+                    self._emit(f"using {prefer}, which is the expected one.",
+                               "ok")
+                folder = str(Path(candidates[0]).parent).replace("\\", "/")
+                if folder.rstrip("/") == REHEARSAL_DIR.rstrip("/"):
+                    raise RuntimeError(
+                        f"{name} resolved to the rehearsal folder. Refusing — "
+                        f"that is the throwaway, not the real system.")
                 self.state[f"{which}_dir"] = folder
                 self._emit(f"folder: {folder}")
 
@@ -997,6 +1025,22 @@ class App:
             if not live_db:
                 raise RuntimeError("Run step 1 first.")
             target = f"{REHEARSAL_DIR}/data/poster.db"
+
+            # ── COPYING A DATABASE INTO ITSELF IS NEVER RIGHT ────────────
+            #
+            # The copy DELETES each table before re-inserting, so a source
+            # that is also the destination empties it and puts back what it
+            # just removed. It survived once because both sides were empty;
+            # with real accounts in there it would have wiped them.
+            #
+            # Impossible beats detectable: this cannot be reached by any
+            # future path that gets the folders confused, not just the one
+            # that did.
+            if Path(live_db).as_posix() == Path(target).as_posix():
+                raise RuntimeError(
+                    f"Refusing: the source and the destination are the same "
+                    f"database ({live_db}). Step 1 has identified the "
+                    f"rehearsal as your working system — run step 1 again.")
 
             self._emit("copying these tables from your working system:")
             for name, why in SETTINGS_TABLES + (

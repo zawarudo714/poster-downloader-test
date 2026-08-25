@@ -875,9 +875,22 @@ tool needs, add it to `REQUIRED_MODULES` in `dev_setup.py` too.
   The audit trail must survive.
 - **`ActivityLog` for every state change** — actor, target, timestamp, JSON
   detail.
-- **`external_id` is the universal key.** The `0` column from the original CSV.
-  It is the folder prefix (`50. Pulp Fiction (1994)`), `MasterTitle
-  .external_id`, and the key in both legacy JSON files. Everything joins on it.
+- **`external_id` is the universal key — INSIDE ONE PROJECT.** The `0` column
+  from that project's own sheet. It is the folder prefix (`50. Pulp Fiction
+  (1994)`), `MasterTitle.external_id`, and the key in both legacy JSON files.
+
+  **It is NOT unique across projects and never was.** Every sheet starts
+  again at 1, so external_id 2 is `The Dark Knight` in the movie project and
+  `Radiohead` in MUSIK. On 25 Aug the legacy upload import built one
+  `{external_id: title}` dictionary over the whole table; the later rows won,
+  every movie title silently resolved to a music artist, and it matched 0 of
+  4,865 images — while printing a confident page of "renumbered" findings
+  about the wrong project's data. Nothing looked broken.
+
+  Any lookup BY external_id must be scoped, through `pipeline.project_scope`
+  or one of the `scope_titles` helpers. Now enforced by the GUARDED table in
+  `preflight.py`, so a new one fails before deploy. Sorting by it is fine —
+  it is equality lookups that pick a row.
 - **`Base.metadata.create_all()` does not ALTER existing tables.** New columns
   need an explicit migration (see `migrate_pipeline.NEW_COLUMNS`). The README's
   per-round notes are the precedent.
@@ -1906,10 +1919,13 @@ Two things in that are worth carrying past this bug:
     designs. Blocked and broken are different answers; a system that has
     only one of them will use it for both.
 
-Now enforced mechanically: `preflight.py` has a GUARDED table — (file, the
-risky call, the calls that protect it) — so a new function that navigates
-the browser without consulting the wall fails before deploy. Add a row
-whenever a protective call has to accompany a risky one.
+Now enforced mechanically: `preflight.py` has a GUARDED table — (file glob,
+the risky call, the calls that protect it) — so a new function that
+navigates the browser without consulting the wall, or looks a title up by
+`external_id` without scoping it to a project, fails before deploy. Add a
+row whenever a protective call has to accompany a risky one, and use a GLOB
+rather than a filename: a rule usually belongs to a kind of code, and a list
+of files is another thing somebody has to remember to extend.
 
 Concretely: **an exception must never be able to escape past the point where
 the work was claimed.** If setup can fail, either claim after it, or catch it

@@ -248,6 +248,64 @@ def archive_cases() -> list[tuple[str, bool]]:
     ]
 
 
+MIGRATE = Path(__file__).resolve().parent / "migrate_gui.py"
+
+
+def dry_run_cases() -> list[tuple[str, bool]]:
+    """
+    Does the migration tool believe its own numbers?
+
+    ════════════════════════════════════════════════════════════════════════
+    THE BUG THIS EXISTS FOR — 25 Aug, and it said "Done"
+    ════════════════════════════════════════════════════════════════════════
+    The upload-history import matched ZERO of 4,865 images, and the tool
+    printed both numbers and then said "Done. The pipeline will now leave
+    those images alone." Nothing compared them. The owner was one button
+    away from greenlighting ten thousand posters against a marketplace that
+    already held half of them.
+
+    So the judgement is a pure function of the script's own report, held
+    here against the real shapes it produces.
+    """
+    tree = ast.parse(MIGRATE.read_text(encoding="utf-8"))
+    fn = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "_parse_dry_run":
+            fn = node
+            break
+    if fn is None:
+        raise SystemExit("_parse_dry_run has gone from migrate_gui.py — "
+                         "this test is now blind.")
+    # Lifted WITHOUT its decorator: @staticmethod cannot be applied outside
+    # a class body, and the rule being checked is in the body either way.
+    fn = ast.FunctionDef(name=fn.name, args=fn.args, body=fn.body,
+                         decorator_list=[], returns=None,
+                         type_comment=None)
+    mod = ast.Module([fn], [])
+    ast.fix_missing_locations(mod)
+    ns = {"re": re}
+    exec(compile(mod, str(MIGRATE), "exec"), ns)
+    parse = ns["_parse_dry_run"]
+
+    healthy = "      + 4,821 tracking rows\n      ? 44 unmatched\n"
+    broken = "      + 0 tracking rows\n      ? 4,865 unmatched\n"
+    return [
+        ("a normal import — 4,821 placed, 44 not — is usable",
+         parse(healthy)["usable"] is True),
+        ("the real failure — nothing placed at all — is NOT usable, and "
+         "this is the check that was missing",
+         parse(broken)["usable"] is False),
+        ("it reads the counts rather than guessing",
+         (parse(healthy)["record"], parse(healthy)["unmatched"]) == (4821, 44)),
+        ("commas in the numbers do not defeat it",
+         parse("+ 12,345 tracking rows\n? 6 unmatched\n")["record"] == 12345),
+        ("output with no numbers at all is not treated as a success",
+         parse("the container fell over")["usable"] is False),
+        ("half the archive unplaceable is not a finding, it is a broken rule",
+         parse("+ 2,400 tracking rows\n? 2,465 unmatched\n")["usable"] is False),
+    ]
+
+
 def obj(**kw):
     return types.SimpleNamespace(**kw)
 
@@ -470,9 +528,24 @@ ARCHIVE_SABOTAGE = [
      'parts = [p for p in (rel or "").split("/") if p]'),
 ]
 
+# The migration tool's own judgement of its own output.
+MIGRATE_SABOTAGE = [
+    ("an import that placed NOTHING would read as a success — the exact "
+     "failure of 25 Aug, one button away from ten thousand duplicates",
+     '"usable": bool(total) and pct <= 10.0',
+     '"usable": True'),
+    ("an empty report would be treated as a clean run",
+     '"usable": bool(total) and pct <= 10.0',
+     '"usable": pct <= 10.0'),
+    ("the counts would never be read, so every run would look identical",
+     r'found = re.search(r"\+\s*([\d,]+)\s+tracking rows", line)',
+     r'found = re.search(r"NEVERMATCHES", line)'),
+]
+
 
 def run_suite(src: str) -> list[tuple[str, bool]]:
-    return cases(*load(src)) + listing_cases() + archive_cases()
+    return (cases(*load(src)) + listing_cases() + archive_cases()
+            + dry_run_cases())
 
 
 def main() -> int:
@@ -502,7 +575,8 @@ def main() -> int:
         # disk and put back. Uglier than the in-memory swap above, and
         # unavoidable: `run_suite` reads that file itself.
         for path, table in ((LISTING, LISTING_SABOTAGE),
-                            (ARCHIVE, ARCHIVE_SABOTAGE)):
+                            (ARCHIVE, ARCHIVE_SABOTAGE),
+                            (MIGRATE, MIGRATE_SABOTAGE)):
             original = path.read_text(encoding="utf-8")
             for cost, find, repl in table:
                 if find not in original:

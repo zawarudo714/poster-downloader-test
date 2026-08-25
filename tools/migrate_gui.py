@@ -1333,6 +1333,34 @@ class App:
         finally:
             client.close()
 
+    @staticmethod
+    def _parse_dry_run(text: str) -> dict:
+        """
+        Turn the script's own report into a yes/no. Pure, so it is testable.
+
+        It already prints everything needed — "+ N tracking rows" and
+        "? M unmatched" — and the first version of this step printed those
+        for a person to judge. A person reading a wall of output at 5pm is
+        not a check; the numbers have to be compared by something that
+        cannot get bored.
+        """
+        record = unmatched = 0
+        for line in (text or "").splitlines():
+            found = re.search(r"\+\s*([\d,]+)\s+tracking rows", line)
+            if found:
+                record = int(found.group(1).replace(",", ""))
+            found = re.search(r"\?\s*([\d,]+)\s+unmatched", line)
+            if found:
+                unmatched = int(found.group(1).replace(",", ""))
+        total = record + unmatched
+        pct = (unmatched / total * 100) if total else 0.0
+        # Measured on the real archive: about 1% cannot be placed, and those
+        # are the titles the old Photoshop script truncated. Ten percent is
+        # already far outside that; anything higher is a broken rule, not a
+        # broken archive.
+        return {"record": record, "unmatched": unmatched, "pct": pct,
+                "usable": bool(total) and pct <= 10.0}
+
     def _history_paths(self, where: str) -> tuple[Path, str]:
         local = Path(self.tracking.get().strip('" '))
         if not local.is_file():
@@ -1411,12 +1439,36 @@ class App:
                 self._emit("\nNothing moved, which is what a dry run must do.",
                            "ok")
 
+            # ── READ THE DRY RUN'S OWN ANSWER ───────────────────────────
+            #
+            # It says "+ N tracking rows" and "? M unmatched". Printing
+            # those for a person to interpret is not enough: the first real
+            # run recorded ZERO of 4,865 and the log still read like a
+            # success, because nothing was comparing the two numbers.
+            #
+            # An unmatched rate this high is never a finding about the
+            # archive — the measured figure is about 1%. It means the
+            # matching rule is broken, and the honest thing is to say so
+            # and refuse rather than let the next button write.
+            would = self._parse_dry_run(text)
             self.state["history_checked"] = account
             self.state["history_before"] = before
             # 6c refuses unless the check was done for this account AND this
             # stack. Checking the rehearsal and then importing into the test
             # box would be two different databases with one set of numbers.
             self.state["history_where"] = where
+            self.state["history_usable"] = would["usable"]
+
+            if not would["usable"]:
+                self._emit(
+                    f"\nSTOP — DO NOT PRESS 6c.\n"
+                    f"It would record {would['record']:,} image(s) and fail "
+                    f"to place {would['unmatched']:,}. About 1 in 100 is "
+                    f"normal; this is {would['pct']:.0f}%, which means the "
+                    f"images cannot be matched to their posters at all "
+                    f"rather than that anything is wrong with your archive.\n"
+                    f"Send this log to whoever built it.", "err")
+                return
             self._emit(
                 "\nRead the three numbers above: how many it would record, "
                 "how many it would set aside, and how many it could not "
@@ -1440,6 +1492,12 @@ class App:
                     f"Run 6b for '{account}' against {label} first. It is the "
                     f"only thing that says what this will do, and it is the "
                     f"reason this button is safe to press.")
+            if not self.state.get("history_usable"):
+                raise RuntimeError(
+                    "6b said this would not work — almost nothing could be "
+                    "matched to a poster. Writing it anyway would leave you "
+                    "believing images are protected when they are not, "
+                    "which is worse than not running it at all.")
             local, remote = self._history_paths(where)
 
             # The stack being written to is NAMED in the box, not just in the
@@ -1492,10 +1550,35 @@ class App:
             recorded = next((int(l) for l in tally.split() if l.isdigit()), 0)
             self._emit(f"\nthe file listed {claimed:,} image(s); "
                        f"{recorded:,} are now on record.")
-            if recorded > claimed:
+
+            # ── FAILING SHORT IS THE FAILURE THAT MATTERS ───────────────
+            #
+            # The first version of this check only complained when there
+            # were MORE rows than the file listed. So a run that matched
+            # NOTHING AT ALL — 4,865 claimed, 0 recorded — printed its two
+            # numbers and then said "Done. The pipeline will now leave
+            # those images alone", which was the exact opposite of true.
+            #
+            # The whole point of this step is that the pipeline stops
+            # offering images that are already live. Recording none of them
+            # is not a partial success, it is the failure this button
+            # exists to prevent, and it has to be impossible to read as
+            # anything else.
+            if recorded < claimed * 0.9:
+                self._emit(
+                    f"\nTHIS DID NOT WORK. {claimed - recorded:,} of "
+                    f"{claimed:,} image(s) were NOT recorded, so the "
+                    f"pipeline still thinks they need uploading. Do NOT "
+                    f"greenlight anything. Press PUT IT BACK and send this "
+                    f"log to whoever built it.", "err")
+                self.state["history_ok"] = False
+            elif recorded > claimed:
                 self._emit("More on record than the file listed — something "
                            "else has written here too. Worth understanding "
                            "before you promote.", "err")
+                self.state["history_ok"] = False
+            else:
+                self.state["history_ok"] = True
 
             after = self._project_counts(client, where)
             self._emit("\ntitles per project AFTER:")
@@ -1521,12 +1604,23 @@ class App:
                 self._emit("\nNo project gained or lost titles it should not "
                            "have.", "ok")
 
-            self._emit(
-                f"\nDone. The pipeline will now leave those images alone.\n"
-                f"The files themselves are still only linked once you press "
-                f"READ THE STORAGE BOX on the Pipeline page — that needs the "
-                f"worker machine, which is the only thing with the drive.",
-                "ok")
+            # THE CLOSING LINE MUST FOLLOW THE NUMBERS, NOT THE FACT THAT
+            # THE COMMAND RETURNED. A step that ran to the end and achieved
+            # nothing is not a step that worked, and saying so cheerfully is
+            # how a person goes off and greenlights ten thousand posters.
+            if self.state.get("history_ok"):
+                self._emit(
+                    f"\nDone. The pipeline will now leave those images "
+                    f"alone.\nThe files themselves are still only linked "
+                    f"once you press READ THE STORAGE BOX on the Pipeline "
+                    f"page — that needs the worker machine, which is the "
+                    f"only thing with the drive.", "ok")
+            else:
+                self._emit(
+                    f"\nNOT DONE. Nothing here is protected yet — the "
+                    f"pipeline would still offer those images for upload. "
+                    f"The database was backed up before this ran, so PUT IT "
+                    f"BACK undoes it completely.", "err")
         finally:
             client.close()
 

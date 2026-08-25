@@ -878,6 +878,25 @@ GUARDED: list[tuple[str, str, tuple[str, ...], str]] = [
     ("worker_service/store_health.py", "driver.get(",
      ("clear_wall(", "_open_page(", "page_is_theirs("),
      "navigates the browser without consulting the interstitial wall"),
+    # ── external_id REPEATS ACROSS PROJECTS ─────────────────────────────
+    #
+    # It is the `0` column from a project's OWN sheet, so every project
+    # starts again at 1: the movie list and MUSIK both hold an external_id
+    # 2, `The Dark Knight` and `Radiohead`. Looking one up without saying
+    # which project returns whichever row the query reaches first.
+    #
+    # Measured 2026-08-25: the upload-history import did exactly this and
+    # matched 0 of 4,865 images, while reporting a page of plausible
+    # findings about the wrong project's titles. Nothing looked broken —
+    # the numbers were confident and completely wrong.
+    ("app/**/*.py", ".external_id ==",
+     ("project_scope(", "scope_titles(", "_title_scope("),
+     "looks a title up by its sheet number without scoping to a project, "
+     "and that number repeats in every project"),
+    ("scripts/**/*.py", ".external_id ==",
+     ("project_scope(", "scope_titles(", "_titles_by_ext_query("),
+     "looks a title up by its sheet number without scoping to a project, "
+     "and that number repeats in every project"),
 ]
 
 
@@ -918,25 +937,33 @@ def check_guards_are_called() -> None:
     hook name and found its own query. A check that cannot go red is worse
     than no check, because it is counted as coverage.
     """
-    for rel, risky, guards, what in GUARDED:
-        path = ROOT / rel
-        if not path.exists():
-            fail(f"{rel} is missing — the guard check is now blind")
+    for pattern, risky, guards, what in GUARDED:
+        # A rule usually belongs to a KIND of code rather than to one file —
+        # the project-scoping one applies to anything that touches titles.
+        # A glob keeps it from being a list of files somebody has to
+        # remember to extend, which is the same failure as a guard nobody
+        # remembers to call.
+        paths = ([ROOT / pattern] if "*" not in pattern
+                 else sorted(ROOT.glob(pattern)))
+        if not paths or not any(p.exists() for p in paths):
+            fail(f"{pattern} matches nothing — this guard check is now blind")
             continue
-        src = path.read_text(encoding="utf-8")
-        try:
-            tree = ast.parse(src)
-        except SyntaxError:
-            continue                    # check_python_compiles owns that
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            body = ast.get_source_segment(src, node) or ""
-            if risky not in body:
-                continue
-            if not any(g in body for g in guards):
-                fail(f"{rel}:{node.lineno} — {node.name}() {what} "
-                     f"(expected one of: {', '.join(guards)})")
+        for path in paths:
+            rel = path.relative_to(ROOT).as_posix()
+            src = path.read_text(encoding="utf-8")
+            try:
+                tree = ast.parse(src)
+            except SyntaxError:
+                continue                # check_python_compiles owns that
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                body = ast.get_source_segment(src, node) or ""
+                if risky not in body:
+                    continue
+                if not any(g in body for g in guards):
+                    fail(f"{rel}:{node.lineno} — {node.name}() {what} "
+                         f"(expected one of: {', '.join(guards)})")
 
 
 def check_endpoints_have_buttons() -> None:

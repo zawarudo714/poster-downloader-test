@@ -53,6 +53,13 @@ from the original CSV — which is `MasterTitle.external_id` here. Within a
 title, images are matched by filename: the processed name is the source name
 plus the configured suffix, so "Pulp Fiction 1.jpg" ↔ "Pulp Fiction 1_Painted.jpg".
 
+**THAT NUMBER IS ONLY UNIQUE INSIDE ONE PROJECT.** Every project's sheet
+starts again at 1, so the movie list and MUSIK both hold an external_id 2 —
+`The Dark Knight` and `Radiohead`. Every lookup here therefore goes through
+`_titles_by_ext_query`, which scopes to the project being imported. This
+script predates multi-project support and did not, which made it match 0 of
+4,865 images while reporting them as plausible-looking findings.
+
 Where a processed filename can't be matched back to a live poster (the poster
 was deleted after upload, or the file was renamed by hand), the row is
 reported as unmatched rather than guessed at. Those are listed at the end so
@@ -136,6 +143,41 @@ def ensure_account(
     return account
 
 
+def _titles_by_ext_query(db, project: Project, *extra):
+    """
+    external_id → title, FOR ONE PROJECT.
+
+    ════════════════════════════════════════════════════════════════════════
+    external_id IS ONLY UNIQUE INSIDE A PROJECT
+    ════════════════════════════════════════════════════════════════════════
+    It is the `0` column from a project's own source sheet, so every project
+    starts again at 1. The movie list has an external_id 2 and so does
+    MUSIK — `The Dark Knight` and `Radiohead`.
+
+    Both versions of this lookup were written when there was one project,
+    and built ONE dictionary across the whole table. The later rows win, so
+    every movie title silently resolved to a music artist, and the upload
+    history import matched 0 of 4,865 images while reporting them as
+    "renumbered". Nothing looked broken: it produced a report full of
+    plausible-sounding findings about the wrong project's data.
+
+    Measured 2026-08-25 on the real database, and it is the exact shape the
+    project brief warns about — a query that filters on project by hand, or
+    in this case does not filter at all.
+
+    NULL means the DEFAULT project and nothing else, which is why this goes
+    through `pipeline.project_scope` rather than comparing the column:
+    production's 101,605 movie rows are still NULL until the backfill at the
+    end of this script runs.
+    """
+    columns = (MasterTitle.external_id, MasterTitle.id) + tuple(extra)
+    default = P.ensure_default_project(db)
+    return (db.query(*columns)
+              .filter(MasterTitle.external_id.isnot(None))
+              .filter(P.project_scope(project.id,
+                                      default_project_id=default.id)))
+
+
 def _poster_index_map(db, master_id: int) -> dict[int, int]:
     """
     Position of each live poster within its title, in creation order.
@@ -190,14 +232,11 @@ def import_processed_files(
     suffix = P.get_setting(db, "output_suffix", project=project)
     version = "legacy-local"
 
-    # external_id → MasterTitle, built once; 100k titles is far too many to
-    # query per file.
     titles_by_ext = {
         ext_id: (title_id, folder)
         for ext_id, title_id, folder in
-        db.query(MasterTitle.external_id, MasterTitle.id, MasterTitle.title_folder_path)
-          .filter(MasterTitle.external_id.isnot(None))
-          .all()
+        _titles_by_ext_query(db, project,
+                             MasterTitle.title_folder_path).all()
     }
 
     created = skipped = unmatched = 0
@@ -330,10 +369,8 @@ def import_upload_tracking(
     suffix = P.get_setting(db, "output_suffix", project=project)
 
     titles_by_ext = {
-        ext_id: title_id for ext_id, title_id in
-        db.query(MasterTitle.external_id, MasterTitle.id)
-          .filter(MasterTitle.external_id.isnot(None))
-          .all()
+        ext_id: title_id
+        for ext_id, title_id in _titles_by_ext_query(db, project).all()
     }
 
     created = skipped = unmatched = removed_count = 0

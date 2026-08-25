@@ -119,6 +119,25 @@ def index_files(db: Session, project: Project, files: list[dict],
 
     Returns what happened, in words the screen can use directly.
     """
+    from . import pipeline as P
+
+    # ── SCOPED TO ONE PROJECT, AND THAT IS LOAD-BEARING ─────────────────
+    #
+    # `external_id` is the `0` column from a project's OWN sheet, so every
+    # project starts again at 1: the movie list and MUSIK both hold an
+    # external_id 2 — `The Dark Knight` and `Radiohead`.
+    #
+    # Looking one up across the whole table therefore returns whichever row
+    # the query happens to reach first. The upload-history import did that
+    # and matched 0 of 4,865 images while reporting a page of plausible
+    # findings about the wrong project's titles. Nothing looked broken.
+    #
+    # NULL means the DEFAULT project and nothing else, which is why this
+    # goes through `project_scope` rather than comparing the column — a
+    # freshly migrated database still has its imported rows on NULL.
+    default = P.ensure_default_project(db)
+    scope = P.project_scope(project.id, default_project_id=default.id)
+
     linked = already = conflict = unmatched = 0
     examples: list[dict] = []
 
@@ -136,10 +155,12 @@ def index_files(db: Session, project: Project, files: list[dict],
         ext_id, stem, filename = parsed
 
         title = (db.query(MasterTitle)
-                   .filter(MasterTitle.external_id == ext_id).first())
+                   .filter(MasterTitle.external_id == ext_id)
+                   .filter(scope).first())
         if title is None:
             unmatched += 1
-            note("no title", rel, f"no title carries the number {ext_id}")
+            note("no title", rel,
+                 f"no title in {project.name} carries the number {ext_id}")
             continue
 
         poster = None

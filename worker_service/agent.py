@@ -48,7 +48,20 @@ from .store_health import StoreHealthStage
 from .uploader import UploadStage
 
 
-AGENT_VERSION = "1.24.0"
+# ── BUMP THIS WHENEVER ANYTHING IN worker_service/ CHANGES ──────────────
+#
+# The worker machine is updated by COPYING A FOLDER, and a folder copy has
+# no confirmation. This number, reported on every handshake and shown on the
+# Nodes tab, is the ONLY way to tell from the site whether the copy actually
+# happened — so a change that leaves it alone is a change nobody can verify.
+#
+# It was left at 1.24.0 through two releases that both changed this folder
+# (the interstitial check when switching designs back on, and the archive
+# index), which made the number worse than useless: it read "up to date"
+# either way. `check_worker_agent_current` in diagnostics.py now compares
+# what the machine reports against what this file says, so a stale copy is
+# reported instead of assumed.
+AGENT_VERSION = "1.26.0"
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_CONFIG = HERE / "config.json"

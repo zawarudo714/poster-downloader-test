@@ -289,11 +289,13 @@ STEPS = [
      "_step_settings"),
     ("6b. CHECK THE OLD UPLOAD HISTORY",
      "Reads faa_upload_tracking.json and says what it WOULD record. Writes "
-     "nothing at all. Run this before 6c.",
+     "nothing at all. Acts on the rehearsal if one exists, otherwise on "
+     "your test box — it says which, before it does anything.",
      "_step_history_check"),
     ("6c. IMPORT THE OLD UPLOAD HISTORY",
      "Records the images you uploaded to FineArtAmerica by hand, so the "
-     "pipeline never offers them again. Backs up first.",
+     "pipeline never offers them again. Backs up first, and only works on "
+     "the same stack 6b just checked.",
      "_step_history_import"),
     ("7. PROMOTE IT TO YOUR TEST BOX",
      "Makes the rehearsed copy your everyday test system, so you build and "
@@ -1255,18 +1257,53 @@ class App:
     # A single clever button that decided for itself would be doing its
     # deciding at the one moment nobody is in a position to disagree.
 
-    def _rehearsal_python(self, client, script: str) -> tuple[int, str]:
-        """Run a snippet inside the rehearsal's container. Returns (code, text)."""
+    def _python_in(self, client, directory: str, script: str) -> tuple[int, str]:
+        """Run a snippet inside a stack's container. Returns (code, text)."""
         return self._run(client, (
-            f"cd {REHEARSAL_DIR} && docker compose exec -T web python - "
+            f"cd {directory} && docker compose exec -T web python - "
             f"<<'PY'\n{script}\nPY"))
+
+    def _rehearsal_python(self, client, script: str) -> tuple[int, str]:
+        """Run a snippet inside the REHEARSAL specifically."""
+        return self._python_in(client, REHEARSAL_DIR, script)
+
+    def _history_target(self, client) -> tuple[str, str]:
+        """
+        Which stack the upload-history steps act on, and its plain-words name.
+
+        ════════════════════════════════════════════════════════════════════
+        BOTH ARE LEGITIMATE, AND GUESSING SILENTLY WOULD BE THE BUG
+        ════════════════════════════════════════════════════════════════════
+        During a real migration the import belongs on the REHEARSAL, before
+        it is promoted, so the promoted copy already carries it.
+
+        But the rehearsal is deliberately thrown away by step 8, and once a
+        promote has happened the test box IS the database that matters.
+        Insisting on the rehearsal then would mean rebuilding five steps and
+        overwriting the very box being tested on — a lot of work to end up
+        somewhere worse.
+
+        So it follows what actually exists, and SAYS which one out loud in
+        the log and again in the confirmation box. A tool that quietly
+        picked one would eventually pick the wrong one on a day nobody was
+        reading carefully.
+        """
+        live = self.state.get("test_dir") or TEST_DIR
+        code, _text = self._run(
+            client, f"test -f {REHEARSAL_DIR}/data/poster.db && echo yes",
+            quiet=True)
+        if code == 0:
+            return REHEARSAL_DIR, "the REHEARSAL copy (port 8081)"
+        return live, f"your TEST BOX at {live} — there is no rehearsal here"
 
     def _step_list_accounts(self) -> None:
         """Fill the dropdown from the rehearsal, so nothing has to be typed."""
         self._header("READING THE ACCOUNT LIST")
         client = self._connect("test")
         try:
-            code, text = self._rehearsal_python(client, (
+            where, label = self._history_target(client)
+            self._emit(f"reading from {label}", "dim")
+            code, text = self._python_in(client, where, (
                 "from app.db import SessionLocal\n"
                 "from app.models import UploadAccount\n"
                 "db=SessionLocal()\n"
@@ -1282,7 +1319,10 @@ class App:
                     self._emit(f"   {parts[0]:<20} {parts[1]:<16} "
                                f"lists as: {parts[2]}", "dim")
             if not names:
-                self._emit("No accounts found. Run step 6 first.", "err")
+                self._emit(
+                    "No accounts found there. If that was the rehearsal, run "
+                    "step 6 first; if it was your test box, something is "
+                    "wrong — it should have accounts.", "err")
                 return
             self.account_box["values"] = names
             if self.account.get() not in names:
@@ -1293,18 +1333,18 @@ class App:
         finally:
             client.close()
 
-    def _history_paths(self) -> tuple[Path, str]:
+    def _history_paths(self, where: str) -> tuple[Path, str]:
         local = Path(self.tracking.get().strip('" '))
         if not local.is_file():
             raise RuntimeError(
                 f"I cannot find {local}. That is the old uploader's record of "
                 f"what it put on FineArtAmerica — it lives beside the FAA "
                 f"Autouploader folder.")
-        return local, f"{REHEARSAL_DIR}/data/faa_upload_tracking.json"
+        return local, f"{where}/data/faa_upload_tracking.json"
 
-    def _project_counts(self, client) -> dict:
+    def _project_counts(self, client, where: str) -> dict:
         """Titles per project, by name. The before/after of the whole step."""
-        code, text = self._rehearsal_python(client, (
+        code, text = self._python_in(client, where, (
             "from app.db import SessionLocal\n"
             "from app.models import MasterTitle, Project\n"
             "db=SessionLocal()\n"
@@ -1327,7 +1367,6 @@ class App:
         Say what the import WOULD do. Nothing is written, by construction.
         """
         self._header("6b. CHECKING THE OLD UPLOAD HISTORY")
-        local, remote = self._history_paths()
         account = self.account.get().strip()
         if not account:
             raise RuntimeError(
@@ -1338,6 +1377,10 @@ class App:
 
         client = self._connect("test")
         try:
+            where, label = self._history_target(client)
+            self._emit(f"acting on {label}\n", "ok")
+            local, remote = self._history_paths(where)
+
             self._emit(f"copying {local.name} up ({local.stat().st_size:,} bytes)…")
             sftp = client.open_sftp()
             try:
@@ -1345,20 +1388,20 @@ class App:
             finally:
                 sftp.close()
 
-            before = self._project_counts(client)
+            before = self._project_counts(client, where)
             self._emit("\ntitles per project BEFORE:")
             for name, n in before.items():
                 self._emit(f"   {name:<24} {n:>8,}", "dim")
 
             self._emit("\nasking what it would do (writing nothing)…")
             code, text = self._run(client, (
-                f"cd {REHEARSAL_DIR} && docker compose exec -T web python "
+                f"cd {where} && docker compose exec -T web python "
                 f"scripts/migrate_pipeline.py --dry-run "
                 f"--tracking /app/data/faa_upload_tracking.json "
                 f"--account-name '{account}'"))
             self._emit(text.strip())
 
-            after = self._project_counts(client)
+            after = self._project_counts(client, where)
             moved = [n for n in after if after.get(n, 0) != before.get(n, 0)]
             if moved:
                 self._emit(f"\nA DRY RUN MOVED SOMETHING: {', '.join(moved)}. "
@@ -1370,6 +1413,10 @@ class App:
 
             self.state["history_checked"] = account
             self.state["history_before"] = before
+            # 6c refuses unless the check was done for this account AND this
+            # stack. Checking the rehearsal and then importing into the test
+            # box would be two different databases with one set of numbers.
+            self.state["history_where"] = where
             self._emit(
                 "\nRead the three numbers above: how many it would record, "
                 "how many it would set aside, and how many it could not "
@@ -1384,36 +1431,43 @@ class App:
         """Do it for real — after a backup, and check its own arithmetic."""
         self._header("6c. IMPORTING THE OLD UPLOAD HISTORY")
         account = self.account.get().strip()
-        if self.state.get("history_checked") != account:
-            raise RuntimeError(
-                "Run 6b for this account first. It is the only thing that "
-                "says what this will do, and it is the reason this button is "
-                "safe to press.")
-        local, remote = self._history_paths()
-
-        if not messagebox.askyesno("Import", (
-                f"Record the images you uploaded by hand as already "
-                f"uploaded, against '{account}'?\n\n"
-                f"The database is backed up first and PUT IT BACK undoes "
-                f"this.")):
-            self._emit("cancelled", "dim")
-            return
-
         client = self._connect("test")
         try:
+            where, label = self._history_target(client)
+            if (self.state.get("history_checked") != account
+                    or self.state.get("history_where") != where):
+                raise RuntimeError(
+                    f"Run 6b for '{account}' against {label} first. It is the "
+                    f"only thing that says what this will do, and it is the "
+                    f"reason this button is safe to press.")
+            local, remote = self._history_paths(where)
+
+            # The stack being written to is NAMED in the box, not just in the
+            # log. This is the one irreversible-looking button in the tool
+            # and it can now point at two different databases.
+            if not messagebox.askyesno("Import", (
+                    f"Record the images you uploaded by hand as already "
+                    f"uploaded, against '{account}'?\n\n"
+                    f"This writes to {where} — {label}.\n\n"
+                    f"The database is backed up first and PUT IT BACK undoes "
+                    f"this.")):
+                self._emit("cancelled", "dim")
+                return
+
             stamp = datetime.now().strftime("%Y%m%d-%H%M")
-            backup = f"{REHEARSAL_DIR}/data/poster.db.before-history-{stamp}"
+            backup = f"{where}/data/poster.db.before-history-{stamp}"
+            self._emit(f"acting on {label}", "ok")
             self._emit("backing the database up first…")
             self._must(client,
-                       f"cp {REHEARSAL_DIR}/data/poster.db {backup} && "
-                       f"ls -lh {backup}",
+                       f"cp {where}/data/poster.db {backup} && ls -lh {backup}",
                        "could not take a backup — nothing was changed")
             self.state["history_backup"] = backup
+            self.state["history_backup_dir"] = where
 
             before = self.state.get("history_before") or {}
             self._emit("\nimporting…")
             code, text = self._run(client, (
-                f"cd {REHEARSAL_DIR} && docker compose exec -T web python "
+                f"cd {where} && docker compose exec -T web python "
                 f"scripts/migrate_pipeline.py "
                 f"--tracking /app/data/faa_upload_tracking.json "
                 f"--account-name '{account}'"))
@@ -1429,7 +1483,7 @@ class App:
             with open(local, "r", encoding="utf-8") as fh:
                 claimed = sum(len(v) for v in json.load(fh).values()
                               if isinstance(v, dict))
-            code, tally = self._rehearsal_python(client, (
+            code, tally = self._python_in(client, where, (
                 "from app.db import SessionLocal\n"
                 "from app.models import UploadTracking\n"
                 "db=SessionLocal()\n"
@@ -1443,7 +1497,7 @@ class App:
                            "else has written here too. Worth understanding "
                            "before you promote.", "err")
 
-            after = self._project_counts(client)
+            after = self._project_counts(client, where)
             self._emit("\ntitles per project AFTER:")
             for name, n in after.items():
                 delta = n - before.get(name, n)
@@ -1480,24 +1534,29 @@ class App:
         """Put the database back as it was before 6c."""
         self._header("PUTTING THE DATABASE BACK")
         backup = self.state.get("history_backup")
-        if not backup:
-            raise RuntimeError("There is no backup from this session to "
-                               "restore. Look in the rehearsal's data folder "
-                               "for a file named poster.db.before-history-*.")
+        where = self.state.get("history_backup_dir")
+        if not backup or not where:
+            raise RuntimeError(
+                "There is no backup from this session to restore. Look in "
+                "the data folder of whichever stack you imported into for a "
+                "file named poster.db.before-history-*, and copy it over "
+                "poster.db by hand.")
+        # The stack is NAMED, because this button can now put a database
+        # back into either one and restoring the wrong system would be a
+        # much worse afternoon than the import it is undoing.
         if not messagebox.askyesno("Put it back", (
-                f"Replace the rehearsal's database with the copy taken "
+                f"Replace the database at {where} with the copy taken just "
                 f"before the import?\n\nAnything done since is lost.")):
             self._emit("cancelled", "dim")
             return
         client = self._connect("test")
         try:
-            self._run(client, f"cd {REHEARSAL_DIR} && docker compose down "
-                              f"2>&1 | tail -2")
+            self._emit(f"restoring {backup}")
+            self._run(client, f"cd {where} && docker compose down 2>&1 | tail -2")
             self._must(client,
-                       f"cp {backup} {REHEARSAL_DIR}/data/poster.db && echo ok",
+                       f"cp {backup} {where}/data/poster.db && echo ok",
                        "could not restore the backup")
-            self._run(client, f"cd {REHEARSAL_DIR} && docker compose up -d "
-                              f"2>&1 | tail -3")
+            self._run(client, f"cd {where} && docker compose up -d 2>&1 | tail -3")
             self._emit("Restored. The import has been undone.", "ok")
         finally:
             client.close()

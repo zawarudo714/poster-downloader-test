@@ -65,6 +65,7 @@ is reassuring.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Callable, Optional
@@ -72,11 +73,11 @@ from typing import Callable, Optional
 from sqlalchemy import func, true as sa_true
 from sqlalchemy.orm import Session
 
-from .config import WORKSPACE_DIR
+from .config import BASE_DIR, WORKSPACE_DIR
 from .models import (
     AccountProject, MasterTitle, ProcessedImage, Project, Revision,
     SavedPoster, StoreListing, StoreScanRun, UploadAccount, UploadTracking,
-    User,
+    User, WorkerNode,
 )
 from .utils import saved_poster_path
 
@@ -1046,6 +1047,79 @@ def check_listing_sweep_believable(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def expected_agent_version() -> Optional[str]:
+    """
+    What version of the worker agent this release ships.
+
+    READ OUT OF `worker_service/agent.py` rather than copied into a constant
+    here. Two copies of one fact are two chances to drift, and the copy that
+    breaks is always the newer one, silently — which is precisely the defect
+    this whole check exists to catch, so having it in two places would be
+    absurd.
+    """
+    try:
+        source = (BASE_DIR / "worker_service" / "agent.py").read_text(
+            encoding="utf-8")
+    except OSError:
+        return None
+    found = re.search(r'^AGENT_VERSION\s*=\s*"([^"]+)"', source, re.M)
+    return found.group(1) if found else None
+
+
+def check_worker_agent_current(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: the worker machine runs the agent this release ships.
+
+    ════════════════════════════════════════════════════════════════════════
+    A FOLDER COPY HAS NO CONFIRMATION
+    ════════════════════════════════════════════════════════════════════════
+    Deploying updates the server. The worker machine is updated by copying
+    `worker_service\\` across by hand, and nothing anywhere says whether that
+    happened. So the machine can quietly keep running last week's code while
+    the site shows a fresh version number, and the symptom arrives days
+    later as a job failing for a reason that was fixed.
+
+    It bit twice in one week: the folder went two releases without its
+    version being bumped, so the number that was supposed to answer this
+    question read the same either way.
+
+    The version is what the MACHINE says about itself on every handshake,
+    against what this release ships. Same shape as every other check worth
+    having — one number from outside our own assumptions.
+    """
+    expected = expected_agent_version()
+    nodes = db.query(WorkerNode).filter(WorkerNode.is_enabled == 1).all()
+
+    if expected is None:
+        return _result("worker_agent_current",
+                       "Cannot tell which agent version this release ships",
+                       "worker_service/agent.py is not readable from the "
+                       "server, so there is nothing to compare against.",
+                       "warn", [], 0)
+    if not nodes:
+        return _result("worker_agent_current", "No worker machine is enabled",
+                       "Nothing to check. Processing and every upload happen "
+                       "on that machine, so this is worth knowing on its "
+                       "own.", "warn", [], 0)
+
+    stale = [n for n in nodes if (n.agent_version or "") != expected]
+    rows = [Finding(n.name,
+                    f"reports {n.agent_version or 'nothing yet'}, "
+                    f"this release ships {expected}",
+                    "/admin/pipeline")
+            for n in stale]
+    return _result(
+        "worker_agent_current",
+        f"{len(stale)} worker machine(s) are running an older agent"
+        if stale else f"The worker machine is running agent {expected}",
+        "Copy the worker_service folder across again and restart the agent. "
+        "Until then that machine is running older code, and a fix you "
+        "deployed has not reached the half of the system that does the "
+        "Photoshop, the uploading and the marketplace reading.",
+        "error" if stale else "ok", rows, len(stale),
+    )
+
+
 def check_two_current_images(db: Session, scope: Scope) -> CheckResult:
     """
     INVARIANT: a poster has at most ONE current processed image.
@@ -1308,6 +1382,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_count_check_is_running,
     check_designs_given_up_on,
     check_two_current_images,
+    check_worker_agent_current,
     check_orphaned_upload_rows,
     check_unassigned_titles,
     check_duplicate_hashes,

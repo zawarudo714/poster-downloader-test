@@ -10,6 +10,12 @@ v121 — legacy upload history, archive index, and the settings-drift warning
 # archive_index.py and the agent learns the "archive_index" job. No new pip
 # packages; it uses os.walk and nothing else.
 #
+# The agent is 1.26.0 now. After copying and restarting, the Nodes tab
+# should read 1.26.0 — and Diagnostics goes RED if it does not, which is the
+# whole point of that number. It sat at 1.24.0 through v120 and v121 while
+# both of them changed that folder.
+#
 # AFTER DEPLOYING, in this order:
-#   1. MIGRATE.bat -> LIST ACCOUNTS -> 6b CHECK -> read the numbers -> 6c
-#   2. Pipeline page -> READ THE STORAGE BOX
+#   1. Diagnostics -> confirm the worker machine reports 1.26.0
+#   2. MIGRATE.bat -> LIST ACCOUNTS -> 6b CHECK -> read the numbers -> 6c
+#   3. Pipeline page -> READ THE STORAGE BOX

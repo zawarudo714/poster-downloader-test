@@ -351,8 +351,15 @@
     if (!checks || !checks.length) return '';
     var bad = checks.filter(function (c) { return !c.agrees; });
     if (!bad.length) {
+      // The unclassified note goes here TOO, not only on the failure path.
+      // The first version returned early and appended it after the failures,
+      // so it appeared only when something ALSO failed to reconcile — which
+      // is exactly when it is least needed. Since the totals now count every
+      // row whatever it is called, reconciling and having an unnameable row
+      // is the NORMAL combination, and the note was invisible in it.
       return '<p class="muted mono">Our figures reconcile with theirs exactly '
-        + '(' + checks.length + ' account(s) checked).</p>';
+        + '(' + checks.length + ' account(s) checked).</p>'
+        + unclassifiedNote(checks);
     }
     return bad.map(function (c) {
       // DO NOT say "rows are missing". That was the old wording and it was a

@@ -7,78 +7,75 @@ empties this file once the server is confirmed to be running it.
 
 ---
 
-**Waiting: v132 — the $6.00 gap, found and fixed** · targets
-178.105.232.196 (test box)
+**Waiting: v133 · AGENT 1.27.0 — stale claims released on node restart**
+targets 178.105.232.196 (test box)
 
-**Includes a schema change** (`ledger_entries.raw_type`), so back up
-`poster.db` before deploying. It is one nullable column and
-`schema_migrations.py` adds it with `IF NOT EXISTS`, so it is safe and
-idempotent — but the rule is the rule.
+**THE NODE MUST BE UPDATED TOO.** Copy `worker_service/` to the Windows box.
+`AGENT_VERSION` is 1.26.0 → 1.27.0, and the Nodes tab is the only way to
+confirm the copy actually happened — a folder copy has no receipt.
 
-## What it was
+## First: two things I reported as defects are NOT defects
 
-ONE row:
+`MEASURED 2026-08-27`, and both were my error.
 
-    2026-08-25  debit $6.00  entry_type 'other'
-    "Highlander - 1986 A - T-Shirt - Navy - Medium"
+**"6 jobs claimed and never reported."** It was five, not six — job #200
+finished at 00:06 the next morning and I missed it because the node's log
+rotates at midnight. And the five were killed by **agent restarts**: there
+are 65 restarts across the 13 days of logs, almost all version bumps during
+active development. Each one matches a job's last line:
 
-FineArtAmerica put a word in its Type column that `classify()` does not
-know, so the row was filed as `other`. The row was stored correctly, with
-the right amount in the right column. But the reconciliation added up three
-buckets — sales, payouts, refunds — each selected by `entry_type`, and
-`other` was in none of them, so the money left the total.
+    #85   07:07:59   agent restarted 07:50:38  (v1.15.0)
+    #122  15:28:43   agent restarted 15:46:37  (v1.17.3)
+    #123  15:47:42   agent restarted 16:03:14  (v1.18.0)
+    #151  19:24:19   agent restarted 19:28:08  (v1.20.0)
+    #174  11:53:35   agent restarted 12:57:17  (v1.23.0)
 
-    sales    +360.60
-    payments  -87.30
-    other      -6.00
-              ───────
-               267.30   = exactly what FineArtAmerica states
+**The four `400 Invalid HTTP request` errors** begin one second after the
+07:50:38 restart and stop at the next restart eight minutes later. Same
+event. Self-resolved.
 
-`MEASURED 2026-08-27` — this also explains REFUNDED reading `-$0.00`
-everywhere: the one refund-shaped row there has ever been was not called a
-refund.
+I read gaps in a log as stalls without checking what caused the gaps. The
+answer was one grep away in files I already had. Recorded here because the
+mistake is more useful than the non-finding.
 
-**And the screen's diagnosis was wrong.** It said "rows are missing, so the
-totals above are wrong. Try READ NOW." The row was already there; reading
-again could never have helped. That sentence was a guess about the cause
-presented as an observation.
+## The real defect underneath
 
-## Fixed
+A job killed by a restart dies on the NODE while the SERVER still has it
+`running`. It stays claimed until the stalled-job reaper times it out — up
+to `claim_timeout_min` minutes of nothing happening. That is the cost, and
+it happened 65 times this fortnight.
 
-**Sum the money, not our labels for it.** Totals are now credits minus
-debits across EVERY row. Credit and debit are the marketplace's own
-columns, so a row we cannot name still lands in the right place — and a
-kind of entry nobody has ever seen counts correctly the first time, with no
-code change. Verified against the real numbers: the old way was out by
-exactly $6.00, the new way lands on their figure.
+**Fixed:** the agent now sends `startup: true` on its FIRST hello only, and
+the server releases jobs it has down as running for that node. A process
+that has just started cannot still be doing what it claimed before.
 
-**`ledger_entries.raw_type`** now stores the marketplace's own word,
-verbatim. Without it an unclassified row is a dead end — we could see the
-money was unaccounted for and had no way to learn the word that would let
-us name it. The Highlander row's word is unrecoverable; the next one will
-not be.
+Only on the first hello. `/hello` is called every poll cycle, and releasing
+there would cancel live work every thirty seconds — a far worse bug than
+the one being fixed.
 
-**The message says what is known, not what caused it.** It no longer claims
-rows are missing, and it points at their figure as the one to trust.
+The count comes back in the reply and the node logs it, so a restart that
+releases work says so rather than being silent.
 
-**A new line on the page** when unnameable rows exist: the money is counted,
-but they are absent from REFUNDED and WHAT SOLD, and here is an example.
+**Tested** against the shipped function, five cases: releases my own running
+job on startup; releases nothing on a routine poll; ignores another node's
+job; ignores a queued job; copes with nothing to do.
 
-**`check_unclassified_ledger_rows`** in Diagnostics, so this surfaces
-unattended instead of as a $6 discrepancy nobody can explain.
+## Also
 
-## After deploying
+`app/static/js/admin_earnings.js` — the unclassified-row note was behind the
+early return for "everything reconciles", so it only appeared when something
+ALSO failed to reconcile. That is exactly when it is least needed, and it is
+why you did not see it after v132. Now shown on both paths.
 
-Open Earnings. GoldenR T should reconcile exactly — no red box. Underneath
-you should see a line saying one row is of a kind the app does not
-recognise, with the Highlander description.
-
-**If you can, look at that row on FineArtAmerica's Balance page and tell me
-the word in its Type column.** That is one line in `classify()` and it stops
-being an unknown. From the next read onward the app records the word itself.
+`app/config.py` — a comment still named `_host_is_internal()`, renamed to
+`_host_check()` in v130.
 
 ### Files
 
-`app/earnings/service.py`, `app/earnings/faa.py`, `app/models.py`,
-`app/schema_migrations.py`, `app/diagnostics.py`,
-`app/static/js/admin_earnings.js`, `app/config.py` (131 → 132).
+`app/routes/pipeline_api.py`, `worker_service/agent.py`,
+`worker_service/client.py`, `app/static/js/admin_earnings.js`,
+`app/config.py` (132 → 133), `worker_service/agent.py` (1.26.0 → 1.27.0).
+
+**After deploying:** restart the node once. Its log should say either
+nothing, or "Server released N job(s) it still had me down as running."
+The Earnings page should now show the note about the one unrecognised row.

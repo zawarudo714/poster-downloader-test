@@ -89,15 +89,25 @@ class PipelineClient:
 
     # ── Handshake ──────────────────────────────────────────────────────────
 
-    def hello(self, *, hostname: str, agent_version: str) -> dict:
+    def hello(self, *, hostname: str, agent_version: str,
+              startup: bool = False) -> dict:
         """
         Announce presence and pick up poll/schedule hints.
 
         Called every cycle, not just at startup, so the dashboard's node
         health indicator reflects reality and schedule changes take effect
         without a restart.
+
+        `startup` marks the FIRST call after this process began. It is the
+        only one where the server may release work it thinks we are running:
+        a process that has just started cannot still be doing something it
+        claimed before, and saying so turns a 45-minute wait for the reaper
+        into a few seconds. On every later call it is False, because there
+        the server's view is correct and releasing would kill live work.
         """
-        return self.post("/hello", {"hostname": hostname, "agent_version": agent_version})
+        return self.post("/hello", {"hostname": hostname,
+                                    "agent_version": agent_version,
+                                    "startup": bool(startup)})
 
     # ── Photoshop stage ────────────────────────────────────────────────────
 

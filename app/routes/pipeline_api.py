@@ -114,10 +114,45 @@ def hello(
     """
     node.hostname = (payload.get("hostname") or "")[:128] or node.hostname
     node.agent_version = (payload.get("agent_version") or "")[:32] or node.agent_version
+
+    # ════════════════════════════════════════════════════════════════════
+    # A NODE THAT HAS JUST STARTED IS NOT RUNNING ANYTHING
+    # ════════════════════════════════════════════════════════════════════
+    # When the agent is restarted mid-job — a redeploy, a reboot, Ctrl+C —
+    # the job dies on the node while the SERVER still has it as 'running'.
+    # The work then sits claimed until the stalled-job reaper times it out,
+    # which is `claim_timeout_min` minutes of nothing happening.
+    #
+    # MEASURED 2026-08-27 across 13 days of node logs: 65 agent restarts,
+    # almost all of them version bumps during development, and five jobs
+    # visibly killed that way. Those five were first read as stranded work
+    # and reported as a defect; they were not. The defect is the WAIT, not
+    # the death.
+    #
+    # Only on the FIRST hello of a process. On the routine per-cycle hello
+    # the server's view is correct, and releasing there would cancel live
+    # work every thirty seconds — which is a far worse bug than the one
+    # this fixes.
+    released = 0
+    if payload.get("startup"):
+        stale = (db.query(PipelineJob)
+                   .filter(PipelineJob.status == "running",
+                           PipelineJob.claimed_by == node.name).all())
+        for job in stale:
+            P.finish_job(
+                db, job, ok=False,
+                error=("The worker machine restarted while this was "
+                       "running, so it stopped. Nothing is lost — the work "
+                       "goes back in the queue."))
+            released += 1
     db.commit()
 
     return JSONResponse({
         "ok": True,
+        # Reported back so the restart is visible in the node's own log
+        # rather than only in the database. Silence would look identical to
+        # nothing having happened.
+        "released_stale_jobs": released,
         "node": {
             "name": node.name,
             "capabilities": [c.strip() for c in (node.capabilities or "").split(",") if c.strip()],

@@ -14,7 +14,7 @@ from pathlib import Path
 # Bumped on every deploy. Templates append `?v={APP_VERSION}` to every
 # <script> and <link rel="stylesheet"> URL, so deploys force browsers to
 # refetch JS/CSS automatically — no Ctrl+Shift+R needed by users.
-APP_VERSION = "132"
+APP_VERSION = "133"
 
 
 # ── Paths ────────────────────────────────────────────────────────────────────
@@ -96,8 +96,8 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 # A protection that cannot be switched on is the same as no protection.
 #
 # Internal, private and loopback addresses are refused ALWAYS, by
-# `_host_is_internal()` in routes/worker.py. That needs no configuration
-# because no legitimate image is ever served from one.
+# `_host_check()` in routes/worker.py. That needs no configuration because
+# no legitimate image is ever served from one.
 
 MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024  # 25 MB safety cap per image
 DOWNLOAD_TIMEOUT_S = 20

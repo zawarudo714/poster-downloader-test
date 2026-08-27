@@ -61,7 +61,7 @@ from .uploader import UploadStage
 # either way. `check_worker_agent_current` in diagnostics.py now compares
 # what the machine reports against what this file says, so a stale copy is
 # reported instead of assumed.
-AGENT_VERSION = "1.26.0"
+AGENT_VERSION = "1.27.0"
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_CONFIG = HERE / "config.json"
@@ -180,10 +180,22 @@ class Agent:
         VPS reboot shouldn't need a human to restart the agent.
         """
         try:
-            data = self.client.hello(hostname=self.hostname, agent_version=AGENT_VERSION)
+            first = not getattr(self, "_said_hello", False)
+            data = self.client.hello(hostname=self.hostname,
+                                     agent_version=AGENT_VERSION,
+                                     startup=first)
+            self._said_hello = True
         except PipelineError as e:
             self.log(f"Handshake failed: {e}", level="error")
             return False
+
+        # If the server had work down to us that we are plainly not doing —
+        # because this process has only just started — it says so here.
+        released = int(data.get("released_stale_jobs") or 0)
+        if released:
+            self.log(f"Server released {released} job(s) it still had "
+                     f"me down as running. They will be handed out again.",
+                     level="warn")
 
         node = data.get("node") or {}
         self.capabilities = set(node.get("capabilities") or [])

@@ -39,8 +39,11 @@ network link. It had already been repeated to the owner as fact.
 `MEASURED 2026-08-27` — every DEAD and WRONG row below was re-checked
 against the code as it stands today.
 
-**All three root causes from the 17 August pass are FIXED.** Two entries
-remain open and are marked so.
+**All three root causes from the 17 August pass are FIXED**, and both
+entries it left open are now closed — one fixed, one verified as
+deliberate. Checking the second turned up a fault the 17 August pass did
+not look for, because it walked CONTROLS and this one is in what a control
+does after you press it. See "Image downloading" below.
 
 ---
 
@@ -124,30 +127,78 @@ queue's scoping.
 | Pipeline · GPT settings, prompt, style image | OK — gated on `processor` |
 | Pipeline · Test download / process | OK — hidden for GPT projects |
 | Pipeline · Test generation | OK — GPT only |
-| Review Posters · "Paste URL to add one" | **OPEN — needs a look.** See below. |
-| Upload · title template help text | **OPEN — still true.** See below. |
+| Review Posters · "Paste URL to add one" | OK — verified, see below |
+| Upload · title template help text | **FIXED 2026-08-27** — gated on capability |
 
-### OPEN · Upload title template help text
+### FIXED · Upload title template help text
 
-`MEASURED 2026-08-27` — `admin_pipeline.html:519` lists the available
-variables as `{title} {year} {letter} {index} {content_type} {external_id}
-{description}` for every project. `{year}` and `{content_type}` render
-EMPTY for MUSIK, whose `has_year` and `has_content_type` are both 0.
+`MEASURED 2026-08-27` — it listed `{year}` and `{content_type}` for every
+project, and both render EMPTY where `has_year` / `has_content_type` are
+off. It was inviting the owner to build a listing template with a hole in
+it. Now assembled from the project's declared capabilities, like every other
+control on that screen.
 
-Minor: it misleads rather than breaks. Worth gating the help text on the
-project's declared capabilities when batch 3 reaches this screen.
+### VERIFIED · Review Posters "Paste URL to add one"
 
-### OPEN · Review Posters "Paste URL to add one"
+`MEASURED 2026-08-27` — the control exists. The 17 August note was right;
+it is simply named `.g-add-url` / `.g-add-btn` in `admin.js`, posting to
+`/admin/poster/add`, which is why a search for the label found nothing.
 
-`DECIDED 2026-08-17` — flagged, not removed. The admin has no URL source
-for MUSIK either, but unlike the worker's box it is not a dead end: it is
+`DECIDED 2026-08-17, still stands` — kept for MUSIK. Unlike the worker's
+paste box it is not a dead end: the in-page grid is worker-only, so this is
 the admin's only way to add an image directly.
 
-`LEAD 2026-08-27` — the control could not be found by that name in
-`admin_review_images.html`. It may have moved, been renamed, or been
-removed. **Not verified either way.** Confirm when batch 3 reaches the
-admin screens rather than assuming the 17 August note still describes what
-is there.
+**But checking it turned up something the 17 August pass did not** — see
+the image-download section below.
+
+## Image downloading — what happens AFTER you press the button
+
+`MEASURED 2026-08-27`. Four controls end in the server fetching a URL a
+person typed: the worker's SAVE box, the worker's two REPLACE boxes, and
+the admin's "+ ADD". All four went through one validator, and it checked
+the scheme, the host being non-empty, and the file extension.
+
+**It did not check where the host pointed.** `http://127.0.0.1:8000/x.jpg`
+or `http://169.254.169.254/meta.jpg` would make the server fetch its own
+admin API, or the cloud provider's credentials endpoint, and write the
+result into the workspace as a poster.
+
+There WAS a control for this and it could never be switched on:
+
+  * `RESTRICT_HOSTS` was an ENVIRONMENT VARIABLE, so invisible from the
+    dashboard — against the standing rule that anything the owner might
+    change lives on a screen.
+  * It defaulted to off and `MEASURED 2026-08-27` had always been off.
+  * Its allow-list held TMDB only, so switching it on would have blocked
+    every MUSIK save — those images come from wherever Brave found them.
+
+`CLAUDE.md` names "allowed hosts" explicitly in the list of things that must
+resolve per project. This was a constant in `config.py`.
+
+**Fixed two ways, because there are two different questions here:**
+
+  * Internal, private, loopback and link-local addresses are refused
+    ALWAYS, for every project, with no setting. This can never refuse a
+    legitimate image, because none is served from such an address. The
+    hostname is RESOLVED, not pattern-matched — `sneaky.example.com` can
+    point at 127.0.0.1 and a string check waves it through.
+  * The allow-list is now `allowed_image_hosts`, a per-project dashboard
+    setting. **Blank by default, which is exactly today's behaviour**, so
+    nothing changes until someone chooses to narrow it.
+
+`RULE` — and the reason this was missed on 17 August: that pass walked
+CONTROLS and asked "does this do anything in this project?". This fault is
+not in a control, it is in what four controls share once pressed. **A
+control audit and a path audit are different audits.** When a screen's
+buttons all funnel into one function, that function needs its own look.
+
+**Three answers, not two.** The first version of the fix treated "could not
+resolve that name" the same as "that name is internal" — both refuse, so
+the behaviour was right, but the message said "on this server's own
+network", which is false for a DNS hiccup and would send someone hunting a
+security problem. Same shape as FAA's 410 versus 404. Found because the
+sandbox it was written in has no DNS, so the first test run rejected every
+legitimate host.
 
 ## Shared / master
 

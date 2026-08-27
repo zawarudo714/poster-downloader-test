@@ -516,7 +516,16 @@
     <section class="panel">
       <div class="panel-head">
         <span>LISTING TEMPLATES
-          {{ info("How each listing's title, keywords and description are built. Variables: {title} {year} {letter} {index} {content_type} {external_id} {description}. {letter} is the per-image A/B/C suffix. Titles are ASCII-folded automatically because marketplaces reject accents.") }}
+          {# Only offer variables this project can actually fill. {year} and
+             {content_type} render EMPTY for a project with has_year /
+             has_content_type off, so listing them was inviting the owner to
+             build a template with a hole in it. Same rule as every other
+             control here: gate on the project's declared capability. #}
+          {{ info("How each listing's title, keywords and description are built. Variables: {title}"
+                  ~ (" {year}" if has_year else "")
+                  ~ " {letter} {index}"
+                  ~ (" {content_type}" if has_content_type else "")
+                  ~ " {external_id} {description}. {letter} is the per-image A/B/C suffix. Titles are ASCII-folded automatically because marketplaces reject accents.") }}
         </span>
       </div>
       <div class="panel-body">

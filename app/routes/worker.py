@@ -40,8 +40,8 @@ from sqlalchemy.orm import Session
 from ..audit import log as log_activity
 from ..auth import require_user
 from ..config import (
-    ALLOWED_DOWNLOAD_HOSTS, DEFAULT_PULL_SIZE, DOWNLOAD_TIMEOUT_S,
-    MASTER_PAGE_SIZE, MAX_DOWNLOAD_BYTES, MAX_PULL_SIZE, RESTRICT_HOSTS,
+    DEFAULT_PULL_SIZE, DOWNLOAD_TIMEOUT_S,
+    MASTER_PAGE_SIZE, MAX_DOWNLOAD_BYTES, MAX_PULL_SIZE,
     SOFT_LIMIT_PER_TITLE,
 )
 from ..db import get_db
@@ -741,7 +741,8 @@ def api_search_save(
     from ..imagefetch import FetchError, fetch_as_jpeg
 
     t = _load_my_master(db, user, master_id)
-    ok, reason = _validate_image_url(url)
+    ok, reason = _validate_image_url(
+        url, db, resolve_project(db, t.project_id))
     if not ok:
         raise HTTPException(400, reason)
 
@@ -1133,7 +1134,99 @@ def go_to_title(
 
 # ── Save image ───────────────────────────────────────────────────────────────
 
-def _validate_image_url(url: str) -> tuple[bool, str]:
+def _host_check(host: str, resolver=None) -> tuple[str, str]:
+    """
+    Where does this hostname point? Returns (verdict, message).
+
+    Verdict is one of "public", "internal", "unresolvable" — THREE answers,
+    not two, and that is the point.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THREE
+    ════════════════════════════════════════════════════════════════════════
+    The first version of this returned a bool and treated "could not look it
+    up" the same as "it is internal". Both refuse the save, which is right —
+    a name that will not resolve cannot be downloaded either — but the
+    REASON shown was "that address is on this server's own network". That
+    sentence is simply false for a DNS hiccup, and it would send someone
+    hunting a security problem when the answer is that the resolver was
+    briefly unavailable.
+
+    Same shape as FineArtAmerica's 410 versus 404, and as the TeePublic wall
+    versus an empty search: when two causes need different responses from a
+    human, they must not share one message.
+
+    `resolver` is injectable so this can be tested without a network. The
+    sandbox this was written in has no DNS, and the first test run showed
+    every legitimate host being rejected — which is exactly the failure this
+    docstring is about, found by accident.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY BLOCK INTERNAL ADDRESSES AT ALL
+    ════════════════════════════════════════════════════════════════════════
+    Saving an image means the SERVER fetches a URL a person typed. Without
+    this, `http://127.0.0.1/x.jpg` or `http://169.254.169.254/meta.jpg`
+    makes the server fetch its own admin API or the cloud provider's
+    credentials endpoint and write the result into the workspace.
+
+    There WAS a control for this — `RESTRICT_HOSTS` plus an allow-list — and
+    it was off by default, set by an environment variable the owner cannot
+    see, and listed TMDB only. Turning it on would have blocked every MUSIK
+    save, because those images come from wherever Brave found them. So it
+    could never actually be switched on, which is the same as not having it.
+    `MEASURED 2026-08-27`: it had always been "0".
+
+    Blocking internal addresses can never refuse a legitimate image, because
+    no legitimate image is served from a loopback or private address. So it
+    needs no configuration and no per-project thought.
+
+    The name is RESOLVED rather than pattern-matched, because
+    `something.example.com` can perfectly well point at 127.0.0.1 and a
+    string check would wave it through.
+    """
+    import ipaddress
+    import socket
+
+    host = (host or "").strip().strip("[]")
+    if not host:
+        return "unresolvable", "URL has no host."
+
+    resolve = resolver or (lambda h: [i[4][0] for i in socket.getaddrinfo(h, None)])
+    try:
+        addrs = resolve(host)
+    except OSError:
+        return "unresolvable", (
+            f"Could not look up {host}. Check the address is spelled right; "
+            f"if it is, the server's name lookup may be having a moment — "
+            f"try again in a minute.")
+    if not addrs:
+        return "unresolvable", f"Could not look up {host}."
+
+    for addr in addrs:
+        try:
+            ip = ipaddress.ip_address(str(addr).split("%")[0])
+        except ValueError:
+            return "unresolvable", f"Could not make sense of the address for {host}."
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+            return "internal", (
+                "That address is inside this server's own network, so it is "
+                "not an image from the internet. Check the link.")
+    return "public", ""
+
+
+def _validate_image_url(url: str, db: Optional[Session] = None,
+                        project=None) -> tuple[bool, str]:
+    """
+    Is this URL safe and sensible to download an image from?
+
+    `db`/`project` are optional so the existing call sites keep working, but
+    pass them where you have them: the host allow-list is a PER-PROJECT
+    setting, because what counts as a legitimate source differs per niche —
+    the movie project takes everything from TMDB, MUSIK from wherever the
+    image search found it. Blank means "any public host", which is what this
+    has always done in practice.
+    """
     url = url.strip()
     if not url:
         return False, "Empty URL."
@@ -1142,8 +1235,19 @@ def _validate_image_url(url: str) -> tuple[bool, str]:
         return False, "URL must be http(s)."
     if not parsed.netloc:
         return False, "URL has no host."
-    if RESTRICT_HOSTS and parsed.netloc.lower() not in ALLOWED_DOWNLOAD_HOSTS:
-        return False, f"Host not allowed: {parsed.netloc}"
+
+    verdict, message = _host_check(parsed.hostname or "")
+    if verdict != "public":
+        return False, message
+
+    if db is not None:
+        from ..pipeline import get_setting
+        raw = str(get_setting(db, "allowed_image_hosts", project=project) or "")
+        allowed = {h.strip().lower() for h in raw.replace(",", " ").split() if h.strip()}
+        if allowed and host.lower() not in allowed:
+            return False, (f"Images for this project may only come from: "
+                           f"{', '.join(sorted(allowed))}")
+
     if not IMAGE_EXT_RE.search(parsed.path):
         return False, "URL must end in .jpg/.jpeg/.png/.webp/.gif"
     return True, ""
@@ -1240,7 +1344,7 @@ def save_image(
     if t.status in ("complete", "skipped"):
         raise HTTPException(409, f"This title is marked {t.status}. Reopen it to add posters.")
 
-    ok, reason = _validate_image_url(url)
+    ok, reason = _validate_image_url(url, db, resolve_project(db, t.project_id))
     if not ok:
         raise HTTPException(400, reason)
     src_url = url.strip()
@@ -1583,7 +1687,9 @@ def replace_poster(
     client can re-call with confirm_low_quality=1 to bypass.
     """
     sp = _load_my_poster(db, user, poster_id)
-    ok, reason = _validate_image_url(url)
+    _mt = db.query(MasterTitle).filter_by(id=sp.master_title_id).first()
+    ok, reason = _validate_image_url(
+        url, db, resolve_project(db, _mt.project_id if _mt else None))
     if not ok:
         raise HTTPException(400, reason)
     src_url = url.strip()

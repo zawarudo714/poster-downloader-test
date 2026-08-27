@@ -14,7 +14,7 @@ from pathlib import Path
 # Bumped on every deploy. Templates append `?v={APP_VERSION}` to every
 # <script> and <link rel="stylesheet"> URL, so deploys force browsers to
 # refetch JS/CSS automatically — no Ctrl+Shift+R needed by users.
-APP_VERSION = "129"
+APP_VERSION = "130"
 
 
 # ── Paths ────────────────────────────────────────────────────────────────────
@@ -88,15 +88,16 @@ PALETTE = {
 
 # ── Image constraints ────────────────────────────────────────────────────────
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
-ALLOWED_DOWNLOAD_HOSTS = {
-    "image.tmdb.org",
-    "www.themoviedb.org",
-    "themoviedb.org",
-    # If posters are sometimes hosted elsewhere, add here.
-}
-# Allow any host by default (worker may grab from various sources). Set
-# RESTRICT_HOSTS=1 in env to enforce ALLOWED_DOWNLOAD_HOSTS instead.
-RESTRICT_HOSTS = os.environ.get("RESTRICT_HOSTS", "0") == "1"
+# Where images may be downloaded from is now a PER-PROJECT dashboard
+# setting, `allowed_image_hosts` (blank = any public host). It used to be
+# this pair of constants plus a RESTRICT_HOSTS environment variable, which
+# was never switched on, could not be seen or changed from the dashboard,
+# and listed TMDB only — so enabling it would have blocked every MUSIK save.
+# A protection that cannot be switched on is the same as no protection.
+#
+# Internal, private and loopback addresses are refused ALWAYS, by
+# `_host_is_internal()` in routes/worker.py. That needs no configuration
+# because no legitimate image is ever served from one.
 
 MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024  # 25 MB safety cap per image
 DOWNLOAD_TIMEOUT_S = 20

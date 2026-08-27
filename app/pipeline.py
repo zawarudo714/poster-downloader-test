@@ -593,6 +593,13 @@ DEFAULTS: dict[str, Any] = {
     # own cooldown (3h after a general failure, 12h after a signed-out one),
     # so a signed-out account waits for a person instead of being knocked on
     # repeatedly. 0 switches retrying off.
+    # Which hosts a project's images may be downloaded from. BLANK = any
+    # public host, which is what the app has always done — the old
+    # RESTRICT_HOSTS env var was never switched on, and listed TMDB only, so
+    # enabling it would have blocked every MUSIK save. Per project because
+    # what counts as a legitimate source differs per niche. Internal and
+    # private addresses are refused regardless of this setting.
+    "allowed_image_hosts": "",
     "earnings_retry_window_hours": 8,
     # When the SCHEDULED read was dispatched, UTC ISO. The retry measures
     # from this rather than from the calendar day, so it behaves the same at

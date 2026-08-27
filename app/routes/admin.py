@@ -1538,7 +1538,10 @@ def admin_add_poster(
     if not t:
         raise HTTPException(404, "Title not found.")
 
-    ok, reason = _validate_image_url(url.strip())
+    from ..pipeline import resolve_project
+
+    ok, reason = _validate_image_url(
+        url.strip(), db, resolve_project(db, t.project_id))
     if not ok:
         raise HTTPException(400, reason)
     src_url = url.strip()

@@ -611,7 +611,13 @@ def store_snapshot(db: Session, *, account: UploadAccount, html: str) -> dict:
 
     marketplace = (account.target_site or "").lower()
     reader = READERS.get(marketplace)
-    snap = reader.parse_account_page(html)
+    # The structural markers, so a page that is NOT theirs is reported
+    # as such rather than as a redesign. getattr because a reader that
+    # does not take them simply ignores the argument.
+    try:
+        snap = reader.parse_account_page(html, site_markers(marketplace))
+    except TypeError:
+        snap = reader.parse_account_page(html)
     today = local_today()
 
     previous = (

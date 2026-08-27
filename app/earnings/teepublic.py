@@ -151,7 +151,8 @@ def looks_signed_out(html: str) -> bool:
     return any(m in html for m in SIGNED_OUT_MARKERS)
 
 
-def parse_account_page(html: str) -> Snapshot:
+def parse_account_page(html: str,
+                       markers: Optional[list[str]] = None) -> Snapshot:
     """
     The four figures, with the month each one describes.
 
@@ -191,9 +192,37 @@ def parse_account_page(html: str) -> Snapshot:
             found += 1
 
     if found < 3:
+        # ════════════════════════════════════════════════════════════════
+        # "THE LABELS ARE MISSING" IS NOT THE SAME AS "THEY REDESIGNED IT"
+        # ════════════════════════════════════════════════════════════════
+        # This used to say "TeePublic has changed it" whenever fewer than
+        # three labels were found — one cause, asserted as fact, out of
+        # several that produce exactly this. A maintenance page, an error
+        # page, a half-loaded page and the interstitial all look like this.
+        #
+        # The owner named this himself as an unhandled gap: a maintenance
+        # page would send the next session hunting a redesign that never
+        # happened. Same shape as FineArtAmerica's 410 versus 404, and as
+        # a DNS failure being reported as "that address is internal".
+        #
+        # `site_markers` is the answer and it already exists: the header
+        # logo is on every ordinary TeePublic page and on nothing that
+        # stands in front of one. Present means this really is their page
+        # and the labels really have moved. Absent means we never reached
+        # their page at all, which is a different problem with a different
+        # fix and must not be reported as a redesign.
+        if markers and not any(m in html for m in markers):
+            raise TeePublicError(
+                "This is not TeePublic's account page — their own header is "
+                "not on it. Something is standing in front of it: the "
+                "interstitial, a maintenance page, or an error page. Nothing "
+                "is wrong with your account and nothing has been redesigned. "
+                "Try again shortly.")
         raise TeePublicError(
-            "Could not find the earnings figures on the account page — "
-            "TeePublic has changed it. Nothing is wrong with your account.")
+            "This IS TeePublic's account page — their header is on it — but "
+            "the earnings figures are not where they used to be. That means "
+            "they have changed the page and the four labels this reads need "
+            "updating. Nothing is wrong with your account.")
     return snap
 
 

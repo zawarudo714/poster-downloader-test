@@ -7,65 +7,65 @@ empties this file once the server is confirmed to be running it.
 
 ---
 
-**Waiting: v136 — a long upload batch could be reaped mid-flight** · targets
-178.105.232.196 (test box)
+**Waiting: v137 — a maintenance page no longer reads as a redesign** ·
+targets 178.105.232.196 (test box)
 
 **Deploy:** yes. **Copy `worker_service/` to the node:** NO — nothing under
 it changed, `AGENT_VERSION` stays 1.27.0. **Schema change:** none.
 
-## The defect
+## The gap the owner named himself
 
-`reap_stale_claims` releases work claimed by a node that never reported
-back. Your notes already record this exact mistake being found and fixed
-FOR JOBS — comparing `started_at` against the timeout meant a healthy
-hour-long TeePublic job was cancelled at minute 45 and its remaining
-designs handed out again.
+`CLAUDE.md` planned item 8 records this as his own example of the class of
+bug the interaction audit exists to catch, and says it is NOT yet handled:
 
-**The same function still compares `claimed_at` for posters and uploads.**
-The fix went to one of three places.
+> what happens to the earnings read when FineArtAmerica serves a MAINTENANCE
+> page? Today the parser would fail to find the figures and report "FAA has
+> changed its page" — sending the next session hunting a redesign that never
+> happened.
 
-`MEASURED 2026-08-27` from 13 days of node logs:
+`MEASURED 2026-08-27` — still true, on TeePublic. `parse_account_page` raised
+"TeePublic has changed it" whenever fewer than three of the four labels were
+found. That is ONE cause asserted as fact, out of several that look
+identical: a redesign, a maintenance page, an error page, a half-loaded
+page, the interstitial.
 
-    upload per item     median 16-22s   p90 55-59s   outliers 5-9 min
-    upload_batch_size   40
-    claim_timeout_min   45 minutes
+## Fixed with a mechanism that already existed
 
-40 items at p90 pace is **37 minutes of a 45-minute timeout**, and
-multi-minute outliers appear on every single day in the logs. A healthy
-batch can outlive its own claim, at which point its remaining rows go back
-to 'pending' while the node is still uploading them — and the next claim
-can hand the same rows out again. For an upload that means a **duplicate
-listing on a real marketplace.**
+`site_markers()` returns the header logo, which is on every ordinary
+TeePublic page and on nothing that stands in front of one. It was already
+being used by the store scan; the account parser was not asking.
 
-**What is measured and what is not:** the timings, the batch size and the
-timeout are measured, and the asymmetry between the three tables is read
-straight from the source. Whether this has ALREADY produced a duplicate is
-NOT established — I have not found one, and I did not go looking hard. The
-margin is thin enough to close regardless.
+Three answers now, three messages:
 
-Processing has the same shape (`process_batch_size` 20) but I have no
-measurement of Photoshop's per-image time — only one process job appears in
-the logs. Treated as the same fix rather than a separate claim.
+  * the sign-in field is present  -> "the session was not accepted"
+  * their header is ABSENT        -> "something is standing in front of it:
+    the interstitial, a maintenance page, or an error page. Nothing has been
+    redesigned. Try again shortly."
+  * their header is PRESENT and the labels are not -> "they HAVE changed the
+    page and the four labels this reads need updating."
 
-## The fix
+Same shape as FineArtAmerica's 410 versus 404, and as the DNS-versus-internal
+split added in v130.
 
-Liveness is the last thing the NODE said, not when the batch started. Every
-item a node finishes stamps `uploaded_at`, so a node working steadily
-through a long batch is visibly alive even though the item in its hand is
-not. The reaper now skips rows claimed by a node that has reported anything
-inside the timeout window.
+**Tested** against the shipped parser: a real page parses; each of the three
+failures produces its own message; and a marketplace with no markers
+configured still gets an answer rather than being refused.
 
-Derived, not stored — no new column, nothing to keep correct.
+## What batch 5 did NOT find
 
-**Tested against real SQLite:** a busy node claimed 50 minutes ago but
-reporting 2 minutes ago keeps its work; a dead node claimed at the same
-moment loses its work; and when the busy node goes quiet for 90 minutes its
-work is released too.
+Two lines of enquiry produced nothing and are recorded so nobody repeats
+them:
+
+  * **Exception handlers that swallow silently.** 172 matched, which is a
+    flood rather than a finding, and the detector was itself wrong — it did
+    not know `emit()` is how the node reports, so handlers that DO speak
+    were counted as silent. Not a usable check in that form.
+  * **`intake_open` coverage.** All three stages its docstring claims are
+    verified to call it. `claim_job` deliberately does not, and that is
+    correct: earnings reads and store jobs are the very work the gate exists
+    to make room for, so gating them would deadlock.
 
 ### Files
 
-`app/pipeline.py`, `app/config.py` (135 → 136).
-
-**Not verified:** nothing has run through this against the live node.
-Nothing to click — it shows itself only when a batch runs longer than 45
-minutes, which is exactly the case that was broken.
+`app/earnings/teepublic.py`, `app/earnings/service.py`,
+`app/config.py` (136 -> 137).

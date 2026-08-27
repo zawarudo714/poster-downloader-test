@@ -700,6 +700,72 @@ def check_account_never_read(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def check_unclassified_ledger_rows(db: Session, scope: Scope) -> CheckResult:
+    """
+    Money rows we stored but could not name.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY
+    ════════════════════════════════════════════════════════════════════════
+    `classify()` maps a marketplace's Type column onto sale / payment /
+    refund, and anything it does not recognise becomes 'other'. Keeping the
+    row was the right call — an unknown row we can see beats a wrong one we
+    cannot — but everything downstream selects BY TYPE, so an 'other' row
+    was counted nowhere.
+
+    MEASURED 2026-08-27: one row did exactly that. FineArtAmerica recorded a
+    $6.00 debit against "Highlander - 1986 A - T-Shirt - Navy - Medium" with
+    a word `classify()` does not know. It fell out of the balance, the
+    Earnings page reported GoldenR T as $6.00 short, and it said rows were
+    MISSING and to press READ NOW — a diagnosis that was wrong, for a row
+    that was already stored.
+
+    The arithmetic is fixed: totals now sum credit minus debit across every
+    row, so an unnameable row still lands in the right place. What is still
+    lost is the LABEL — such a row is absent from REFUNDED and from WHAT
+    SOLD, and nothing would say so.
+
+    That is what this reports. It is not an error, it is a gap in our
+    vocabulary, and the fix is one word added to `classify()` — which needs
+    `raw_type`, now stored for exactly this reason.
+    """
+    rows = []
+    try:
+        entries = (db.query(LedgerEntry)
+                     .filter(LedgerEntry.entry_type == "other")
+                     .order_by(LedgerEntry.occurred_at.desc())
+                     .limit(50).all())
+    except Exception as e:
+        return _result(
+            "unclassified_ledger", "Money rows we could not name",
+            "This check could not run.", "warn",
+            [Finding("The check itself failed", str(e), "/admin/earnings")])
+
+    for r in entries:
+        amount = (r.debit or "0").strip() or "0"
+        if amount in ("0", "0.0", "0.00"):
+            amount = (r.credit or "0").strip() or "0"
+        if amount in ("0", "0.0", "0.00"):
+            continue                      # a zero row costs nothing either way
+        rows.append(Finding(
+            f"{r.marketplace}: ${amount} on {r.occurred_at:%Y-%m-%d} "
+            f"is of a kind we do not recognise",
+            (f"they called it {r.raw_type!r} · " if getattr(r, "raw_type", None)
+             else "their word for it was not recorded · ")
+            + (r.description or "")[:70],
+            "/admin/earnings"))
+
+    return _result(
+        "unclassified_ledger", "Money rows we could not name",
+        "The amount is counted correctly in the balance — totals add up "
+        "credits minus debits across every row, whatever it is called. But "
+        "a row we cannot name is left out of REFUNDED and WHAT SOLD, "
+        "because those pick rows by type. Tell Claude the word the "
+        "marketplace uses and it becomes one line in classify().",
+        "warn", rows,
+    )
+
+
 def check_earnings_retry_gave_up(db: Session, scope: Scope) -> CheckResult:
     """
     Accounts today's read never managed to read, after retrying stopped.
@@ -1535,6 +1601,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_upload_accounts,
     check_duplicate_accounts,
     check_account_never_read,
+    check_unclassified_ledger_rows,
     check_earnings_retry_gave_up,
     check_orphaned_bans,
     # ── Listing-health invariants ───────────────────────────────────────

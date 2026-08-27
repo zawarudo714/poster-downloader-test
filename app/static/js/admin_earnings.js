@@ -355,14 +355,42 @@
         + '(' + checks.length + ' account(s) checked).</p>';
     }
     return bad.map(function (c) {
+      // DO NOT say "rows are missing". That was the old wording and it was a
+      // diagnosis, not an observation — on 2026-08-27 it was wrong: the row
+      // was present, it was simply of a kind we could not name, so it fell
+      // out of the arithmetic. The owner was told to press READ NOW, which
+      // could never have helped. Say what is known; do not name the cause.
       return '<div class="quota-note" style="margin-top:8px">'
-        + '<strong>' + esc(c.account) + ' does not add up.</strong> '
+        + '<strong>' + esc(c.account) + ' does not match.</strong> '
         + 'We hold ' + c.sales + ' sale(s) and ' + c.payouts + ' payout(s), '
-        + 'which come to ' + money(c.ours) + '. They say ' + money(c.theirs)
+        + 'adding up to ' + money(c.ours) + '. They say ' + money(c.theirs)
         + ' — a difference of ' + money(c.difference) + '. '
-        + 'That means rows are missing, so the totals above are wrong. '
-        + 'Try READ NOW; if it persists, tell Claude.'
+        + 'Their figure is the one to trust. '
+        + 'Either we have not seen every row yet, or one is recorded '
+        + 'differently from how we read it.'
         + '</div>';
+    }).join('')
+    + unclassifiedNote(checks);
+  }
+
+  // Rows whose money we counted but whose KIND we could not work out. They
+  // are correct in the balance and absent from everything that filters by
+  // type — "refunded", WHAT SOLD — so the screen has to say so rather than
+  // quietly under-reporting.
+  function unclassifiedNote(checks) {
+    var odd = checks.filter(function (c) { return c.unclassified > 0; });
+    if (!odd.length) return '';
+    return odd.map(function (c) {
+      return '<p class="muted" style="margin-top:8px">'
+        + c.unclassified + ' row(s) on ' + esc(c.account) + ' are of a kind '
+        + 'this app does not recognise. The money is counted correctly in the '
+        + 'balance, but they are left out of REFUNDED and WHAT SOLD because '
+        + 'we do not know what to call them'
+        + (c.unclassified_examples && c.unclassified_examples.length
+            ? ' — for example: ' + esc(c.unclassified_examples[0])
+            : '')
+        + '. Worth telling Claude, with the wording the marketplace uses.'
+        + '</p>';
     }).join('');
   }
 

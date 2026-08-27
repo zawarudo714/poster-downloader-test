@@ -96,6 +96,17 @@ class LedgerRow:
     balance_after: Optional[str]
     artwork_name: Optional[str] = None
     product: Optional[str] = None
+    # EXACTLY what the marketplace printed in its Type column, verbatim.
+    # `entry_type` is our READING of it and can be wrong; this is the
+    # evidence. MEASURED 2026-08-27: a $6.00 row was classified 'other',
+    # dropped out of the balance, and its Type word was not stored — so
+    # `classify()` could not be corrected without going back to the site.
+    #
+    # Defaulted, and placed with the other defaulted fields, because a
+    # dataclass forbids a defaulted field before a required one. The first
+    # attempt at this put it straight after `entry_type` and would not
+    # import at all.
+    raw_type: str = ""
     # Filled from the row's own hidden panel on the Sales page. Declared here
     # rather than attached dynamically so the shape of a row is readable in
     # one place.
@@ -338,6 +349,7 @@ def _row_from_cells(texts: list[str]) -> list[LedgerRow]:
         balance_after=money(balance) if balance else None,
         artwork_name=artwork,
         product=product,
+        raw_type=_clean(raw_type),
     )]
 
 

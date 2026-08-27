@@ -1172,6 +1172,12 @@ class LedgerEntry(Base):
     # is stored as 'other' with its raw description rather than being forced
     # into a bucket — an unknown row we can see beats a wrong one we cannot.
     entry_type     = Column(String(16), nullable=False, index=True)
+    # The marketplace's OWN word for this row, verbatim. `entry_type` is our
+    # reading of it and can be wrong; this is the evidence. Without it an
+    # 'other' row cannot be diagnosed — see the $6.00 Highlander row,
+    # 2026-08-27, whose Type word was lost and so could not be added to
+    # classify().
+    raw_type       = Column(String(64), nullable=True)
 
     remote_order_id = Column(String(64), nullable=True, index=True)
     description     = Column(Text, nullable=True)

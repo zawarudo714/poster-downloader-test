@@ -77,6 +77,7 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("projects",      "has_review_gate",   "INTEGER NOT NULL DEFAULT 0"),
     ("projects",      "search_mode",       "VARCHAR(16) NOT NULL DEFAULT 'external'"),
     # ── AI review gate + spend metering ─────────────────────────────────
+    ("ledger_entries",   "raw_type",     "VARCHAR(64)"),
     ("processed_images", "review_status", "VARCHAR(16)"),
     ("processed_images", "reviewed_at",   "DATETIME"),
     ("processed_images", "reviewed_by",   "VARCHAR(64)"),

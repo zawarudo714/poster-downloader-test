@@ -15,6 +15,7 @@ cost far more to read, answer a different question, and on a mounted working
 copy `git status` cannot refresh its index — it reports stale answers with
 no warning.
 
+- **2026-08-27 15:00** · `c677a1e3` · v131 · deploy v131
 - **2026-08-27 14:40** · `0d2dde7c` · v130 · deploy v130
 - **2026-08-27 14:11** · `d4a18552` · v129 · deploy v129
 - **2026-08-27 13:18** · `36ad9833` · v128 · deploy v128
@@ -44,4 +45,3 @@ no warning.
 - **2026-08-24 07:38** · `3592bbde` · Counts now say what they mean: 17 of 627 in this continue, not 17 of 1543.
 - **2026-08-24 07:23** · `c5ce73cf` · A wall no longer kills the night: the sweep waits 30/60/90 minutes and retries,
 - **2026-08-23 21:30** · `05083e9f` · A paused or stopped scan no longer counts as a FINISHED scan. Resume carries on
-- **2026-08-23 20:11** · `2cc8cbbd` · Search pages are now addressed directly (?page=N&query=) instead of following a

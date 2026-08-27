@@ -671,6 +671,10 @@ def _entry_from_row(account: UploadAccount, marketplace: str, row) -> LedgerEntr
         marketplace=marketplace,
         occurred_at=row.occurred_at,
         entry_type=row.entry_type,
+        # getattr, because TeePublic's reader builds rows of its own shape
+        # and does not have this field. A marketplace that does not tell us
+        # a type word simply stores none.
+        raw_type=getattr(row, "raw_type", "") or None,
         remote_order_id=row.order_id,
         description=row.description,
         artwork_name=row.artwork_name,
@@ -1292,14 +1296,31 @@ def reconcile(db: Session, *, account_ids: Optional[list[int]] = None) -> list[d
             continue
         rows = db.query(LedgerEntry).filter(
             LedgerEntry.account_id == account.id).all()
-        gross = sum((dec(r.credit) for r in rows if r.entry_type == "sale"),
-                    Decimal("0"))
-        paid = sum((dec(r.debit) for r in rows if r.entry_type == "payment"),
-                   Decimal("0"))
-        back = sum((dec(r.debit) or dec(r.credit)
-                    for r in rows if r.entry_type == "refund"), Decimal("0"))
-        ours = gross - paid - back
+
+        # ════════════════════════════════════════════════════════════════
+        # SUM THE MONEY, NOT OUR LABELS FOR IT
+        # ════════════════════════════════════════════════════════════════
+        # This used to add up three buckets — sales, payouts, refunds —
+        # each selected by `entry_type`. Any row we could not classify was
+        # filed as 'other' and then left out of the total entirely.
+        #
+        # MEASURED 2026-08-27: one row did exactly that. FineArtAmerica
+        # recorded a $6.00 debit against "Highlander - 1986 A - T-Shirt -
+        # Navy - Medium" with a Type word `classify()` does not know, so it
+        # became 'other', dropped out of the sum, and this check reported
+        # GoldenR T as $6.00 out — while telling the owner rows were
+        # MISSING and to press READ NOW. The row was already there. Reading
+        # again could never have helped.
+        #
+        # Credit and debit are FineArtAmerica's own columns. Trusting those
+        # rather than our reading of their Type word means a row we do not
+        # understand still lands in the right place, and a new kind of
+        # entry we have never seen counts correctly the first time.
+        ours = sum((dec(r.credit) - dec(r.debit) for r in rows), Decimal("0"))
         theirs = dec(account.marketplace_balance)
+        unknown = [r for r in rows
+                   if r.entry_type == "other"
+                   and (dec(r.credit) or dec(r.debit))]
         out.append({
             "account_id": account.id,
             "account": account.name,
@@ -1309,6 +1330,14 @@ def reconcile(db: Session, *, account_ids: Optional[list[int]] = None) -> list[d
             "agrees": ours == theirs,
             "sales": sum(1 for r in rows if r.entry_type == "sale"),
             "payouts": sum(1 for r in rows if r.entry_type == "payment"),
+            # Counted in the total above, but we do not know what to CALL
+            # them — so they are missing from "refunded", from WHAT SOLD,
+            # and from anything else that selects by type. Surfaced rather
+            # than hidden, because the money is right and the label is not.
+            "unclassified": len(unknown),
+            "unclassified_examples": [
+                (r.description or "")[:70] for r in unknown[:3]
+            ],
         })
     return out
 

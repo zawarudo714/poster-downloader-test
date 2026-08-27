@@ -326,9 +326,31 @@ def _cycle() -> bool:
             poster, title = _claim_next(db, project)
             if poster is None:
                 continue
-            log.info("GPT: processing poster %s (%s)", poster.id, title.title)
-            if process_one(db, poster, title, project):
-                did_work = True
+            # The claim above is COMMITTED, so the cycle-level rollback below
+            # cannot undo it. `process_one` handles its three known failure
+            # shapes and releases the claim in each; anything OUTSIDE those
+            # used to escape to the cycle handler and strand the poster at
+            # 'processing' — where, since the reaper began sparing nodes
+            # that are visibly producing (v140), a busy worker's wedged
+            # poster would never be freed at all. Rule 8: an exception must
+            # not escape past the point where the work was claimed.
+            #
+            # `report_process_failure` is the same call the node's report
+            # endpoint uses — releases the claim, bumps attempts, records
+            # the error, and past max_attempts it surfaces in the failure
+            # list instead of retrying forever.
+            pid = poster.id
+            try:
+                if process_one(db, poster, title, project):
+                    did_work = True
+            except Exception as e:
+                db.rollback()
+                detail = f"{type(e).__name__}: {e}"
+                log.error("GPT: poster %s failed unexpectedly: %s", pid, detail)
+                from .pipeline import report_process_failure
+                report_process_failure(db, poster_id=pid, node="server",
+                                       error=detail)
+                db.commit()
     except Exception as e:
         db.rollback()
         log.error("GPT cycle failed: %s", e)
@@ -341,6 +363,25 @@ def _run() -> None:
     log.info("GPT image worker started")
     _health["started_at"] = datetime.utcnow()
     _health["last_tick"] = datetime.utcnow()
+    # A worker that has just started is not processing anything — the same
+    # rule the Windows node's first hello applies (v133/v140). Without this,
+    # a claim stranded by a crash-and-restart waited for the reaper, and a
+    # reaper that spares visibly-producing nodes would spare 'server' for as
+    # long as this worker stays busy.
+    try:
+        from .db import SessionLocal
+        from .pipeline import release_claims_for_node
+        _db = SessionLocal()
+        try:
+            freed = release_claims_for_node(_db, "server")
+            _db.commit()
+            if freed["posters"] or freed["uploads"]:
+                log.warning("GPT: released %s claim(s) left over from a "
+                            "previous run", freed["posters"] + freed["uploads"])
+        finally:
+            _db.close()
+    except Exception as e:
+        log.error("GPT: could not release leftover claims: %s", e)
     while not _stop.is_set():
         try:
             did = _cycle()

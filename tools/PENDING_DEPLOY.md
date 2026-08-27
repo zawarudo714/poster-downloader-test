@@ -7,59 +7,57 @@ empties this file once the server is confirmed to be running it.
 
 ---
 
-**Waiting: v141 — review pass part 2: the migration flow was broken for
-migration day** · targets 178.105.232.196 (test box)
+**Waiting: v142 — review pass part 3: v140 created an immortal claim, and
+the GPT stage was never audited** · targets 178.105.232.196 (test box)
 
 **Deploy:** yes. **Copy `worker_service/` to the node:** NO — server-side
 only, `AGENT_VERSION` stays 1.28.0. **Schema change:** none.
 
-## The finding — traced end to end, and it would have burned THE day
+## The finding: my own v140 fix created a wedge
 
-The v124 `ensure_account` fix (rightly) stopped inventing
-`unknown@example.com`. But the migration GUI drives the history import with
-`--account-name` ONLY, and the migration plan deletes every FineArtAmerica
-account before importing. So on migration day, as scripted:
+The chain, traced end to end and reproduced:
 
-  1. email lookup — skipped, no email given
-  2. name lookup — nothing exists, all accounts deleted
-  3. `ensure_account` returns None
-  4. **the dry run returned None IN SILENCE** — the guidance message sat
-     AFTER the `if dry_run: return None`, so the rehearsal that exists to
-     catch exactly this would have passed quietly
-  5. the real run then hit the per-row `account is None` branch — which is
-     the DRY-RUN counting path — and would have printed
-     **"+ 4,865 tracking rows" while writing ZERO**
+  1. `gpt_worker._claim_next` COMMITS the claim before returning.
+  2. `process_one` handles its three known failure shapes; anything OUTSIDE
+     them escaped to the cycle handler, whose `rollback` cannot undo a
+     committed claim. The poster stays at 'processing', claimed by 'server'.
+  3. Every GPT success writes `ProcessedImage(processed_by="server")`.
+  4. v140's reaper spares any claim whose owner produced evidence inside the
+     window — so while the worker is busy with OTHER posters, the wedged one
+     is spared forever. Before v140 it was freed in 45 minutes; after v140
+     it was immortal. **One day old, found by asking what the fix meant for
+     the one stage nobody audited.**
 
-The GUI's own does-it-add-up tally would have caught the zero afterwards
-(that invariant earned its keep), but the script lies first, and any run
-outside the GUI has no net. Without the tracking rows, the pipeline would
-re-upload all 4,865 images to FineArtAmerica — the exact catastrophe the
-import exists to prevent.
+## Fixed at the source, per rule 8
 
-## Fixed, three layers
+  * `_cycle` now wraps each poster: any unexpected exception releases the
+    claim through `report_process_failure` — the same call the node's
+    report endpoint uses. Claim released, attempts bumped, error recorded;
+    past `process_max_attempts` it surfaces in the failure list instead of
+    retrying forever.
+  * `_run` releases all 'server' claims at worker startup — the same rule
+    as the node's first hello (v133/v140): a worker that just started is
+    not processing anything. Covers the crash-and-restart path the in-cycle
+    handler cannot.
 
-  * `ensure_account` prints the no-account guidance on the DRY RUN too, and
-    it states the order that works: **create the account in the dashboard
-    first** (real address — needed for uploading anyway), then run the
-    import; the name lookup finds it. Or pass `--account-email`.
-  * `import_upload_tracking` REFUSES a real run with `account=None`, loudly,
-    before the row loop — it can no longer count rows it is not writing.
-  * The rehearsal still counts correctly (dry run + no account is the
-    legitimate counting case).
+**Reproduced against real SQLite:** the wedged poster is spared by the v140
+reaper (immortal), the in-cycle handler frees it with correct semantics,
+and the startup release covers the restart case. No path now leaves a
+poster claimed forever.
 
-Verified structurally: guidance at line 198 precedes the dry-run return at
-205; the refusal at 451 precedes the row loop at 474. My first AST check
-claimed the second guard was missing — the checker was wrong, the plain
-read confirmed placement. Same lesson as yesterday, caught in thirty
-seconds instead of shipped.
+## Also reviewed this part, NOT findings
 
-## For the migration checklist
-
-**Order on the day: add the real FineArtAmerica account in the dashboard
-BEFORE running the upload-history import step.** The import finds it by
-name and links it. This was implicitly required before and is now enforced
-and said out loud by the tool.
+  * The v132/v133 JS wiring traced end to end: `reconcile()` →
+    `/api/overview` → `renderReconcile` → `unclassifiedNote`. The
+    `unclassified` fields genuinely travel.
+  * GPT's claim ORDERING is right — spend-cap check before the claim, three
+    failure shapes released per poster.
+  * `gpt_worker`'s heartbeat/watchdog structure: sound.
 
 ### Files
 
-`scripts/migrate_pipeline.py`, `app/config.py` (140 → 141).
+`app/gpt_worker.py`, `app/config.py` (141 → 142).
+
+**After deploying:** the container restart itself exercises the startup
+release — the app log will say "released N claim(s) left over" if anything
+was stranded, or nothing if clean.

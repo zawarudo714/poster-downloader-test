@@ -541,14 +541,54 @@ class ProcessStage:
             self.log("Nothing to process")
             return {"claimed": 0, "processed": 0, "failed": 0}
 
-        root = self._storage_root(settings)
-        runner = self._ensure_runner(settings)
-
-        # Fail the whole batch up front rather than one image at a time if the
-        # archive isn't reachable. Photoshop suppresses its own save errors, so
-        # without this the symptom is "script reported success but no output
-        # file" repeated for every image in the run.
-        self._check_storage_writable(root)
+        # ── Getting as far as a usable Photoshop and a writable archive ──
+        #
+        # The images are already CLAIMED by the line above. If anything here
+        # raises and we let it propagate, every one of them is left sitting
+        # at 'processing' with nothing said about why: the exception reaches
+        # `run_process_stage`, which writes it to THIS machine's local log,
+        # and the owner cannot read that.
+        #
+        # The visible result is a pipeline that looks alive and moves
+        # nothing. The stale-claim reaper releases the batch after the
+        # timeout, the next cycle claims it again, fails here again, and
+        # strands it again — forever. An unreachable storage box looks
+        # exactly like a healthy idle node from the dashboard.
+        #
+        # This is the same failure the UPLOADER already guards against, in
+        # the same shape, and the fix went to one of the two. Found
+        # 2026-08-27 by asking whether the sibling had it too.
+        #
+        # `_check_storage_writable` exists precisely to fail the whole batch
+        # up front rather than one image at a time — Photoshop suppresses
+        # its own save errors, so without it the symptom is "script reported
+        # success but no output file" repeated for every image. Its
+        # docstring says "before claiming work"; it runs AFTER, which is why
+        # reporting matters here.
+        try:
+            root = self._storage_root(settings)
+            runner = self._ensure_runner(settings)
+            self._check_storage_writable(root)
+        except Exception as e:
+            detail = f"{type(e).__name__}: {e}"
+            self.log(f"Could not start a processing session — {detail}",
+                     level="error")
+            if job_id:
+                self.client.job_log(
+                    job_id, [f"Could not start a processing session: {detail}"],
+                    level="error")
+            for item in batch:
+                try:
+                    self.client.report_process_failure(
+                        poster_id=item["poster_id"],
+                        error=f"Processing could not start — {detail}")
+                except Exception:
+                    # Reporting one item must not stop us reporting the rest.
+                    # A batch half-released is still better than none, and the
+                    # reaper covers whatever we could not reach.
+                    self.log(f"Could not report poster {item.get('poster_id')} "
+                             f"as failed", level="error")
+            return {"claimed": len(batch), "processed": 0, "failed": len(batch)}
 
         self.log(f"Claimed {len(batch)} image(s) · script {settings.get('script_version')}")
         self.log(f"Archive: {root}   Photoshop: {settings.get('photoshop_exe')}")

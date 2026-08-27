@@ -61,7 +61,7 @@ from .uploader import UploadStage
 # either way. `check_worker_agent_current` in diagnostics.py now compares
 # what the machine reports against what this file says, so a stale copy is
 # reported instead of assumed.
-AGENT_VERSION = "1.27.0"
+AGENT_VERSION = "1.28.0"
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_CONFIG = HERE / "config.json"
@@ -300,12 +300,24 @@ class Agent:
     # ── Autonomous stages ──────────────────────────────────────────────────
 
     def run_process_stage(self) -> bool:
+        """
+        One Photoshop batch, outside the job system.
+
+        The handlers below are a LAST RESORT, not the reporting path. Work is
+        claimed inside `run_batch`, and anything that goes wrong after the
+        claim is reported per item from there — because an error that only
+        reaches this machine's local log does not exist as far as the owner
+        is concerned. If you find yourself relying on these `self.log` calls
+        to explain a stalled pipeline, the report is missing upstream.
+        """
         if not self.can("process"):
             return False
         try:
             summary = self.processor.run_batch(project_id=self.project_id)
             return summary.get("claimed", 0) > 0
         except PipelineError as e:
+            # Cannot reach the server, so there is nowhere to report TO.
+            # Local is genuinely all there is.
             self.log(f"Process stage could not talk to the server: {e}", level="error")
         except Exception as e:
             self.log(f"Process stage error: {type(e).__name__}: {e}", level="error")

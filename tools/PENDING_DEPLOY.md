@@ -7,63 +7,59 @@ empties this file once the server is confirmed to be running it.
 
 ---
 
-**Waiting: v128 — audit batch 2, the worker screens** · targets
-178.105.232.196 (test box)
+**Waiting: v129 — the notes revamp** · targets 178.105.232.196 (test box)
 
-### A worker could not fix their own flagged image
+Documentation and one preflight check. **No application behaviour changes**,
+so nothing to click after deploying — but it needs to go up so the repo and
+the server do not diverge.
 
-`user.js` decided whether to show the paste-a-URL box from `PD.searchMode` —
-the project the worker is STANDING IN. A flag card can be for a title in
-their OTHER project, and then the two disagree.
+### What prompted it
 
-Standing in MUSIK with a flagged movie poster, the check said "in-page, no
-pasting" and REMOVED the box and the REPLACE button. Pasting a URL is the
-only way a movie poster can be replaced, so the worker could look at their
-flagged image and had no way to fix it. The reverse case shows a paste box
-for an image that can only be re-picked from a grid.
+`AUDIT.md` — a complete control-by-control walk of every screen, per role,
+per project, written 2026-08-17 — was referenced by NOTHING. A session on
+2026-08-27 redid most of that work from scratch and missed findings the file
+already had. It was only discovered by listing the directory for an
+unrelated reason.
 
-The server was already sending the title's own mode with every revision
-(`**_project_ui(db, mt.project_id)`), so this was reading the wrong one of
-two values it already had. Fixed in three places; `buildPosterCard` now
-takes the mode as an argument rather than being right by accident.
+### 1. Provenance tags
 
-### `go_to_title` claimed a title with no permission check
+Every claim now says where it came from, because four contradictions found
+the same day were all one shape: a guess written in the voice of a
+measurement.
 
-Every worker route that hands out a title scopes it — `pull_next`,
-`select_titles` and `release` all go through `_worker_project` and
-`_scope_to_project`. `go_to_title` also hands out a title (it claims an
-unclaimed one) and checked nothing, so a worker assigned only to MUSIK could
-claim a movie title by id.
+    MEASURED <date>   somebody ran it; the numbers are real
+    DECIDED  <date>   a choice, not a fact; can be revisited
+    LEAD              untested hypothesis — never act on it as a diagnosis
+    RULE              timeless; applies until the code changes
 
-Not reachable by clicking, which is exactly why it survived. New
-`_may_touch()` checks the title is in one of the worker's PERMITTED projects
-— not the active one, because the flag card that leads here can legitimately
-belong to their other project.
+Defined at the top of `CLAUDE.md`, applied to the planned items and the
+marketplace-behaviour sections, and used throughout the rewritten
+`AUDIT.md`. Untagged text predates the convention; tag as you touch.
 
-### The guard check could be satisfied by a COMMENT
+### 2. A document index in CLAUDE.md
 
-Adding a `GUARDED` entry for the above exposed a hole in the safety net
-itself. `check_guards_are_called` substring-matched the raw source, so the
-comment `# See _may_touch().` counted as calling it: deleting the call left
-the check green.
+All 15 documents, what each answers, and when to read it — split into "every
+session", "before writing code", and "when the work touches this".
 
-**All four entries had been exposed to this**, including the TeePublic wall
-guard and the two external_id ones. It now takes the guards from the calls
-the function actually makes, read out of the syntax tree.
+### 3. `check_no_orphan_documents` in preflight
 
-Found by sabotage. Reading the check did not find it — and the first three
-attempts at the sabotage silently failed to apply, which is why the final
-one asserts that it landed before trusting the result.
+Every `.md` must be named in that index. Sabotage-tested twice: red when a
+new unlinked document appears, red when an existing one is unlinked, green
+otherwise.
+
+### 4. AUDIT.md verified and made living
+
+Every DEAD/WRONG row re-checked against today's code. **All three root
+causes from 17 August are fixed.** Two entries stay open: the Upload title
+template help text still offers `{year}` and `{content_type}` to MUSIK where
+both render empty (still true, minor), and the admin "Paste URL to add one"
+control could not be found by that name — marked `LEAD`, not assumed either
+way.
+
+It also records the correction that the flag-card bug reported earlier that
+day was overstated: the list is project-scoped, so the two values involved
+can never disagree.
 
 ### Files
 
-`app/static/js/user.js`, `app/routes/worker.py`, `tools/preflight.py`,
-`app/config.py` (127 → 128), `CLAUDE.md`.
-
-**Verified:** preflight green, `user.js` parses, and the new guard
-sabotage-tested — call removed → red, restored → green, with the other three
-guards still passing throughout.
-
-**Not verified:** none of it exercised against a real worker session. The
-thing to click is a flag card while standing in the OTHER project — that is
-the case that was broken.
+`CLAUDE.md`, `AUDIT.md`, `tools/preflight.py`, `app/config.py` (128 → 129).

@@ -1032,6 +1032,56 @@ GUARDED: list[tuple[str, str, tuple[str, ...], str]] = [
 ]
 
 
+def check_no_orphan_documents() -> None:
+    """
+    Every .md in the repo must be named in CLAUDE.md's document index.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY
+    ════════════════════════════════════════════════════════════════════════
+    `AUDIT.md` — a complete control-by-control walk of every screen, per
+    role, per project — sat in the repo from 2026-08-17 referenced by
+    nothing. On 2026-08-27 a session redid most of that work from scratch,
+    missed findings the file already had, and only discovered it existed by
+    listing the directory for an unrelated reason.
+
+    The finding was worth less than the pointer to it. Writing a document is
+    cheap; making the next session KNOW it exists is the part that fails,
+    and it fails silently because an unread file looks exactly like a file
+    with nothing in it.
+
+    This is the cheapest rung that does not depend on anyone remembering.
+
+    Deliberately checks NAMING, not content: a document can be stale and
+    still be worth reading. Staleness is what the provenance tags are for.
+    """
+    index = (ROOT / "CLAUDE.md")
+    if not index.exists():
+        fail("CLAUDE.md is missing — nothing can point at the other documents")
+        return
+    text = index.read_text(encoding="utf-8", errors="ignore")
+
+    skip_dirs = {".venv", "node_modules", ".git", "__pycache__"}
+    docs = sorted(
+        p for p in ROOT.rglob("*.md")
+        if not any(part in skip_dirs for part in p.parts)
+        and p.name != "CLAUDE.md"
+    )
+    if not docs:
+        fail("no .md files found at all — this check is looking in the wrong place")
+        return
+
+    for p in docs:
+        rel = p.relative_to(ROOT).as_posix()
+        # Named by full path or by filename — both are unambiguous enough to
+        # find, and demanding one exact form would be a rule about
+        # formatting rather than about being reachable.
+        if rel not in text and p.name not in text:
+            fail(f"{rel} is not named in CLAUDE.md — a document nothing "
+                 f"points at is a document nobody reads. Add it to the "
+                 f"index, or delete it if it is finished with.")
+
+
 def _calls_made_in(node: ast.AST) -> set[str]:
     """
     Every function name actually INVOKED inside a node.
@@ -1232,6 +1282,7 @@ CHECKS = [
     ("zero is not treated as missing", check_falsy_zero_defaults),
     ("listing-health rules behave", check_store_logic),
     ("guards are called on every path", check_guards_are_called),
+    ("every document is linked", check_no_orphan_documents),
 ]
 
 

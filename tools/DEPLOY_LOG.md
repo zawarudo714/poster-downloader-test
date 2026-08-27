@@ -15,6 +15,7 @@ cost far more to read, answer a different question, and on a mounted working
 copy `git status` cannot refresh its index — it reports stale answers with
 no warning.
 
+- **2026-08-27 13:18** · `36ad9833` · v128 · deploy v128
 - **2026-08-27 12:13** · `c4f4aa38` · v126 · deploy v126
 - **2026-08-27 11:44** · `7a63f913` · v125 · deploy v125
 - **2026-08-27 11:40** · `16ff8023` · deploy v124
@@ -44,4 +45,3 @@ no warning.
 - **2026-08-23 20:11** · `2cc8cbbd` · Search pages are now addressed directly (?page=N&query=) instead of following a
 - **2026-08-23 17:53** · `6bff3a33` · The design catalogue is now kept between runs: added, removed and returned
 - **2026-08-23 17:03** · `3b54c6a0` · STOP now actually stops the node, within one design, keeping everything checked.
-- **2026-08-23 16:46** · `3cfceca0` · DEPLOY THE SITE TOO - the scan job payload is built server-side.

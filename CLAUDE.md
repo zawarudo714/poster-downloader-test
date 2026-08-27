@@ -1,7 +1,73 @@
 # Project brief for AI sessions
 
 Read this first — including **"HOW TO WORK HERE"** near the bottom, which
-sets out what is expected of you before, during and after any change. Then:
+sets out what is expected of you before, during and after any change.
+
+---
+
+## HOW TO READ A CLAIM IN THIS REPO
+
+**Every claim carries its PROVENANCE.** Four contradictions were found in
+these notes on 2026-08-27 and all four were the same shape: a guess written
+in the same voice as a measurement, and later acted on as fact.
+
+| Tag | Means | How to treat it |
+|---|---|---|
+| `MEASURED <date>` | Somebody ran it. The numbers are real. | Trust it. Doubt it? Re-run and update the date. |
+| `DECIDED <date>` | A choice, not a fact. | Can be revisited — but say why it was decided before overturning it. |
+| `LEAD` | A hypothesis nobody has tested. | **Never act on it as a diagnosis.** Measure first. |
+| `RULE` | Timeless. Applies until the code changes. | No date needed. |
+
+The worked example is planned item 9 below. It said the site was slow
+because of 201,133 titles, and its candidate list even said "found by
+reading rather than timing, so treat them as leads and not as findings" —
+but it sat in the same paragraph as confident numbers, so the next session
+read it as a diagnosis and repeated it to the owner as fact. Measured, that
+query costs 0.16s and the cause was the network link. **One caveat line does
+not survive in a file this dense. A tag on every claim does.**
+
+Untagged text predates the convention (2026-08-27). Tag it as you touch it;
+do not stop to retro-tag everything.
+
+---
+
+## THE DOCUMENTS, AND WHEN TO READ THEM
+
+`preflight.py` fails if a `.md` in this repo is missing from this list —
+because `AUDIT.md` sat unreferenced for ten days and a session redid most of
+its work from scratch.
+
+**Every session, before anything else:**
+
+| File | Answers |
+|---|---|
+| `tools/PENDING_DEPLOY.md` | What is written but NOT on the server |
+| `tools/DEPLOY_LOG.md` | What IS on the server, newest first |
+
+**Before writing any code:**
+
+| File | Answers |
+|---|---|
+| `MULTIPROJECT.md` | The multi-project contract. Short, and nearly every bug here came from ignoring it |
+| `AUDIT.md` | Every control on every screen, and whether it does anything in THIS project. **A living inventory — extend it, do not start a new one** |
+
+**When the work touches these areas:**
+
+| File | Answers |
+|---|---|
+| `ROADMAP.md` | Everything outstanding, in order, and why that order |
+| `OPEN_ISSUES.md` | Individual defects not yet fixed, with what is known about each |
+| `PIPELINE.md` | Post-production: processing, uploading, the node |
+| `DEPLOY.md` | How to deploy |
+| `SETUP_VPS.md` · `SETUP_WINDOWS_NODE.md` | Building a box from nothing |
+| `README.md` | What the app is, for someone who has never seen it |
+| `CHANGELOG.md` | Released changes, by version |
+| `fineartamerica-bulk-delete.md` | A one-off procedure, kept because it worked |
+| `tools/MIGRATION_REHEARSAL.md` | What the last migration rehearsal proved |
+
+---
+
+Then:
 
 - **`tools/PENDING_DEPLOY.md` then `tools/DEPLOY_LOG.md` — what is WAITING,
   and what is LIVE. READ BOTH FIRST, EVERY SESSION, BEFORE ANYTHING ELSE.**
@@ -83,14 +149,20 @@ a developer — he reads code but does not want to edit it to change behaviour.
 **This project will keep growing in scope. Do not make choices that are
 painful to retrofit.**
 
-Stated plans, in order:
+Stated plans, in order. `DECIDED` by the owner — these are intentions, not
+commitments with dates, and he may reorder them:
+
 1. A second niche — **celebrity portraits**, sourced from Pinterest rather than
    TMDB, a different master sheet schema, ~2 images per title, its own
    FineArtAmerica account.
 2. **Merge both niches** under one master dashboard with cross-niche reporting.
 3. **More marketplaces** — TeePublic named specifically — and more accounts.
 
-Also planned, stated but not yet built:
+Also planned, stated but not yet built. **Each item below carries its own
+provenance — read the tag before acting on it.** Items 1-7 describe things
+that are BUILT or DONE and are therefore statements of fact; 8 and 10 are
+`DECIDED` work not yet started; 9 was a `LEAD` that turned out to be wrong
+and is kept as the worked example of why the tags exist:
 
 4. **Marketplace reconciliation. BUILT 2026-08-24** — `app/listing_check.py`,
    `routes/listing_admin.py`, the Listing check tab, and the node's
@@ -155,7 +227,8 @@ Also planned, stated but not yet built:
        and does not publish it. Their `Current Balance` is authoritative;
        anything we derive is an estimate and must be worded as one.
 
-6. **Ban recovery / account handover. BUILT.** `ban_account()` and
+6. **Ban recovery / account handover. BUILT.** `MEASURED 2026-08-20` for
+   the code paths; **never exercised against a REAL ban.** `ban_account()` and
    `hand_over_account()` in `pipeline.py`, MARK BANNED and HAND OVER TO… on
    the Upload tab. A banned account keeps its row and its history — it is not
    a disabled one, because its listings are gone from the marketplace and
@@ -166,28 +239,51 @@ Also planned, stated but not yet built:
 
    Untested against a REAL ban — nothing here has been through one.
 
-7. **The dot-truncated legacy titles. NO LONGER NEEDS A TOOL — SOLVED BY
-   DOING NOTHING.** The old JSX did `split('.')[0]` on the filename, so
-   every poster in a title containing a dot overwrote the previous one.
+7. **The dot-truncated legacy titles. DONE 2026-08-27 — repaired, not left
+   alone.** The old JSX did `split('.')[0]` on the filename, so every poster
+   in a title containing a dot overwrote the previous one.
 
    **The figure is 44, confirmed twice** — 44 folders on disk holding one
    file each, and independently 44 entries in `faa_upload_tracking.json`
-   whose filename carries no poster number (`E_Painted.jpg`,
-   `Kill Bill Vol_Painted.jpg`, `House M_Painted.jpg`). The owner's
-   recollection of 61-65 was high; treat 44 as measured.
+   whose filename carries no poster number. The owner's recollection of
+   61-65 was high; treat 44 as measured.
 
-   No throwaway admin action is needed, and building one would be wasted
-   work. `import_upload_tracking` cannot match those filenames to a poster,
-   so it files them as orphans with cause `jsx_dot_bug` and writes NO upload
-   record. Those posters therefore look like ordinary unprocessed work and
-   the pipeline paints and uploads them on its next run, correctly indexed.
+   **This entry used to say "NO LONGER NEEDS A TOOL — SOLVED BY DOING
+   NOTHING… building one would be wasted work", and accept 44 near-duplicate
+   listings. The owner chose to repair them instead, and it took one
+   afternoon.** Both halves were fixed:
 
-   Expect one near-duplicate listing per affected title, because the one
-   image that did reach the marketplace is still there. 44 duplicates in
-   ~4,900 listings; tidy by hand or leave.
+     * the FILES on `S:` renamed (`rename_painted.py`), so the archive index
+       can match a painted image to its poster
+     * the 44 keys in `faa_upload_tracking.json` rewritten, so the pipeline
+       knows they are already on FineArtAmerica and does not upload them
+       again — renaming files does NOT touch that file, and forgetting it
+       would have produced exactly the duplicates this was avoiding
+
+   The rule that made it possible, read out of `FAA_Real_Paint_FX.jsx`
+   rather than guessed: it walks a folder with an ascending loop and saves
+   with `saveAs(..., true, ...)`, which overwrites silently, so **the file
+   left standing is the LAST one processed — the highest-numbered poster.**
+   Both things that could break that rule were checked and neither applied:
+   no title here has 10+ posters (where Windows sorts "10" before "2"), and
+   every poster in each title shares one save date, so none was added after
+   its painting run.
+
+   **Not yet in effect.** The repaired JSON only does anything when the
+   import runs against the FINAL database at migration time. The ~62 other
+   posters in those 37 titles were painted and instantly overwritten, so
+   they never reached the marketplace and are ordinary unprocessed work —
+   and because the Photoshop queue is oldest-save-date-first and they date
+   from 30 April to 24 May, they will be at the FRONT of it.
+
+   **The general lesson, which is why this entry is kept rather than
+   deleted: "no tool is needed" was a judgement about cost, not a fact, and
+   it was written down in the same voice as the measured figures around
+   it.** Nothing distinguished the two on the page.
 
 8. **THE INTERACTION AUDIT — a whole-system pass, on his explicit
-   instruction, once the foundational mechanisms are all in.** Not a code
+   instruction, once the foundational mechanisms are all in.**
+   `DECIDED 2026-08-24` — not started. Not a code
    review and not a test suite: a deliberate trace of every action against
    every OTHER thing it can touch, written out as a tree.
 
@@ -229,32 +325,47 @@ Also planned, stated but not yet built:
    mid-stage in each of the six stages; a marketplace serving maintenance,
    a redesign, or a challenge to any of the three readers.
 
-9. **SPEED. The site is slow now and it was not before, and the reason is
-   not mysterious: it is running on 201,133 titles instead of nineteen.**
-   Requested 2026-08-25 after the promoted test box became noticeably
-   sluggish.
+9. **SPEED. MEASURED 2026-08-27 — IT WAS THE NETWORK, NOT THE DATABASE.
+   This entry previously blamed the 201,133 titles. That was wrong, and it
+   was written confidently enough to have cost an evening.**
 
-   Every query that was written against a toy database is now doing real
-   work, and SQLite will happily scan 201k rows without complaining. This is
-   NOT a rewrite — it is finding the handful of page loads that scan whole
-   tables and giving them an index or a bound.
+       login page built by the app          8.7 ms
+       dashboard group-by over 201,133 rows 0.16 s
+       plain COUNT(*)                       0.00 s
+       server pulling from Hetzner's mirror  130 MB/s
+       laptop pulling from THIS server       12.6 KB/s
+       laptop pulling from the OLD server    16.3 KB/s
 
-   **Measure first, and say the numbers.** Do not guess which page is slow;
-   time them. `EXPLAIN QUERY PLAN` says "SCAN master_titles" in plain words
-   and is the whole diagnosis for most of these.
+   Two different servers in two different datacentres, equally slow to the
+   same laptop within a minute of each other, while the box itself pulled at
+   130 MB/s. So it was the link out to Kenya. It recovered on its own the
+   next day, and the owner confirmed the site felt normal again.
 
-   Known candidates, found by reading rather than timing, so treat them as
-   leads and not as findings:
+   **The original text said "the reason is not mysterious" and named the row
+   count. Nothing had been timed.** The candidate list below was explicitly
+   marked "found by reading rather than timing" — and was then read by the
+   next session as a diagnosis anyway. A lead and a finding must not sit in
+   the same list in the same voice.
 
-     * The master dashboard groups the ENTIRE `master_titles` table by
-       `(project_id, status)` on every load. There is no index on that
-       pair — `ix_master_status_extid` and `ix_master_claim_status` do not
-       cover it. One full scan of 201k rows per visit.
-     * `preflight.py` already warns about six queries running once per item
-       inside a comprehension. Those were harmless at nineteen rows.
-     * Diagnostics walks the disk for 10,092 posters. That one is honestly
+   What is STILL worth doing, on its own merits rather than as a cure:
+
+     * an index on `(project_id, status)` — takes the dashboard grouping
+       from 0.16s to about 0.01s and removes a TEMP B-TREE. Real, small,
+       and it was never what he felt.
+     * `preflight.py` warns about six queries running once per item inside
+       a comprehension. Harmless at nineteen rows, worth tidying at 201k.
+     * Diagnostics walks the disk for 10,092 posters. That one IS genuinely
        slow and belongs behind an explicit "run it" rather than a page load.
-     * The worker's Browse All Titles pages 201,133 rows.
+
+   Deliberately removed from that list: "the worker's Browse All Titles
+   pages 201,133 rows." It is properly paginated — 100 a page, and the page
+   itself says `page 1 / 1017`. Paging through a large table is the correct
+   behaviour, not a defect, and listing it as a speed candidate is what a
+   lead turning into a finding looks like.
+
+   `gzip` compression was added on 2026-08-27 and is worth keeping whatever
+   the link is doing: it cuts HTML, CSS and JS by 70-80%, which matters
+   enormously on a bad connection and costs the server nothing.
 
    An index is a schema change, so it goes in `schema_migrations.py` as
    `CREATE INDEX IF NOT EXISTS` — safe, idempotent, and SQLite builds one
@@ -265,7 +376,9 @@ Also planned, stated but not yet built:
    query with no filter on a table known to be large.
 
 10. **THE RETROFIT AUDIT — build the extension points before the next thing
-    needs them.** His words, 2026-08-25: *"we should revamp everything for
+    needs them.** `DECIDED 2026-08-25` — not started. Folded into the QoL
+    stage in `ROADMAP.md`, because it asks the same question that stage
+    already asks. His words, 2026-08-25: *"we should revamp everything for
     as little retrospect headache as possible. You have by now seen the
     pattern when we add stuff."*
 
@@ -474,7 +587,7 @@ Rules that matter:
 - `sync_projects()` never touches `process_weight` or `is_active` — those are
   dashboard levers, and a deploy must not re-enable a project you turned off.
 
-## FineArtAmerica behaviour, measured (do not re-derive these)
+## FineArtAmerica behaviour — `MEASURED` (do not re-derive these)
 
 **There are TWO upload forms live at the same time.** `updateartwork.html`
 and `updateartwork2025.html`, chosen per request, apparently at random. The
@@ -523,7 +636,7 @@ the claim while it still passes. `Current Balance` remains the authoritative
 "what you are owed" — never replace it with arithmetic, which is how the page
 once read "probably $1,477.21" against a real $298.28.
 
-## TeePublic behaviour, measured (do not re-derive these)
+## TeePublic behaviour — `MEASURED` (do not re-derive these)
 
 **TeePublic no longer uses Cloudflare** (observed 2026-08-23, after weeks of
 it). All challenge detection was removed with it — FineArtAmerica never
@@ -682,7 +795,7 @@ plausible later — the owner's tool already contains a working uploader. This
 tab is therefore marketplace-level (accounts), not project-level, and slots
 beside such a project rather than tangling with it.
 
-## FineArtAmerica listing pages, measured 2026-08-24 (do not re-derive)
+## FineArtAmerica listing pages — `MEASURED 2026-08-24` (do not re-derive)
 
 Measured with `tools/faa_url_check.py` against two real shops. This is what
 the reconciliation scanner rests on, so it is written down rather than
@@ -794,7 +907,7 @@ fetches them perfectly with no wall at all. A sweep that runs there and
 posts results back would never compete with the pipeline. The only cost is
 that it runs when the laptop is on.
 
-## FineArtAmerica title rules (measured 2026-08-13)
+## FineArtAmerica title rules — `MEASURED 2026-08-13`
 
 FAA silently rewrites artwork titles. Verified by submitting all 165 distinct
 non-ASCII characters from the celebrity database and reading back what saved:
@@ -1030,7 +1143,30 @@ An earlier version of this file guessed "about 54, the earliest batch" for
 the whole miss and it was repeated as if measured. The owner pushed back —
 "there is no way i deleted 50" — and he was right. 10.
 
-## Data state (2026-07-30)
+## Data state
+
+**Two boxes, and they hold DIFFERENT data. Read the right column.**
+Measured 2026-08-27 on both.
+
+| | LIVE 178.105.34.144 | TEST 178.105.232.196 |
+|---|---|---|
+| version | v15, sourcing only | current |
+| master titles | 101,605 | 201,133 (the extra ~99.5k is MUSIK) |
+| saved posters | 10,697 | — |
+| payment runs | 15 | — |
+| pipeline tables | **none exist** | all |
+
+The live box has never had the post-production half. Every pipeline table
+arrives at once on migration, empty, and is filled by the imports — which is
+the easiest kind of migration, not the hardest.
+
+MUSIK exists ONLY on the test box, which is why cleaning its master sheet is
+free right now and expensive after any real work.
+
+### The figures below are from 2026-07-30 and describe the LIVE box
+
+The worker has added roughly 2,700 posters since (7,972 → 10,697), so treat
+the poster counts as a floor rather than a current figure.
 
 | | |
 |---|---|
@@ -1208,6 +1344,36 @@ So for anything you touch, ask in this order:
    it at master level.
 3. **Does it serve more than one purpose?** The node processes AND uploads.
    A check covering one of those silently passes while the other is broken.
+
+**TWO VARIABLES HOLDING ONE FACT IS A SUSPICION, NOT A FINDING. Before
+calling it a bug, NAME THE QUERY that can return a row where they differ.**
+If you cannot name it, you have a code smell — say that, and do not send him
+off testing a scenario that cannot happen.
+
+On 2026-08-27 the worker screen was found asking "is this project in-page?"
+from two different variables: the project being STOOD IN, and the TITLE's
+own. That is a real duplication. It was reported as a live bug — "a worker
+with a flagged movie poster cannot fix it while standing in MUSIK" — and the
+flag list is project-scoped, so the two can never disagree and the card is
+not even on screen.
+
+The error is worth naming exactly, because the reasoning FELT like the
+reasoning that had found two genuine defects the same day:
+
+  * The scenario was INVENTED to make the two variables differ, then
+    treated as though it had been observed.
+  * The confirmation was `**_project_ui(...)` in the revision payload —
+    "why would the server send a per-title mode unless the list were mixed?"
+    It is boilerplate; the same call is in `lock_title`, `title_catalog`
+    and `go_to_title`. A habit was read as a signal.
+  * Reasoning ran from the CONSUMER (the JavaScript, where both names are
+    visible) and never from the PRODUCER (the query that fills them).
+    Whether two values can differ is a fact about the query.
+
+The falsifying line was in a file already open, and cheap. It was not read
+because by then there was a story worth keeping. **Go looking for the thing
+that kills the theory, not the thing that fits it** — and the place to look
+is always the query, never the variable names.
 
 **A thing with two purposes needs two of everything that can stop it.** An
 account both UPLOADS and REPORTS MONEY, and those fail for unrelated reasons

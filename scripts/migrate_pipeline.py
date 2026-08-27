@@ -107,30 +107,98 @@ from app.schema_migrations import NEW_COLUMNS, NEW_INDEXES, migrate_schema  # no
 # ═════════════════════════════════════════════════════════════════════════
 
 def ensure_account(
-    db, *, name: str, email: str, profile_url: Optional[str],
+    db, *, name: str, email: Optional[str], profile_url: Optional[str],
     password: Optional[str], project: Project, dry_run: bool,
 ) -> Optional[UploadAccount]:
     """
-    Find or create the marketplace account the historical uploads belong to.
+    Find the marketplace account the historical uploads belong to.
 
-    A placeholder password is stored when none is supplied: the history import
-    needs an account row to attach to, and you'll set the real credentials in
-    the dashboard before the first automated run.
+    ════════════════════════════════════════════════════════════════════════
+    AN ACCOUNT IS IDENTIFIED BY ITS EMAIL, NOT BY WHICH PROJECT IT SERVES
+    ════════════════════════════════════════════════════════════════════════
+    This used to look the account up with
+
+        filter_by(project_id=project.id, name=name)
+
+    and it produced a real duplicate on 2026-08-25. `UploadAccount.project_id`
+    is the DEAD legacy column — an account that serves several projects says
+    so through the `account_projects` link table and leaves that column NULL.
+    So the real 'GoldenR T' account, which had NULL there, was invisible to
+    this lookup, and the import created a SECOND row with the same name, no
+    artist name, and an invented email address.
+
+    The consequence was not cosmetic. The phantom row was the only account
+    linked to the movie project, so every nightly earnings read tried to sign
+    in as `unknown@example.com`, failed, and printed a red error on the
+    Earnings page for two days.
+
+    The same rule the rest of the codebase already follows: never scope by
+    `UploadAccount.project_id`; identity is (target_site, email).
+
+    ════════════════════════════════════════════════════════════════════════
+    AND IT WILL NOT INVENT AN EMAIL
+    ════════════════════════════════════════════════════════════════════════
+    It used to fall back to "unknown@example.com". An address nobody can sign
+    in with is not a default, it is a guess wearing a default's clothing, and
+    it ships looking exactly like a working account. If we cannot identify the
+    account, the honest outcome is to say so and let the operator create it in
+    the dashboard, where the real credentials live.
     """
-    account = (
-        db.query(UploadAccount)
-          .filter_by(project_id=project.id, name=name)
-          .first()
-    )
+    site = P.MARKETPLACE_RENAMES.get("faa", "fineartamerica")
+
+    # Identity first: one account, one email, whatever projects it serves.
+    account = None
+    if email:
+        account = (
+            db.query(UploadAccount)
+              .filter(UploadAccount.target_site == site,
+                      UploadAccount.email == email)
+              .first()
+        )
+
+    # No email given — fall back to the name, but across ALL projects rather
+    # than this one, and refuse if it is ambiguous rather than picking.
+    if account is None:
+        matches = (
+            db.query(UploadAccount)
+              .filter(UploadAccount.target_site == site,
+                      UploadAccount.name == name)
+              .all()
+        )
+        if len(matches) > 1:
+            print(f"      ! {len(matches)} accounts on {site} are called "
+                  f"{name!r} (ids {[m.id for m in matches]}). Pass "
+                  f"--account-email to say which one, or merge them first.")
+            return None
+        if matches:
+            account = matches[0]
+
     if account is not None:
+        # An existing account may not yet serve THIS project. Say so through
+        # the link table, never by writing the legacy column.
+        if not dry_run:
+            attached = P.attach_account(db, account_id=account.id,
+                                        project_id=project.id, by="migration")
+            if attached:
+                print(f"      Linked existing account '{account.name}' "
+                      f"to project '{project.name}'")
         return account
+
     if dry_run:
         return None
 
+    if not email:
+        print("      ! No account matched and no --account-email was given, "
+              "so there is nothing to attach this history to.")
+        print("        Create the account in the dashboard with its real "
+              "address, then run this step again.")
+        return None
+
     account = UploadAccount(
-        project_id=project.id,
+        # project_id is the dead legacy column and is deliberately left NULL.
+        # The link table below is what says which projects this account serves.
         name=name,
-        target_site="faa",
+        target_site=site,
         email=email,
         password_enc=P.encrypt_secret(password or "CHANGE_ME_IN_DASHBOARD"),
         profile_url=profile_url,
@@ -140,6 +208,8 @@ def ensure_account(
     )
     db.add(account)
     db.flush()
+    P.attach_account(db, account_id=account.id, project_id=project.id,
+                     by="migration")
     return account
 
 
@@ -496,7 +566,11 @@ def import_upload_tracking(
                 processed_image_id=processed.id if processed else None,
                 account_id=account.id,
                 project_id=project.id,
-                target_site="faa",
+                # Canonical name, not the legacy "faa". Writing the old value
+                # and relying on MARKETPLACE_RENAMES to repair it at startup
+                # keeps two names alive for one marketplace, and the rename
+                # only runs if startup gets that far.
+                target_site=P.MARKETPLACE_RENAMES.get("faa", "fineartamerica"),
                 remote_title=(P.render_remote_title(db, title, poster, index, project=project)
                               if title else None),
                 letter_index=index,

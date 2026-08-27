@@ -4,11 +4,39 @@ What is actually live on the server, newest first. Written automatically by
 the deploy tool, and only when the server was confirmed to be running the
 commit that was just pushed.
 
-**For a future session: read THIS file to see what shipped. Do not run git
-log or diff to work it out — that costs far more to read than these lines.**
-If the top entry looks older than the work in the repo, the difference is
-what has not been deployed yet.
+**FOR A FUTURE SESSION — READ THE TWO BLOCKS BELOW BEFORE ANYTHING ELSE.**
+They cost about twenty lines and they answer "what is live" and "what is
+waiting". Do not run `git log`, `git diff` or `git status` to work it out:
+they cost far more to read and answer a different question, and on a mounted
+working copy `git status` cannot refresh its index so it reports stale
+answers with no warning.
 
+## ⚠ NOT YET DEPLOYED
+
+Anything listed here is written but NOT running on the server. **Say so at
+the start of the session**, before the owner asks — he cannot tell by
+looking at the site, and work built on top of an undeployed change is work
+he will have to test twice.
+
+Clear this block when the deploy is confirmed, and add the new line to the
+log below.
+
+**Waiting: v124** — targets 178.105.232.196 (test box)
+
+  * `app/main.py` — gzip compression on text responses
+  * `app/config.py` — APP_VERSION 123 → 124
+  * `app/diagnostics.py` — two new checks: duplicate marketplace accounts,
+    and accounts that have never once reported money
+  * `scripts/migrate_pipeline.py` — `ensure_account` identified accounts by
+    the dead `project_id` column and created a duplicate; no longer invents
+    an email address; writes the canonical `fineartamerica`
+  * `scripts/dev_setup.py` — writes the canonical `fineartamerica`
+
+---
+
+## Live
+
+- **2026-08-25 19:19** · `557a4e74` · deploy v123
 - **2026-08-25 18:09** · `eb18a279` · deploy v122
 - **2026-08-25 17:52** · `e29893df` · v122 — external_id repeats across projects; the legacy import was matching MUSIK
 - **2026-08-25 17:12** · `6c2f9afc` · v121 — legacy upload history, archive index, and the settings-drift warning
@@ -38,4 +66,3 @@ what has not been deployed yet.
 - **2026-08-23 16:18** · `54d0ff63` · Node needs: pip install -r worker_service/requirements.txt (beautifulsoup4).
 - **2026-08-23 16:05** · `f0994d7c` · TeePublic tab: scan every design for search visibility, then deactivate and
 - **2026-08-23 11:02** · `bc645ce5` · The TeePublic wall is dismissed by replaying a recorded mouse path.
-- **2026-08-20 23:31** · `0cd07ae9` · Reading money and uploading now have one pause each, so a failure in one no

@@ -3,13 +3,31 @@
 Read this first — including **"HOW TO WORK HERE"** near the bottom, which
 sets out what is expected of you before, during and after any change. Then:
 
-- **`tools/DEPLOY_LOG.md` — what is actually LIVE on the server.** One line
-  per deploy, newest first, written by the deploy tool only when the server
-  was confirmed to be running what was pushed. Read that file rather than
-  running `git log`, `git diff` or `git status` to work it out: those cost
-  far more to read and answer a different question (what is committed, not
-  what shipped). If the repo contains work newer than the top line, that
-  work has not been deployed.
+- **`tools/DEPLOY_LOG.md` — what is actually LIVE, and what is WAITING.**
+  **READ IT FIRST, EVERY SESSION, BEFORE ANYTHING ELSE.** It opens with a
+  `⚠ NOT YET DEPLOYED` block and then the log, newest first. About twenty
+  lines, and it answers both questions at once.
+
+  Read that file rather than running `git log`, `git diff` or `git status`:
+  those cost far more and answer a different question (what is committed,
+  not what shipped). On a mounted working copy `git status` cannot even
+  refresh its index — it reports stale answers with no warning, and on
+  2026-08-27 it showed two edited files as unmodified.
+
+  **The two standing rules, both added 2026-08-27 at the owner's request
+  after a version collision:**
+
+  * **Say at the START of the session if anything is undeployed**, before
+    he asks. He cannot tell by looking at the site, and anything built on
+    top of an undeployed change is work he tests twice.
+  * **When he deploys, SAY WHETHER IT WORKED** — "v124 is live" or "v124
+    failed, here is what it said" — then move the entry out of the waiting
+    block and into the log. Never leave it ambiguous.
+
+  **Bump `APP_VERSION` to one MORE than the top log entry, not one more
+  than whatever the file happens to say.** On 2026-08-27 the file read 122
+  while v123 was already live, so the bump produced a second v123 — a
+  version number that means two different things is worse than none.
 
 - **`MULTIPROJECT.md` — read it before writing ANY code.** This app runs
   several niches side by side. Nearly every bug it has had came from code

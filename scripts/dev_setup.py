@@ -679,7 +679,10 @@ class DevSetup:
         account = UploadAccount(
             project_id=project.id,
             name="DEV",
-            target_site="faa",
+            # Canonical name. "faa" is the legacy value that MARKETPLACE_RENAMES
+            # repairs at startup; writing it here keeps two names alive for one
+            # marketplace and makes the dev database differ from a real one.
+            target_site="fineartamerica",
             email="dev@example.com",
             password_enc=P.encrypt_secret("not-a-real-password"),
             profile_url="https://fineartamerica.com/profiles/0-dev",

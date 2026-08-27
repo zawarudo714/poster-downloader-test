@@ -75,9 +75,9 @@ from sqlalchemy.orm import Session
 
 from .config import BASE_DIR, WORKSPACE_DIR
 from .models import (
-    AccountProject, MasterTitle, ProcessedImage, Project, Revision,
-    SavedPoster, StoreListing, StoreScanRun, UploadAccount, UploadTracking,
-    User, WorkerNode,
+    AccountProject, LedgerEntry, MarketplaceSnapshot, MasterTitle,
+    ProcessedImage, Project, Revision, SavedPoster, StoreListing,
+    StoreScanRun, UploadAccount, UploadTracking, User, WorkerNode,
 )
 from .utils import saved_poster_path
 
@@ -585,6 +585,117 @@ def check_orphaned_bans(db: Session, scope: Scope) -> CheckResult:
         "you money to make — until they are handed over to a replacement "
         "account they are earning nothing. Use HAND OVER TO… on the Upload "
         "tab.",
+        "error", rows,
+    )
+
+
+def check_duplicate_accounts(db: Session, scope: Scope) -> CheckResult:
+    """
+    Two accounts on one marketplace that are really the same account.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS EXISTS
+    ════════════════════════════════════════════════════════════════════════
+    On 2026-08-25 the history import created a SECOND 'GoldenR T' row on
+    FineArtAmerica, because it looked accounts up by the dead legacy
+    `project_id` column and the real one — which uses the `account_projects`
+    link table and leaves that column NULL — was invisible to it. The
+    duplicate carried an invented email address, no artist name, and became
+    the only account linked to the movie project. Every nightly earnings read
+    then tried to sign in as `unknown@example.com` and failed.
+
+    The import bug is fixed. This check exists because NOTHING WOULD HAVE
+    FOUND IT: the owner spotted it on the Earnings page two days later. Both
+    rows were individually valid, so no invariant over a single account could
+    disagree with anything. Only comparing accounts WITH EACH OTHER shows it.
+
+    Matched on name as well as email, because the two rows of that incident
+    did not share an address — inventing one is exactly what went wrong.
+    """
+    rows = []
+    accounts = db.query(UploadAccount).all()
+
+    by_email: dict[tuple, list] = {}
+    by_name: dict[tuple, list] = {}
+    for a in accounts:
+        if a.email:
+            by_email.setdefault((a.target_site, a.email.strip().lower()), []).append(a)
+        if a.name:
+            by_name.setdefault((a.target_site, a.name.strip().lower()), []).append(a)
+
+    seen: set[tuple[int, ...]] = set()
+    for (site, email), group in sorted(by_email.items()):
+        if len(group) > 1:
+            key = tuple(sorted(a.id for a in group))
+            seen.add(key)
+            rows.append(Finding(
+                f"{site}: {len(group)} accounts share {email}",
+                f"ids {', '.join(str(a.id) for a in group)} — "
+                f"named {', '.join(repr(a.name) for a in group)}",
+                "/admin/pipeline#upload"))
+
+    for (site, name), group in sorted(by_name.items()):
+        if len(group) > 1 and tuple(sorted(a.id for a in group)) not in seen:
+            rows.append(Finding(
+                f"{site}: {len(group)} accounts are called '{group[0].name}'",
+                " · ".join(f"id={a.id} {a.email or 'no address'}"
+                           for a in group),
+                "/admin/pipeline#upload"))
+
+    return _result(
+        "duplicate_accounts", "The same marketplace account entered twice",
+        "One real account should be one row here, however many projects it "
+        "serves. Two rows means a daily upload limit the marketplace applies "
+        "ONCE gets counted as two, earnings get split across both, and "
+        "whichever row holds the wrong password fails every night. Check "
+        "which row holds the real address and the artist name, move any "
+        "project links onto it, and delete the other.",
+        "error", rows,
+    )
+
+
+def check_account_never_read(db: Session, scope: Scope) -> CheckResult:
+    """
+    An account that has never once been read for earnings since it was made.
+
+    A read that fails today is ordinary — a wall, a dropped session, a site
+    having a moment — and the existing cooldown handles it. An account that
+    has NEVER succeeded is a different thing entirely: it means the row is
+    wrong, not the network. Wrong address, wrong password, or a row nobody
+    meant to create.
+
+    Kept separate from "the last read failed" for exactly the reason this
+    codebase keeps relearning: two failures that look alike but mean
+    different things need two answers. One is weather; this one is a defect.
+
+    Deliberately quiet for the first day, so a genuinely new account you have
+    just typed in does not shout before its first scheduled read.
+    """
+    cutoff = datetime.utcnow() - timedelta(days=1)
+    rows = []
+    for a in db.query(UploadAccount).filter(
+            UploadAccount.banned_at.is_(None)).all():
+        if a.created_at and a.created_at > cutoff:
+            continue
+        ledger = (db.query(func.count(LedgerEntry.id))
+                    .filter(LedgerEntry.account_id == a.id).scalar() or 0)
+        snaps = (db.query(func.count(MarketplaceSnapshot.id))
+                   .filter(MarketplaceSnapshot.account_id == a.id).scalar() or 0)
+        if ledger or snaps:
+            continue
+        rows.append(Finding(
+            f"{a.name} ({a.target_site}) has never been read",
+            f"created {a.created_at:%Y-%m-%d} · {a.email or 'no address'}",
+            "/admin/earnings"))
+
+    return _result(
+        "account_never_read", "Accounts that have never reported any money",
+        "A read failing today is normal and sorts itself out. An account "
+        "that has never succeeded ONCE since it was created is telling you "
+        "the row itself is wrong — wrong address, wrong password, or a row "
+        "that was created by accident. Nothing else notices, because a "
+        "failure that happens every single time looks the same as a failure "
+        "that happened once.",
         "error", rows,
     )
 
@@ -1369,6 +1480,8 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_greenlit_not_complete,
     check_uploaded_without_processed,
     check_upload_accounts,
+    check_duplicate_accounts,
+    check_account_never_read,
     check_orphaned_bans,
     # ── Listing-health invariants ───────────────────────────────────────
     check_designs_left_switched_off,

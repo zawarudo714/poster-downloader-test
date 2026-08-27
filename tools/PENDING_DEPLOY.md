@@ -7,75 +7,55 @@ empties this file once the server is confirmed to be running it.
 
 ---
 
-**Waiting: v133 · AGENT 1.27.0 — stale claims released on node restart**
-targets 178.105.232.196 (test box)
+**Waiting: v134 — the dashboard grouping index** · targets
+178.105.232.196 (test box)
 
-**THE NODE MUST BE UPDATED TOO.** Copy `worker_service/` to the Windows box.
-`AGENT_VERSION` is 1.26.0 → 1.27.0, and the Nodes tab is the only way to
-confirm the copy actually happened — a folder copy has no receipt.
+## Two things before you deploy
 
-## First: two things I reported as defects are NOT defects
+**BACK UP `poster.db` FIRST.** This adds an index, which is a schema change.
+It is `CREATE INDEX IF NOT EXISTS`, so safe and repeatable, and SQLite
+builds it over 201k rows in a couple of seconds — but the rule is the rule.
 
-`MEASURED 2026-08-27`, and both were my error.
+**The node does NOT need copying.** Nothing under `worker_service/` changed
+and `AGENT_VERSION` stays at 1.27.0.
 
-**"6 jobs claimed and never reported."** It was five, not six — job #200
-finished at 00:06 the next morning and I missed it because the node's log
-rotates at midnight. And the five were killed by **agent restarts**: there
-are 65 restarts across the 13 days of logs, almost all version bumps during
-active development. Each one matches a job's last line:
+## What it does
 
-    #85   07:07:59   agent restarted 07:50:38  (v1.15.0)
-    #122  15:28:43   agent restarted 15:46:37  (v1.17.3)
-    #123  15:47:42   agent restarted 16:03:14  (v1.18.0)
-    #151  19:24:19   agent restarted 19:28:08  (v1.20.0)
-    #174  11:53:35   agent restarted 12:57:17  (v1.23.0)
+The master dashboard groups every title by `(project_id, status)` on each
+load. There was an index on `project_id` alone, so SQLite scanned that and
+then built a scratch sort structure — a TEMP B-TREE — to do the grouping,
+and threw it away every time.
 
-**The four `400 Invalid HTTP request` errors** begin one second after the
-07:50:38 restart and stop at the next restart eight minutes later. Same
-event. Self-resolved.
+`MEASURED 2026-08-27` on a table of the same shape and size:
 
-I read gaps in a log as stalls without checking what caused the gaps. The
-answer was one grep away in files I already had. Recorded here because the
-mistake is more useful than the non-finding.
+    BEFORE   SCAN master_titles USING INDEX ix_master_titles_project_id
+             USE TEMP B-TREE FOR GROUP BY
+             216.7 ms
 
-## The real defect underneath
+    AFTER    SCAN master_titles USING COVERING INDEX ix_master_project_status
+             23.4 ms
 
-A job killed by a restart dies on the NODE while the SERVER still has it
-`running`. It stays claimed until the stalled-job reaper times it out — up
-to `claim_timeout_min` minutes of nothing happening. That is the cost, and
-it happened 65 times this fortnight.
+9x faster, and it became a COVERING index — SQLite answers the whole query
+from the index without reading the table at all.
 
-**Fixed:** the agent now sends `startup: true` on its FIRST hello only, and
-the server releases jobs it has down as running for that node. A process
-that has just started cannot still be doing what it claimed before.
+## What it is NOT
 
-Only on the first hello. `/hello` is called every poll cycle, and releasing
-there would cancel live work every thirty seconds — a far worse bug than
-the one being fixed.
+**This is not why the site felt slow.** That was the link out to Kenya,
+measured the same day at 12.6 KB/s to the laptop while the server itself
+pulled from Hetzner's mirror at 130 MB/s. A sixth of a second cannot be
+felt.
 
-The count comes back in the reply and the node logs it, so a restart that
-releases work says so rather than being silent.
-
-**Tested** against the shipped function, five cases: releases my own running
-job on startup; releases nothing on a routine poll; ignores another node's
-job; ignores a queued job; copes with nothing to do.
-
-## Also
-
-`app/static/js/admin_earnings.js` — the unclassified-row note was behind the
-early return for "everything reconciles", so it only appeared when something
-ALSO failed to reconcile. That is exactly when it is least needed, and it is
-why you did not see it after v132. Now shown on both paths.
-
-`app/config.py` — a comment still named `_host_is_internal()`, renamed to
-`_host_check()` in v130.
+`CLAUDE.md` planned item 9 used to blame the 201,133 titles, in the same
+confident voice as the measured facts around it, and that claim had already
+been repeated to the owner as fact. It is corrected there now. This index is
+the small real thing that was hiding behind the wrong diagnosis, and it
+matters more as the table grows — celebrity portraits are coming.
 
 ### Files
 
-`app/routes/pipeline_api.py`, `worker_service/agent.py`,
-`worker_service/client.py`, `app/static/js/admin_earnings.js`,
-`app/config.py` (132 → 133), `worker_service/agent.py` (1.26.0 → 1.27.0).
+`app/schema_migrations.py`, `app/config.py` (133 → 134).
 
-**After deploying:** restart the node once. Its log should say either
-nothing, or "Server released N job(s) it still had me down as running."
-The Earnings page should now show the note about the one unrecognised row.
+**Verified:** preflight green, and the index measured against a real 201,133
+-row table before and after. **Not verified:** it has not run against the
+actual database — the migration runs on startup, so the first proof is the
+dashboard loading after deploy.

@@ -92,6 +92,14 @@ Then:
   * **Say at the START of the session if anything is undeployed**, before
     he asks. He cannot tell by looking at the site, and anything built on
     top of an undeployed change is work he tests twice.
+  * **EVERY time you finish a change, say TWO things: deploy, and whether
+    the NODE also needs copying.** Added 2026-08-27 at his request, after
+    v133 changed `worker_service/` and he only copied it because it came up
+    in conversation. The deploy tool touches the SERVER only — the Windows
+    box is updated by copying a folder, which has no receipt, so if nobody
+    says it the node silently keeps running old code. If `worker_service/`
+    changed at all, bump `AGENT_VERSION` and say so in the same breath as
+    "deploy this".
   * **When he deploys, SAY WHETHER IT WORKED** — "v124 is live" or "v124
     failed, here is what it said" — then move the entry out of the waiting
     block and into the log. Never leave it ambiguous.
@@ -1344,6 +1352,40 @@ So for anything you touch, ask in this order:
    it at master level.
 3. **Does it serve more than one purpose?** The node processes AND uploads.
    A check covering one of those silently passes while the other is broken.
+
+**NOTHING IS A FINDING UNTIL YOU HAVE TRIED TO KILL IT.** Standing
+instruction from the owner, 2026-08-27, after THREE false reports in one
+day. Before telling him anything is broken, produce ONE of:
+
+  * a reproduction, or
+  * a log line or database row showing it happening, or
+  * the code path traced from PRODUCER to CONSUMER — the query that fills
+    the value, not just the code that reads it.
+
+If you have none of those, you have a QUESTION. Say "these two things look
+inconsistent, I could not confirm it" and stop. That is genuinely useful.
+A confident wrong diagnosis is not: it costs him an evening testing a
+scenario that cannot happen, and it teaches him to discount the true ones.
+
+The three, all the same shape — a pattern that looked like a finding, a
+story built on it, and no attempt to disprove it, while the falsifying
+evidence sat one grep away in a file already open:
+
+  * **the flag card.** Two variables held "is this project in-page", so
+    they were assumed to disagree. The list they feed is project-scoped;
+    they cannot. The query was in a file being read all afternoon.
+  * **"six stranded jobs".** Five, not six — one finished after midnight
+    and the log rotates. And all five were killed by AGENT RESTARTS; there
+    were 65 in the thirteen days of logs, each matching a job's last line.
+  * **"a silent 400 loop".** The four errors begin one second after one of
+    those restarts and stop at the next. Same event, self-resolved.
+
+**Do not confuse the SHAPE of a real defect with a defect.** Two records
+for one fact, work claimed and not reported, a gap in a log — these are
+where bugs live, and matching one is a reason to LOOK, never a reason to
+report. The same pattern-matching found four genuine defects the same day,
+which is exactly why it is dangerous: it produces plausible stories fast,
+and plausible is not measured.
 
 **TWO VARIABLES HOLDING ONE FACT IS A SUSPICION, NOT A FINDING. Before
 calling it a bug, NAME THE QUERY that can return a row where they differ.**

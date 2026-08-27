@@ -15,6 +15,7 @@ cost far more to read, answer a different question, and on a mounted working
 copy `git status` cannot refresh its index — it reports stale answers with
 no warning.
 
+- **2026-08-27 15:32** · `16954bd9` · v133 · deploy v133
 - **2026-08-27 15:15** · `c5a61dd7` · v132 · deploy v132
 - **2026-08-27 15:00** · `c677a1e3` · v131 · deploy v131
 - **2026-08-27 14:40** · `0d2dde7c` · v130 · deploy v130
@@ -44,4 +45,3 @@ no warning.
 - **2026-08-24 13:57** · `86d0410c` · TeePublic switching stages made stoppable, resumable and self-repairing.
 - **2026-08-24 13:10** · `8a967de1` · Deploy now runs tools/preflight.py first: compiles, undefined names, JS parsing,
 - **2026-08-24 07:38** · `3592bbde` · Counts now say what they mean: 17 of 627 in this continue, not 17 of 1543.
-- **2026-08-24 07:23** · `c5ce73cf` · A wall no longer kills the night: the sweep waits 30/60/90 minutes and retries,

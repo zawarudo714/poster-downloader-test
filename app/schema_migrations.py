@@ -173,6 +173,22 @@ NEW_INDEXES: list[tuple[str, str, str]] = [
     ("ix_master_greenlit_source",        "master_titles", "greenlit_source"),
     ("ix_poster_project_folder",         "saved_posters", "project_folder"),
     ("ix_processed_review",              "processed_images", "review_status"),
+    # The master dashboard groups every title by (project_id, status) on
+    # each load. `ix_master_titles_project_id` covers only the first column,
+    # so SQLite scanned that index and then built a TEMP B-TREE to do the
+    # grouping — a scratch sort structure thrown away every time.
+    #
+    # MEASURED 2026-08-27 on 201,133 rows: 0.16s before, and the plan says
+    # "SCAN master_titles USING INDEX ix_master_titles_project_id" plus
+    # "USE TEMP B-TREE FOR GROUP BY". With both columns covered the grouping
+    # is read straight off the index.
+    #
+    # Worth stating plainly: this is NOT why the site felt slow. That was
+    # the network link, measured the same day at 12 KB/s to the owner while
+    # the server itself pulled at 130 MB/s. A sixth of a second cannot be
+    # felt. This is a tidy-up that was hiding behind a wrong diagnosis, and
+    # it matters more as the table grows — celebrity portraits are coming.
+    ("ix_master_project_status",         "master_titles", "project_id, status"),
 ]
 
 

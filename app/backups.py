@@ -284,10 +284,16 @@ def _scheduler_loop():
             # account's password being wrong, must not cost a backup.
             try:
                 from .db import SessionLocal
-                from .earnings.service import run_daily_if_due
+                from .earnings.service import run_daily_if_due, retry_unread_if_due
                 _db = SessionLocal()
                 try:
-                    run_daily_if_due(_db)
+                    if run_daily_if_due(_db) is None:
+                        # Today's run already happened. Anything it failed to
+                        # read gets another go once that account's own cooldown
+                        # expires, for a few hours. Only reached when the daily
+                        # run did NOT just fire, so the two can never queue the
+                        # same account twice in one tick.
+                        retry_unread_if_due(_db)
                 finally:
                     _db.close()
             except Exception:

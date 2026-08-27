@@ -39,6 +39,15 @@
     var d = new Date(iso);
     return isNaN(d) ? esc(iso) : d.toLocaleDateString();
   }
+  // How long ago, in hours. Returns 0 for anything unparseable so a bad
+  // timestamp reads as "just now" rather than as a fake alarm about the
+  // figures being years stale.
+  function staleHours(iso) {
+    if (!iso) return 0;
+    var d = new Date(iso);
+    if (isNaN(d)) return 0;
+    return Math.max(0, (Date.now() - d.getTime()) / 3600000);
+  }
 
   function params(extra) {
     var p = new URLSearchParams();
@@ -214,7 +223,21 @@
         // capability flag that already governs REFUNDED and PAID OUT, so a
         // third marketplace inherits the right behaviour without an edit.
         card('EARNED', money(s.earned), caps.sales ? s.sales_count + ' sale(s)' : 'to date') +
-        card('TODAY', '+' + money(s.today.amount), caps.sales ? s.today.sales + ' sale(s)' : 'since yesterday') +
+        // NOT "TODAY / since yesterday". That is a calendar word describing
+        // the gap between two READINGS, so it quietly starts lying the moment
+        // a read is missed — and a read fails roughly one day in five.
+        //
+        // A ledger site timestamps every sale, so 24 hours really is 24 hours
+        // however badly the reading went. A snapshot site only reports how
+        // much its lifetime total climbed since the last look, so a missed
+        // read produces one figure covering two days. The card now says which
+        // it is holding.
+        card('LAST 24 HOURS',
+             '+' + money(s.today.amount),
+             caps.sales ? s.today.sales + ' sale(s)'
+                        : (s.today.covers_days > 1
+                             ? 'covers ' + s.today.covers_days + ' days'
+                             : 'since the last reading')) +
         card('LAST 7 DAYS', '+' + money(s.week.amount), caps.sales ? s.week.sales + ' sale(s)' : 'past week') +
         // Refunds and payouts only exist on a site that publishes a ledger.
         // Shown when the selection can support them, omitted otherwise —
@@ -223,6 +246,20 @@
         (caps.payouts ? card('PAID OUT', money(s.paid_out), 'already received') : '') +
       '</div>' +
       '<p class="muted" style="margin-top:8px" data-cap-note hidden></p>' +
+      // Say WHEN these figures were last refreshed, and say it plainly when
+      // that was not recent. Without it a stale screen and a quiet day look
+      // identical, which is the whole reason the label above was wrong.
+      (s.last_read_at
+        ? '<p class="muted" style="margin-top:8px">Last successful read: '
+          + when(s.last_read_at)
+          + (staleHours(s.last_read_at) >= 26
+              ? ' — that is ' + Math.floor(staleHours(s.last_read_at) / 24)
+                + ' day(s) ago, so anything since then is not in these figures yet.'
+              : '')
+          + '</p>'
+        : '<p class="muted" style="margin-top:8px">These accounts have never '
+          + 'been read successfully, so every figure above is zero because '
+          + 'nothing has been fetched — not because nothing was earned.</p>') +
       (s.snapshot_partial
         ? '<p class="muted" style="margin-top:8px">Some of these accounts only '
           + 'report running totals, so their figures start from ' + when(s.snapshot_since)

@@ -724,8 +724,208 @@ def run_daily_if_due(db: Session) -> Optional[dict]:
             return None
 
     set_setting(db, "earnings_last_run_day", today, by="scheduler")
+    # The baseline the retry measures against. Written ONLY here, so pressing
+    # READ NOW cannot move it and trigger an unscheduled sweep of everything
+    # else. See daily_run_started().
+    set_setting(db, "earnings_daily_run_started_at",
+                datetime.utcnow().isoformat(), by="scheduler")
     db.commit()
     return queue_reads(db, requested_by="scheduler")
+
+
+def daily_run_started(db: Session) -> Optional[datetime]:
+    """
+    When today's SCHEDULED read was dispatched, in UTC. None if it has not.
+
+    Its own setting, written only by `run_daily_if_due`, and deliberately not
+    the existing `earnings_last_run_at` — that one is also stamped by READ NOW.
+    Reusing it would mean pressing READ NOW on one account at ten in the
+    morning moved the baseline to ten in the morning, at which point every
+    other account counts as "not read since the run" and the retry fires a
+    full unscheduled sweep. One manual click causing eleven sign-ins is the
+    exact behaviour the cooldown exists to prevent.
+    """
+    from ..pipeline import get_setting
+
+    raw = str(get_setting(db, "earnings_daily_run_started_at") or "")
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def accounts_unread_since(db: Session, since: datetime) -> list[UploadAccount]:
+    """
+    Readable accounts not successfully read since a given moment.
+
+    Measured against the RUN, not against the calendar day. `local_today()`
+    reads naturally but breaks across midnight: with the read at 22:00 and an
+    8-hour window, at 00:01 every account — including the ones read perfectly
+    at 22:05 — becomes "unread today", and the retry re-reads the lot. A
+    timestamp has no such edge.
+
+    `last_earnings_read_at` is stamped only when a page came back and parsed,
+    so "not since" means the read never happened or it failed.
+    """
+    out = []
+    for a in readable_accounts(db, include_paused=True):
+        last = a.last_earnings_read_at
+        if last is None or last < since:
+            out.append(a)
+    return out
+
+
+def retry_unread_if_due(db: Session) -> Optional[dict]:
+    """
+    Re-queue accounts that today's scheduled read did not manage to read.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY A RETRY AT ALL
+    ════════════════════════════════════════════════════════════════════════
+    Measured across 13 days of node logs, a failed run is usually the hour
+    rather than the account. Twice, a run that mostly failed was followed by
+    a completely clean one two to three hours later with nothing changed:
+
+        23 Aug 05:00 -> 2 of 11        23 Aug 08:00 -> 13 of 13
+        24 Aug 20:00 -> 2 of 11        24 Aug 22:00 -> 11 of 11
+
+    And on 26 Aug every one of nine TeePublic accounts failed at the wall,
+    while the next morning every one got through on the first attempt.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE GAP IS THE EXISTING COOLDOWN, NOT A SECOND TIMER
+    ════════════════════════════════════════════════════════════════════════
+    A failed read already parks its account — 3 hours for a general failure,
+    12 for a signed-out one. A retry on its own schedule would have been
+    silently swallowed by that: `readable_accounts` skips a paused account,
+    so a "retry in 2 hours" would have run, queued nothing, and reported
+    success while doing nothing at all.
+
+    So the cooldown IS the gap. An account becomes retryable exactly when it
+    stops being parked, which also gets the important distinction for free:
+
+      · a general failure (a wall, a hung page) is weather — back in 3 hours
+      · SIGNED OUT is not weather. It needs a person and two minutes with
+        PROFILES.bat, so its 12-hour park keeps it out until tomorrow rather
+        than knocking eleven more times at a sign-in page. Repeated knocking
+        is what got us challenged in the first place.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHAT IT MUST NOT DO
+    ════════════════════════════════════════════════════════════════════════
+    It does not touch `earnings_last_run_day`. That marker is what reopens
+    the quiet window, and it is set whether the read worked or not, so that a
+    failure cannot leave uploading dead all night. If a retry re-armed it,
+    one bad read would cost three separate pauses of the pipeline instead of
+    none.
+
+    Nothing is counted. How many attempts happen falls out of the cooldown
+    and the window: a 3-hour park inside an 8-hour window gives about three
+    tries. Preferring a condition you can DERIVE over a number you have to
+    MAINTAIN is the same reason the quiet window is a window and not a switch
+    — there is no counter here to be left wrong by a path nobody listed.
+    """
+    from ..pipeline import get_setting
+
+    window = float(get_setting(db, "earnings_retry_window_hours") or 0)
+    if window <= 0:
+        return None                       # retries switched off in the dashboard
+
+    started = daily_run_started(db)
+    if started is None:
+        return None                       # today's scheduled read has not run
+
+    # Measured from the RUN, in elapsed hours, so it behaves the same at 23:50
+    # as at 00:10. Doing this on clock hours would have made the window stop
+    # dead at midnight while the setting still claimed eight hours.
+    elapsed = (datetime.utcnow() - started).total_seconds() / 3600.0
+    if elapsed < 0 or elapsed > window:
+        return None
+
+    # Anything still parked is deliberately left alone — its cooldown has not
+    # expired, which is the whole point of the cooldown.
+    stragglers = [a for a in accounts_unread_since(db, started)
+                  if not read_paused(a)]
+    if not stragglers:
+        return None
+
+    from ..pipeline import create_job
+    from ..models import PipelineJob
+
+    already = {
+        int(json.loads(j.payload_json or "{}").get("account_id") or 0)
+        for j in db.query(PipelineJob)
+                   .filter(PipelineJob.kind == "earnings_read",
+                           PipelineJob.status.in_(("queued", "running"))).all()
+    }
+
+    queued = []
+    for account in stragglers:
+        if account.id in already:
+            continue
+        create_job(db, kind="earnings_read",
+                   payload={"account_id": account.id},
+                   requested_by="scheduler-retry")
+        queued.append(account.name)
+
+    if not queued:
+        return None
+
+    db.commit()
+    return {"queued": queued, "accounts": len(queued),
+            "hours_since_run": round(elapsed, 1)}
+
+
+def retry_state(db: Session) -> dict:
+    """
+    What the Earnings page needs to SAY about retrying, in its own words.
+
+    A mechanism that quietly waits looks exactly like a mechanism that has
+    given up. The owner has no other way to tell the difference, so the page
+    has to say "waiting to try X again at 21:00" rather than leaving him to
+    infer it from an empty screen.
+    """
+    from ..pipeline import get_setting
+
+    out = {"enabled": False, "waiting": [], "gave_up": [],
+           "window_ends": "", "ran_today": False}
+
+    window = float(get_setting(db, "earnings_retry_window_hours") or 0)
+    started = daily_run_started(db)
+    out["enabled"] = window > 0
+    out["ran_today"] = started is not None
+    if not out["enabled"] or started is None:
+        return out
+
+    out["window_ends"] = _local_hhmm(started + timedelta(hours=window))
+    past_window = (datetime.utcnow() - started).total_seconds() / 3600.0 > window
+
+    for a in accounts_unread_since(db, started):
+        entry = {"name": a.name, "site": a.target_site,
+                 "reason": a.earnings_pause_reason or "",
+                 "retry_at": ""}
+        if past_window:
+            out["gave_up"].append(entry)
+        elif read_paused(a):
+            entry["retry_at"] = _local_hhmm(a.earnings_paused_until)
+            out["waiting"].append(entry)
+        else:
+            entry["retry_at"] = "next check"
+            out["waiting"].append(entry)
+    return out
+
+
+def _local_hhmm(when: Optional[datetime]) -> str:
+    if when is None:
+        return ""
+    from ..timeutil import to_local
+
+    try:
+        return to_local(when).strftime("%H:%M")
+    except Exception:
+        return when.strftime("%H:%M")
 
 
 def rearm_today(db: Session, *, by: str = "admin") -> None:
@@ -740,6 +940,10 @@ def rearm_today(db: Session, *, by: str = "admin") -> None:
     from ..pipeline import set_setting
 
     set_setting(db, "earnings_last_run_day", "", by=by)
+    # Clear the retry baseline with it. Left set, the retry would keep
+    # measuring against a run that is being deliberately forgotten, and would
+    # fire against the re-armed schedule.
+    set_setting(db, "earnings_daily_run_started_at", "", by=by)
     db.commit()
 
 
@@ -841,7 +1045,21 @@ def summary(db: Session, *, marketplace: Optional[str] = None,
                                account_ids=account_ids, since_days=days)
 
     def window(hours: int) -> dict:
-        """Movement over a recent stretch, from both shapes."""
+        """
+        Movement over a recent stretch, from both shapes.
+
+        `covers_days` is what stops the label lying. On a ledger site every
+        sale carries its own timestamp, so a 24-hour figure is exactly 24
+        hours whether or not a read was missed — the next read backfills with
+        the real dates. On a snapshot site there is only "how much the
+        lifetime total climbed since the previous reading", so a missed read
+        silently produces one figure covering two days, and those two days can
+        never be separated afterwards.
+
+        The number was already being derived on write and then thrown away
+        here, which is how the card came to say "since yesterday" over a
+        figure that sometimes meant since the day before that.
+        """
         edge = now - timedelta(hours=hours)
         recent = [r for r in sales if r.occurred_at >= edge]
         amount = sum((dec(r.credit) for r in recent), Decimal("0"))
@@ -850,11 +1068,14 @@ def summary(db: Session, *, marketplace: Optional[str] = None,
         # window is counted in whole local days.
         from ..timeutil import local_today
         edge_day = local_today() - timedelta(days=max(1, hours // 24))
+        covers = 0
         for snap in snaps["rows"]:
             if snap.taken_on > edge_day and snap.earned_since:
                 amount += dec(snap.earned_since)
+                covers = max(covers, int(snap.covers_days or 1))
 
-        return {"sales": len(recent), "amount": _fmt(amount)}
+        return {"sales": len(recent), "amount": _fmt(amount),
+                "covers_days": covers}
 
     return {
         "days": days,
@@ -865,6 +1086,11 @@ def summary(db: Session, *, marketplace: Optional[str] = None,
         "sales_count": len(sales),
         "today": window(24),
         "week": window(24 * 7),
+        # When these accounts were last read successfully, so the screen can
+        # name the gap it is actually reporting rather than calling it "since
+        # yesterday" and being wrong whenever a read was missed.
+        "last_read_at": _last_read_at(db, marketplace=marketplace,
+                                      account_ids=account_ids),
         "unmatched": sum(1 for r in sales if r.master_title_id is None),
         "revision_window_h": REVISION_WINDOW_H,
         # Everything the page needs to be honest about what it cannot know.
@@ -873,6 +1099,31 @@ def summary(db: Session, *, marketplace: Optional[str] = None,
         "snapshot_gap_days": snaps["gap_days"],
         "items_lifetime": snaps["items_lifetime"],
     }
+
+
+def _last_read_at(db: Session, *, marketplace: Optional[str] = None,
+                  account_ids: Optional[list[int]] = None) -> Optional[str]:
+    """
+    The newest successful read among the accounts being looked at, ISO or None.
+
+    Scoped to the SELECTION rather than to everything, because the figure
+    beside it is scoped that way too. A global "last read" printed next to one
+    marketplace's money would be a different kind of wrong from the one this
+    is fixing.
+    """
+    newest = None
+    for a in db.query(UploadAccount).all():
+        site = (a.target_site or "").lower()
+        if site not in READERS:
+            continue
+        if marketplace and site != marketplace.lower():
+            continue
+        if account_ids and a.id not in account_ids:
+            continue
+        when = a.last_earnings_read_at
+        if when and (newest is None or when > newest):
+            newest = when
+    return newest.isoformat() if newest else None
 
 
 def next_payout_estimate(db: Session, *, marketplace: Optional[str] = None,

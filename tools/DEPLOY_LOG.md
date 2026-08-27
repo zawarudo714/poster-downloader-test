@@ -4,11 +4,18 @@ What is actually live on the server, newest first. Written automatically by
 the deploy tool, and only when the server was confirmed to be running the
 commit that was just pushed.
 
-**For a future session: read THIS file to see what shipped. Do not run git
-log or diff to work it out — that costs far more to read than these lines.**
-If the top entry looks older than the work in the repo, the difference is
-what has not been deployed yet.
+**THIS FILE IS REWRITTEN BY THE DEPLOY TOOL. Do not hand-write anything
+here — it will be destroyed on the next deploy. What is WAITING to be
+deployed belongs in `PENDING_DEPLOY.md`, which the tool only ever empties.**
 
+**For a future session: read this file and `PENDING_DEPLOY.md` before
+anything else.** Between them they answer "what is live" and "what is
+waiting". Do not run `git log`, `git diff` or `git status` instead: they
+cost far more to read, answer a different question, and on a mounted working
+copy `git status` cannot refresh its index — it reports stale answers with
+no warning.
+
+- **2026-08-27 11:44** · `7a63f913` · v125 · deploy v125
 - **2026-08-27 11:40** · `16ff8023` · deploy v124
 - **2026-08-27 11:38** · `304319d3` · deploy v124
 - **2026-08-25 19:19** · `557a4e74` · deploy v123
@@ -38,4 +45,3 @@ what has not been deployed yet.
 - **2026-08-23 17:03** · `3b54c6a0` · STOP now actually stops the node, within one design, keeping everything checked.
 - **2026-08-23 16:46** · `3cfceca0` · DEPLOY THE SITE TOO - the scan job payload is built server-side.
 - **2026-08-23 16:27** · `2d5afb19` · Scan sends the full account payload (the browser needs selectors/timings) and
-- **2026-08-23 16:18** · `54d0ff63` · Node needs: pip install -r worker_service/requirements.txt (beautifulsoup4).

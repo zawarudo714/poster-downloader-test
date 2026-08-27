@@ -700,6 +700,59 @@ def check_account_never_read(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def check_earnings_retry_gave_up(db: Session, scope: Scope) -> CheckResult:
+    """
+    Accounts today's read never managed to read, after retrying stopped.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY A MECHANISM THAT GIVES UP QUIETLY NEEDS A WATCHER
+    ════════════════════════════════════════════════════════════════════════
+    The retry is deliberately bounded: a few hours after the scheduled read
+    it stops trying until tomorrow, so a marketplace that is refusing us is
+    not knocked on all night. That is the right behaviour and it has one
+    cost — when it gives up, nothing says so. The screen looks the same as a
+    day where every account reported zero.
+
+    For a snapshot marketplace that is not a cosmetic difference. TeePublic
+    publishes a running total and nothing else, so a day with no reading is
+    merged into the next one and the two can never be separated afterwards.
+    A week of silent give-ups is a week of figures that cannot be rebuilt
+    from anything.
+
+    Only fires once the window has closed, so an account still waiting for
+    its cooldown is not reported as a failure while it is working normally.
+    """
+    from .earnings import service as earnings
+
+    try:
+        state = earnings.retry_state(db)
+    except Exception as e:
+        # A watcher that throws is a watcher that is not watching. Say so
+        # rather than letting the whole Diagnostics page fail.
+        return _result(
+            "earnings_retry_gave_up", "Accounts today's earnings read never got",
+            "This check could not run, so nothing is watching the earnings "
+            "retry right now.", "error",
+            [Finding("The check itself failed", str(e), "/admin/earnings")])
+
+    rows = [
+        Finding(f"{e['name']} ({e['site']}) was not read today",
+                e["reason"] or "no reason recorded",
+                "/admin/earnings")
+        for e in state.get("gave_up", [])
+    ]
+
+    return _result(
+        "earnings_retry_gave_up", "Accounts today's earnings read never got",
+        "The nightly read tried these and gave up for the day. On a site "
+        "that only publishes a running total, today's earnings are now "
+        "merged into tomorrow's figure and cannot be separated again. Press "
+        "READ NOW if the cause has passed, or open the account's Chrome "
+        "profile and sign in by hand if it says signed out.",
+        "warn", rows,
+    )
+
+
 def check_orphaned_upload_rows(db: Session, scope: Scope) -> CheckResult:
     """
     Queued uploads whose marketplace account no longer exists.
@@ -1482,6 +1535,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_upload_accounts,
     check_duplicate_accounts,
     check_account_never_read,
+    check_earnings_retry_gave_up,
     check_orphaned_bans,
     # ── Listing-health invariants ───────────────────────────────────────
     check_designs_left_switched_off,

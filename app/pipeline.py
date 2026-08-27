@@ -588,6 +588,16 @@ DEFAULTS: dict[str, Any] = {
     # queue and take their turn like any other job.
     "earnings_quiet_from":  "22:00",
     "earnings_run_at":      "22:00",
+    # How long after the scheduled read we keep re-queueing accounts that did
+    # not get read. The GAP between tries is not set here — it is the account's
+    # own cooldown (3h after a general failure, 12h after a signed-out one),
+    # so a signed-out account waits for a person instead of being knocked on
+    # repeatedly. 0 switches retrying off.
+    "earnings_retry_window_hours": 8,
+    # When the SCHEDULED read was dispatched, UTC ISO. The retry measures
+    # from this rather than from the calendar day, so it behaves the same at
+    # 23:50 and 00:10. Written only by run_daily_if_due().
+    "earnings_daily_run_started_at": "",
 
     # ── The interstitial wall ────────────────────────────────────────────
     # TeePublic serves a full-page wall whose dismiss control is sealed

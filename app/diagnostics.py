@@ -700,6 +700,84 @@ def check_account_never_read(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def check_upload_project_starved(db: Session, scope: Scope) -> CheckResult:
+    """
+    An account serving two projects that only ever uploads one of them.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY
+    ════════════════════════════════════════════════════════════════════════
+    `claim_upload_batch` picks which of an account's projects gets its turn.
+    Until 2026-08-27 it took the FIRST one with any work — the comment said
+    "whichever has waited longest", but the query it read had no ordering,
+    so in practice the project attached first won every time.
+
+    An account serving two projects where one always has work then never
+    uploads the other's work AT ALL. The movie project carries a backlog of
+    roughly three thousand posters, so "always has work" is its normal
+    state, and one FineArtAmerica account is meant to serve both niches
+    after migration. Reproduced against a real database before fixing.
+
+    The picker is fixed. This watches for the SYMPTOM rather than the cause,
+    because the symptom is what costs money and it would show up whatever
+    the reason — a paused project, a quota rule, a future change to the
+    rotation. Anything that makes one niche silently stop uploading through
+    a shared account looks like this.
+    """
+    from datetime import timedelta
+
+    cutoff = datetime.utcnow() - timedelta(days=7)
+    rows = []
+
+    for account in db.query(UploadAccount).filter(
+            UploadAccount.is_enabled == 1).all():
+        links = (db.query(AccountProject.project_id)
+                   .filter(AccountProject.account_id == account.id).all())
+        pids = [p for (p,) in links]
+        if len(pids) < 2:
+            continue                       # one project cannot starve another
+
+        waiting, served = [], []
+        for pid in pids:
+            queued = (db.query(func.count(UploadTracking.id))
+                        .filter(UploadTracking.account_id == account.id,
+                                UploadTracking.project_id == pid,
+                                UploadTracking.status.in_(("pending", "failed")))
+                        .scalar() or 0)
+            recent = (db.query(func.count(UploadTracking.id))
+                        .filter(UploadTracking.account_id == account.id,
+                                UploadTracking.project_id == pid,
+                                UploadTracking.uploaded_at.isnot(None),
+                                UploadTracking.uploaded_at >= cutoff)
+                        .scalar() or 0)
+            if queued and not recent:
+                waiting.append((pid, queued))
+            if recent:
+                served.append((pid, recent))
+
+        # Only interesting when one project is being served and another is
+        # not. Both idle is a quiet week; both busy is working correctly.
+        if waiting and served:
+            for pid, queued in waiting:
+                name = scope.label(pid) or f"project {pid}"
+                other = ", ".join(f"{scope.label(p) or p} ({n})" for p, n in served)
+                rows.append(Finding(
+                    f"{account.name}: {name} has {queued} upload(s) waiting "
+                    f"and none sent in 7 days",
+                    f"the same account uploaded for {other} in that time",
+                    "/admin/pipeline#upload"))
+
+    return _result(
+        "upload_project_starved", "One niche not uploading through a shared account",
+        "This account serves more than one project. One of them has work "
+        "queued and has sent nothing for a week, while another has been "
+        "uploading through the same account. That is what it looks like "
+        "when the rotation always picks the same project — the queued work "
+        "is never wrong, it is simply never reached.",
+        "error", rows,
+    )
+
+
 def check_unclassified_ledger_rows(db: Session, scope: Scope) -> CheckResult:
     """
     Money rows we stored but could not name.
@@ -1601,6 +1679,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_upload_accounts,
     check_duplicate_accounts,
     check_account_never_read,
+    check_upload_project_starved,
     check_unclassified_ledger_rows,
     check_earnings_retry_gave_up,
     check_orphaned_bans,

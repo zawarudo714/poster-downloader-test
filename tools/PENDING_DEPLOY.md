@@ -7,55 +7,71 @@ empties this file once the server is confirmed to be running it.
 
 ---
 
-**Waiting: v134 — the dashboard grouping index** · targets
+**Waiting: v135 — one niche would never have uploaded** · targets
 178.105.232.196 (test box)
 
-## Two things before you deploy
+**Deploy:** yes. **Copy `worker_service/` to the node:** NO — nothing under
+it changed, `AGENT_VERSION` stays 1.27.0. **Schema change:** none.
 
-**BACK UP `poster.db` FIRST.** This adds an index, which is a schema change.
-It is `CREATE INDEX IF NOT EXISTS`, so safe and repeatable, and SQLite
-builds it over 201k rows in a couple of seconds — but the rule is the rule.
+## The defect
 
-**The node does NOT need copying.** Nothing under `worker_service/` changed
-and `AGENT_VERSION` stays at 1.27.0.
+`claim_upload_batch` decides which of an account's projects gets its turn.
+The comment said:
 
-## What it does
+> the account's turn goes to whichever of its projects has waited longest
 
-The master dashboard groups every title by `(project_id, status)` on each
-load. There was an index on `project_id` alone, so SQLite scanned that and
-then built a scratch sort structure — a TEMP B-TREE — to do the grouping,
-and threw it away every time.
+It did not. It called `project_ids_for_account()`, whose query has **no
+`ORDER BY`**, and took the FIRST project that had any work at all. SQLite
+returns rows in rowid order, so in practice **the project attached first
+won every single turn.**
 
-`MEASURED 2026-08-27` on a table of the same shape and size:
+`MEASURED 2026-08-27`, traced producer to consumer: the query is unordered,
+the loop breaks on the first match, and `_has_upload_work` only asked
+"is there anything?" — never "how long has it waited?".
 
-    BEFORE   SCAN master_titles USING INDEX ix_master_titles_project_id
-             USE TEMP B-TREE FOR GROUP BY
-             216.7 ms
+**The consequence is total, not partial.** An account serving two projects
+where the first-attached one always has work never uploads the other's work
+AT ALL. The movie project carries a backlog of roughly three thousand
+posters, so "always has work" is its permanent state — and one FineArtAmerica
+account is meant to serve both niches after migration. Test Account is
+linked to both projects right now.
 
-    AFTER    SCAN master_titles USING COVERING INDEX ix_master_project_status
-             23.4 ms
+**Reproduced against a real SQLite database** before changing anything: one
+account, both projects, 3,000 movie rows queued two hours ago and 5 MUSIK
+rows queued three weeks ago. Old logic picks movie. New logic picks MUSIK,
+and once those five are done movie takes over again — no starvation in
+either direction.
 
-9x faster, and it became a COVERING index — SQLite answers the whole query
-from the index without reading the table at all.
+## The fix
 
-## What it is NOT
+`_oldest_upload_wait()` returns when the longest-waiting queued item for an
+(account, project) pair was created, and the turn goes to the oldest.
 
-**This is not why the site felt slow.** That was the link out to Kenya,
-measured the same day at 12.6 KB/s to the laptop while the server itself
-pulled from Hetzner's mirror at 130 MB/s. A sixth of a second cannot be
-felt.
+Derived from the WORK rather than stored in a counter — the same choice the
+quiet window and `scan_incomplete` make. There is no per-project "last
+served" column to keep correct, nothing to forget to update, and nothing a
+future path can leave wrong.
 
-`CLAUDE.md` planned item 9 used to blame the 201,133 titles, in the same
-confident voice as the measured facts around it, and that claim had already
-been repeated to the owner as fact. It is corrected there now. This index is
-the small real thing that was hiding behind the wrong diagnosis, and it
-matters more as the table grows — celebrity portraits are coming.
+The comment is now true, which it was not before.
+
+## The invariant
+
+`check_upload_project_starved` in Diagnostics: an account serving more than
+one project, where one has work queued and has sent nothing for seven days
+while another has uploaded through the same account in that time.
+
+Watches the SYMPTOM, not the cause. The picker is fixed, but anything that
+makes one niche silently stop uploading through a shared account — a paused
+project, a quota rule, a future rotation change — looks exactly like this.
 
 ### Files
 
-`app/schema_migrations.py`, `app/config.py` (133 → 134).
+`app/pipeline.py`, `app/diagnostics.py`, `app/config.py` (134 → 135).
 
-**Verified:** preflight green, and the index measured against a real 201,133
--row table before and after. **Not verified:** it has not run against the
-actual database — the migration runs on startup, so the first proof is the
-dashboard loading after deploy.
+**Verified:** preflight green; the starvation reproduced against a real
+database and then shown fixed, including that the other project recovers
+its turn afterwards.
+
+**Not verified:** no real upload has run through the new picker. Nothing to
+click — it only shows itself when the node next claims an upload batch for
+an account serving two projects.

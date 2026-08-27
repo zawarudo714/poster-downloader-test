@@ -2525,13 +2525,44 @@ def _has_upload_work(db: Session, account_id: int, project_id: Optional[int]) ->
     serving two projects doesn't waste its turn on the empty one and leave
     the busy one waiting for the next rotation.
     """
-    q = db.query(UploadTracking.id).filter(
+    return _oldest_upload_wait(db, account_id, project_id) is not None
+
+
+def _oldest_upload_wait(db: Session, account_id: int,
+                        project_id: Optional[int]) -> Optional[datetime]:
+    """
+    When the LONGEST-WAITING queued upload for this pair was created.
+    None when there is nothing queued.
+
+    ════════════════════════════════════════════════════════════════════════
+    THIS IS WHAT MAKES "WHICHEVER WAITED LONGEST" TRUE
+    ════════════════════════════════════════════════════════════════════════
+    `claim_upload_batch` said in a comment that an account's turn goes to
+    whichever of its projects has waited longest. It did not. It asked
+    `project_ids_for_account()`, which runs a query with NO `ORDER BY`, and
+    took the first one that had any work at all — so in practice the project
+    ATTACHED FIRST won every turn.
+
+    MEASURED 2026-08-27, traced from producer to consumer: the query has no
+    ordering, SQLite returns rows in rowid order, and the loop breaks on the
+    first match. The consequence is not subtle — an account serving two
+    projects where the first one always has work means the SECOND NEVER
+    UPLOADS AT ALL. The movie project carries a backlog of roughly three
+    thousand posters, so "always has work" is its normal state, and one FAA
+    account is meant to serve both niches after migration.
+
+    Derived from the WORK rather than stored in a counter, which is the same
+    choice the quiet window and `scan_incomplete` make: there is no
+    per-project "last served" column to keep correct, nothing to forget to
+    update, and nothing that can be left wrong by a path nobody listed.
+    """
+    q = db.query(func.min(UploadTracking.created_at)).filter(
         UploadTracking.account_id == account_id,
         UploadTracking.status.in_(("pending", "failed")),
     )
     if project_id:
         q = q.filter(UploadTracking.project_id == project_id)
-    return db.query(q.exists()).scalar()
+    return q.scalar()
 
 
 def claim_upload_batch(
@@ -2594,18 +2625,28 @@ def claim_upload_batch(
         # longest, and the whole batch is that project's work.
         candidates = ([project_id] if project_id
                       else project_ids_for_account(db, account.id))
-        chosen = None
+
+        # Genuinely oldest-first, not first-attached-first. `candidates`
+        # comes back unordered, and taking the first with work meant the
+        # project attached first won every turn — see _oldest_upload_wait().
+        # An account serving two projects where one always has work would
+        # never upload the other's work at all.
+        ranked: list[tuple[datetime, Any]] = []
         for pid in candidates:
             candidate_project = resolve_project(db, pid)
             # run_mode is per project: one may be paused while another runs.
             if not intake_open(db, candidate_project):
                 continue
-            if not _has_upload_work(db, account.id, pid):
+            waited = _oldest_upload_wait(db, account.id, pid)
+            if waited is None:
                 continue
-            chosen = candidate_project
-            break
-        if chosen is None:
+            ranked.append((waited, candidate_project))
+        if not ranked:
             continue
+        # Oldest queued item wins. Ties break on project id so the choice is
+        # deterministic rather than dependent on dictionary order.
+        ranked.sort(key=lambda pair: (pair[0], pair[1].id))
+        chosen = ranked[0][1]
 
         project = chosen
         # How many this account gets per turn. Its own rotation_size wins;

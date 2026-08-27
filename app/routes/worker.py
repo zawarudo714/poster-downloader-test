@@ -1344,7 +1344,15 @@ def save_image(
     if t.status in ("complete", "skipped"):
         raise HTTPException(409, f"This title is marked {t.status}. Reopen it to add posters.")
 
-    ok, reason = _validate_image_url(url, db, resolve_project(db, t.project_id))
+    # Resolved ONCE, here, and reused. This function used to work it out
+    # three separate times, each behind its own local `from ..pipeline
+    # import resolve_project`. A local import binds the name for the WHOLE
+    # function, so adding a use above the first one crashed with
+    # UnboundLocalError — the module-level import on line 49 becomes
+    # invisible. It shipped as v130 and broke every paste-a-URL save.
+    project = resolve_project(db, t.project_id)
+
+    ok, reason = _validate_image_url(url, db, project)
     if not ok:
         raise HTTPException(400, reason)
     src_url = url.strip()
@@ -1418,8 +1426,8 @@ def save_image(
     # through the settings cascade so a third niche needs no code change.
     soft_limit = SOFT_LIMIT_PER_TITLE
     try:
-        from ..pipeline import get_setting, resolve_project
-        _proj = resolve_project(db, t.project_id)
+        from ..pipeline import get_setting
+        _proj = project
         soft_limit = int(_proj.images_per_title
                          or get_setting(db, "soft_limit_per_title", project=_proj))
     except Exception:
@@ -1439,8 +1447,7 @@ def save_image(
     # The project's folder segment, resolved once and stamped onto the poster
     # row below so saved_poster_path() never needs a join to rebuild it.
     from ..workspace_migration import project_folder_for
-    from ..pipeline import resolve_project
-    project_folder = project_folder_for(resolve_project(db, t.project_id))
+    project_folder = project_folder_for(project)
 
     folder = title_folder_for(user.username, t.original_save_date,
                               t.title_folder_path, project_folder)

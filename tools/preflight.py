@@ -1032,6 +1032,66 @@ GUARDED: list[tuple[str, str, tuple[str, ...], str]] = [
 ]
 
 
+def check_local_imports_not_used_earlier() -> None:
+    """
+    A name imported INSIDE a function, but used earlier in that same function.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY
+    ════════════════════════════════════════════════════════════════════════
+    `import x` anywhere in a function makes `x` a LOCAL for the whole
+    function, so a use above that line raises UnboundLocalError at runtime —
+    even when the module imports the same name at the top and every other
+    function uses it happily.
+
+    Nothing static catches it. `py_compile` is happy. The undefined-name
+    check is happy, because the name IS bound — just not yet. It only fails
+    when that line actually runs.
+
+    `MEASURED 2026-08-27`: `save_image()` resolved the project three times,
+    each behind its own `from ..pipeline import resolve_project`. Adding a
+    fourth use ABOVE them shipped as v130 and broke every paste-a-URL save
+    with a 500. Preflight was green. The owner found it by saving a poster.
+
+    That is the shape this whole file exists to prevent: a change that
+    passes every check and fails on the first real click.
+
+    Reported as a WARNING rather than a failure, because a local import
+    below a use of the same name is legal wherever the earlier use is a
+    different binding — but it is worth a look every time.
+    """
+    for path in sorted((ROOT / "app").rglob("*.py")) + \
+                sorted((ROOT / "scripts").rglob("*.py")):
+        rel = path.relative_to(ROOT).as_posix()
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            # Names this function imports locally, and where.
+            imported: dict[str, int] = {}
+            for node in ast.walk(fn):
+                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                    for alias in node.names:
+                        name = alias.asname or alias.name.split(".")[0]
+                        imported.setdefault(name, node.lineno)
+            if not imported:
+                continue
+            # Any LOAD of that name strictly above its import line.
+            for node in ast.walk(fn):
+                if (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+                        and node.id in imported
+                        and node.lineno < imported[node.id]):
+                    warn(f"{rel}:{node.lineno} — {fn.name}() uses "
+                         f"'{node.id}' before importing it locally on line "
+                         f"{imported[node.id]}. A local import makes the name "
+                         f"local for the WHOLE function, so this raises "
+                         f"UnboundLocalError when it runs.")
+                    break
+
+
 def check_no_orphan_documents() -> None:
     """
     Every .md in the repo must be named in CLAUDE.md's document index.
@@ -1283,6 +1343,7 @@ CHECKS = [
     ("listing-health rules behave", check_store_logic),
     ("guards are called on every path", check_guards_are_called),
     ("every document is linked", check_no_orphan_documents),
+    ("local imports come before use", check_local_imports_not_used_earlier),
 ]
 
 

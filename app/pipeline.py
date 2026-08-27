@@ -1738,6 +1738,49 @@ def recompute_title_status(db: Session, title: MasterTitle) -> Optional[str]:
 #  WORK DISPATCH — Photoshop stage
 # ═════════════════════════════════════════════════════════════════════════
 
+def release_claims_for_node(db: Session, node_name: str) -> dict[str, int]:
+    """
+    Release EVERY batch claim held by one named node, right now.
+
+    For the node's first hello after starting: a process that has just begun
+    cannot still be running a batch it claimed before, so its posters go back
+    to 'greenlit' and its upload rows back to 'pending' immediately instead
+    of waiting out the reaper's timeout.
+
+    The v1.27.0 handshake fix did exactly this for PIPELINE JOBS and left the
+    batch claims to the reaper — the same one-of-two-siblings gap as the
+    reaper's own liveness check. Reviewed 2026-08-27. With `claim_timeout_min`
+    at 45, every one of the 65 restarts in the August logs left up to 45
+    minutes of claimed work sitting still; jobs were freed in seconds while
+    batches waited.
+
+    Same resets as the reaper, in one place, so the two paths cannot drift.
+    """
+    posters = (
+        db.query(SavedPoster)
+          .filter(SavedPoster.pipeline_status == "processing",
+                  SavedPoster.claimed_by == node_name)
+          .all()
+    )
+    for poster in posters:
+        poster.pipeline_status = "greenlit"
+        poster.claimed_at = None
+        poster.claimed_by = None
+
+    rows = (
+        db.query(UploadTracking)
+          .filter(UploadTracking.status == "uploading",
+                  UploadTracking.claimed_by == node_name)
+          .all()
+    )
+    for row in rows:
+        row.status = "pending"
+        row.claimed_at = None
+        row.claimed_by = None
+
+    return {"posters": len(posters), "uploads": len(rows)}
+
+
 def reap_stale_claims(db: Session) -> dict[str, int]:
     """
     Release work claimed by a node that never reported back (crash, reboot,
@@ -1763,15 +1806,32 @@ def reap_stale_claims(db: Session) -> dict[str, int]:
     # tips it over.
     #
     # Liveness is the last thing the NODE said, not when it started. Every
-    # item it finishes stamps `uploaded_at` (uploads) or moves a poster on
-    # (processing), so a node working steadily through a long batch is
-    # visibly alive even though the item in its hand is not.
+    # item it finishes leaves a stamped, node-attributed row — `uploaded_at`
+    # on the tracking row for uploads, and a ProcessedImage carrying
+    # `processed_by` and `created_at` for Photoshop work — so a node working
+    # steadily through a long batch is visibly alive even though the item in
+    # its hand is not.
+    #
+    # BOTH signals, deliberately. The first version of this fix read only
+    # `uploaded_at`, while its own comment claimed processing counted too —
+    # so a node mid-Photoshop-batch, having uploaded nothing for 45 minutes
+    # because it was busy PAINTING, was invisible to the very check meant to
+    # protect it, and its remaining posters were released mid-stride. The
+    # same half-fix shape as the jobs reaper before it: reviewed 2026-08-27,
+    # one day after shipping, by asking what evidence each work type leaves.
     live_nodes = {
         name for (name,) in
         db.query(UploadTracking.claimed_by)
           .filter(UploadTracking.claimed_by.isnot(None),
                   UploadTracking.uploaded_at.isnot(None),
                   UploadTracking.uploaded_at >= cutoff)
+          .distinct().all()
+        if name
+    } | {
+        name for (name,) in
+        db.query(ProcessedImage.processed_by)
+          .filter(ProcessedImage.processed_by.isnot(None),
+                  ProcessedImage.created_at >= cutoff)
           .distinct().all()
         if name
     }

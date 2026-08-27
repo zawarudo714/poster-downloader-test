@@ -145,6 +145,12 @@ def hello(
                        "running, so it stopped. Nothing is lost — the work "
                        "goes back in the queue."))
             released += 1
+        # And its BATCH claims — posters mid-Photoshop and uploads
+        # mid-upload. The first version of this fix freed only the jobs and
+        # left these to the reaper's 45-minute timeout, which is the exact
+        # asymmetry it was written to remove, one shelf down.
+        freed = P.release_claims_for_node(db, node.name)
+        released += freed["posters"] + freed["uploads"]
     db.commit()
 
     return JSONResponse({

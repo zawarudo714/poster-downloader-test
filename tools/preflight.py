@@ -1124,10 +1124,19 @@ def check_state_changes_are_logged() -> None:
         "api_test_gpt_process": "a single test generation; its spend is metered separately",
         "api_trigger_run": "the run it starts records itself",
         "api_cancel_job": "the job carries its own cancelled state and reason",
+        "master_upload": "records itself as an ImportJob row with started_by",
+        "chat_admin_mark_read": "read-state bookkeeping, not a state change worth auditing",
     }
     MUTATING = ("post", "put", "delete", "patch")
 
-    for path in sorted((ROOT / "app" / "routes").glob("*_admin.py")):
+    # `admin.py` as well as `*_admin.py`. The first version's glob quietly
+    # excluded the largest admin file — reviewed 2026-08-27, one deploy after
+    # the check shipped. Nothing real was hiding there, but a check whose
+    # coverage claim is wrong is the exact thing this file exists to prevent.
+    targets = sorted((ROOT / "app" / "routes").glob("*_admin.py"))
+    if (ROOT / "app" / "routes" / "admin.py").exists():
+        targets.append(ROOT / "app" / "routes" / "admin.py")
+    for path in targets:
         rel = path.relative_to(ROOT).as_posix()
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))

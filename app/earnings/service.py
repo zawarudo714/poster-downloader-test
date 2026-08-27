@@ -611,12 +611,21 @@ def store_snapshot(db: Session, *, account: UploadAccount, html: str) -> dict:
 
     marketplace = (account.target_site or "").lower()
     reader = READERS.get(marketplace)
-    # The structural markers, so a page that is NOT theirs is reported
-    # as such rather than as a redesign. getattr because a reader that
-    # does not take them simply ignores the argument.
-    try:
-        snap = reader.parse_account_page(html, site_markers(marketplace))
-    except TypeError:
+    # The structural markers, so a page that is NOT theirs is reported as
+    # such rather than as a redesign.
+    #
+    # Asked of the SIGNATURE, not caught as an exception. The first version
+    # did `except TypeError: parse without markers` — which also catches a
+    # TypeError raised INSIDE the parser by bad data, silently re-parses the
+    # page without markers, and reports whatever that produces. For a wall
+    # page that is precisely the "they redesigned it" misdiagnosis the
+    # markers exist to prevent, restored by the error handling around them.
+    import inspect
+
+    if "markers" in inspect.signature(reader.parse_account_page).parameters:
+        snap = reader.parse_account_page(html, markers=site_markers(marketplace))
+    else:
+        # A future reader that has not learned about markers yet.
         snap = reader.parse_account_page(html)
     today = local_today()
 

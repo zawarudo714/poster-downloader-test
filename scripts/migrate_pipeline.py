@@ -184,14 +184,25 @@ def ensure_account(
                       f"to project '{project.name}'")
         return account
 
-    if dry_run:
+    # No account matched. SAY SO ON THE DRY RUN TOO — the first version put
+    # this message after the dry_run return, so the rehearsal passed in
+    # silence and the problem surfaced only on the real run. A rehearsal
+    # that cannot see the failure it exists to catch is worse than none.
+    #
+    # This is the expected state on migration day: the plan deletes every
+    # FineArtAmerica account before importing, and the GUI passes only
+    # --account-name. The order that works is: create the account in the
+    # dashboard FIRST (with its real address — needed for uploading anyway),
+    # then run this step, and the name lookup above finds it.
+    if not email:
+        print("      ! No existing account matched and no --account-email "
+              "was given, so there is nothing to attach this history to.")
+        print("        Create the account in the dashboard with its real "
+              "address FIRST, then run this step — it will be found by "
+              "name. (Or pass --account-email.)")
         return None
 
-    if not email:
-        print("      ! No account matched and no --account-email was given, "
-              "so there is nothing to attach this history to.")
-        print("        Create the account in the dashboard with its real "
-              "address, then run this step again.")
+    if dry_run:
         return None
 
     account = UploadAccount(
@@ -430,6 +441,18 @@ def import_upload_tracking(
     """
     if not tracking_path.is_file():
         return {"error": f"Tracking file not found: {tracking_path}"}
+
+    # A REAL run with no account cannot import anything. Without this it fell
+    # through to the per-row loop, whose account-is-None branch exists for
+    # DRY runs — `created += 1; continue` — so a real run would have printed
+    # "+ 4,865 tracking rows" while writing ZERO. The GUI's does-it-add-up
+    # tally would catch the mismatch afterwards; anything driving this
+    # script directly would not. Reviewed 2026-08-27.
+    if account is None and not dry_run:
+        return {"error": (
+            "No marketplace account to attach the history to. Create the "
+            "account in the dashboard first (its real address — needed for "
+            "uploading anyway), then run this step again.")}
 
     try:
         raw = json.loads(tracking_path.read_text(encoding="utf-8"))

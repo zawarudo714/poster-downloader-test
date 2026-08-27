@@ -7,83 +7,59 @@ empties this file once the server is confirmed to be running it.
 
 ---
 
-**Waiting: v140 — review pass over yesterday's own fixes, part 1** ·
-targets 178.105.232.196 (test box)
+**Waiting: v141 — review pass part 2: the migration flow was broken for
+migration day** · targets 178.105.232.196 (test box)
 
-**Deploy:** yes. **Copy `worker_service/` to the node:** NO — all four
-changes are server-side, `AGENT_VERSION` stays 1.28.0. **Schema change:**
-none.
+**Deploy:** yes. **Copy `worker_service/` to the node:** NO — server-side
+only, `AGENT_VERSION` stays 1.28.0. **Schema change:** none.
 
-A fresh-eyes re-audit, pointed first at the sixteen deploys made yesterday —
-because quickly-written fixes are where new bugs live, and v130 proved that
-once already. Two of yesterday's fixes turned out to be half-fixes of
-exactly the shape they were correcting.
+## The finding — traced end to end, and it would have burned THE day
 
-## 1. The v136 reaper fix protected uploads and abandoned Photoshop
+The v124 `ensure_account` fix (rightly) stopped inventing
+`unknown@example.com`. But the migration GUI drives the history import with
+`--account-name` ONLY, and the migration plan deletes every FineArtAmerica
+account before importing. So on migration day, as scripted:
 
-v136 taught the reaper that a long batch is not an abandoned one — liveness
-is the last thing the node SAID. But `live_nodes` was built from
-`UploadTracking.uploaded_at` ONLY, while its own comment claimed processing
-counted too.
+  1. email lookup — skipped, no email given
+  2. name lookup — nothing exists, all accounts deleted
+  3. `ensure_account` returns None
+  4. **the dry run returned None IN SILENCE** — the guidance message sat
+     AFTER the `if dry_run: return None`, so the rehearsal that exists to
+     catch exactly this would have passed quietly
+  5. the real run then hit the per-row `account is None` branch — which is
+     the DRY-RUN counting path — and would have printed
+     **"+ 4,865 tracking rows" while writing ZERO**
 
-Traced producer to consumer: every painted image writes a `ProcessedImage`
-row carrying `processed_by` (the node's name) and `created_at` — the
-evidence existed and was not consulted. So a node mid-Photoshop-batch,
-uploading nothing for 45 minutes because it was busy PAINTING, was invisible
-to the very check meant to protect it, and its remaining posters were
-released mid-stride. `process_batch_size` is 20 and the painterly effect is
-minutes per image; the margin is the same one v136 closed for uploads.
+The GUI's own does-it-add-up tally would have caught the zero afterwards
+(that invariant earned its keep), but the script lies first, and any run
+outside the GUI has no net. Without the tracking rows, the pipeline would
+re-upload all 4,865 images to FineArtAmerica — the exact catastrophe the
+import exists to prevent.
 
-**Reproduced against real SQLite:** a node with 8 recent ProcessedImage rows
-and zero uploads — v136 logic releases its 12 remaining posters alongside
-the dead node's; the fix releases only the dead node's. `live_nodes` is now
-the union of both signals.
+## Fixed, three layers
 
-## 2. The v133 startup release freed jobs and left batches waiting
+  * `ensure_account` prints the no-account guidance on the DRY RUN too, and
+    it states the order that works: **create the account in the dashboard
+    first** (real address — needed for uploading anyway), then run the
+    import; the name lookup finds it. Or pass `--account-email`.
+  * `import_upload_tracking` REFUSES a real run with `account=None`, loudly,
+    before the row loop — it can no longer count rows it is not writing.
+  * The rehearsal still counts correctly (dry run + no account is the
+    legitimate counting case).
 
-When the agent restarts, its first hello releases PipelineJobs the server
-still had it running — but NOT its batch claims. A process that has just
-started is not running a batch either, yet its posters and upload rows
-waited out the reaper's full 45 minutes. 65 restarts in the August logs,
-each one up to 45 minutes of claimed work sitting still.
+Verified structurally: guidance at line 198 precedes the dry-run return at
+205; the refusal at 451 precedes the row loop at 474. My first AST check
+claimed the second guard was missing — the checker was wrong, the plain
+read confirmed placement. Same lesson as yesterday, caught in thirty
+seconds instead of shipped.
 
-New `release_claims_for_node()` in pipeline.py — same resets as the reaper,
-in one shared place so the two paths cannot drift — called from the startup
-hello. Tested: releases exactly the restarting node's claims, leaves the
-other node's alone.
+## For the migration checklist
 
-## 3. v139's own check had a blind spot in its glob
-
-`check_state_changes_are_logged` scanned `*_admin.py`, which does not match
-`routes/admin.py` — the largest admin file. Scanned it by hand: the two
-unlogged mutating endpoints there are benign (`master_upload` records itself
-as an ImportJob row; marking chat read is not worth auditing). The glob now
-includes it and both are in ALLOW with reasons — the net widened without
-noise.
-
-## 4. v137's caller shim could resurrect the bug v137 fixed
-
-`except TypeError` around `parse_account_page(html, markers)` also catches a
-TypeError raised INSIDE the parser by bad data — and silently re-parses
-without markers, restoring the exact "wall reads as redesign" misdiagnosis
-the markers exist to prevent. Now an `inspect.signature` check: precise,
-and a parse-time TypeError propagates as itself.
-
-## Reviewed and NOT findings
-
-  * `Scope.label(pid)` in the starvation check — safe on both scoped and
-    all-projects runs.
-  * The agent's `_said_hello` ordering — set only after a successful hello,
-    so a failed first handshake retries with `startup=true`. Correct.
-  * The v135 rotation, v132 arithmetic (validated by the live "reconciles
-    exactly" screenshot), retry quiet-window behaviour, and the
-    dead-code removals — re-read, no new issues.
+**Order on the day: add the real FineArtAmerica account in the dashboard
+BEFORE running the upload-history import step.** The import finds it by
+name and links it. This was implicitly required before and is now enforced
+and said out loud by the tool.
 
 ### Files
 
-`app/pipeline.py`, `app/routes/pipeline_api.py`, `app/earnings/service.py`,
-`tools/preflight.py`, `app/config.py` (139 → 140).
-
-**After deploying:** nothing to click. Both fixes show themselves only when
-a node restarts mid-batch or a Photoshop batch outlives 45 minutes — the
-cases that were broken.
+`scripts/migrate_pipeline.py`, `app/config.py` (140 → 141).

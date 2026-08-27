@@ -9,6 +9,7 @@ log or diff to work it out — that costs far more to read than these lines.**
 If the top entry looks older than the work in the repo, the difference is
 what has not been deployed yet.
 
+- **2026-08-27 11:40** · `16ff8023` · deploy v124
 - **2026-08-27 11:38** · `304319d3` · deploy v124
 - **2026-08-25 19:19** · `557a4e74` · deploy v123
 - **2026-08-25 18:09** · `eb18a279` · deploy v122
@@ -38,4 +39,3 @@ what has not been deployed yet.
 - **2026-08-23 16:46** · `3cfceca0` · DEPLOY THE SITE TOO - the scan job payload is built server-side.
 - **2026-08-23 16:27** · `2d5afb19` · Scan sends the full account payload (the browser needs selectors/timings) and
 - **2026-08-23 16:18** · `54d0ff63` · Node needs: pip install -r worker_service/requirements.txt (beautifulsoup4).
-- **2026-08-23 16:05** · `f0994d7c` · TeePublic tab: scan every design for search visibility, then deactivate and

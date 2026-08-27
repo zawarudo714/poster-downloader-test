@@ -3,10 +3,16 @@
 Read this first — including **"HOW TO WORK HERE"** near the bottom, which
 sets out what is expected of you before, during and after any change. Then:
 
-- **`tools/DEPLOY_LOG.md` — what is actually LIVE, and what is WAITING.**
-  **READ IT FIRST, EVERY SESSION, BEFORE ANYTHING ELSE.** It opens with a
-  `⚠ NOT YET DEPLOYED` block and then the log, newest first. About twenty
-  lines, and it answers both questions at once.
+- **`tools/PENDING_DEPLOY.md` then `tools/DEPLOY_LOG.md` — what is WAITING,
+  and what is LIVE. READ BOTH FIRST, EVERY SESSION, BEFORE ANYTHING ELSE.**
+  Twenty-odd lines between them.
+
+  They are two files on purpose. The deploy tool REWRITES `DEPLOY_LOG.md`
+  from a header plus its own lines, so anything hand-written there is
+  destroyed on the next deploy — which is what happened on 2026-08-27, an
+  hour after a pending-work block was added to it. **Two programs cannot own
+  one file.** `PENDING_DEPLOY.md` is only ever emptied by the tool, never
+  rewritten, so a note in it survives.
 
   Read that file rather than running `git log`, `git diff` or `git status`:
   those cost far more and answer a different question (what is committed,
@@ -26,8 +32,11 @@ sets out what is expected of you before, during and after any change. Then:
 
   **Bump `APP_VERSION` to one MORE than the top log entry, not one more
   than whatever the file happens to say.** On 2026-08-27 the file read 122
-  while v123 was already live, so the bump produced a second v123 — a
-  version number that means two different things is worse than none.
+  while v123 was already live, so the bump produced a second v123 — and then
+  two different commits both shipped as v124. A version number that means
+  two different things is worse than none. The log line now carries the
+  version as its own field and the deploy tool warns when one is about to be
+  reused, so this is caught by the tool rather than remembered.
 
 - **`MULTIPROJECT.md` — read it before writing ANY code.** This app runs
   several niches side by side. Nearly every bug it has had came from code

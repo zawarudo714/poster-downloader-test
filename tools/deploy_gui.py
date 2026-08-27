@@ -93,16 +93,37 @@ DEPLOY_NOTE_DONE = HERE / "next_deploy.done.txt"
 DEPLOY_LOG = HERE / "DEPLOY_LOG.md"
 DEPLOY_LOG_KEEP = 30
 
+# What is written but NOT yet on the server. A SEPARATE FILE on purpose:
+# _record_deploy() rewrites DEPLOY_LOG.md from a header plus its own lines,
+# so anything hand-written there is destroyed on the next deploy. That is
+# exactly what happened on 2026-08-27 — a pending-work block was added to the
+# log and the very next deploy wiped it. Two programs cannot own one file.
+PENDING_FILE = HERE / "PENDING_DEPLOY.md"
+
+PENDING_EMPTY = """# Not yet deployed
+
+Nothing. Everything written is on the server.
+
+Whoever changes code writes here what is waiting and why; the deploy tool
+empties this file once the server is confirmed to be running it.
+"""
+
 DEPLOY_LOG_HEADER = """# Deploy log
 
 What is actually live on the server, newest first. Written automatically by
 the deploy tool, and only when the server was confirmed to be running the
 commit that was just pushed.
 
-**For a future session: read THIS file to see what shipped. Do not run git
-log or diff to work it out — that costs far more to read than these lines.**
-If the top entry looks older than the work in the repo, the difference is
-what has not been deployed yet.
+**THIS FILE IS REWRITTEN BY THE DEPLOY TOOL. Do not hand-write anything
+here — it will be destroyed on the next deploy. What is WAITING to be
+deployed belongs in `PENDING_DEPLOY.md`, which the tool only ever empties.**
+
+**For a future session: read this file and `PENDING_DEPLOY.md` before
+anything else.** Between them they answer "what is live" and "what is
+waiting". Do not run `git log`, `git diff` or `git status` instead: they
+cost far more to read, answer a different question, and on a mounted working
+copy `git status` cannot refresh its index — it reports stale answers with
+no warning.
 
 """
 
@@ -549,13 +570,30 @@ class DeployApp:
         """
         from datetime import datetime
 
-        line = (f"- **{datetime.now():%Y-%m-%d %H:%M}** · `{sha[:8]}` · "
-                f"{message or '(no message)'}")
+        version = local_app_version(Path(self.repo_var.get().strip()))
+
         try:
             existing = DEPLOY_LOG.read_text(encoding="utf-8")
             entries = [l for l in existing.splitlines() if l.startswith("- ")]
         except Exception:
             entries = []
+
+        # A VERSION NUMBER THAT MEANS TWO DIFFERENT THINGS IS WORSE THAN NONE.
+        # On 2026-08-27 two different commits both shipped as "v124" because
+        # nothing bumps APP_VERSION between deploys and nothing noticed. The
+        # version now goes in the line as its own field so this is checkable
+        # rather than buried in whatever the commit message happened to say.
+        if version and entries:
+            previous = entries[0]
+            if f"· v{version} ·" in previous and f"`{sha[:8]}`" not in previous:
+                self._emit(
+                    f"WARNING: v{version} is already in the log against a "
+                    f"different commit. Two deploys now share one version "
+                    f"number — bump APP_VERSION so they can be told apart.",
+                    "err")
+
+        line = (f"- **{datetime.now():%Y-%m-%d %H:%M}** · `{sha[:8]}` · "
+                f"v{version or '?'} · {message or '(no message)'}")
 
         # Same commit deployed twice (a rebuild, say) replaces its own entry
         # rather than adding a duplicate that says nothing new.
@@ -569,6 +607,16 @@ class DeployApp:
             self._emit(f"Logged to {DEPLOY_LOG.name}.", "dim")
         except Exception as e:
             self._emit(f"Could not write the deploy log: {e}", "err")
+
+        # The work is now on the server, so nothing is pending. Emptied rather
+        # than deleted: a missing file reads as "someone removed the
+        # mechanism", an empty one reads as "nothing is waiting", and only one
+        # of those is true.
+        try:
+            PENDING_FILE.write_text(PENDING_EMPTY, encoding="utf-8")
+            self._emit(f"Cleared {PENDING_FILE.name}.", "dim")
+        except Exception as e:
+            self._emit(f"Could not clear the pending file: {e}", "err")
 
     def _consume_note(self) -> None:
         """

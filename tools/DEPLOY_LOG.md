@@ -15,6 +15,7 @@ cost far more to read, answer a different question, and on a mounted working
 copy `git status` cannot refresh its index — it reports stale answers with
 no warning.
 
+- **2026-08-27 15:54** · `1a3474c3` · v135 · deploy v135
 - **2026-08-27 15:43** · `d104dbce` · v134 · deploy v134
 - **2026-08-27 15:32** · `16954bd9` · v133 · deploy v133
 - **2026-08-27 15:15** · `c5a61dd7` · v132 · deploy v132
@@ -44,4 +45,3 @@ no warning.
 - **2026-08-25 07:20** · `c21e035f` · The deploy tool now proves the RUNNING site matches the code you pushed, not
 - **2026-08-25 00:02** · `fea7974e` · (no message)
 - **2026-08-24 13:57** · `86d0410c` · TeePublic switching stages made stoppable, resumable and self-repairing.
-- **2026-08-24 13:10** · `8a967de1` · Deploy now runs tools/preflight.py first: compiles, undefined names, JS parsing,

@@ -7,7 +7,7 @@ empties this file once the server is confirmed to be running it.
 
 ---
 
-**Waiting: v135 — one niche would never have uploaded** · targets
+**Waiting: v136 — a long upload batch could be reaped mid-flight** · targets
 178.105.232.196 (test box)
 
 **Deploy:** yes. **Copy `worker_service/` to the node:** NO — nothing under
@@ -15,63 +15,57 @@ it changed, `AGENT_VERSION` stays 1.27.0. **Schema change:** none.
 
 ## The defect
 
-`claim_upload_batch` decides which of an account's projects gets its turn.
-The comment said:
+`reap_stale_claims` releases work claimed by a node that never reported
+back. Your notes already record this exact mistake being found and fixed
+FOR JOBS — comparing `started_at` against the timeout meant a healthy
+hour-long TeePublic job was cancelled at minute 45 and its remaining
+designs handed out again.
 
-> the account's turn goes to whichever of its projects has waited longest
+**The same function still compares `claimed_at` for posters and uploads.**
+The fix went to one of three places.
 
-It did not. It called `project_ids_for_account()`, whose query has **no
-`ORDER BY`**, and took the FIRST project that had any work at all. SQLite
-returns rows in rowid order, so in practice **the project attached first
-won every single turn.**
+`MEASURED 2026-08-27` from 13 days of node logs:
 
-`MEASURED 2026-08-27`, traced producer to consumer: the query is unordered,
-the loop breaks on the first match, and `_has_upload_work` only asked
-"is there anything?" — never "how long has it waited?".
+    upload per item     median 16-22s   p90 55-59s   outliers 5-9 min
+    upload_batch_size   40
+    claim_timeout_min   45 minutes
 
-**The consequence is total, not partial.** An account serving two projects
-where the first-attached one always has work never uploads the other's work
-AT ALL. The movie project carries a backlog of roughly three thousand
-posters, so "always has work" is its permanent state — and one FineArtAmerica
-account is meant to serve both niches after migration. Test Account is
-linked to both projects right now.
+40 items at p90 pace is **37 minutes of a 45-minute timeout**, and
+multi-minute outliers appear on every single day in the logs. A healthy
+batch can outlive its own claim, at which point its remaining rows go back
+to 'pending' while the node is still uploading them — and the next claim
+can hand the same rows out again. For an upload that means a **duplicate
+listing on a real marketplace.**
 
-**Reproduced against a real SQLite database** before changing anything: one
-account, both projects, 3,000 movie rows queued two hours ago and 5 MUSIK
-rows queued three weeks ago. Old logic picks movie. New logic picks MUSIK,
-and once those five are done movie takes over again — no starvation in
-either direction.
+**What is measured and what is not:** the timings, the batch size and the
+timeout are measured, and the asymmetry between the three tables is read
+straight from the source. Whether this has ALREADY produced a duplicate is
+NOT established — I have not found one, and I did not go looking hard. The
+margin is thin enough to close regardless.
+
+Processing has the same shape (`process_batch_size` 20) but I have no
+measurement of Photoshop's per-image time — only one process job appears in
+the logs. Treated as the same fix rather than a separate claim.
 
 ## The fix
 
-`_oldest_upload_wait()` returns when the longest-waiting queued item for an
-(account, project) pair was created, and the turn goes to the oldest.
+Liveness is the last thing the NODE said, not when the batch started. Every
+item a node finishes stamps `uploaded_at`, so a node working steadily
+through a long batch is visibly alive even though the item in its hand is
+not. The reaper now skips rows claimed by a node that has reported anything
+inside the timeout window.
 
-Derived from the WORK rather than stored in a counter — the same choice the
-quiet window and `scan_incomplete` make. There is no per-project "last
-served" column to keep correct, nothing to forget to update, and nothing a
-future path can leave wrong.
+Derived, not stored — no new column, nothing to keep correct.
 
-The comment is now true, which it was not before.
-
-## The invariant
-
-`check_upload_project_starved` in Diagnostics: an account serving more than
-one project, where one has work queued and has sent nothing for seven days
-while another has uploaded through the same account in that time.
-
-Watches the SYMPTOM, not the cause. The picker is fixed, but anything that
-makes one niche silently stop uploading through a shared account — a paused
-project, a quota rule, a future rotation change — looks exactly like this.
+**Tested against real SQLite:** a busy node claimed 50 minutes ago but
+reporting 2 minutes ago keeps its work; a dead node claimed at the same
+moment loses its work; and when the busy node goes quiet for 90 minutes its
+work is released too.
 
 ### Files
 
-`app/pipeline.py`, `app/diagnostics.py`, `app/config.py` (134 → 135).
+`app/pipeline.py`, `app/config.py` (135 → 136).
 
-**Verified:** preflight green; the starvation reproduced against a real
-database and then shown fixed, including that the other project recovers
-its turn afterwards.
-
-**Not verified:** no real upload has run through the new picker. Nothing to
-click — it only shows itself when the node next claims an upload batch for
-an account serving two projects.
+**Not verified:** nothing has run through this against the live node.
+Nothing to click — it shows itself only when a batch runs longer than 45
+minutes, which is exactly the case that was broken.

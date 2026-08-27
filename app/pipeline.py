@@ -1747,25 +1747,54 @@ def reap_stale_claims(db: Session) -> dict[str, int]:
     timeout = int(get_setting(db, "claim_timeout_min"))
     cutoff = datetime.utcnow() - timedelta(minutes=timeout)
 
-    posters = (
-        db.query(SavedPoster)
-          .filter(SavedPoster.pipeline_status == "processing",
-                  SavedPoster.claimed_at.isnot(None),
-                  SavedPoster.claimed_at < cutoff)
-          .all()
-    )
+    # ── A LONG BATCH IS NOT AN ABANDONED ONE, EITHER ────────────────────
+    #
+    # The same mistake the jobs section below already documents, on the two
+    # tables above it. `claimed_at` is when the batch STARTED. A batch that
+    # takes longer than the timeout gets its remaining items released while
+    # the node is actively working on them, and the next claim can hand the
+    # same rows out again — which for an upload means a duplicate listing
+    # on a real marketplace.
+    #
+    # MEASURED 2026-08-27 from 13 days of node logs: an upload takes a
+    # median of 16-22 seconds, a p90 of 55-59 seconds, and outliers of five
+    # to nine minutes appear on every single day. `upload_batch_size` is 40.
+    # At p90 that is 37 minutes of a 45-minute timeout, and one outlier
+    # tips it over.
+    #
+    # Liveness is the last thing the NODE said, not when it started. Every
+    # item it finishes stamps `uploaded_at` (uploads) or moves a poster on
+    # (processing), so a node working steadily through a long batch is
+    # visibly alive even though the item in its hand is not.
+    live_nodes = {
+        name for (name,) in
+        db.query(UploadTracking.claimed_by)
+          .filter(UploadTracking.claimed_by.isnot(None),
+                  UploadTracking.uploaded_at.isnot(None),
+                  UploadTracking.uploaded_at >= cutoff)
+          .distinct().all()
+        if name
+    }
+
+    posters = [
+        p for p in db.query(SavedPoster)
+                     .filter(SavedPoster.pipeline_status == "processing",
+                             SavedPoster.claimed_at.isnot(None),
+                             SavedPoster.claimed_at < cutoff).all()
+        if p.claimed_by not in live_nodes
+    ]
     for poster in posters:
         poster.pipeline_status = "greenlit"
         poster.claimed_at = None
         poster.claimed_by = None
 
-    rows = (
-        db.query(UploadTracking)
-          .filter(UploadTracking.status == "uploading",
-                  UploadTracking.claimed_at.isnot(None),
-                  UploadTracking.claimed_at < cutoff)
-          .all()
-    )
+    rows = [
+        r for r in db.query(UploadTracking)
+                     .filter(UploadTracking.status == "uploading",
+                             UploadTracking.claimed_at.isnot(None),
+                             UploadTracking.claimed_at < cutoff).all()
+        if r.claimed_by not in live_nodes
+    ]
     for row in rows:
         row.status = "pending"
         row.claimed_at = None

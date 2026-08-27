@@ -182,7 +182,46 @@ outcome rule 5e is aiming at, so the cross-checks are working. Neither is
 a made-up finding; both are the far side's own numbers disagreeing with
 ours.
 
-### 1. A THIRD "GoldenR T" FineArtAmerica account exists, and he never made it
+### 1. RESOLVED 2026-08-27 — the phantom "GoldenR T" account
+
+**Cause found and fixed in code.** `ensure_account` in
+`scripts/migrate_pipeline.py` looked accounts up with
+
+    filter_by(project_id=project.id, name=name)
+
+— the DEAD legacy column. The real GoldenR T says which projects it serves
+through `account_projects` and leaves `project_id` NULL, so it was invisible
+to that lookup and the import created a second row, with an invented email
+(`unknown@example.com`) because the code defaulted to one when none was
+given. That phantom then became the only account linked to the movie
+project, so every nightly earnings read tried to sign in as it and failed.
+
+Two rules already in CLAUDE.md were both broken by that one function: never
+scope by `UploadAccount.project_id`, and never invent an external value.
+
+Fixed: identity is now (marketplace, email); falls back to name across all
+projects and REFUSES when ambiguous; never invents an address; links through
+`attach_account`.
+
+Live data corrected the same day. Final state on the test box:
+
+    id=1   Test Account  eltonodhis@gmail.com   artist 'White And Black'  projects [1,2]
+    id=11  GoldenR T     darktitan72@gmail.com  artist 'Golden Reel'      earn-only
+
+GoldenR T is deliberately linked to NO project — it reports money and
+receives no uploads, which is right for a test box. Test Account serves both
+projects, which is how the owner tests.
+
+**What would have caught it without him: nothing.** Both rows were
+individually valid, so no check that looks at one account could disagree with
+anything. Now covered by two new Diagnostics checks —
+`check_duplicate_accounts` (compares accounts with EACH OTHER, on email and
+on name, because the two rows did not share an address) and
+`check_account_never_read` (an account that has never once reported money is
+a broken row, not bad weather). The duplicate check was sabotage-tested
+against the exact live data and goes red on it.
+
+### 1b. ORIGINAL NOTES — kept for the reasoning, superseded above
 
 On the Earnings tab, under FineArtAmerica:
 

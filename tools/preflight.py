@@ -1092,6 +1092,66 @@ def check_local_imports_not_used_earlier() -> None:
                     break
 
 
+def check_state_changes_are_logged() -> None:
+    """
+    An admin endpoint that changes something must say so in the activity log.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY
+    ════════════════════════════════════════════════════════════════════════
+    `CLAUDE.md`: "ActivityLog for every state change — actor, target,
+    timestamp, JSON detail." The owner cannot read the database, so the
+    activity log is the only way he can answer "why did this happen" after
+    the fact.
+
+    `MEASURED 2026-08-27`: `api_skip_failures` permanently excluded items
+    from the pipeline and logged nothing, while `api_retry_failures` — its
+    neighbour on the same screen, doing the REVERSIBLE version of the same
+    thing — logged properly. `api_update_node` could switch a node off while
+    ban, delete and update ACCOUNT all logged. Both found by comparing
+    siblings, not by reading either one alone.
+
+    Reported as a WARNING. Some mutating endpoints genuinely do not need an
+    entry — a test that spends nothing, a read-through cache write — and a
+    hard failure would train people to add a log line to silence it rather
+    than to think. The list is short enough to read.
+
+    ALLOW lists the ones deliberately left alone, WITH a reason, so the
+    warning stays short enough that a new one stands out.
+    """
+    ALLOW = {
+        "api_test": "a diagnostic that changes nothing lasting",
+        "api_test_gpt_process": "a single test generation; its spend is metered separately",
+        "api_trigger_run": "the run it starts records itself",
+        "api_cancel_job": "the job carries its own cancelled state and reason",
+    }
+    MUTATING = ("post", "put", "delete", "patch")
+
+    for path in sorted((ROOT / "app" / "routes").glob("*_admin.py")):
+        rel = path.relative_to(ROOT).as_posix()
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if not any(isinstance(d, ast.Call)
+                       and getattr(d.func, "attr", "") in MUTATING
+                       for d in fn.decorator_list):
+                continue
+            called = _calls_made_in(fn)
+            if "log_activity" in called:
+                continue
+            if not (called & {"commit", "set_setting", "clear_setting"}):
+                continue                      # nothing persisted
+            if fn.name in ALLOW:
+                continue
+            warn(f"{rel}:{fn.lineno} — {fn.name}() changes state and writes "
+                 f"no activity log. If that is deliberate, add it to ALLOW "
+                 f"in check_state_changes_are_logged with the reason.")
+
+
 def check_no_orphan_documents() -> None:
     """
     Every .md in the repo must be named in CLAUDE.md's document index.
@@ -1342,6 +1402,7 @@ CHECKS = [
     ("zero is not treated as missing", check_falsy_zero_defaults),
     ("listing-health rules behave", check_store_logic),
     ("guards are called on every path", check_guards_are_called),
+    ("state changes are logged", check_state_changes_are_logged),
     ("every document is linked", check_no_orphan_documents),
     ("local imports come before use", check_local_imports_not_used_earlier),
 ]

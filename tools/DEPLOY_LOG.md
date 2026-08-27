@@ -15,6 +15,7 @@ cost far more to read, answer a different question, and on a mounted working
 copy `git status` cannot refresh its index — it reports stale answers with
 no warning.
 
+- **2026-08-27 16:22** · `f6b7813c` · v138 · deploy v138
 - **2026-08-27 16:09** · `5a0adbfa` · v137 · deploy v137
 - **2026-08-27 16:00** · `261ddf8f` · v136 · deploy v136
 - **2026-08-27 15:54** · `1a3474c3` · v135 · deploy v135
@@ -44,4 +45,3 @@ no warning.
 - **2026-08-25 08:01** · `4a49f262` · FAA returns 410 for a REMOVED listing and 404 for an address that never
 - **2026-08-25 07:55** · `de86461e` · (no message)
 - **2026-08-25 07:38** · `a82f6f7a` · Deploy tool: an empty commit message no longer silently skips the commit and
-- **2026-08-25 07:20** · `c21e035f` · The deploy tool now proves the RUNNING site matches the code you pushed, not

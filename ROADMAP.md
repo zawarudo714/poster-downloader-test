@@ -1,5 +1,58 @@
 # The parked list — everything outstanding, in order
 
+---
+
+## WHERE THE AUDIT GOT TO — `MEASURED 2026-08-27`
+
+Fifteen deploys, v124 to v138. **Stage 1 (bug fixes) is done for every code
+area that was planned.**
+
+Covered: the control enumeration and dead code · the worker screens · the
+admin screens · the shared image-download path · earnings · the pipeline ·
+the node.
+
+**Not covered, and the honest remainder:** the server-side store and listing
+modules (`earnings/store_health.py`, `listing_check.py`, ~1,700 lines) and
+most of `routes/pipeline_admin.py` (~3,500 lines, the admin API surface).
+Neither was reached. They are the natural batch 7 if the audit resumes.
+
+### What it found
+
+  * the phantom marketplace account, and `ensure_account` looking accounts
+    up by the dead `project_id` column, which created it
+  * 240 lines of dead code — including the FineArtAmerica server-side fetch
+    path that FAA answers with "Verify Visitor", left sitting there looking
+    usable, and `scope_titles_multi`, the worker scoping that had been
+    REPLACED for causing a bug while these notes still recommended it
+  * the button map traced 22 of 57 controls and reported two of them
+    wrongly — `reject` as calling `approve`
+  * `go_to_title` claimed titles with no permission check at all
+  * `check_guards_are_called` could be satisfied by a COMMENT naming the
+    guard, which affected every entry in the table
+  * no protection against the server fetching its own internal addresses,
+    and an allow-list that could never be switched on
+  * the $6.00 ledger gap: one row we could not name, dropping out of every
+    total, while the screen said rows were missing
+  * one niche would never have uploaded through a shared account
+  * long upload batches reaped while the node was still working on them
+  * a maintenance page reading as "they redesigned the site"
+  * a stranded Photoshop batch reporting only to the node's local log
+
+### What it got WRONG — three false reports in one day
+
+`RULE`, and the reason the evidence rule now exists: the flag-card mixing,
+the "six stranded jobs", and the "silent 400 loop" were all reported as
+defects and none was one. Each time a pattern was treated as a result and
+the disproving evidence — one grep, in a file already open — was not looked
+for. See `CLAUDE.md` "NOTHING IS A FINDING UNTIL YOU HAVE TRIED TO KILL IT".
+
+Two of the searches that found nothing are also recorded, in
+`PENDING_DEPLOY` history and here: the silent-exception sweep (172 matches,
+a flood, and the detector itself was wrong) and node dependencies (sound).
+An empty search reported as empty is worth more than a plausible story.
+
+---
+
 Agreed 2026-08-27. This is the working order and the full contents of each
 stage. `OPEN_ISSUES.md` holds the detail on individual defects; this file
 holds the shape of the work.

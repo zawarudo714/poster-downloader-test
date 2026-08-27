@@ -781,6 +781,11 @@ def api_reset_setting(
     scope = payload.get("scope", "global")
     project = _project(request, admin, db, payload.get("project_id"))
     P.clear_setting(db, key, project=project if scope == "project" else None)
+    # A settings change is exactly what you want to find when behaviour
+    # changes and nobody remembers touching anything.
+    log_activity(db, user=admin, action="setting_reset", target_type="setting",
+                 details={"key": key, "scope": scope,
+                          "project": project.slug if project and scope == "project" else None})
     db.commit()
     return JSONResponse({"ok": True})
 
@@ -1573,6 +1578,12 @@ def api_skip_failures(
             row.status = "skipped"
             row.claimed_at = None
             row.claimed_by = None
+        # RETRY next door logs and this did not — and this is the one that
+        # cannot be undone. Without a record, "why was this never uploaded"
+        # has no answer at all.
+        log_activity(db, user=admin, action="pipeline_skip", target_type="pipeline",
+                     details={"kind": "upload", "count": len(rows),
+                              "tracking_ids": payload["tracking_ids"][:50]})
         db.commit()
         return JSONResponse({"ok": True, "skipped": len(rows)})
 
@@ -1589,6 +1600,9 @@ def api_skip_failures(
             title = db.query(MasterTitle).filter_by(id=poster.master_title_id).first()
             if title:
                 P.recompute_title_status(db, title)
+        log_activity(db, user=admin, action="pipeline_skip", target_type="pipeline",
+                     details={"kind": "process", "count": len(posters),
+                              "poster_ids": payload["poster_ids"][:50]})
         db.commit()
         return JSONResponse({"ok": True, "skipped": len(posters)})
 
@@ -2072,6 +2086,13 @@ def api_update_node(
     if payload.get("capabilities"):
         caps = payload["capabilities"]
         node.capabilities = ",".join(caps) if isinstance(caps, list) else str(caps)
+    # Its siblings — ban, delete and update ACCOUNT — all log. This did not,
+    # and switching a node off or taking a capability away from it stops work
+    # happening with nothing on record saying why.
+    log_activity(db, user=admin, action="node_updated", target_type="node",
+                 target_id=node.id,
+                 details={"name": node.name, "is_enabled": node.is_enabled,
+                          "capabilities": node.capabilities})
     db.commit()
     return JSONResponse({"ok": True})
 

@@ -408,7 +408,7 @@
     const newSig = (t.posters || []).map((p) => `${p.id}:${p.size || 0}`).join('|');
     if ((grid.dataset.sig || '') !== newSig) {
       grid.innerHTML = '';
-      (t.posters || []).forEach((p) => grid.appendChild(buildPosterCard(p)));
+      (t.posters || []).forEach((p) => grid.appendChild(buildPosterCard(p, t.search_mode)));
       grid.dataset.sig = newSig;
     }
     const completeBtn = activePanel.querySelector('[data-action="complete"]');
@@ -422,7 +422,14 @@
     }
   }
 
-  function buildPosterCard(p) {
+  // searchMode is the TITLE's, passed in by the caller. It is only ever
+  // called for the title the worker has open, which the server already
+  // filters to the project they are standing in — so the global would be
+  // right today. It would be right by accident, and the same assumption was
+  // wrong two functions down, where a flag card really can belong to the
+  // other project. Falls back to the global for safety.
+  function buildPosterCard(p, searchMode) {
+    const mode = searchMode || PD.searchMode;
     const node = tplPoster.content.cloneNode(true);
     const img = node.querySelector('.poster-img');
     img.src = fileUrl(p.id, p.size);
@@ -444,7 +451,7 @@
     // anything is not a labelling problem.
     const replaceUrl = node.querySelector('.poster-replace-url');
     const replaceBtn = node.querySelector('[data-action="replace"]');
-    if (PD.searchMode === 'inpage') {
+    if (mode === 'inpage') {
       replaceUrl.remove();
       replaceBtn.remove();
     } else {
@@ -734,8 +741,15 @@
     // Source link. REMOVED, not hidden, for a project with no external
     // source — GO TO TITLE already takes the worker to the in-page search,
     // which is the only place their images come from.
+    // r.search_mode, NOT PD.searchMode. PD is the project the worker is
+    // STANDING IN; a flag card can be for a title in their other project, and
+    // then the two disagree. Standing in MUSIK with a flagged movie poster,
+    // the global check removed the paste-a-URL box — and pasting a URL is the
+    // only way a movie poster can be replaced, so the worker could not fix
+    // their own flagged image. The server already sends the title's own mode
+    // with every revision; this just has to read it.
     const tmdbA = wrap.querySelector('.rev-tmdb');
-    if (PD.searchMode === 'inpage' || !r.tmdb_search) {
+    if (r.search_mode === 'inpage' || !r.tmdb_search) {
       tmdbA.remove();
     } else {
       tmdbA.href = r.tmdb_search;
@@ -820,8 +834,10 @@
         const deleteBtn  = wrap.querySelector('[data-action="delete-revision"]');
         const resolveBtn = wrap.querySelector('[data-action="resolve"]');
         if (r.status === 'awaiting_approval') resolveBtn.hidden = true;
-        // Same rule as the saved-image card: no external source, no paste.
-        if (PD.searchMode === 'inpage') {
+        // Same rule as the saved-image card, and the same correction: the
+        // TITLE's mode, not the mode of the project the worker happens to be
+        // standing in. See the note on the source link above.
+        if (r.search_mode === 'inpage') {
           urlInp.remove();
           replaceBtn.remove();
         } else {

@@ -71,29 +71,6 @@ def list_images_in(folder: Path) -> list[Path]:
     )
 
 
-def count_images_in(folder: Path) -> int:
-    """Count image files directly in `folder` (non-recursive)."""
-    if not folder.is_dir():
-        return 0
-    n = 0
-    for entry in folder.iterdir():
-        if entry.is_file() and entry.suffix.lower() in IMAGE_EXTS:
-            n += 1
-    return n
-
-
-def count_images_recursive(folder: Path) -> int:
-    """Count image files recursively under `folder`."""
-    if not folder.is_dir():
-        return 0
-    n = 0
-    for root, _dirs, files in os.walk(folder):
-        for f in files:
-            if Path(f).suffix.lower() in IMAGE_EXTS:
-                n += 1
-    return n
-
-
 def list_users_with_workspaces(project_folder: str | None = None) -> list[str]:
     """
     Worker folders that contain any work, for the browse page's dropdown.
@@ -158,14 +135,6 @@ def list_date_folders(username: str, project_folder: str | None = None) -> list[
         out |= {p.name for p in root.iterdir()
                 if p.is_dir() and _is_date_name(p.name)}
     return sorted(out, reverse=True)
-
-
-def list_title_folders(username: str, d: date_type) -> list[Path]:
-    """All title subfolders inside the user's date folder, sorted by name."""
-    base = WORKSPACE_DIR / username / d.isoformat()
-    if not base.is_dir():
-        return []
-    return sorted([p for p in base.iterdir() if p.is_dir()], key=lambda p: p.name)
 
 
 # ── Date helpers ─────────────────────────────────────────────────────────────
@@ -312,18 +281,3 @@ def safe_under_workspace(p: Path) -> bool:
 
 # ── Misc ─────────────────────────────────────────────────────────────────────
 
-def hash_file(path: Path, algo: str = "sha256") -> str:
-    """SHA-256 hex digest of a file (used to detect duplicate content)."""
-    h = hashlib.new(algo)
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(64 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def human_size(n_bytes: int) -> str:
-    if n_bytes >= 1_000_000:
-        return f"{n_bytes/1024/1024:.1f} MB"
-    if n_bytes >= 1000:
-        return f"{n_bytes/1024:.1f} KB"
-    return f"{n_bytes} B"

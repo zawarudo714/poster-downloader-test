@@ -91,12 +91,6 @@ def allowed_projects(db: Session, user: User) -> list[Project]:
     return q.filter(Project.id.in_(ids)).order_by(Project.id).all()
 
 
-def may_access(db: Session, user: User, project: Optional[Project]) -> bool:
-    if project is None:
-        return False
-    return any(p.id == project.id for p in allowed_projects(db, user))
-
-
 # ── Resolving the active project ─────────────────────────────────────────────
 
 def project_by_slug(db: Session, slug: Optional[str]) -> Optional[Project]:
@@ -190,23 +184,6 @@ def scope_titles(q, project: Optional[Project]):
     if project is None:
         return q
     return q.filter(project_scope(project.id, default_project_id=_default_id(project)))
-
-
-def scope_titles_multi(q, projects: list[Project]):
-    """
-    Restrict to ANY of several projects — used for a worker's queue, since a
-    worker may cover more than one niche.
-
-    Built from the same `project_scope()` clauses OR'd together, so the
-    NULL-means-default rule can never drift between the two functions.
-    """
-    if not projects:
-        return q
-    from sqlalchemy import or_
-    default_id = _default_id(projects[0])
-    return q.filter(or_(*[
-        project_scope(p.id, default_project_id=default_id) for p in projects
-    ]))
 
 
 # ── Display ──────────────────────────────────────────────────────────────────

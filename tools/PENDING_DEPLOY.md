@@ -3,36 +3,67 @@
 Written but NOT running on the server.
 
 Whoever changes code writes here what is waiting and why; the deploy tool
-empties this file once the server is confirmed to be running it. It is a
-SEPARATE file from `DEPLOY_LOG.md` because the deploy tool rewrites that one
-from scratch every time, so anything hand-written there is destroyed on the
-next deploy.
+empties this file once the server is confirmed to be running it.
 
 ---
 
-**Waiting: v126 — the earnings retry** · targets 178.105.232.196 (test box)
+**Waiting: v128 — audit batch 2, the worker screens** · targets
+178.105.232.196 (test box)
 
-  * `app/earnings/service.py`
-      * `retry_unread_if_due()` — re-queues accounts today's scheduled read
-        did not get. The GAP between tries is the account's own cooldown (3h
-        general, 12h signed-out), NOT a second timer, because a separate
-        timer would have been silently swallowed by that cooldown.
-      * `accounts_unread_since()` / `daily_run_started()` — measured from the
-        run, not the calendar day, so it behaves the same at 23:50 and 00:10.
-      * `retry_state()` — what the page needs to SAY while it waits.
-      * `summary()` now reports `covers_days` and `last_read_at`.
-  * `app/backups.py` — scheduler tick calls the retry when the daily run did
-    not just fire.
-  * `app/pipeline.py` — two new declared settings:
-    `earnings_retry_window_hours` (8, dashboard-editable, 0 switches it off)
-    and `earnings_daily_run_started_at`.
-  * `app/diagnostics.py` — `check_earnings_retry_gave_up`, because a retry
-    that gives up quietly looks exactly like a day with no sales.
-  * `app/static/js/admin_earnings.js` — the card no longer says
-    "TODAY / since yesterday", and the page now states when the figures were
-    last actually refreshed.
-  * `app/config.py` — APP_VERSION 125 → 126
+### A worker could not fix their own flagged image
 
-**After deploying, the thing to look at** is the Earnings page: the first
-card should read LAST 24 HOURS, and underneath there should be a line saying
-when the last successful read was.
+`user.js` decided whether to show the paste-a-URL box from `PD.searchMode` —
+the project the worker is STANDING IN. A flag card can be for a title in
+their OTHER project, and then the two disagree.
+
+Standing in MUSIK with a flagged movie poster, the check said "in-page, no
+pasting" and REMOVED the box and the REPLACE button. Pasting a URL is the
+only way a movie poster can be replaced, so the worker could look at their
+flagged image and had no way to fix it. The reverse case shows a paste box
+for an image that can only be re-picked from a grid.
+
+The server was already sending the title's own mode with every revision
+(`**_project_ui(db, mt.project_id)`), so this was reading the wrong one of
+two values it already had. Fixed in three places; `buildPosterCard` now
+takes the mode as an argument rather than being right by accident.
+
+### `go_to_title` claimed a title with no permission check
+
+Every worker route that hands out a title scopes it — `pull_next`,
+`select_titles` and `release` all go through `_worker_project` and
+`_scope_to_project`. `go_to_title` also hands out a title (it claims an
+unclaimed one) and checked nothing, so a worker assigned only to MUSIK could
+claim a movie title by id.
+
+Not reachable by clicking, which is exactly why it survived. New
+`_may_touch()` checks the title is in one of the worker's PERMITTED projects
+— not the active one, because the flag card that leads here can legitimately
+belong to their other project.
+
+### The guard check could be satisfied by a COMMENT
+
+Adding a `GUARDED` entry for the above exposed a hole in the safety net
+itself. `check_guards_are_called` substring-matched the raw source, so the
+comment `# See _may_touch().` counted as calling it: deleting the call left
+the check green.
+
+**All four entries had been exposed to this**, including the TeePublic wall
+guard and the two external_id ones. It now takes the guards from the calls
+the function actually makes, read out of the syntax tree.
+
+Found by sabotage. Reading the check did not find it — and the first three
+attempts at the sabotage silently failed to apply, which is why the final
+one asserts that it landed before trusting the result.
+
+### Files
+
+`app/static/js/user.js`, `app/routes/worker.py`, `tools/preflight.py`,
+`app/config.py` (127 → 128), `CLAUDE.md`.
+
+**Verified:** preflight green, `user.js` parses, and the new guard
+sabotage-tested — call removed → red, restored → green, with the other three
+guards still passing throughout.
+
+**Not verified:** none of it exercised against a real worker session. The
+thing to click is a flag card while standing in the OTHER project — that is
+the case that was broken.

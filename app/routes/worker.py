@@ -79,6 +79,41 @@ def _my_projects(db: Session, user: User):
     return allowed_projects(db, user)
 
 
+def _may_touch(db: Session, user: User, title) -> bool:
+    """
+    Is this title in a project this worker is allowed to work in?
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS EXISTS
+    ════════════════════════════════════════════════════════════════════════
+    Every route that HANDS OUT a title scopes it — `pull_next`,
+    `select_titles` and `release` all go through `_worker_project` and
+    `_scope_to_project`. `go_to_title` also hands out a title (it claims an
+    unclaimed one) and did not, so a worker assigned only to MUSIK could
+    claim a movie title by id. Nothing in the screen offers such an id, so it
+    was never reachable by clicking — but "the caller would never send that"
+    is not a guard, and this is the one route that both writes a claim and
+    accepts an arbitrary id.
+
+    Checked against PERMITTED projects rather than the ACTIVE one on purpose.
+    Scoping to the active project would be tighter and would also break a
+    real flow: the flag card that leads here belongs to the worker's own
+    poster, which may sit in their other project. Permission is the question
+    being asked; "which project am I standing in" is a different one.
+
+    NULL project_id means the DEFAULT project — the same rule the rest of the
+    scoping helpers follow, and forgetting it here would lock every worker
+    out of all 101,605 imported rows.
+    """
+    from ..pipeline import _default_project_id
+
+    allowed = {p.id for p in _my_projects(db, user)}
+    if not allowed:
+        return True                      # unassigned worker: no restriction
+    pid = title.project_id or _default_project_id(db)
+    return pid in allowed
+
+
 def _project_ui(db: Session, project_id) -> dict:
     """
     The bits of a project the worker's screen needs to render itself.
@@ -1043,6 +1078,10 @@ def go_to_title(
     """
     t = db.query(MasterTitle).filter_by(id=master_id).first()
     if not t:
+        raise HTTPException(404, "Title not found.")
+    # This route CLAIMS an unclaimed title, so it has to ask the same
+    # permission question the other claiming routes ask. See _may_touch().
+    if not _may_touch(db, user, t):
         raise HTTPException(404, "Title not found.")
     # If the title is currently claimed by another worker, block.
     if t.claimed_by_id and t.claimed_by_id != user.id:

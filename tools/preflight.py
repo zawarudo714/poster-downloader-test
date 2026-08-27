@@ -492,40 +492,160 @@ def button_map() -> dict[str, list[tuple[str, str]]]:
         if not actions:
             continue
 
-        rows = []
-        for action in sorted(actions):
-            endpoint = "?"
-            # The handler for this action, and roughly its body.
-            m = re.search(
-                r"""(?:dataset\.action|\ba)\s*===\s*['"]"""
-                + re.escape(action) + r"""['"]""", src)
-            if m:
-                body = src[m.end():m.end() + 600]
-                # Stop at the next action so we do not read its endpoint.
-                nxt = re.search(r"""(?:dataset\.action|\ba)\s*===\s*['"]""",
-                                body)
-                if nxt:
-                    body = body[:nxt.start()]
-                call = re.search(r"""API\s*\+\s*['"](/[a-z-]+)""", body) \
-                    or re.search(r"""['"](/admin/[a-z/_-]+)['"]""", body)
-                if call:
-                    endpoint = call.group(1)
-                    # What it SENDS. The object literal after the address —
-                    # `{}` is recorded as "{}" rather than blank, because
-                    # "sends nothing" is the interesting answer, not a
-                    # missing one.
-                    sent = re.search(
-                        re.escape(call.group(0)) + r"""[^,]*,\s*\{([^{}]*)\}""",
-                        body)
-                    if sent:
-                        keys = re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\s*:",
-                                          sent.group(1))
-                        endpoint += "  {" + ", ".join(keys) + "}"
-                elif re.search(r"\breload\(|loadDesigns\(|\bhidden\b", body):
-                    endpoint = "(page only — no server call)"
-            rows.append((action, endpoint))
+        rows = [(action, _endpoint_for(src, action))
+                for action in sorted(actions)]
         out[js.name] = rows
     return out
+
+
+# ── Tracing an action to the address it calls ───────────────────────────────
+#
+# THE PREVIOUS VERSION KNEW ONE DISPATCH STYLE AND ONE URL STYLE, so 35 of 57
+# controls read "?". Widening the regexes made it worse rather than better: it
+# began reporting `reject -> /admin/revisions/:id/approve` and a truncated
+# `/greenl`, because it scanned a fixed 900-character window forward from the
+# action's name and reported whatever address it bumped into — the neighbouring
+# handler's, or half a string sliced mid-token.
+#
+# A map that says a button calls the opposite endpoint is far worse than one
+# that says "?". So this follows the CODE instead of scanning near it, and
+# where it cannot be sure it says so.
+
+_URL_PATTERNS = (
+    r"""API\s*\+\s*['"](/[A-Za-z0-9/_-]+)""",          # API + '/foo'
+    r"""`\$\{API\}(/[A-Za-z0-9/_${}.?=&-]+)`""",       # `${API}/foo`
+    r"""[`'"](/(?:admin|api)/[A-Za-z0-9/_${}.?=&-]+)[`'"]""",   # '/admin/foo'
+    r"""[`'"](/[A-Za-z0-9_-]+(?:/[A-Za-z0-9/_${}.?=&-]+)?)[`'"]""",  # '/foo/${id}'
+)
+
+_SKIP_PAYLOAD_KEYS = ("method", "headers", "credentials", "cache", "signal")
+
+
+def _block_from(src: str, pos: int, limit: int = 4000) -> str:
+    """
+    The brace-matched block starting at the first '{' at or after pos.
+
+    Brace counting rather than a fixed window, because a window cuts mid-token
+    — that is where the truncated `/greenl` came from — and it reads straight
+    into whatever handler happens to sit next in the file.
+    """
+    start = src.find("{", pos)
+    if start < 0 or start - pos > 300:
+        return src[pos:pos + 400]
+    depth, i, end = 0, start, min(len(src), start + limit)
+    while i < end:
+        c = src[i]
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return src[start:i + 1]
+        i += 1
+    return src[start:end]
+
+
+def _function_body(src: str, name: str) -> str:
+    """The body of a named function, however this codebase declares it."""
+    for pat in (r"\basync\s+function\s+" + re.escape(name) + r"\s*\(",
+                r"\bfunction\s+" + re.escape(name) + r"\s*\(",
+                r"\b(?:const|let|var)\s+" + re.escape(name)
+                + r"\s*=\s*(?:async\s*)?(?:function\s*)?\("):
+        m = re.search(pat, src)
+        if m:
+            return _block_from(src, m.end())
+    return ""
+
+
+def _url_in(body: str) -> Optional[re.Match]:
+    for pat in _URL_PATTERNS:
+        m = re.search(pat, body)
+        if m:
+            return m
+    return None
+
+
+def _describe(body: str, m: re.Match) -> str:
+    """An address plus the keys it sends, from a matched URL."""
+    endpoint = re.sub(r"\$\{[^}]*\}", ":id", m.group(1))
+    endpoint = endpoint.split("?")[0]
+    sent = re.search(re.escape(m.group(0)) + r"""[^;]{0,200}?\{([^{}]*)\}""", body)
+    if sent is not None:
+        keys = [k for k in re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\s*:", sent.group(1))
+                if k not in _SKIP_PAYLOAD_KEYS]
+        endpoint += "  {" + ", ".join(keys) + "}"
+    return endpoint
+
+
+def _handler_bodies(src: str, action: str) -> list[str]:
+    """
+    Every block that runs when this action fires. All four styles used here:
+
+      case 'pay': doPay(); break;            <- dispatch table
+      if (a === 'pay') { ... }               <- delegated listener
+      const payBtn = q('[data-action="pay"]'); payBtn.onclick = ...
+      querySelectorAll('[data-action="pay"]').forEach(btn => { ... })
+    """
+    a = re.escape(action)
+    out = []
+
+    # case 'x': ... break;   /   if (a === 'x') { ... }
+    for m in re.finditer(r"""case\s*['"]""" + a + r"""['"]\s*:""", src):
+        nxt = re.search(r"""\bcase\s*['"]|\bdefault\s*:""", src[m.end():])
+        out.append(src[m.end(): m.end() + (nxt.start() if nxt else 300)])
+    for m in re.finditer(r"""(?:dataset\.action|\ba)\s*===\s*['"]""" + a + r"""['"]""", src):
+        out.append(_block_from(src, m.end()))
+
+    # forEach(btn => { ... }) bound straight off the selector
+    for m in re.finditer(r"""querySelectorAll\([^)]*data-action=["']"""
+                         + a + r"""["'][^)]*\)\s*\.forEach\s*\(""", src):
+        out.append(_block_from(src, m.end()))
+
+    # const xBtn = ...querySelector('[data-action="x"]')  ->  xBtn's listener
+    for m in re.finditer(r"""(?:const|let|var)\s+(\w+)\s*=\s*[^;\n]*"""
+                         r"""data-action=["']""" + a + r"""["']""", src):
+        var = m.group(1)
+        lis = re.search(re.escape(var)
+                        + r"""\s*(?:\.addEventListener\([^,]+,|\.onclick\s*=)""",
+                        src[m.end():])
+        if lis:
+            out.append(_block_from(src, m.end() + lis.end()))
+    return out
+
+
+def _endpoint_for(src: str, action: str) -> str:
+    """
+    The address one action calls, and what it sends with it.
+
+    Follows the handler, and if the handler just calls a named function it
+    follows that too — one hop, which is how most of admin_pipeline.js is
+    written (`case 'titles-greenlight': greenlightSelected(); break;`).
+
+    Returns "?" rather than a guess. An inventory that is wrong is worse than
+    one that admits a gap, because the gap gets looked at and the wrong answer
+    does not.
+    """
+    page_only = False
+    for body in _handler_bodies(src, action):
+        if not body.strip():
+            continue
+        m = _url_in(body)
+        if m:
+            return _describe(body, m)
+
+        # The handler delegates. Follow the functions it names, once.
+        for call in re.findall(r"\b([a-zA-Z_]\w{2,})\s*\(", body):
+            if call in ("if", "for", "while", "switch", "return", "function",
+                        "catch", "typeof", "parseInt", "parseFloat", "Number"):
+                continue
+            inner = _function_body(src, call)
+            if inner:
+                m = _url_in(inner)
+                if m:
+                    return _describe(inner, m)
+        if re.search(r"\breload\(|loadDesigns\(|\bhidden\b|showSection\(", body):
+            page_only = True
+    return "(page only — no server call)" if page_only else "?"
 
 
 def check_actions_are_handled() -> None:
@@ -897,7 +1017,39 @@ GUARDED: list[tuple[str, str, tuple[str, ...], str]] = [
      ("project_scope(", "scope_titles(", "_titles_by_ext_query("),
      "looks a title up by its sheet number without scoping to a project, "
      "and that number repeats in every project"),
+    # ── HANDING OUT A TITLE IS A PERMISSION QUESTION ────────────────────
+    #
+    # Every worker route that gives a worker a title scopes it — except
+    # `go_to_title`, which claimed an unclaimed title by id with no check at
+    # all, so a worker assigned only to MUSIK could take a movie title.
+    # Nothing on the screen offers such an id, which is exactly why it went
+    # unnoticed: it was unreachable by clicking and wide open to anything
+    # else.
+    ("app/routes/worker.py", "claimed_by_id   = user.id",
+     ("_may_touch(", "_scope_to_project(", "_worker_project("),
+     "claims a title for a worker without checking the title is in a "
+     "project that worker is allowed to work in"),
 ]
+
+
+def _calls_made_in(node: ast.AST) -> set[str]:
+    """
+    Every function name actually INVOKED inside a node.
+
+    Both `foo(...)` and `mod.foo(...)`, because a guard is often reached
+    through a module — `earnings_service.pause_reading(...)`. Comments and
+    docstrings cannot appear here, which is the entire point: see the note in
+    check_guards_are_called().
+    """
+    out: set[str] = set()
+    for n in ast.walk(node):
+        if isinstance(n, ast.Call):
+            f = n.func
+            if isinstance(f, ast.Name):
+                out.add(f.id)
+            elif isinstance(f, ast.Attribute):
+                out.add(f.attr)
+    return out
 
 
 def check_guards_are_called() -> None:
@@ -961,7 +1113,24 @@ def check_guards_are_called() -> None:
                 body = ast.get_source_segment(src, node) or ""
                 if risky not in body:
                     continue
-                if not any(g in body for g in guards):
+                # PROSE MUST NOT SATISFY A GUARD.
+                #
+                # This used to substring-match the raw source, so a comment
+                # reading "# see _may_touch()" counted as calling it. Found
+                # 2026-08-27 by sabotage: the call was deleted, the comment
+                # ABOUT the call stayed, and the check went right on passing.
+                #
+                # That is the same failure the docstring above describes and
+                # believed it had fixed — ending an entry in "(" stops a bare
+                # word matching a parameter name, but does nothing about a
+                # sentence that mentions the function. Every entry here was
+                # exposed to it, not just the new one.
+                #
+                # So the guards are looked for among the calls this function
+                # ACTUALLY makes, taken from the syntax tree, where a comment
+                # does not exist.
+                called = _calls_made_in(node)
+                if not any(g.rstrip("(") in called for g in guards):
                     fail(f"{rel}:{node.lineno} — {node.name}() {what} "
                          f"(expected one of: {', '.join(guards)})")
 

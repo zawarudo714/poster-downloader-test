@@ -151,28 +151,6 @@ def looks_signed_out(html: str) -> bool:
     return any(m in html for m in SIGNED_OUT_MARKERS)
 
 
-def login_fields(html: str) -> dict:
-    """
-    Everything the sign-in form needs, read off the page.
-
-    The hidden `authenticity_token` changes on every visit — it CANNOT be
-    stored in settings or guessed, which is precisely why the form is read
-    rather than assumed. Same lesson as the FineArtAmerica sign-in endpoint
-    that was invented and returned 403 for two deploys.
-    """
-    soup = _soup(html)
-    for form in soup.find_all("form"):
-        if not form.find("input", {"type": "password"}):
-            continue
-        fields = {}
-        for inp in form.find_all("input"):
-            name = inp.get("name")
-            if name and (inp.get("type") or "") not in ("submit", "button"):
-                fields[name] = inp.get("value") or ""
-        return {"action": form.get("action") or "", "fields": fields}
-    return {}
-
-
 def parse_account_page(html: str) -> Snapshot:
     """
     The four figures, with the month each one describes.
@@ -219,21 +197,3 @@ def parse_account_page(html: str) -> Snapshot:
     return snap
 
 
-def period_month(label: str, *, today: Optional[date] = None) -> Optional[str]:
-    """
-    "Aug Earnings" -> "2026-08". Used to tell the two figures apart.
-
-    The year is not printed, so it is inferred: a month AHEAD of the current
-    one must belong to last year, which only matters in January when "Dec
-    Earnings" is still waiting to be paid.
-    """
-    today = today or date.today()
-    m = re.match(r"\s*([A-Za-z]{3,})", label or "")
-    if not m:
-        return None
-    try:
-        month = datetime.strptime(m.group(1)[:3], "%b").month
-    except ValueError:
-        return None
-    year = today.year - 1 if month > today.month else today.year
-    return f"{year:04d}-{month:02d}"

@@ -224,12 +224,6 @@ def restore_backup(filename: str) -> Path:
 # ─── Background scheduler ───────────────────────────────────────────────────
 
 
-def _seconds_until_next_midnight() -> float:
-    now = datetime.now()
-    nxt = (now + timedelta(days=1)).replace(hour=0, minute=0, second=5, microsecond=0)
-    return max(1.0, (nxt - now).total_seconds())
-
-
 def _scheduler_loop():
     """
     Run forever. Wake once per minute and:

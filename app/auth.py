@@ -119,6 +119,3 @@ def require_admin(user: User = Depends(require_user)) -> User:
     return user
 
 
-def require_worker_or_admin(user: User = Depends(require_user)) -> User:
-    """Both roles can access worker views; admins can act as workers too."""
-    return user

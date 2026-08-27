@@ -206,13 +206,6 @@ class MatchIndex:
         return None, None
 
 
-def find_match(
-    db: Session, *, marketplace: str, artwork_name: str,
-) -> tuple[Optional[int], Optional[str]]:
-    """One-off lookup. Prefer MatchIndex directly when matching many rows."""
-    return MatchIndex(db, marketplace).lookup(artwork_name)
-
-
 def match_entry(db: Session, entry: LedgerEntry,
                 index: Optional[MatchIndex] = None) -> bool:
     """Attribute one ledger row. True if it now points at a design."""

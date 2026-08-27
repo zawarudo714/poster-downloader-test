@@ -395,8 +395,16 @@ Rules that matter:
 - A template declares its level with `{% set nav_scope = 'project' %}` at the
   top level, right after `{% extends %}`. Anything that doesn't say is master.
 - Any query that can show or hand out a title goes through
-  `projects.scope_titles()` (admin), `scope_titles_multi()` (worker) or
+  `projects.scope_titles()` (admin), `worker._worker_project()` (worker) or
   `pipeline_admin._title_scope()`. **Nothing filters on `project_id` by hand.**
+
+  This file used to name `scope_titles_multi()` as the worker helper. That
+  was the UNION-of-all-their-projects version, which is the bug described two
+  bullets down — it was replaced by the one-active-project rule and then sat
+  unused for weeks while these notes still recommended it. Deleted
+  2026-08-27. **A helper that these notes name is a helper a future session
+  will reach for, so an obsolete one left in place is a trap, not just dead
+  weight.**
   Three endpoints once hand-rolled `or_(project_id == X, project_id IS NULL)`,
   which reads as "this project plus anything unassigned" and is only correct
   for the DEFAULT project — MUSIK inherited all 101,605 NULL movie rows.
@@ -835,7 +843,18 @@ app/
     faa.py             Parsers for FineArtAmerica's Sales and Balance pages.
                        Every function takes a STRING, never a URL, which is
                        what let the fetching move to the node for free.
-                       Deliberately contains no page URLs at all.
+                       Deliberately contains no page URLs at all — TRUE AGAIN
+                       as of 2026-08-27. It had quietly stopped being true:
+                       `read_sales`, `read_ledger`, `fetch_sale_detail` and
+                       `login` were still there, importing `requests` and
+                       holding `BASE = "https://fineartamerica.com"`, two
+                       lines above a comment insisting there were no URLs.
+                       Nothing had called them since reading moved to the
+                       node. Deleted — and the deletion matters more than the
+                       160 lines, because that is the server-side fetch path
+                       FAA answers with "Verify Visitor", and leaving it
+                       sitting there looking usable is how the next session
+                       spends three deploy cycles rediscovering that.
     matching.py        Attributing a sale to one of our designs. Refuses to
                        guess — see its docstring for why a wrong match is
                        worse than no match.
@@ -1263,6 +1282,18 @@ eleven checks stayed green: the test was comparing the file against a copy
 of the rule it had supplied itself. `_exec` now lifts module-level values
 out of the file too. Anything a rule depends on comes from the shipped
 source, never from the caller.
+
+**AND PROSE MUST NOT SATISFY A CHECK EITHER.** Ending an entry in `(` stops
+a bare word matching a parameter name; it does nothing about a COMMENT. On
+2026-08-27 a guard was added to `go_to_title`, along with a comment reading
+`# See _may_touch().` — and deleting the call left the check green, because
+it substring-matched the raw source and the sentence about the call was
+still there. Every entry in the table had been exposed to this, not just the
+new one. `check_guards_are_called` now takes the guards from the CALLS the
+function actually makes, read out of the syntax tree, where a comment does
+not exist. **Sabotage found it; reading the check did not — and the first
+three attempts at the sabotage silently failed to apply, which is its own
+lesson: verify the sabotage landed before believing a green light.**
 
 **MATCH A CALL, NEVER A WORD — this is the commonest way a check reads as
 coverage while looking at nothing.** The guard check written on 25 Aug

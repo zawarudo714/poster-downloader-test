@@ -68,21 +68,6 @@ def _week_start(d: date, week_start_dow: int) -> date:
     return d - timedelta(days=offset)
 
 
-def _saves_on(db: Session, *, username: str, d: date, scope=None) -> int:
-    """Number of non-deleted saves by this worker on this calendar date."""
-    return (
-        db.query(func.count(SavedPoster.id))
-          .filter(
-              SavedPoster.username == username,
-              SavedPoster.original_save_date == d,
-              SavedPoster.deleted_at.is_(None),
-              scope if scope is not None else sa_true(),
-          )
-          .scalar()
-        or 0
-    )
-
-
 def _save_dates(db: Session, *, username: str, scope=None) -> list[date]:
     """All distinct calendar dates this worker saved at least one live poster."""
     rows = (

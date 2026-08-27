@@ -189,13 +189,6 @@ def week_bounds_containing(d: date, week_start: int) -> tuple[date, date]:
     return start, end
 
 
-def daterange_inclusive(start: date, end: date) -> Iterable[date]:
-    cur = start
-    while cur <= end:
-        yield cur
-        cur += timedelta(days=1)
-
-
 # ─── Eligibility queries ──────────────────────────────────────────────────
 
 def _already_paid_poster_ids(db: Session, worker_id: int) -> set[int]:
@@ -343,17 +336,6 @@ def count_pending_revisions_today(db: Session, worker_id: int) -> int:
 
 
 # ─── Payment-run summary helpers ──────────────────────────────────────────
-
-def runs_for_worker(db: Session, worker_id: int, *, limit: int = 50):
-    """Recent runs for one worker, newest first."""
-    return (
-        db.query(PaymentRun)
-          .filter_by(worker_id=worker_id)
-          .order_by(PaymentRun.created_at.desc())
-          .limit(limit)
-          .all()
-    )
-
 
 def all_runs(db: Session, *, limit: int = 200):
     return (

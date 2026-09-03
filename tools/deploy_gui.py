@@ -567,10 +567,28 @@ class DeployApp:
 
         Newest first so the useful line is the first one read, and capped at
         DEPLOY_LOG_KEEP so the file cannot grow into something expensive.
+
+        ════════════════════════════════════════════════════════════════════
+        THE LINE NAMES ITS SERVER, BECAUSE THERE ARE TWO
+        ════════════════════════════════════════════════════════════════════
+        One server made the host redundant. Two makes its absence a lie:
+        "v143 deployed" would answer "what is live" with no way to ask
+        WHERE, and the whole point of this file is that a session reads it
+        instead of guessing.
+
+        Worse, the de-duplication below removes any earlier entry with the
+        same commit — so deploying one commit to the test box and then to
+        production would DELETE the test line and leave the log claiming
+        only one of them happened. The host is therefore part of the key,
+        not just part of the text.
         """
         from datetime import datetime
 
         version = local_app_version(Path(self.repo_var.get().strip()))
+        try:
+            _, host, _ = parse_ssh_target(self.ssh_var.get())
+        except Exception:
+            host = "?"
 
         try:
             existing = DEPLOY_LOG.read_text(encoding="utf-8")
@@ -583,8 +601,12 @@ class DeployApp:
         # nothing bumps APP_VERSION between deploys and nothing noticed. The
         # version now goes in the line as its own field so this is checkable
         # rather than buried in whatever the commit message happened to say.
-        if version and entries:
-            previous = entries[0]
+        # Only compare against deploys to THIS server. A version being live
+        # on the test box says nothing about production, and warning on it
+        # would train the eye to ignore the warning that matters.
+        same_host = [e for e in entries if f"[{host}]" in e]
+        if version and same_host:
+            previous = same_host[0]
             if f"· v{version} ·" in previous and f"`{sha[:8]}`" not in previous:
                 self._emit(
                     f"WARNING: v{version} is already in the log against a "
@@ -592,12 +614,16 @@ class DeployApp:
                     f"number — bump APP_VERSION so they can be told apart.",
                     "err")
 
-        line = (f"- **{datetime.now():%Y-%m-%d %H:%M}** · `{sha[:8]}` · "
-                f"v{version or '?'} · {message or '(no message)'}")
+        line = (f"- **{datetime.now():%Y-%m-%d %H:%M}** · `[{host}]` · "
+                f"`{sha[:8]}` · v{version or '?'} · "
+                f"{message or '(no message)'}")
 
-        # Same commit deployed twice (a rebuild, say) replaces its own entry
-        # rather than adding a duplicate that says nothing new.
-        entries = [e for e in entries if f"`{sha[:8]}`" not in e]
+        # Same commit deployed twice TO THE SAME SERVER (a rebuild, say)
+        # replaces its own entry rather than adding a duplicate that says
+        # nothing new. The host is in the test because the same commit on a
+        # different server is a different, and interesting, fact.
+        entries = [e for e in entries
+                   if not (f"`{sha[:8]}`" in e and f"[{host}]" in e)]
         entries.insert(0, line)
 
         try:

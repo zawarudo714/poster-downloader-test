@@ -275,21 +275,21 @@ before acting on it:**
      * `Current Balance` is authoritative. Anything derived is an estimate
        and must be worded as one.
 
-6. **Ban recovery / account handover. BUILT 2026-08-20, and it has now been
-   through a REAL closure — 2026-08-28.** `ban_account()` and
-   `hand_over_account()` in `pipeline.py`, MARK BANNED and HAND OVER TO… on
-   the Upload tab. A banned account keeps its row and its history, because
-   its listings are gone from the marketplace and have to be rebuilt
-   elsewhere. Handover reuses `requeue_for_account()`, so the review-gate
-   rules apply to a rebuild exactly as to a first upload.
+6. **Ban recovery / account handover. DROPPED `2026-09-03`,** at the owner's
+   instruction. `ban_account()` and `hand_over_account()` still exist and
+   still work; they are simply not on the list any more.
 
-   **What the real closure exposed, and it is not fixed:** the design assumes
-   ONE account is banned and its catalogue moves to another. Both accounts
-   were closed at the same moment, by one person, for one reason. There was
-   nowhere to hand over TO. A recovery plan that assumes a surviving sibling
-   is not a recovery plan.
+   His reasoning, and it follows from the whole point of this niche: the
+   accounts were closed over CONTENT, and nobody owns Kyoto. If a closure
+   ever happens anyway, the catalogue and the upload records are enough to
+   rebuild against a new account at the time.
 
-7. **THE INTERACTION AUDIT.** `DECIDED 2026-08-24` — not started. Not a code
+   What the real closure exposed is therefore also dropped rather than
+   fixed: the design assumes ONE account is banned and its catalogue moves
+   to a surviving sibling, and both accounts were closed at the same moment
+   by one person for one reason.
+
+7. **THE INTERACTION AUDIT — now part of THE MEGA AUDIT.** `DECIDED 2026-08-24` — not started. Not a code
    review and not a test suite: a deliberate trace of every action against
    every OTHER thing it can touch, written out as a tree.
 
@@ -321,7 +321,7 @@ before acting on it:**
    find the figures and report "FAA has changed its page" — sending the next
    session hunting a redesign that never happened.
 
-8. **THE RETROFIT AUDIT — build the extension points before the next thing
+8. **THE RETROFIT AUDIT — now part of THE MEGA AUDIT — build the extension points before the next thing
    needs them.** `DECIDED 2026-08-25` — not started. His words: *"we should
    revamp everything for as little retrospect headache as possible."*
 
@@ -357,6 +357,23 @@ before acting on it:**
    **The concrete test is now travel's own growth**, plus TeePublic as an
    uploading project and Redbubble as a third marketplace. For each, say
    which existing pieces would be DEAD — BEFORE building.
+
+8b. **THE MEGA AUDIT.** `DECIDED 2026-09-03` — the owner's name for it.
+   Items 7 and 8 above, plus five more questions, done as ONE pass, AFTER
+   the UI revamp and as the last thing before he starts testing. The seven
+   questions and the method are written out in `ROADMAP.md` stage 5; do not
+   restate them here.
+
+   Two things about it that belong in this file rather than that one:
+
+   * **It is one pass because seven separate ones never started.** Each
+     alone reads like a week nobody has. Together they are one walk over the
+     same code asking seven questions, and the answers overlap — the field
+     that cannot express a second user is usually the same field whose two
+     failure modes share one column.
+   * **After the UI, not before.** An audit of a structure that is still
+     moving has to be redone, and the UI stage is explicitly the one that
+     moves templates around.
 
 9. **SPEED. `MEASURED 2026-08-27` — IT WAS THE NETWORK, NOT THE DATABASE.**
    Kept because it is the worked example of why the provenance tags exist.
@@ -2235,6 +2252,31 @@ inherits the wrong half of another one.
 - He is cost-conscious and picks cheap, simple, mainstream hosting.
 - **Anything he might want to tweak belongs in the dashboard.** He has said
   this more than once. Treat a hardcoded value as a defect.
+
+  **AND A VALUE IN `DEFAULTS` WITH NO BOX IS THE SAME DEFECT WEARING A
+  SECOND HAT — it is far easier to miss, because nothing is wrong.**
+  `brave_query_normal` is the words the worker's SEARCH button sends to
+  Brave. It sat in `pipeline.DEFAULTS` with no field on any screen from the
+  day the search was built until 2026-09-03, so the one thing he most needed
+  to experiment with was the one thing he could not touch without a deploy.
+
+  Nothing could have found it. The code parses, the key is declared, the
+  setting resolves, every page renders. **A rule about something ABSENT has
+  nothing to trip over**, which is why writing the rule down was not enough
+  and it quietly went on being broken for months.
+
+  Now mechanical: `check_settings_are_reachable` in `preflight.py` compares
+  `DEFAULTS` against the fields on every admin screen. A key with nowhere to
+  type it fails before deploy unless it is listed as deliberately exempt with
+  a reason. Sabotage-tested twice — removing the box goes red, and a mere
+  MENTION of the key in help text does not satisfy it.
+
+  It found 18 more the same day, including the worker PAY RATE and the
+  ALLOWED IMAGE HOSTS — both named in this very file as examples of what
+  belongs on the dashboard. They are named in `SETTINGS_WITH_NO_BOX_YET` and
+  warn rather than fail, so the existing debt does not block every deploy
+  while anything NEW still fails at once. Clearing that list is a QoL or Mega
+  Audit job.
 - **And it belongs where the thing it governs is SHOWN.** A setting he cannot
   find is a setting he does not have. The nightly earnings times were added
   to Upload Settings — correct by category, useless in practice, because the

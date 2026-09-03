@@ -32,6 +32,13 @@
   <div class="pipe-tabs" role="tablist">
     <button class="pipe-tab active" data-section="overview"   role="tab">OVERVIEW</button>
     <button class="pipe-tab"        data-section="greenlight" role="tab">GREENLIGHT<span class="pipe-tab-badge" data-badge="greenlight" hidden>0</span></button>
+    {# Only for projects whose workers search inside the site. This is a
+       SOURCING setting, not a post-production one, so it gets its own tab
+       rather than being tucked inside PROCESSING where nobody would look
+       for it. #}
+    {% if search_mode == 'inpage' %}
+    <button class="pipe-tab"        data-section="search"     role="tab">IMAGE SEARCH</button>
+    {% endif %}
     <button class="pipe-tab"        data-section="processing" role="tab">PROCESSING</button>
     <button class="pipe-tab"        data-section="upload"     role="tab">UPLOAD</button>
     <button class="pipe-tab"        data-section="test"       role="tab">TEST &amp; DEBUG</button>
@@ -264,6 +271,30 @@
     </section>
 
   </div>
+
+  {# ═══════════════════════════════════════════════════════════════ #}
+  {#  IMAGE SEARCH — only for projects whose workers search inside the
+      site. An 'external' project sends its workers to another site with a
+      link, so Brave phrasings would govern nothing there.               #}
+  {# ═══════════════════════════════════════════════════════════════ #}
+  {% if search_mode == 'inpage' %}
+  <div class="pipe-section" data-section-panel="search" hidden>
+    <section class="panel">
+      <div class="panel-head">
+        <span>IMAGE SEARCH
+          {{ info("The words the worker's search buttons send to Brave. Write each one as a sentence with {title} where the place name goes. Brave is a much smaller search engine than Google, so which words work has to be tried on real places rather than worked out in advance — that is what the extra phrasing buttons are for. Changes show up on the worker screen as soon as they reload the page.") }}
+        </span>
+      </div>
+      <div class="panel-body">
+        <div class="settings-grid" data-settings-group="search"></div>
+        <div class="filter-row" style="margin-top:12px">
+          <button type="button" class="btn btn-accent" data-action="save-settings" data-group="search">SAVE SEARCH SETTINGS</button>
+          <span class="muted mono" data-settings-status="search"></span>
+        </div>
+      </div>
+    </section>
+  </div>
+  {% endif %}
 
   {# ═══════════════════════════════════════════════════════════════ #}
   {#  PROCESSING — the panel matches the project's processor.

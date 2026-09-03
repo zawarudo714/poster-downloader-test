@@ -573,6 +573,153 @@ def check_sheet_columns_all_or_nothing(db: Session, scope: Scope) -> CheckResult
     )
 
 
+def check_search_phrasings_name_a_place(db: Session, scope: Scope) -> CheckResult:
+    """
+    Every configured search phrasing must contain {title}.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS IS WATCHED AS WELL AS REFUSED
+    ════════════════════════════════════════════════════════════════════════
+    `pipeline.set_setting()` already refuses a phrasing with no placeholder,
+    so this state should be impossible. It is watched anyway because the
+    refusal is new and the settings table is old: a value written before the
+    guard existed, or typed straight into the database, walks past it.
+
+    What the bad state costs is the reason it is worth two rungs. A phrasing
+    with no {title} does not fail. It searches the same literal words for
+    every place in the catalogue and returns a full grid of real, plausible
+    photographs — of somewhere else. The worker sees nothing wrong, saves
+    one, and it is paid for, processed, and listed under a place name it has
+    nothing to do with. The first person to notice would be a customer.
+
+    Read from the settings the way the app reads them, per project, so an
+    override that only exists on one niche is seen exactly as that niche's
+    workers would see it.
+    """
+    from .pipeline import SEARCH_QUERY_KEYS, get_setting
+
+    projects = db.query(Project).filter(Project.is_active == 1)
+    if scope.project_id:
+        projects = projects.filter(Project.id == scope.project_id)
+
+    rows = []
+    for project in projects.all():
+        # An external project sends its workers to another site, so its
+        # Brave settings govern nothing and a stray value there is clutter,
+        # not a fault.
+        if project.search_mode != "inpage":
+            continue
+        for key in SEARCH_QUERY_KEYS:
+            raw = str(get_setting(db, key, project=project) or "")
+            for line_no, line in enumerate(raw.splitlines(), 1):
+                line = line.strip()
+                if not line or "{title}" in line or "{artist}" in line:
+                    continue
+                rows.append(Finding(
+                    f"{project.name}: {key} line {line_no} does not say which "
+                    f"place to look for — {line!r}",
+                    "This phrasing has no {title} in it, so every title in "
+                    "the project searches for these same words and brings "
+                    "back photographs of somewhere else. Nothing errors and "
+                    "the grid looks normal, so nobody would notice. Fix it "
+                    "on the Pipeline page under IMAGE SEARCH — for example "
+                    "'places to visit in {title}'.",
+                    "/admin/pipeline#search",
+                ))
+
+    return _result(
+        "search_phrasings_name_a_place",
+        "Every search phrasing says which place to look for",
+        "A phrasing without {title} searches the same words for every title "
+        "and returns convincing photographs of the wrong place, with no "
+        "error anywhere.",
+        "error", rows, len(rows),
+    )
+
+
+def check_prompt_matches_style_toggle(db: Session, scope: Scope) -> CheckResult:
+    """
+    The prompt and the style-reference switch must agree about how many
+    pictures are being sent.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY A HINT RATHER THAN A REFUSAL
+    ════════════════════════════════════════════════════════════════════════
+    A prompt is prose. Whether it depends on a reference image cannot be
+    decided by reading it, so this cannot be a rule that blocks a save —
+    that would be a check pretending to know something it does not.
+
+    What it CAN do is spot the two obvious disagreements, and those are the
+    ones that cost money:
+
+      · the switch is OFF while the prompt talks about "the first image" —
+        there is no first image, so the model reads the instruction against
+        the photo itself and produces something nobody asked for
+      · the switch is ON while the prompt never mentions a second image —
+        a reference is sent that the prompt gives no job to, and the model
+        blends two looks
+
+    Neither one fails. Both produce a finished picture, charged for, that
+    goes to the review gate looking like an ordinary bad result. Across a
+    batch that is real money, and the cause is a switch nobody looked at.
+
+    Deliberately worth checking, never certain: the wording says "worth a
+    look", because a prompt could legitimately mention an image in passing.
+    """
+    from .pipeline import get_setting
+
+    projects = db.query(Project).filter(Project.is_active == 1)
+    if scope.project_id:
+        projects = projects.filter(Project.id == scope.project_id)
+
+    # Phrases that only make sense when two pictures are sent. Matched on the
+    # WORDS a person would write, not on a single token like "image", which
+    # appears in almost every prompt ever written about images.
+    TWO_PICTURE_WORDS = ("first image", "second image", "1st image",
+                         "2nd image", "other image", "reference image")
+
+    rows = []
+    for project in projects.all():
+        if project.processor != "gpt":
+            continue
+        prompt = str(get_setting(db, "openai_prompt", project=project) or "")
+        uses_style = bool(get_setting(db, "openai_use_style_image", project=project))
+        mentions_two = any(w in prompt.lower() for w in TWO_PICTURE_WORDS)
+
+        if mentions_two and not uses_style:
+            rows.append(Finding(
+                f"{project.name}: the prompt talks about more than one "
+                f"picture, but the style reference is switched OFF",
+                "Only the worker's photo is being sent, so there is no "
+                "'first image' for the prompt to point at. The model will "
+                "still produce a picture and you will still be charged for "
+                "it. Either switch 'Send the style reference image' back on, "
+                "or reword the prompt to describe the look in words.",
+                "/admin/pipeline#processing",
+            ))
+        elif uses_style and not mentions_two:
+            rows.append(Finding(
+                f"{project.name}: the style reference is switched ON, but "
+                f"the prompt never mentions a second picture",
+                "The reference is being sent with every request and the "
+                "prompt gives it no job, so the model blends two looks and "
+                "the result drifts from what the prompt asks for. Either "
+                "switch the reference off, or say in the prompt what the "
+                "first image is for. Worth a look rather than certainly "
+                "wrong — a prompt can refer to the reference in other words.",
+                "/admin/pipeline#processing",
+            ))
+
+    return _result(
+        "prompt_matches_style_toggle",
+        "The prompt and the style-reference switch agree",
+        "Sending a reference the prompt ignores, or writing a prompt about "
+        "an image that is not being sent, produces a paid-for picture that "
+        "is quietly wrong rather than an error.",
+        "attention", rows, len(rows),
+    )
+
+
 def check_projects_match_registry(db: Session, scope: Scope) -> CheckResult:
     """
     Every ACTIVE project must be one the code still declares.
@@ -1813,6 +1960,8 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_stale_claims,
     check_projects_match_registry,
     check_sheet_columns_all_or_nothing,
+    check_search_phrasings_name_a_place,
+    check_prompt_matches_style_toggle,
     check_claims_by_inactive,
     check_greenlit_not_complete,
     check_uploaded_without_processed,

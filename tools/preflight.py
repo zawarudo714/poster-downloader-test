@@ -1414,10 +1414,176 @@ def check_endpoints_have_buttons() -> None:
                  f"or fetch anywhere calls it (nothing matches '{shown}')")
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# Settings the owner can reach
+# ════════════════════════════════════════════════════════════════════════════
+#
+# Keys that are DELIBERATELY not a box on the settings forms. Each one needs a
+# reason, and the reason has to be one of three things — anything else means
+# the owner cannot change a value he is expected to change.
+#
+#   WRITTEN BY THE APP   nobody types it; a human editing it would be a bug
+#   ITS OWN PANEL        edited somewhere better than a one-line box
+#   NOT A SETTING        a credential or a structure with its own screen
+#
+NOT_ON_THE_SETTINGS_FORMS = {
+    # Written by the app itself. A human editing one of these would be a bug.
+    "openai_reconcile_result":       "written by the nightly cost check",
+    "openai_reconcile_date":         "written by the nightly cost check",
+    "earnings_last_run_at":          "written by the nightly earnings read",
+    "earnings_last_run_day":         "written by the nightly earnings read",
+    "earnings_daily_run_started_at": "written by the nightly earnings read",
+    "run_mode":        "set by the PAUSE NEW WORK and RESUME buttons",
+    "run_mode_reason": "set by the PAUSE NEW WORK and RESUME buttons",
+    "wall_path_cursor": "a position the node keeps, not a choice",
+    # Their own panels, which are better than a one-line box.
+    "process_script":     "the JSX editor",
+    "openai_prompt":      "the PROMPT panel, with its own save and reset",
+    "openai_style_image": "the STYLE REFERENCE panel, which uploads a file",
+    "selectors":          "the selectors grid",
+    "selectors_teepublic": "the selectors grid",
+    "timings":            "the timings grid",
+}
+
+# ════════════════════════════════════════════════════════════════════════════
+# Settings with nowhere to type them — the backlog, found 2026-09-03
+# ════════════════════════════════════════════════════════════════════════════
+#
+# These have no box on any screen and no reason to be exempt. They are WARNED
+# about rather than failed, so this check can be switched on today without
+# stopping every deploy until eighteen screens have been built.
+#
+# THE SHAPE OF THE LIST IS THE POINT. Anything NEW fails immediately; only
+# what was already broken on the day the check was written is tolerated, and
+# it is tolerated by NAME, so the debt cannot grow quietly. Delete a line
+# whenever you give that setting a box.
+#
+# The owner's own notes name several of these as things that must be on the
+# dashboard — the pay rate, the allowed hosts, the image cap, the source
+# search URL. The rule was written down and then broken for months, because a
+# rule about something ABSENT has nothing to trip over. Clearing this list is
+# a job for the QoL stage or the Mega Audit.
+SETTINGS_WITH_NO_BOX_YET = {
+    "pay_rate_kes", "soft_limit_per_title", "source_search_url",
+    "allowed_image_hosts", "allowed_download_hosts", "review_min_width_px",
+    "earnings_sales_url", "earnings_balance_url", "earnings_retry_window_hours",
+    "listing_check_alarm_ratio", "listing_check_max_attempts",
+    "listing_check_min_sample",
+    "scan_delay_s", "scan_retry_delays_min", "store_stage_max_attempts",
+    "upload_pause_after_failures", "wall_max_attempts", "wall_wait_s",
+}
+
+
+def check_settings_are_reachable() -> None:
+    """
+    Every pipeline setting must be editable from the dashboard.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE DEFECT THIS EXISTS FOR
+    ════════════════════════════════════════════════════════════════════════
+    `brave_query_normal` and `brave_query_deep` sat in DEFAULTS with no box
+    anywhere on the Pipeline page, from the day the Brave search was built
+    until 2026-09-03. They are the words the worker's SEARCH button sends —
+    the single thing the owner most needs to experiment with — and changing
+    one meant a code edit and a deploy.
+
+    Nothing could have found it. The code parses, the key is declared, the
+    setting resolves, every page renders. The standing rule "anything he
+    might want to tweak belongs in the dashboard" was written down and then
+    quietly broken, because a rule about something that is ABSENT has nothing
+    to trip over. He would have discovered it by looking for the box.
+
+    So it is mechanical now: the code default and the form field are compared
+    directly, and a new key with nowhere to type it fails before deploy.
+
+    An exception has to be WRITTEN DOWN with a reason, in the table above.
+    That is the point — not to force every key onto a form, but to make
+    leaving one off a decision somebody made rather than a thing that
+    happened.
+    """
+    src = (APP / "pipeline.py").read_text(encoding="utf-8")
+    declared: set[str] = set()
+    for node in ast.walk(ast.parse(src)):
+        target = value = None
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target, value = node.targets[0], node.value
+        elif isinstance(node, ast.AnnAssign):
+            target, value = node.target, node.value
+        if (isinstance(target, ast.Name) and target.id == "DEFAULTS"
+                and isinstance(value, ast.Dict)):
+            declared |= {k.value for k in value.keys
+                         if isinstance(k, ast.Constant)}
+
+    if not declared:
+        fail("pipeline.DEFAULTS could not be read — this check is blind")
+        return
+
+    # The keys the settings forms offer. Read out of SETTINGS_GROUPS in the
+    # JavaScript, which is where the metadata actually lives — the template
+    # only holds empty containers, so looking there would find nothing and
+    # report every key as missing.
+    # EVERY admin screen, not just the Pipeline page. Settings are edited in
+    # several places on purpose — the listing-check numbers live on the
+    # Listing check tab, the store ones on the TeePublic tab — and a check
+    # that only read admin_pipeline.js would report all of those as missing.
+    # A report with known-false lines in it is a report nobody reads.
+    on_forms: set[str] = set()
+    for path in list((ROOT / "app" / "static" / "js").glob("*.js")) + \
+            list((APP / "templates").glob("*.html")):
+        text = path.read_text(encoding="utf-8")
+        # Two ways a key reaches a form. The generated forms list it as the
+        # first entry of a field row; a hand-written input carries it as a
+        # data-setting attribute. Matched as a CALL-shaped pattern in both
+        # cases rather than as a bare word, so a key merely mentioned in help
+        # text or a comment does not count as a box.
+        on_forms |= set(re.findall(r"\[\s*'([a-z0-9_]+)'\s*,\s*'(?:text|number|"
+                                   r"password|select|bool|textarea)'", text))
+        on_forms |= set(re.findall(r'data-set(?:ting)?="([a-z0-9_]+)"', text))
+        on_forms |= set(re.findall(r"data-set(?:ting)?='([a-z0-9_]+)'", text))
+        # A control wired by hand posts the key in its own save call, e.g.
+        # `settings: { greenlight_mode: ... }`. That IS a box on a screen.
+        on_forms |= set(re.findall(r"settings:\s*\{\s*([a-z0-9_]+)\s*:", text))
+
+    if not on_forms:
+        fail("no settings fields could be read out of the admin screens — "
+             "this check is blind")
+        return
+
+    missing = declared - on_forms - set(NOT_ON_THE_SETTINGS_FORMS)
+
+    for key in sorted(missing - SETTINGS_WITH_NO_BOX_YET):
+        fail(f"pipeline setting '{key}' has no box on any admin screen. Add "
+             f"it to SETTINGS_GROUPS in admin_pipeline.js, or to "
+             f"NOT_ON_THE_SETTINGS_FORMS in this file with the reason why "
+             f"nobody should type it")
+
+    still_missing = sorted(missing & SETTINGS_WITH_NO_BOX_YET)
+    if still_missing:
+        warn(f"{len(still_missing)} settings still have no box anywhere: "
+             + ", ".join(still_missing)
+             + " — the known backlog from 2026-09-03, in "
+               "SETTINGS_WITH_NO_BOX_YET")
+
+    # A backlog entry for something that HAS been given a box is a line
+    # claiming to excuse a defect that is fixed. Left in place it would go on
+    # tolerating that key if the box were ever removed again.
+    for key in sorted(SETTINGS_WITH_NO_BOX_YET - missing):
+        warn(f"'{key}' now has a box — delete it from "
+             f"SETTINGS_WITH_NO_BOX_YET so a future removal is caught")
+
+    # The exception list must not rot. A key removed from DEFAULTS leaves an
+    # entry here claiming to excuse something that no longer exists, and the
+    # next person reads that as coverage.
+    for key in sorted(set(NOT_ON_THE_SETTINGS_FORMS) - declared):
+        warn(f"NOT_ON_THE_SETTINGS_FORMS still lists '{key}', which is no "
+             f"longer a pipeline setting — remove the line")
+
+
 CHECKS = [
     ("python compiles",           check_python_compiles),
     ("no undefined names",        check_undefined_names),
     ("settings keys declared",    check_settings_keys_declared),
+    ("settings reachable on the dashboard", check_settings_are_reachable),
     ("activity log calls valid",  check_activity_log_calls),
     ("cross-module calls exist",  check_module_attributes),
     ("javascript parses",         check_js_parses),

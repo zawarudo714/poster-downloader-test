@@ -375,7 +375,12 @@ class SearchCache(Base):
     id              = Column(Integer, primary_key=True)
     master_title_id = Column(Integer, ForeignKey("master_titles.id"), nullable=False, index=True)
     user_id         = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    variant         = Column(String(16), nullable=False)   # 'normal' | 'deep'
+    # 'normal' · 'deep' · 'p:<12 hex>' for one of the owner's own search
+    # phrasings. The phrasing variant is a HASH OF THE WORDS rather than the
+    # button's position, so editing a phrasing misses the cache by itself and
+    # nobody has to remember to clear anything. 14 characters — the column has
+    # 16, so lengthening that hash needs this column widened first.
+    variant         = Column(String(16), nullable=False)
     payload_json    = Column(Text, nullable=False)
     created_at      = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 

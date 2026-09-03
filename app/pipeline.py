@@ -485,6 +485,33 @@ DEFAULTS: dict[str, Any] = {
     # by image URL. Multiple lines exist because one phrase rarely covers a
     # whole niche. At half a cent a query, paying beats being clever.
     "brave_query_deep":   '"{title}"',
+    # ── EXTRA PHRASINGS THE WORKER CAN TRY, ONE PER LINE ─────────────────
+    #
+    # Each line becomes ONE MORE BUTTON on the worker screen, in this order.
+    # A line is a whole sentence with the place dropped into it, so the words
+    # can go before it, after it, or both:
+    #
+    #     places to visit in {title}
+    #     {title} skyline
+    #     aerial view of {title}
+    #
+    # Blank is the normal state and adds no buttons at all, so a project that
+    # never wanted this looks exactly as it did before.
+    #
+    # WHY THESE EXIST AT ALL. Brave is a much smaller search engine than
+    # Google, and the same place answers very differently to different
+    # phrasing. Which words work is not something anybody can reason out in
+    # advance — it has to be tried on real places. Putting the phrasings in a
+    # settings box means the owner runs that experiment himself, in a
+    # browser, without waiting for a deploy.
+    #
+    # EVERY LINE MUST CONTAIN {title}. set_setting() refuses one that does
+    # not, and the reason is worth stating: a phrasing with no placeholder
+    # searches the SAME literal words for every place in the catalogue. It
+    # does not fail. It returns a full grid of plausible photographs of
+    # somewhere else, for every title, while the screen looks completely
+    # normal — and it charges for each one.
+    "brave_search_phrasings": "",
     "brave_min_dimension": 300,
     "brave_results_per_query": 50,
     # Off by default — turn it on only if a bug starts looping.
@@ -522,6 +549,19 @@ DEFAULTS: dict[str, Any] = {
     # workspace. Changing it does NOT retroactively affect already-processed
     # images — each ProcessedImage records the script/style version it used.
     "openai_style_image": "",
+    # WHETHER THE REFERENCE IMAGE IS SENT AT ALL.
+    #
+    # Whether a style reference is wanted is a property of the PROMPT, not of
+    # the project and not of the model. A prompt that says "transform the
+    # style of the second image to the style of the first" needs two images.
+    # A prompt that describes the look in words needs one. Both are ordinary
+    # things to want, and the owner is expected to rewrite the prompt when a
+    # new model appears — so this has to be a switch he can reach, next to
+    # the prompt, rather than a fact baked into the code.
+    #
+    # Default ON, because that is what every existing project does. A default
+    # that changes behaviour on upgrade is not a default, it is a bug.
+    "openai_use_style_image": True,
     # ── Storage access from THIS server ──────────────────────────────────
     # The Windows node writes to the drive letter in `storage_root`. This
     # server has no such drive, so the GPT stage pushes over SFTP to the same
@@ -838,6 +878,7 @@ def set_setting(
     """Persist a setting. Pass project to scope it to one niche."""
     if key not in DEFAULTS:
         raise KeyError(f"Unknown pipeline setting {key!r}. Add it to DEFAULTS.")
+    _reject_a_search_line_with_no_place_in_it(key, value)
 
     slug = project.slug if isinstance(project, Project) else project
     full = f"{SETTINGS_ROOT}.{slug}.{key}" if slug else f"{SETTINGS_ROOT}.{key}"
@@ -856,6 +897,82 @@ def set_setting(
         row.value = raw
         row.updated_by = by
         row.updated_at = datetime.utcnow()
+
+
+# The three settings that hold search phrasings. Named once, here, because a
+# second list of them somewhere else is a list somebody forgets to extend.
+SEARCH_QUERY_KEYS = ("brave_query_normal", "brave_query_deep",
+                     "brave_search_phrasings")
+
+
+def _reject_a_search_line_with_no_place_in_it(key: str, value) -> None:
+    """
+    Refuse a search phrasing that does not say WHICH place to look for.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS IS A REFUSAL AND NOT A WARNING
+    ════════════════════════════════════════════════════════════════════════
+    A phrasing is a sentence with `{title}` standing in for the place, such
+    as "places to visit in {title}". Leave the placeholder out and the line
+    still works perfectly: it searches those exact words, for every title in
+    the catalogue, and returns a full grid of real photographs.
+
+    Nothing on any screen would look wrong. The worker sees results, picks
+    one, and saves a photograph of somewhere else under a place name. Every
+    query is paid for. The first sign would be a customer complaint.
+
+    That is the shape rule 5 calls "make it impossible rather than
+    detectable", so the value is refused on the way in. It sits in
+    set_setting() rather than in the settings route because a guard only one
+    of several paths calls is a guard that has already been walked around —
+    the import scripts and sync_projects() write settings too.
+    """
+    if key not in SEARCH_QUERY_KEYS:
+        return
+    bad = [line.strip() for line in str(value or "").splitlines()
+           if line.strip() and "{title}" not in line and "{artist}" not in line]
+    if bad:
+        raise KeyError(
+            f"This search phrasing does not say which place to look for: "
+            f"{bad[0]!r}. Every line has to contain {{title}} — for example "
+            f"'places to visit in {{title}}'. Without it, every title in the "
+            f"catalogue would search for the same words and bring back "
+            f"photographs of somewhere else."
+        )
+
+
+def phrasing_cache_key(phrasing: str) -> str:
+    """
+    The search-cache name for one phrasing — a hash of the WORDS.
+
+    Not the button's position. The phrasings exist to be edited constantly,
+    and a cache keyed on "button 2" would serve yesterday's results under
+    today's wording: the grid fills, nothing errors, and the comparison the
+    owner is running is quietly against the phrasing he just replaced.
+
+    Hashing the sentence makes an edit miss the cache by itself. There is no
+    stale entry to clear and nothing to remember, which is the same reason
+    the quiet window is a window rather than a switch.
+
+    14 characters. SearchCache.variant holds 16, so lengthening this needs
+    that column widened first — said in both places on purpose.
+    """
+    import hashlib
+    return "p:" + hashlib.sha1(phrasing.encode("utf-8")).hexdigest()[:12]
+
+
+def search_phrasings(db: Session, *, project=None) -> list[str]:
+    """
+    The extra phrasing buttons for this project, in the order they appear.
+
+    Derived from the settings text every time it is asked for, never stored
+    as a count. The owner types three lines and gets three buttons; he
+    deletes one and gets two. There is no separate "how many" field that
+    could disagree with the list, which is the same reason the quiet window
+    is a window rather than a switch.
+    """
+    raw = str(get_setting(db, "brave_search_phrasings", project=project) or "")
+    return [line.strip() for line in raw.splitlines() if line.strip()]
 
 
 def clear_setting(db: Session, key: str, *, project: Optional[Project | str] = None) -> None:
@@ -970,10 +1087,15 @@ PROJECT_DEFS: list[dict] = [
         "name":             "Travel Locations",
         "source_site":      "brave",
         "target_site":      "fineartamerica",
-        # STILL TO BE SPECIFIED BY THE OWNER. Two is the MUSIK figure and is
-        # a placeholder, not a decision — it sets how many images a worker
-        # saves per location and therefore the size of the whole catalogue.
-        "images_per_title": 2,
+        # ONE. Stated by the owner 2026-09-03: the worker picks a single
+        # image per location. Was 2, inherited from MUSIK as a placeholder.
+        #
+        # This is not only a count. At two-plus, a listing needs a suffix to
+        # tell the images apart — "Santorini #A", "#B" — and the whole
+        # 100-character budget dance in render_remote_title() exists to stop
+        # FAA truncating that suffix away. At ONE there is no suffix, so the
+        # listing title is simply the name. See title_template below.
+        "images_per_title": 1,
         "notes":            "Travel locations: Brave image search -> GPT Image 2 -> FineArtAmerica.",
         "item_noun":        "image",
         "item_noun_plural": "images",
@@ -999,22 +1121,50 @@ PROJECT_DEFS: list[dict] = [
             # check in _source_search_url() — without this the project
             # inherits whatever the global default happens to be.
             "source_search_url": "",
-            # "Santorini #A" / "Santorini #B". No year — locations have none.
+            # JUST THE NAME. No suffix, because images_per_title is 1 and a
+            # suffix only exists to tell several images of one place apart.
+            # It was "{title} #{letter}", which at one image per title would
+            # have listed every location as "Santorini #A".
             #
-            # The '#' is doing real work: a place called "Victoria A" sitting
-            # beside a plain "Victoria" makes a bare letter suffix ambiguous
-            # at a glance in a list of 500 listings.
-            "title_template": "{title} #{letter}",
+            # This matters more than it looks. FAA renumbers a title the
+            # account already holds — "Los Angeles" twice becomes "Los
+            # Angeles #2" — so the title is half of the key that finds a
+            # listing again, and the catalogue was made unique on exactly
+            # this string. Adding anything to it here would break that
+            # uniqueness after the fact.
+            "title_template": "{title}",
+            # Seven tags, APPENDED to whatever FAA generates from the title
+            # rather than replacing it — same rule as the old niche. Stated
+            # by the owner 2026-09-03. Leading comma on purpose: the form is
+            # pre-filled and this is added to the end of it.
+            #
+            # DESCRIPTIVE, NOT COMMERCIAL. "wall art", "home decor" and
+            # "gift for traveler" were here and are gone: they describe the
+            # PRODUCT, which FAA already knows it is selling, and say nothing
+            # about the picture.
+            #
+            # EVERY WORD HERE MUST BE TRUE OF ALL 88,970 PLACES, because the
+            # same seven go on every listing. That rules out the obvious
+            # ones: "town" is wrong on a mountain, "city" wrong on a lake,
+            # "nature" wrong on a cathedral. The per-place word already
+            # exists — the sheet's `description` column carries the kind —
+            # but this setting is static by design, so it cannot reach it.
+            # See render_keywords() if that becomes worth doing.
+            "keywords_static": (", travel, destination, tourism, landscape, "
+                                "scenery, landmark, world"),
             # ── STILL TO BE SPECIFIED BY THE OWNER ──────────────────────
-            # These three are the project's whole personality and none of
-            # them can be guessed. Placeholders below are deliberately
-            # generic so a wrong value is obvious rather than plausible.
+            # Two left, and neither can be guessed. The placeholder below is
+            # deliberately generic so a wrong value is obvious rather than
+            # plausible.
             #
             #   brave_query_normal  what the worker's SEARCH button asks for
-            #   keywords_static     the tags appended to every FAA listing
             #   openai_prompt       how the sourced photo becomes artwork
-            "brave_query_normal": '"{title}" travel photography',
-            "keywords_static": ", travel, wall art, landscape, destination",
+            #
+            # NOTE on brave_query_normal: `{title}` here now substitutes the
+            # sheet's `search_query` column, not the worker-facing name — so
+            # this template is only the STYLING (a suffix, quotes), and the
+            # subject already carries its own country. See search_text().
+            "brave_query_normal": "{title}",
         },
     },
 ]

@@ -102,7 +102,8 @@ def _setting(db: Session, key: str, project=None):
     return get_setting(db, key, project=project)
 
 
-def build_queries(db, artist: str, *, deep: bool, project=None) -> list[str]:
+def build_queries(db, artist: str, *, deep: bool, project=None,
+                  template: str | None = None) -> list[str]:
     """
     Render the configured query templates for one master title.
 
@@ -131,8 +132,14 @@ def build_queries(db, artist: str, *, deep: bool, project=None) -> list[str]:
     literal text "{artist}" — which returns nothing, reports nothing, and
     looks exactly like a project with no results.
     """
-    key = "brave_query_deep" if deep else "brave_query_normal"
-    raw = str(_setting(db, key, project) or "")
+    # A phrasing button hands its own sentence in directly. Everything else
+    # reads the setting. The caller passes the WORDS rather than a button
+    # number, so nothing in here has to know the buttons exist.
+    if template is not None:
+        raw = str(template)
+    else:
+        key = "brave_query_deep" if deep else "brave_query_normal"
+        raw = str(_setting(db, key, project) or "")
     clean = normalise_for_search(artist)
     out = []
     for line in raw.splitlines():
@@ -229,7 +236,8 @@ def _parse(raw: list[dict], min_dimension: int) -> tuple[list[ImageResult], int]
 
 # ── Public entry point ──────────────────────────────────────────────────────
 
-def search(db: Session, artist: str, *, deep: bool = False, project=None) -> SearchOutcome:
+def search(db: Session, artist: str, *, deep: bool = False, project=None,
+           template: str | None = None) -> SearchOutcome:
     """
     Run a normal or deep search and return de-duplicated results.
 
@@ -253,7 +261,8 @@ def search(db: Session, artist: str, *, deep: bool = False, project=None) -> Sea
 
     per_query = int(_setting(db, "brave_results_per_query", project) or 50)
     min_dim = int(_setting(db, "brave_min_dimension", project) or 300)
-    queries = build_queries(db, artist, deep=deep, project=project)
+    queries = build_queries(db, artist, deep=deep, project=project,
+                            template=template)
     if not queries:
         raise BraveError("No search query template configured")
 

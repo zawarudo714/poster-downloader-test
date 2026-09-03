@@ -82,6 +82,12 @@ def pipeline_page(
         {"user": admin, "active_tab": "pipeline",
          "project": project,
          "processor": project.processor,
+         # 'inpage' means the workers search inside the site, so the Brave
+         # phrasing boxes have something to govern. An 'external' project
+         # sends its workers to another site and must not be shown search
+         # settings that would do nothing — the same reasoning as the
+         # processor panels below it.
+         "search_mode": project.search_mode,
          "has_review_gate": bool(project.has_review_gate),
          "item_noun": project.item_noun,
          "item_nouns": project.item_noun_plural},

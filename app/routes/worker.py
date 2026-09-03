@@ -46,7 +46,9 @@ from ..config import (
 )
 from ..db import get_db
 from ..models import ActivityLog, MasterTitle, Project, Revision, SavedPoster, User
-from ..pipeline import resolve_project
+from ..pipeline import (resolve_project,
+                        phrasing_cache_key as P_phrasing_cache_key,
+                        search_phrasings as P_search_phrasings)
 from ..projects import (
     active_project, allowed_projects, remember_project, scope_titles,
     set_project_cookie,
@@ -504,11 +506,16 @@ def _state_payload(db: Session, user: User, project=None) -> dict:
 def dashboard(request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)):
     if user.role == "admin":
         return RedirectResponse("/admin", status_code=302)
-    state = _state_payload(db, user, _worker_project(request, db, user))
+    project = _worker_project(request, db, user)
+    state = _state_payload(db, user, project)
     return templates.TemplateResponse(
         request,
         "user_dashboard.html",
-        {"user": user, "state": state, "active_tab": "dashboard"},
+        {"user": user, "state": state, "active_tab": "dashboard",
+         # The owner's extra search phrasings, rendered as buttons. Read here
+         # rather than per title because a phrasing belongs to the PROJECT —
+         # every title in it gets the same buttons.
+         "search_phrasings": P_search_phrasings(db, project=project)},
     )
 
 
@@ -644,6 +651,7 @@ def api_master(
 def api_search(
     master_id: int,
     deep: int = Query(0),
+    phrase: int = Query(-1),
     refresh: int = Query(0),
     cache_only: int = Query(0),
     user: User = Depends(require_user),
@@ -661,7 +669,34 @@ def api_search(
     from ..models import SearchCache
 
     t = _load_my_master(db, user, master_id)
-    variant = "deep" if deep else "normal"
+    project = resolve_project(db, t.project_id)
+
+    # ── Which words are we searching with? ──────────────────────────────
+    #
+    # THE CACHE IS KEYED ON THE WORDS, NOT ON THE BUTTON NUMBER, and that is
+    # the whole safety of this feature. The phrasings are meant to be edited
+    # constantly — that is what they are for. Key the cache on "button 2" and
+    # editing button 2 leaves yesterday's results sitting there under today's
+    # phrasing: the grid fills, nothing errors, and the comparison the owner
+    # is running is quietly against the old words. Keying on a hash of the
+    # sentence means an edited phrasing simply misses the cache and searches
+    # fresh, with nothing to remember to clear.
+    phrasings = P_search_phrasings(db, project=project)
+    template = None
+    if phrase >= 0:
+        if phrase >= len(phrasings):
+            # The admin edited the list while this page was open. Say so
+            # rather than silently searching a different phrasing than the
+            # button the worker actually pressed.
+            return JSONResponse(
+                {"ok": False,
+                 "message": "The search phrasings were changed. Refresh the "
+                            "page to get the current buttons."},
+                status_code=409)
+        template = phrasings[phrase]
+        variant = P_phrasing_cache_key(template)
+    else:
+        variant = "deep" if deep else "normal"
 
     if not refresh:
         cached = (
@@ -680,10 +715,10 @@ def api_search(
         # a fresh paid query they never asked for. Cached results still show
         # (they cost nothing); otherwise the grid says "press SEARCH".
         return JSONResponse({"ok": True, "variant": variant, "results": [],
-                             "queries": [], "filtered_small": 0,
+                             "queries": [], "phrase_used": template or "",
+                             "filtered_small": 0,
                              "cached": False, "not_searched": True})
 
-    project = resolve_project(db, t.project_id)
     try:
         # Not t.title. The words that find a PHOTOGRAPH are not always the
         # words on the poster: "Niagara Falls" prints bare and searches as
@@ -691,7 +726,8 @@ def api_search(
         # search_text() falls back to the title, so a sheet without the
         # column searches exactly as it used to.
         from ..pipeline import search_text
-        outcome = search(db, search_text(t), deep=bool(deep), project=project)
+        outcome = search(db, search_text(t), deep=bool(deep), project=project,
+                         template=template)
     except BraveError as e:
         log_activity(db, user=user, action="search_failed", target_type="master_title",
                      target_id=t.id, details={"error": str(e), "variant": variant})
@@ -701,6 +737,10 @@ def api_search(
     payload = {
         "ok": True,
         "variant": variant,
+        # The words actually used, echoed back so the worker screen can show
+        # them. A button that says one thing while the server searched
+        # another is exactly the confidently-wrong screen to avoid.
+        "phrase_used": template or "",
         "queries": outcome.queries,
         "filtered_small": outcome.filtered_small,
         "results": [r.as_dict() for r in outcome.results],

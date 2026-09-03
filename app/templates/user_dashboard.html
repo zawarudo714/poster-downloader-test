@@ -212,6 +212,29 @@
         <button class="btn btn-accent" data-action="search-save" disabled>SAVE&nbsp;SELECTED</button>
       </div>
     </div>
+    {#
+      EXTRA PHRASINGS — one button per line the admin has typed on the
+      Pipeline page. Nothing renders at all when there are none, which is the
+      normal state, so a project that never wanted these looks untouched.
+
+      THE BUTTON SHOWS THE PHRASING ITSELF, not a nickname. These exist to be
+      compared against each other, and a button reading "TRY 2" tells you
+      nothing about why its results differ from button 1. Showing the words
+      also means the button cannot drift out of step with what it searches.
+
+      A second row rather than more buttons in the row above: SEARCH and DEEP
+      SEARCH are the everyday ones and must not get lost in a line of five.
+    #}
+    {% if search_phrasings %}
+      <div class="search-phrasings">
+        <span class="muted mono search-phrasings-label">ALSO TRY</span>
+        {% for phrasing in search_phrasings %}
+          <button class="btn btn-ghost btn-tiny" data-action="search-phrase"
+                  data-phrase-index="{{ loop.index0 }}"
+                  title="Searches: {{ phrasing }}">{{ phrasing }}</button>
+        {% endfor %}
+      </div>
+    {% endif %}
     <div class="search-note muted" data-search-note hidden></div>
     <div class="search-grid" data-search-grid></div>
 

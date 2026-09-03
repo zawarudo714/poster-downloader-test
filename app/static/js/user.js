@@ -1432,7 +1432,6 @@ function wireSearch(box, title) {
   // It takes them TO the save button, and they press that.
   if (jump) jump.addEventListener("click", () => { backToActions(); jump.hidden = true; });
 
-  let variant    = 'normal';
   let results    = [];
 
   function esc(v) {
@@ -1489,8 +1488,12 @@ function wireSearch(box, title) {
     refreshBar();
   }
 
+  // `kind` is 'normal', 'deep', or a number — the index of one of the
+  // owner's own phrasings. A number rather than the words themselves because
+  // the server must decide what gets searched: letting the page post a
+  // sentence would let anyone with the console open spend Brave credits on
+  // anything they liked.
   async function run(kind, force, cacheOnly) {
-    variant = kind;
     selected.clear();
     refreshJump();
     if (!cacheOnly) {
@@ -1499,7 +1502,9 @@ function wireSearch(box, title) {
     }
     note.hidden = true;
     try {
+      const phraseIndex = (typeof kind === 'number') ? kind : -1;
       const qs = `?deep=${kind === 'deep' ? 1 : 0}`
+               + (phraseIndex >= 0 ? `&phrase=${phraseIndex}` : '')
                + (force ? '&refresh=1' : '')
                + (cacheOnly ? '&cache_only=1' : '');
       const r  = await fetch(`/api/search/${title.id}${qs}`);
@@ -1518,7 +1523,11 @@ function wireSearch(box, title) {
         return;
       }
       results = d.results || [];
+      // The words the SERVER used, never the words on the button. If those
+      // two ever disagree — because the admin edited the list a moment ago —
+      // the worker needs to see which one actually happened.
       status.textContent = `${results.length} result${results.length === 1 ? '' : 's'}`
+                         + (d.phrase_used ? ` · ${d.phrase_used}` : '')
                          + (d.cached ? ' · cached' : '');
       if (d.filtered_small) {
         note.hidden = false;
@@ -1539,6 +1548,11 @@ function wireSearch(box, title) {
      .addEventListener('click', () => run('normal', false));
   box.querySelector('[data-action="search-deep"]')
      .addEventListener('click', () => run('deep', false));
+  // querySelectorAll, because there are as many of these as the admin typed
+  // lines — possibly none, in which case this loop simply does nothing.
+  box.querySelectorAll('[data-action="search-phrase"]').forEach((b) => {
+    b.addEventListener('click', () => run(Number(b.dataset.phraseIndex), false));
+  });
   box.querySelector('[data-action="search-clear"]')
      .addEventListener('click', () => { selected.clear(); refreshBar(); });
 

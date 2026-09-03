@@ -68,10 +68,28 @@
     // Only rendered when the project declares processor = 'gpt'; the
     // template omits the containers entirely otherwise, and
     // renderSettingsGroup() skips a group whose container isn't present.
+    // ── In-page image search ──────────────────────────────────────────
+    // These had NO box on this page at all until 2026-09-03 — they were in
+    // the code defaults and nowhere else, so the one thing the owner most
+    // needs to experiment with was the one thing he could not touch without
+    // a deploy. Exactly the defect the standing rule about the dashboard is
+    // about.
+    search: [
+      ['brave_query_normal',  'text',     'SEARCH button',
+       'What the plain SEARCH button asks Brave for. Write it as a sentence with {title} where the place name goes, for example: "{title}" or photo of {title}. The place already carries its own country, so you do not need to add one.'],
+      ['brave_query_deep',    'textarea', 'DEEP SEARCH button',
+       'One phrasing per line. DEEP SEARCH runs every line and merges the results into one grid, so it costs one paid query per line. Use it when a single phrasing keeps missing things.'],
+      ['brave_search_phrasings', 'textarea', 'Extra phrasing buttons',
+       'One phrasing per line, and each line becomes ONE MORE BUTTON on the worker screen, in this order. Every line must contain {title}. Leave this blank and no extra buttons appear at all. For example: places to visit in {title} / {title} skyline / aerial view of {title}.'],
+      ['brave_results_per_query', 'number', 'Results per search', 'How many images Brave is asked for each time. 50 is a full screen to scroll; 100 is the most it will give.'],
+      ['brave_min_dimension', 'number', 'Smallest usable image (px)', 'An image smaller than this on BOTH sides is hidden before the worker sees it. The count of what was hidden is shown under the grid.'],
+    ],
     gpt: [
       ['openai_model',    'text',   'Model',    'gpt-image-2 unless you have a reason.'],
       ['openai_size',     'select', 'Size',     'auto lets the model choose a ratio to suit the photo. Larger sizes cost proportionally more.', ['auto', '1024x1024', '1024x1536', '1536x1024']],
       ['openai_quality',  'select', 'Quality',  'low is roughly a fifth the price of medium and is upscaled afterwards anyway.', ['auto', 'low', 'medium', 'high']],
+      ['openai_use_style_image', 'bool', 'Send the style reference image',
+       'On, the style reference is sent as the FIRST image and the worker\'s photo as the second — so the prompt can say things like "the style of the first image". Off, only the worker\'s photo is sent and the prompt has to describe the look in words. Match this to the prompt you have written: if the prompt talks about two images, this must be on.'],
       ['gpt_review_required', 'bool', 'Review images before upload', 'On, every generated image waits for you on the Review Images tab. Off, they go straight to the upload queue. Turning it OFF does not release what is already waiting — those still need approving, so nothing is ever listed that you never looked at.'],
     ],
     upscale: [

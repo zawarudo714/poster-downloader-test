@@ -195,6 +195,21 @@ def generate(db: Session, *, source: Path, style: Path, project=None,
     Order matters: the style reference is the FIRST image and the source
     photo is the SECOND, because the prompt refers to them that way.
 
+    ════════════════════════════════════════════════════════════════════════
+    THE STYLE REFERENCE IS OPTIONAL, AND THE PROMPT DECIDES
+    ════════════════════════════════════════════════════════════════════════
+    `openai_use_style_image` switches it off, in which case only the worker's
+    photo is sent. That is not a preference about quality — it is about which
+    prompt is written. "Transform the style of the second image to the style
+    of the first" needs two pictures. A prompt that describes the look in
+    words needs one, and sending a reference alongside it confuses the model
+    into blending two instructions.
+
+    The decision is read HERE rather than by the caller, so there is one
+    place that knows how many images go in the request. A caller deciding it
+    and a builder assuming it is the shape that produced the Chrome-profile
+    bug: two copies of one rule, drifting apart in silence.
+
     Raises PermanentFailure or TransientFailure. Never returns partial work.
     """
     from .pipeline import get_secret, get_setting
@@ -206,9 +221,12 @@ def generate(db: Session, *, source: Path, style: Path, project=None,
     api_key = get_secret(db, "openai_api_key", project=project)
     if not api_key:
         raise PermanentFailure("No OpenAI API key configured.", kind="auth")
-    if not style.is_file():
+    use_style = bool(get_setting(db, "openai_use_style_image", project=project))
+    if use_style and not style.is_file():
         raise PermanentFailure(
-            "No style reference image uploaded. Set one on the Pipeline page.",
+            "The prompt is set to use a style reference image, but none has "
+            "been uploaded. Either upload one on the Pipeline page, or turn "
+            "off 'Send the style reference image' there.",
             kind="bad_request")
     if not source.is_file():
         raise PermanentFailure(f"Source image is missing: {source}", kind="bad_request")
@@ -225,7 +243,16 @@ def generate(db: Session, *, source: Path, style: Path, project=None,
     if quality != "auto":
         data["quality"] = quality
 
-    files = [("image[]", _part(style)), ("image[]", _part(source))]
+    if use_style:
+        # The reference FIRST. Every prompt that mentions two pictures calls
+        # the reference "the first image", so the order is part of the
+        # instruction rather than a detail — swap it and the model styles the
+        # reference to look like the photograph.
+        files = [("image[]", _part(style)), ("image[]", _part(source))]
+        emit("sending the style reference and the photo")
+    else:
+        files = [("image[]", _part(source))]
+        emit("sending the photo only — the style reference is switched off")
     headers = {"Authorization": f"Bearer {api_key}"}
 
     started = time.time()

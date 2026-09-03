@@ -73,8 +73,15 @@
             <a href="/admin/skipped"   class="navlink {% if active_tab == 'skipped' %}active{% endif %}">Skipped</a>
             {# Only projects whose output needs judging get this. Photoshop is
                deterministic; GPT is not. #}
+            {# NOT "Review Images". The tab above renders "Review " plus the
+               project's own plural noun, and travel's noun IS "images" — so
+               both tabs read REVIEW IMAGES and nothing on screen says which
+               is which. They are different jobs on different things: that
+               one judges the photograph the WORKER found, this one judges
+               the artwork GPT MADE from it. A label that needs you to know
+               the code is the wrong label. #}
             {% if pctx.get('review_gate') %}
-              <a href="/admin/pipeline/review" class="navlink {% if active_tab == 'review' %}active{% endif %}">Review&nbsp;Images</a>
+              <a href="/admin/pipeline/review" class="navlink {% if active_tab == 'review' %}active{% endif %}">Approve&nbsp;Artwork</a>
             {% endif %}
             <a href="/admin/pipeline"  class="navlink {% if active_tab == 'pipeline' %}active{% endif %}">Pipeline</a>
             <a href="/admin/stats"     class="navlink {% if active_tab == 'stats' %}active{% endif %}">Stats</a>

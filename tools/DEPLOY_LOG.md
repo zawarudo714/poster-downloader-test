@@ -15,6 +15,7 @@ cost far more to read, answer a different question, and on a mounted working
 copy `git status` cannot refresh its index — it reports stale answers with
 no warning.
 
+- **2026-09-03 11:39** · `80b64fa7` · v143 · v143 — two names a rule cannot rebuild, and the number column
 - **2026-09-03 11:09** · `785bf4ba` · v142 · deploy v142
 - **2026-08-27 18:40** · `f32537ec` · v142 · deploy v142
 - **2026-08-27 18:33** · `0eccaf90` · v141 · deploy v141
@@ -44,4 +45,3 @@ no warning.
 - **2026-08-25 10:54** · `dcc9c48d` · deploy v119
 - **2026-08-25 09:55** · `1eb9f747` · deploy v117
 - **2026-08-25 09:50** · `272011a2` · deploy v116
-- **2026-08-25 09:44** · `29106305` · Listing check now tells a REMOVED listing (410) apart from an address that

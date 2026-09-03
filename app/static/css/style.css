@@ -4602,6 +4602,21 @@ label.inline-check {
    buttons pressed on every single title are the two easiest to reach, and
    the secondary ones (DEEP SEARCH, CLEAR) sit inboard where a mis-tap is
    less likely and less costly. */
+/* The owner's own search phrasings. A wrapping row of small buttons, each
+   showing the sentence it searches. Left-aligned and quieter than the row
+   above, because SEARCH is the everyday button and these are experiments. */
+.search-phrasings {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.search-phrasings-label { opacity: .7; letter-spacing: .06em; }
+/* Long phrasings are allowed to be long — the words ARE the label, so
+   truncating one would hide the only thing that tells two buttons apart. */
+.search-phrasings .btn { text-transform: none; }
+
 .search-head {
   display: flex;
   align-items: center;

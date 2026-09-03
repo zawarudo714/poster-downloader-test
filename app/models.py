@@ -561,10 +561,10 @@ class ChatReadState(Base):
 #     worker side, so a new marketplace is a new worker module plus a new
 #     settings block — not a schema change.
 #
-#  4. THE DATABASE IS THE ONLY SOURCE OF TRUTH. The legacy JSON files
-#     (faa_upload_tracking.json, faa_content_data.json, faa_config.json,
-#     faa_settings.json) are imported once by scripts/migrate_pipeline.py
-#     and then retired. Do not reintroduce sidecar state files.
+#  4. THE DATABASE IS THE ONLY SOURCE OF TRUTH. Do not reintroduce sidecar
+#     state files. An earlier incarnation of this system kept its state in
+#     JSON files beside the images, and every one of them became a second
+#     record that could disagree with the first.
 # ═════════════════════════════════════════════════════════════════════════════
 
 

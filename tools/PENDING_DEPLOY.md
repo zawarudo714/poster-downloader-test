@@ -1,63 +1,81 @@
 # Not yet deployed
 
-Written but NOT running on the server.
+**The strip-down to a single Travel Locations project.** Written and green,
+but intended for a FRESH EMPTY DATABASE on main, not as an upgrade over the
+existing one. Do not deploy this on top of the old data.
 
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.
 
----
+## What is waiting
 
-**Waiting: v142 — review pass part 3: v140 created an immortal claim, and
-the GPT stage was never audited** · targets 178.105.232.196 (test box)
+* **One project.** `DEFAULT_PROJECT_SLUG` is `travel`; `PROJECT_DEFS` holds
+  only Travel Locations — Brave in-page -> GPT Image 2 -> FineArtAmerica,
+  review gate on, no year, no content type.
+* **Global defaults made niche-neutral**, because a global default is what
+  the next project inherits before anyone configures it. `title_template`
+  lost `{year}`, `keywords_static` is blank, `source_search_url` is blank,
+  the Brave queries are generic, and the GPT prompt no longer says "zoom in
+  to the upper body areas".
+* **`build_queries()` accepts `{title}` as well as `{artist}`.** The old
+  placeholder was hardcoded and is a music word.
+* **Deleted, all dead with the movie catalogue:** `archive_index` and
+  everything behind it (two admin endpoints, two node endpoints, the READ THE
+  STORAGE BOX panel, its setting, its tests) · `scripts/migrate_pipeline.py`
+  (920 lines; startup already does create_all -> migrate_schema ->
+  sync_projects) · `backfill_upload_status.py` ·
+  `fix_crossproject_processing.py` · `tools/migrate_gui.py` ·
+  the rehearsal db and note · `fineartamerica-bulk-delete.md`.
+* **Photoshop is DORMANT, not deleted.** Hidden by `processor`. The test
+  panels no longer fall back to assuming Photoshop when there is no active
+  project — no project now means no tests.
+* **New preflight check:** a reference in CLAUDE.md to a document that does
+  not exist now fails. Sabotage-tested — it goes red.
+* Dev seed data is travel locations, keeping the awkward-character coverage.
 
-**Deploy:** yes. **Copy `worker_service/` to the node:** NO — server-side
-only, `AGENT_VERSION` stays 1.28.0. **Schema change:** none.
+## Found by the owner running it — 2026-09-01
 
-## The finding: my own v140 fix created a wedge
+Two real defects the static checks could not see. Both fixed here.
 
-The chain, traced end to end and reproduced:
+* **`sync_projects()` never removed a project deleted from the registry.**
+  It only created and updated, so stripping `PROJECT_DEFS` did nothing to a
+  database that already had the old rows — the movie project kept its card,
+  its place in the switcher, and workers could still stand in it. It is now
+  switched OFF (never deleted; titles, posters and payment history point at
+  that row). The asymmetry is deliberate: sync only ever turns a project
+  off, never on, so the standing rule that a deploy must not re-enable
+  something you switched off by hand still holds.
+* **The worker's empty-state hint said "click the Open TMDB link to find a
+  poster"** — hardcoded, shown in every project. It now reads from
+  `PD.searchMode`, `PD.sourceLabel` and `PD.noun`, so an in-page project is
+  told to search and tap.
 
-  1. `gpt_worker._claim_next` COMMITS the claim before returning.
-  2. `process_one` handles its three known failure shapes; anything OUTSIDE
-     them escaped to the cycle handler, whose `rollback` cannot undo a
-     committed claim. The poster stays at 'processing', claimed by 'server'.
-  3. Every GPT success writes `ProcessedImage(processed_by="server")`.
-  4. v140's reaper spares any claim whose owner produced evidence inside the
-     window — so while the worker is busy with OTHER posters, the wedged one
-     is spared forever. Before v140 it was freed in 45 minutes; after v140
-     it was immortal. **One day old, found by asking what the fix meant for
-     the one stage nobody audited.**
+**New Diagnostics invariant: `check_projects_match_registry`.** An active
+project the code no longer declares is now reported against the live
+database. Nothing mechanical could have caught the first defect — preflight
+proves nothing is DISCONNECTED, and registry-versus-database is a fact about
+data.
 
-## Fixed at the source, per rule 8
+## Verified
 
-  * `_cycle` now wraps each poster: any unexpected exception releases the
-    claim through `report_process_failure` — the same call the node's
-    report endpoint uses. Claim released, attempts bumped, error recorded;
-    past `process_max_attempts` it surfaces in the failure list instead of
-    retrying forever.
-  * `_run` releases all 'server' claims at worker startup — the same rule
-    as the node's first hello (v133/v140): a worker that just started is
-    not processing anything. Covers the crash-and-restart path the in-cycle
-    handler cannot.
+**By running:** preflight green on all 20 checks · 42 behaviour tests pass ·
+all 10 sabotages still caught · the new document check goes red when broken ·
+everything compiles.
 
-**Reproduced against real SQLite:** the wedged poster is spared by the v140
-reaper (immortal), the in-cycle handler frees it with correct semantics,
-and the startup release covers the restart case. No path now leaves a
-poster claimed forever.
+**NOT verified: the site has never been run against a database.** No FastAPI
+in the sandbox to boot it. `DEV_SETUP.bat` is the first real proof and only
+the owner can run it.
 
-## Also reviewed this part, NOT findings
+## Owner still to specify
 
-  * The v132/v133 JS wiring traced end to end: `reconcile()` →
-    `/api/overview` → `renderReconcile` → `unclassifiedNote`. The
-    `unclassified` fields genuinely travel.
-  * GPT's claim ORDERING is right — spend-cap check before the claim, three
-    failure shapes released per poster.
-  * `gpt_worker`'s heartbeat/watchdog structure: sound.
+`images_per_title` (2 is a placeholder), the Brave query, the FAA keywords,
+the GPT prompt, the listing title scheme, and the master sheet itself.
 
-### Files
+## Node — THE FOLDER MUST BE COPIED
 
-`app/gpt_worker.py`, `app/config.py` (141 → 142).
+`worker_service/` HAS CHANGED. `archive_index.py` is deleted there and
+`agent.py` no longer imports, builds or dispatches that stage.
 
-**After deploying:** the container restart itself exercises the startup
-release — the app log will say "released N claim(s) left over" if anything
-was stranded, or nothing if clean.
+`AGENT_VERSION` bumped **1.28.0 -> 1.29.0**. That number on the Nodes tab is
+the only thing that can tell the owner from the website whether the copy
+actually happened.

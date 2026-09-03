@@ -107,7 +107,7 @@
         '<p class="muted">Roughly ' + estimate(c.in_scope || 0,
           (data.settings || {}).listing_check_gap_ms)
         + '. Nothing is changed on the marketplace and nothing is changed '
-        + 'here — it only looks. Photoshop and uploads keep running in '
+        + 'here — it only looks. processing and uploads keep running in'
         + 'between, so it takes longer on a busy day.</p>';
       return;
     }
@@ -153,7 +153,7 @@
         + (s.working ? '' : '<p class="quota-note">Waiting for the worker '
             + 'machine to pick this up. If it stays here, check that the '
             + 'agent is running.</p>')
-        + '<p class="muted">Photoshop and uploads are NOT paused for this — '
+        + '<p class="muted">Processing and uploads are NOT paused for this —'
         + 'it only reads pages. This page updates itself.</p>'
         + '<p><button class="btn btn-ghost btn-tiny" data-action="stop" '
         + 'type="button">STOP</button> <span class="muted">— everything '
@@ -357,7 +357,7 @@
     if (a === 'start') {
       act(API + '/start', {},
           'Check every listing now?\n\nIt only reads pages — nothing on the '
-          + 'marketplace changes, and Photoshop and uploads keep running in '
+          + 'marketplace changes, and processing and uploads keep running in'
           + 'between.',
           function (r) {
             if (!r.queued) alert('Nothing to check.');

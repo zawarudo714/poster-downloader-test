@@ -42,7 +42,6 @@ from typing import Optional
 
 from .client import PipelineClient, PipelineError, load_config
 from .processor import ProcessStage
-from .archive_index import ArchiveIndexStage
 from .listing_check import ListingCheckStage
 from .store_health import StoreHealthStage
 from .uploader import UploadStage
@@ -61,7 +60,7 @@ from .uploader import UploadStage
 # either way. `check_worker_agent_current` in diagnostics.py now compares
 # what the machine reports against what this file says, so a stale copy is
 # reported instead of assumed.
-AGENT_VERSION = "1.28.0"
+AGENT_VERSION = "1.29.0"
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_CONFIG = HERE / "config.json"
@@ -85,7 +84,6 @@ class Agent:
         # the upload capability — same browser, same accounts, same profiles.
         self.store_health = StoreHealthStage(self.client, config, self.log)
         self.listing_check = ListingCheckStage(self.client, config, self.log)
-        self.archive_index = ArchiveIndexStage(self.client, config, self.log)
 
         self.hostname = socket.gethostname()
         self._last_idle_log = 0.0
@@ -267,8 +265,6 @@ class Agent:
                 result = self.store_health.act(job_id, payload)
             elif kind == "listing_check":
                 result = self.listing_check.run(job_id, payload)
-            elif kind == "archive_index":
-                result = self.archive_index.run(job_id, payload)
             elif kind == "test_upload":
                 result = self.uploader.test_upload(job_id, payload)
             elif kind == "process":

@@ -452,23 +452,6 @@
       </div>
     </section>
 
-    <section class="panel">
-      <div class="panel-head">
-        <span>FINISHED IMAGES ON THE STORAGE BOX
-          {{ info("Every image the pipeline finishes is written to the storage box and recorded here at the same moment, so this normally takes care of itself. It matters after something big — a migration, a restored backup, or images copied in from outside — because those files are on the drive with nothing in the database pointing at them. The worker machine has the drive mapped and this server does not, so the machine lists what is there and sends the paths back. It never replaces anything: a poster that already has a finished image on record is left exactly as it is, and a file matching no poster is reported rather than attached to something nearby. Safe to press twice.") }}
-        </span>
-        <span class="muted mono" data-archive-summary></span>
-      </div>
-      <div class="panel-body">
-        <p class="muted" data-archive-state>Reading…</p>
-        <div class="filter-row" style="margin-top:12px">
-          <button type="button" class="btn btn-accent"
-                  data-action="index-archive">READ THE STORAGE BOX</button>
-          <span class="muted mono" data-archive-status></span>
-        </div>
-      </div>
-    </section>
-
   </div>
 
   {# ═══════════════════════════════════════════════════════════════ #}
@@ -586,9 +569,22 @@
       would mean offering a button whose failure ("no node available") has
       nothing to do with the stage being tested.
     #}
-    {% set proc = (proj.processor if proj else 'photoshop') %}
+    {#
+      NO PROJECT MEANS NO TESTS, not "assume Photoshop".
 
-    {% if proc != 'gpt' %}
+      This used to fall back to 'photoshop', so a missing active project
+      rendered the node-job test panels — on an install that may have no
+      Photoshop project at all. That is the wrong direction to fail: it
+      offers buttons whose only possible outcome is "no node available",
+      about a stage this project does not have.
+
+      Same reasoning as NODE_PROCESSORS, which omits a processor rather than
+      guessing at one: showing nothing is recoverable, showing the wrong
+      thing gets believed.
+    #}
+    {% set proc = proj.processor if proj else none %}
+
+    {% if proc and proc != 'gpt' %}
     <section class="panel">
       <div class="panel-head">
         <span>1 · TEST DOWNLOAD

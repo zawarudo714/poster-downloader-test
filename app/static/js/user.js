@@ -259,9 +259,20 @@
   function fullRenderActive() {
     activePanel.innerHTML = '';
     if (!state.locked) {
+      // The second sentence depends on HOW this project finds images, and
+      // it used to name TMDB and "a poster" outright — a movie-project
+      // instruction shown to every worker in every niche. A traveller
+      // looking for Kyoto was told to click a link to a film database that
+      // does not appear anywhere on the page.
+      //
+      // Same defect as the flag card's "Open source" button: renaming would
+      // have made it worse, because it would then have looked right.
+      const hint = PD.searchMode === 'inpage'
+        ? `Then search for an ${PD.noun} and tap the one you want to save it.`
+        : `Then click the <strong>Open ${PD.sourceLabel}</strong> link to find an ${PD.noun}.`;
       activePanel.innerHTML = `<div class="empty-hint">
         Click any title in your list on the left to open it.
-        Then click the <strong>Open TMDB</strong> link to find a poster.
+        ${hint}
       </div>`;
       renderedLockedId = null;
       return;

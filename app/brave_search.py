@@ -104,14 +104,32 @@ def _setting(db: Session, key: str, project=None):
 
 def build_queries(db, artist: str, *, deep: bool, project=None) -> list[str]:
     """
-    Render the configured query templates for one artist.
+    Render the configured query templates for one master title.
 
-    The artist name is normalised for SEARCH only — never for storage or for
-    the marketplace listing. 271 names in the database contain U+2010 HYPHEN
-    rather than an ordinary one ("blink‐182"), and 548 contain a curly
-    apostrophe ("Guns N’ Roses"). Those are not the strings a human types
-    into a search box, and searching them verbatim returns nothing, so those
-    artists would be silently skipped as "not found".
+    The name is normalised for SEARCH only — never for storage or for the
+    marketplace listing. Real sheets are full of characters nobody types into
+    a search box: U+2010 HYPHEN rather than an ordinary one ("blink‐182"),
+    curly apostrophes ("Guns N’ Roses"), en dashes in place-name ranges.
+    Searching those verbatim returns nothing, so the title would be silently
+    skipped as "not found".
+
+    ════════════════════════════════════════════════════════════════════════
+    TWO PLACEHOLDERS, ONE MEANING — AND WHY
+    ════════════════════════════════════════════════════════════════════════
+    `{title}` is the name to use. `{artist}` is accepted as an alias because
+    it was the original spelling, back when the only in-page project searched
+    for musicians.
+
+    That was a niche word baked into shared code: a travel project asks about
+    a mountain, and telling its operator to type `{artist}` to mean "Mount
+    Fuji" is the same defect as an "Open TMDB" button on a project that has
+    never touched TMDB.
+
+    Both are substituted rather than one being migrated, because a template
+    is a string typed by a person into a settings box. Renaming the only
+    placeholder would leave every saved query silently searching for the
+    literal text "{artist}" — which returns nothing, reports nothing, and
+    looks exactly like a project with no results.
     """
     key = "brave_query_deep" if deep else "brave_query_normal"
     raw = str(_setting(db, key, project) or "")
@@ -120,7 +138,7 @@ def build_queries(db, artist: str, *, deep: bool, project=None) -> list[str]:
     for line in raw.splitlines():
         line = line.strip()
         if line:
-            out.append(line.replace("{artist}", clean))
+            out.append(line.replace("{title}", clean).replace("{artist}", clean))
     return out
 
 

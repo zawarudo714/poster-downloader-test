@@ -56,8 +56,6 @@ from pathlib import Path
 APP = Path(__file__).resolve().parent.parent / "app"
 SOURCE = APP / "earnings" / "store_health.py"
 LISTING = APP / "listing_check.py"
-ARCHIVE = APP / "archive_index.py"
-ARCHIVE_UNDER_TEST = ("strip_suffix", "parse_path")
 UNDER_TEST = ("_not_failed_this_run", "stage_should_stop", "judge_counts")
 LISTING_UNDER_TEST = ("slug", "verdict")
 
@@ -193,116 +191,6 @@ def listing_cases() -> list[tuple[str, bool]]:
         ("500 means the site had a moment", verdict(500) == "unknown"),
         ("no status at all — the request never completed",
          verdict(None) == "unknown"),
-    ]
-
-
-def archive_cases() -> list[tuple[str, bool]]:
-    """
-    Reading a path on the storage box back into "which poster is this".
-
-    Cheap to get wrong and silent when wrong in BOTH directions. Match too
-    loosely and a file gets attached to the wrong poster, which sends the
-    wrong image to a marketplace. Match too tightly and 4,865 finished
-    images read as missing and the archive stays unindexed for ever.
-
-    The paths below are the real shape from the storage box, including the
-    dotted titles the old Photoshop script mangled.
-    """
-    import os as _os
-    # `os` is a stand-in for a library. FOLDER_ID is deliberately NOT passed
-    # in — it is a RULE, and a rule handed to the test by the test is a rule
-    # nobody is checking. It comes out of the shipped file.
-    strip, parse = _exec(ARCHIVE, ARCHIVE_UNDER_TEST, {"os": _os})
-    p = lambda path: parse(path, "_Painted")
-    return [
-        ("an ordinary archive path gives its title number and poster",
-         p("2026-05-11/1. The Shawshank Redemption (1994)/"
-           "The Shawshank Redemption 1_Painted.jpg")
-         == (1, "The Shawshank Redemption 1",
-             "The Shawshank Redemption 1_Painted.jpg")),
-        ("a title whose own name contains a dot still resolves — the folder "
-         "number is what we match on, never the text",
-         p("2026-05-12/432. E.T. (1982)/E_Painted.jpg")[0] == 432),
-        ("a three-digit title number is not truncated",
-         p("2026-05-12/1057. Se7en (1995)/Se7en 2_Painted.jpg")[0] == 1057),
-        ("Windows backslashes read the same as forward ones",
-         p("2026-05-11\\1. Title (1994)\\Title 1_Painted.jpg")[0] == 1),
-        ("a folder with no leading number is not ours",
-         p("2026-05-11/Some Folder I Made/thing_Painted.jpg") is None),
-        ("a stray non-image on the drive is ignored rather than reported "
-         "as a poster",
-         p("2026-05-11/1. Title (1994)/notes.txt") is None),
-        ("a loose file at the top of the tree is not ours",
-         p("stray.jpg") is None),
-
-        ("the suffix comes off the stem", strip("Title 1_Painted.jpg", "_Painted")
-         == "Title 1"),
-        ("the extension comes off too, so a .png source and a .jpg output "
-         "still match each other",
-         strip("Title 1_Painted.jpg", "_Painted")
-         == strip("Title 1_Painted.png", "_Painted")),
-        ("a filename that never had the suffix is left alone",
-         strip("Title 1.jpg", "_Painted") == "Title 1"),
-        ("a title with a dot in it keeps the dot — only the extension goes",
-         strip("E.T. 1_Painted.jpg", "_Painted") == "E.T. 1"),
-    ]
-
-
-MIGRATE = Path(__file__).resolve().parent / "migrate_gui.py"
-
-
-def dry_run_cases() -> list[tuple[str, bool]]:
-    """
-    Does the migration tool believe its own numbers?
-
-    ════════════════════════════════════════════════════════════════════════
-    THE BUG THIS EXISTS FOR — 25 Aug, and it said "Done"
-    ════════════════════════════════════════════════════════════════════════
-    The upload-history import matched ZERO of 4,865 images, and the tool
-    printed both numbers and then said "Done. The pipeline will now leave
-    those images alone." Nothing compared them. The owner was one button
-    away from greenlighting ten thousand posters against a marketplace that
-    already held half of them.
-
-    So the judgement is a pure function of the script's own report, held
-    here against the real shapes it produces.
-    """
-    tree = ast.parse(MIGRATE.read_text(encoding="utf-8"))
-    fn = None
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == "_parse_dry_run":
-            fn = node
-            break
-    if fn is None:
-        raise SystemExit("_parse_dry_run has gone from migrate_gui.py — "
-                         "this test is now blind.")
-    # Lifted WITHOUT its decorator: @staticmethod cannot be applied outside
-    # a class body, and the rule being checked is in the body either way.
-    fn = ast.FunctionDef(name=fn.name, args=fn.args, body=fn.body,
-                         decorator_list=[], returns=None,
-                         type_comment=None)
-    mod = ast.Module([fn], [])
-    ast.fix_missing_locations(mod)
-    ns = {"re": re}
-    exec(compile(mod, str(MIGRATE), "exec"), ns)
-    parse = ns["_parse_dry_run"]
-
-    healthy = "      + 4,821 tracking rows\n      ? 44 unmatched\n"
-    broken = "      + 0 tracking rows\n      ? 4,865 unmatched\n"
-    return [
-        ("a normal import — 4,821 placed, 44 not — is usable",
-         parse(healthy)["usable"] is True),
-        ("the real failure — nothing placed at all — is NOT usable, and "
-         "this is the check that was missing",
-         parse(broken)["usable"] is False),
-        ("it reads the counts rather than guessing",
-         (parse(healthy)["record"], parse(healthy)["unmatched"]) == (4821, 44)),
-        ("commas in the numbers do not defeat it",
-         parse("+ 12,345 tracking rows\n? 6 unmatched\n")["record"] == 12345),
-        ("output with no numbers at all is not treated as a success",
-         parse("the container fell over")["usable"] is False),
-        ("half the archive unplaceable is not a finding, it is a broken rule",
-         parse("+ 2,400 tracking rows\n? 2,465 unmatched\n")["usable"] is False),
     ]
 
 
@@ -505,47 +393,8 @@ LISTING_SABOTAGE = [
      '        return "no_page"', '        return "gone"'),
 ]
 
-# The archive rules live in their own file too.
-ARCHIVE_SABOTAGE = [
-    ("every title number past 9 would be read wrong, so thousands of "
-     "finished images would attach to the wrong poster",
-     r'FOLDER_ID = re.compile(r"^(\d+)[.\s]")',
-     r'FOLDER_ID = re.compile(r"^(\d)[.\s]")'),
-    ("the output suffix would stay on the name and nothing would ever "
-     "match a poster — the whole archive would read as missing",
-     "    if suffix and stem.endswith(suffix):\n"
-     "        stem = stem[: -len(suffix)]\n", ""),
-    ("a .png source could never match its .jpg output",
-     'stem = os.path.splitext(filename or "")[0]',
-     'stem = filename or ""'),
-    ("junk on the drive would be reported as posters we cannot place",
-     '    if os.path.splitext(filename)[1].lower() not in (\n'
-     '            ".jpg", ".jpeg", ".png", ".webp"):\n'
-     '        return None\n', ''),
-    ("a Windows path would never match, so a job run on the worker "
-     "machine would find nothing at all",
-     'parts = [p for p in (rel or "").replace("\\\\", "/").split("/") if p]',
-     'parts = [p for p in (rel or "").split("/") if p]'),
-]
-
-# The migration tool's own judgement of its own output.
-MIGRATE_SABOTAGE = [
-    ("an import that placed NOTHING would read as a success — the exact "
-     "failure of 25 Aug, one button away from ten thousand duplicates",
-     '"usable": bool(total) and pct <= 10.0',
-     '"usable": True'),
-    ("an empty report would be treated as a clean run",
-     '"usable": bool(total) and pct <= 10.0',
-     '"usable": pct <= 10.0'),
-    ("the counts would never be read, so every run would look identical",
-     r'found = re.search(r"\+\s*([\d,]+)\s+tracking rows", line)',
-     r'found = re.search(r"NEVERMATCHES", line)'),
-]
-
-
 def run_suite(src: str) -> list[tuple[str, bool]]:
-    return (cases(*load(src)) + listing_cases() + archive_cases()
-            + dry_run_cases())
+    return cases(*load(src)) + listing_cases()
 
 
 def main() -> int:
@@ -574,9 +423,7 @@ def main() -> int:
         # The listing rules live in their own file, so they are broken on
         # disk and put back. Uglier than the in-memory swap above, and
         # unavoidable: `run_suite` reads that file itself.
-        for path, table in ((LISTING, LISTING_SABOTAGE),
-                            (ARCHIVE, ARCHIVE_SABOTAGE),
-                            (MIGRATE, MIGRATE_SABOTAGE)):
+        for path, table in ((LISTING, LISTING_SABOTAGE),):
             original = path.read_text(encoding="utf-8")
             for cost, find, repl in table:
                 if find not in original:

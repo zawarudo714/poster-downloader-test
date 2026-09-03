@@ -477,9 +477,11 @@ def check_unassigned_titles(db: Session, scope: Scope) -> CheckResult:
     if total:
         rows = [Finding(
             f"{total:,} master rows have no project",
-            "Treated as the default project everywhere. Harmless today; run "
-            "the backfill in scripts/migrate_pipeline.py before a second "
-            "project's titles are imported into the same table.",
+            "These are treated as belonging to the default project. The "
+            "importer always stamps a project on every row, so this should "
+            "be impossible — seeing it means rows arrived by some other "
+            "route. Give them a project before a SECOND project's titles go "
+            "into the same table, or the two will silently mix.",
             "/admin/master",
         )]
     return _result(
@@ -488,6 +490,62 @@ def check_unassigned_titles(db: Session, scope: Scope) -> CheckResult:
         "the default project, so nothing is broken — but the ambiguity should "
         "be resolved before a second niche shares the table.",
         "info", rows, 1 if total else 0,
+    )
+
+
+def check_projects_match_registry(db: Session, scope: Scope) -> CheckResult:
+    """
+    Every ACTIVE project must be one the code still declares.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS EXISTS
+    ════════════════════════════════════════════════════════════════════════
+    On 2026-09-01 the registry was stripped to a single travel project, and
+    the deleted movie project went on appearing on the dashboard, in the
+    project switcher, and as somewhere a worker could stand. `sync_projects()`
+    only ever created and updated, so removing a spec did nothing whatever to
+    a database that already had the row.
+
+    The OWNER found it, by opening the app and seeing a niche he had deleted.
+    Nothing mechanical could have: preflight reads source and proves nothing
+    is disconnected, and the registry and the database agreeing is a fact
+    about DATA, which only a check against the live database can see.
+
+    `sync_projects()` now switches undeclared projects off, so this should
+    never fire. That is exactly why it is worth having — it is the invariant
+    watching the fix, and it costs one query.
+    """
+    if not scope.all_projects:
+        return _skipped(
+            "projects_match_registry", "Projects match the code",
+            "Only checked across all projects — this asks whether the whole "
+            "registry and the database agree, which is not a question about "
+            "any single project.")
+
+    from .pipeline import PROJECT_DEFS
+
+    declared = {spec["slug"] for spec in PROJECT_DEFS}
+    stray = [
+        p for p in db.query(Project).filter(Project.is_active == 1).all()
+        if p.slug not in declared
+    ]
+    rows = [
+        Finding(
+            f"'{p.name}' ({p.slug}) is active but not declared in the code",
+            "It is visible on the dashboard and a worker can stand in it, "
+            "yet PROJECT_DEFS no longer lists it. Startup is supposed to "
+            "switch these off, so seeing one means that did not run or did "
+            "not finish. Its rows are safe either way.",
+            "/admin",
+        )
+        for p in stray
+    ]
+    return _result(
+        "projects_match_registry", "Projects match the code",
+        "Projects are declared in code and reconciled on every boot. An "
+        "active project the code has never heard of is one that was deleted "
+        "from the registry without the database being told.",
+        "warn", rows, len(stray),
     )
 
 
@@ -1673,6 +1731,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_complete_without_posters,
     check_open_revisions_on_deleted,
     check_stale_claims,
+    check_projects_match_registry,
     check_claims_by_inactive,
     check_greenlit_not_complete,
     check_uploaded_without_processed,

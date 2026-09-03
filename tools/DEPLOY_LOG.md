@@ -15,6 +15,7 @@ cost far more to read, answer a different question, and on a mounted working
 copy `git status` cannot refresh its index — it reports stale answers with
 no warning.
 
+- **2026-08-27 18:40** · `f32537ec` · v142 · deploy v142
 - **2026-08-27 18:33** · `0eccaf90` · v141 · deploy v141
 - **2026-08-27 18:27** · `1a63706e` · v140 · deploy v140
 - **2026-08-27 16:41** · `a0b2a5c2` · v139 · deploy v139
@@ -44,4 +45,3 @@ no warning.
 - **2026-08-25 09:50** · `272011a2` · deploy v116
 - **2026-08-25 09:44** · `29106305` · Listing check now tells a REMOVED listing (410) apart from an address that
 - **2026-08-25 09:14** · `0cf6dc6d` · Migration tool now copies the poster files server-to-server and can promote the
-- **2026-08-25 08:56** · `82c60041` · Added .dockerignore. The Dockerfile ends with COPY . . and there was no ignore

@@ -125,9 +125,10 @@ def on_startup():
     # "Internal Server Error" with no clue as to why — see
     # app/schema_migrations.py for the full explanation.
     #
-    # Only additive, idempotent changes run automatically. Data migrations and
-    # backfills stay in scripts/migrate_pipeline.py where a human runs them
-    # deliberately.
+    # Only additive, idempotent changes run automatically. Anything that
+    # rewrites existing rows, or could take minutes, belongs in a script a
+    # human runs deliberately — never here, where it would run on every boot
+    # and on every container restart.
     init_db()
 
     import logging

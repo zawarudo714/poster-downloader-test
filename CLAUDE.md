@@ -5,6 +5,26 @@ sets out what is expected of you before, during and after any change.
 
 ---
 
+## BEFORE YOU WRITE A SINGLE WORD TO THE OWNER
+
+Go and read **"Write in plain words"** near the end of this file, and follow
+it in every reply. He asked for this on 2026-08-17, again on 2026-09-02, and
+then a third time the same day because simple words in cramped sentences
+still were not readable.
+
+The short version, but read the full section anyway:
+
+- Whole sentences. Every one gets a subject and a verb.
+- One idea per sentence. Split anything joined by a dash.
+- Say the name of the thing, not "it".
+- Say "for example" before an example.
+- Do not compress a fact, its reason and its consequence into one clause.
+
+This is the most-repeated instruction in the whole file. Treat a rigid reply
+as a defect, the same as a bug.
+
+---
+
 ## HOW TO READ A CLAIM IN THIS REPO
 
 **Every claim carries its PROVENANCE.** Four contradictions were found in
@@ -62,8 +82,6 @@ its work from scratch.
 | `SETUP_VPS.md` · `SETUP_WINDOWS_NODE.md` | Building a box from nothing |
 | `README.md` | What the app is, for someone who has never seen it |
 | `CHANGELOG.md` | Released changes, by version |
-| `fineartamerica-bulk-delete.md` | A one-off procedure, kept because it worked |
-| `tools/MIGRATION_REHEARSAL.md` | What the last migration rehearsal proved |
 
 ---
 
@@ -120,12 +138,21 @@ Then:
 - `PIPELINE.md` if the work touches post-production.
 
 **The single most important thing to understand:** this is a MULTI-PROJECT
-system. Two niches exist today (movie/series posters, MUSIK music artists)
-and more are planned. When the owner asks for a new feature or a new niche,
-it must not inherit mechanisms from another project that do nothing for it,
-and it must not inherit that project's vocabulary either. Ask which pieces
-would be dead for it and say so explicitly, rather than copying an existing
-project's definition.
+system that currently runs ONE project. Two earlier niches were deleted on
+2026-09-01 (see WHERE THIS STANDS), and more are planned.
+
+**One project is the dangerous number, not two.** With two, a wrong
+assumption shows up immediately. With one, code that quietly assumes "the
+project" is always this project looks perfectly correct until the day it
+isn't — which is exactly how the first version of this system got into
+trouble. Every scoping helper, every `project_id` filter and every
+`CAPABILITIES` row still earns its place.
+
+When the owner asks for a new feature or a new niche, it must not inherit
+mechanisms that do nothing for it, and it must not inherit another project's
+vocabulary either — the `{artist}` placeholder sitting in shared search code
+for a project about mountains is the specimen. Ask which pieces would be dead
+for it and say so explicitly, rather than copying an existing definition.
 
 ---
 
@@ -133,22 +160,62 @@ project's definition.
 
 A print-on-demand operation. Two halves:
 
-1. **Sourcing** (built, in production) — a FastAPI + SQLite + vanilla-JS
-   app where paid workers claim titles from a master list, find high-quality
-   images for them, and save them into an audit-trailed folder tree. The
-   admin reviews quality, flags bad images, approves completions, and pays
-   weekly. Where the images come from depends on the project: the movie
-   project sends workers to TMDB in another tab; MUSIK searches Brave inside
-   the page.
+1. **Sourcing** — a FastAPI + SQLite + vanilla-JS app where paid workers
+   claim titles from a master list, find high-quality images for them, and
+   save them into an audit-trailed folder tree. The admin reviews quality,
+   flags bad images, approves completions, and pays weekly.
 
-2. **Post-production** (built, in production) — automates what the owner used
-   to do by hand: process each image, archive it, and upload it to the
-   marketplace. HOW it is processed is a property of the project — the movie
-   project runs a Photoshop painterly effect on a Windows node; MUSIK
-   generates a new image with OpenAI on the server itself. See `PIPELINE.md`.
+2. **Post-production** — process each image, archive it, upload it to the
+   marketplace. HOW it is processed is a property of the project. See
+   `PIPELINE.md`.
 
 Live at `178.105.34.144` (Hetzner, Docker). The owner is a solo operator, not
 a developer — he reads code but does not want to edit it to change behaviour.
+
+---
+
+## WHERE THIS STANDS — `2026-09-01`, and read this before anything else
+
+**There is ONE project: `travel` (Travel Locations).** Brave image search
+in-page -> GPT Image 2 on the Linux server -> FineArtAmerica. Review gate on,
+no year, no content type.
+
+**Two earlier niches are GONE, and why matters more than that they went.**
+
+FineArtAmerica closed both of the owner's accounts on 2026-08-28. The reason
+was the CONTENT, stated by their staff in writing: movie posters and portraits
+of real musicians, neither licensed. Their contributor terms require the
+copyright in the source image AND a release for any identifiable person, and
+their admin removes an ACCOUNT rather than an image once the violations mount
+up.
+
+Both accounts were reinstated after the owner deleted the work and said
+plainly that he had no licences.
+
+**This is the single most important constraint on everything built here.**
+The test that decides whether a niche is viable is not visual and not
+technical: *why would someone buy this?* If the answer names something
+somebody else owns — a film, a band, a person, a brand — no amount of
+processing fixes it, because the recognisability IS the product. Travel
+locations pass: nobody owns Kyoto.
+
+**Do NOT read the account closures as an automation problem.** That theory
+was investigated at length and is wrong. Measured: the node made about 70
+sign-in attempts in 13 days from the Contabo address, FAA does publicly say
+it blocks automated login attempts, and none of that was the reason. The site
+loads fine from both that address and the owner's home connection, so no IP
+was ever blocked. Do not spend a session on proxies, residential IPs or
+datacentre addresses; it has already been spent.
+
+Still worth doing on its own merits: uploads cost ONE login per batch, and
+the earnings read is a second. Reading the balance at the end of an upload
+run — the browser is already signed in — takes a full day from about four
+logins to one.
+
+**MUSIK and the movie project are not archived, they are deleted from the
+registry**, and the database they lived in is being replaced with an empty
+one. Nothing needs unwinding. Comments and history referring to them are
+being cleaned up as they are touched.
 
 ---
 
@@ -157,282 +224,163 @@ a developer — he reads code but does not want to edit it to change behaviour.
 **This project will keep growing in scope. Do not make choices that are
 painful to retrofit.**
 
-Stated plans, in order. `DECIDED` by the owner — these are intentions, not
-commitments with dates, and he may reorder them:
+Stated plans, in order. `DECIDED` by the owner — intentions, not
+commitments with dates.
 
-1. A second niche — **celebrity portraits**, sourced from Pinterest rather than
-   TMDB, a different master sheet schema, ~2 images per title, its own
-   FineArtAmerica account.
-2. **Merge both niches** under one master dashboard with cross-niche reporting.
-3. **More marketplaces** — TeePublic named specifically — and more accounts.
+1. **Get Travel Locations earning.** The only active work. Needs the master
+   sheet, the Brave query, the FAA keywords and the GPT prompt — all four are
+   the owner's to state, and none can be guessed.
+2. **More marketplaces.** TeePublic named specifically. Needs a reader
+   module, an entry in `service.READERS` and a `CAPABILITIES` row — nothing
+   else.
+3. **A second travel-adjacent project** if the sheet justifies splitting
+   parks from cities. Deliberately one project for now.
 
-Also planned, stated but not yet built. **Each item below carries its own
-provenance — read the tag before acting on it.** Items 1-7 describe things
-that are BUILT or DONE and are therefore statements of fact; 8 and 10 are
-`DECIDED` work not yet started; 9 was a `LEAD` that turned out to be wrong
-and is kept as the worked example of why the tags exist:
+**Built and still live. Each carries its own provenance — read the tag
+before acting on it:**
 
 4. **Marketplace reconciliation. BUILT 2026-08-24** — `app/listing_check.py`,
    `routes/listing_admin.py`, the Listing check tab, and the node's
    `listing_check` job. Manual only, no schedule, by instruction.
 
-   It is deliberately NOT shaped like the TeePublic tool, and the measured
-   reasons are in the FineArtAmerica section below: a listing is live or
-   deleted with no hidden state, a missing one returns a real 404, and HEAD
-   is honoured. So there are no stages, no gates, no cure, and NO PIPELINE
-   HOLD — it changes nothing and has no right to stop Photoshop.
+   Deliberately NOT shaped like the TeePublic tool, for measured reasons in
+   the FineArtAmerica section below: a listing is live or deleted with no
+   hidden state, a missing one returns a real 404, and HEAD is honoured. So
+   there are no stages, no gates, no cure, and NO PIPELINE HOLD.
 
    What it DOES borrow, because those lessons were general: one chunk at a
    time, the reply to each report carries the stop signal, and "is it
    finished" is derived from the rows rather than counted.
 
    Still to build: the reverse direction — listings on the site that are not
-   in the database. That needs the shop's own pages paged and parsed, which
-   is a different mechanism and a rarer question.
+   in the database. Needs the shop's own pages paged and parsed, which is a
+   different mechanism and a rarer question.
 
-   The three cases it was built for:
-     * processed + marked uploaded, but NOT on the site — taken down for
-       copyright, or the upload silently failed and was recorded as success
-     * marked uploaded but never processed — impossible state, means bad data
-     * on the site but not in the database — uploaded outside the pipeline
-   The admin annotates each with a reason and the database is corrected.
-   `UploadTracking` already carries `remote_id`, `status='removed'` and
-   `removed_reason` for exactly this, so the reconciler should write into
-   those rather than inventing a parallel table. Note this is the same shape
-   as `diagnostics.py` — findings + an explanation + a deliberate action — and
-   should probably live beside it rather than in the pipeline module.
+5. **Cross-marketplace earnings tab (master level).** NOT a pipeline.
+   **BUILT for FineArtAmerica 2026-08-20, TeePublic 2026-08-22.** The owner
+   has TeePublic accounts earning passively with no uploading.
 
-5. **Cross-marketplace earnings tab (master level).** NOT a pipeline. The
-   owner has 9 TeePublic accounts earning passively with no uploading, and
-   checks each one by hand by opening its Chrome profile and reading
-   "This Month" / "Next Payment" off the My Account page. The plan is a
-   read-only scraper on the node that visits each account once a day, stores
-   an absolute snapshot, and a dashboard tab that shows deltas ("+$2 since
-   yesterday"), filterable and totalled by site (all / TeePublic / FAA /
-   Redbubble later), by account, or by any subset.
+   The rules that held, and are the reason it works:
 
-   **BUILT for FineArtAmerica 2026-08-20, and for TeePublic 2026-08-22.**
-   Redbubble or anything else needs a reader module, an entry in
-   `service.READERS` and a `CAPABILITIES` row — nothing else.
-   What actually got built, where it differs from the plan above:
-
-     * An ACCOUNT EXISTS ONCE — held to, and it is now enforced by the
-       `account_projects` link table rather than by a nullable column. The
-       plan said "make project_id nullable rather than inventing a parallel
-       table"; that was wrong, because one account serves SEVERAL projects,
-       which a single column cannot express. `project_id` survives as a dead
-       legacy column, backfilled into the link table at startup.
+     * An ACCOUNT EXISTS ONCE, enforced by the `account_projects` link table
+       rather than a nullable column, because one account serves several
+       projects and a single column cannot say that. `project_id` survives as
+       a dead legacy column.
      * Reading does NOT happen on the server. FAA challenges it as a bot, so
-       it is a node job using the account's own Chrome profile. See the
-       FineArtAmerica behaviour section.
-     * ABSOLUTE rows, never stored deltas — held to, and it is the single
-       most important rule in `earnings/service.py`. Every figure on the
-       screen is arithmetic over rows computed at read time.
-     * Figures revise DOWNWARD and a drop is not a bug — held to, and it is
-       said on the page so the owner is not left wondering.
-     * Read-only, sibling of `diagnostics.py` — held to.
-     * The "next payout" figure is NOT computable: FAA pays on the SHIP date
-       and does not publish it. Their `Current Balance` is authoritative;
-       anything we derive is an estimate and must be worded as one.
+       it is a node job using the account's own Chrome profile.
+     * ABSOLUTE rows, never stored deltas. Every figure on screen is
+       arithmetic over rows computed at read time.
+     * Figures revise DOWNWARD and a drop is not a bug — said on the page so
+       the owner is not left wondering.
+     * `Current Balance` is authoritative. Anything derived is an estimate
+       and must be worded as one.
 
-6. **Ban recovery / account handover. BUILT.** `MEASURED 2026-08-20` for
-   the code paths; **never exercised against a REAL ban.** `ban_account()` and
+6. **Ban recovery / account handover. BUILT 2026-08-20, and it has now been
+   through a REAL closure — 2026-08-28.** `ban_account()` and
    `hand_over_account()` in `pipeline.py`, MARK BANNED and HAND OVER TO… on
-   the Upload tab. A banned account keeps its row and its history — it is not
-   a disabled one, because its listings are gone from the marketplace and
-   have to be rebuilt elsewhere. Handover reuses `requeue_for_account()`, so
-   the review-gate rules apply to a rebuild exactly as they do to a first
-   upload. `check_orphaned_bans` in Diagnostics catches a banned account
-   whose catalogue was never moved anywhere.
+   the Upload tab. A banned account keeps its row and its history, because
+   its listings are gone from the marketplace and have to be rebuilt
+   elsewhere. Handover reuses `requeue_for_account()`, so the review-gate
+   rules apply to a rebuild exactly as to a first upload.
 
-   Untested against a REAL ban — nothing here has been through one.
+   **What the real closure exposed, and it is not fixed:** the design assumes
+   ONE account is banned and its catalogue moves to another. Both accounts
+   were closed at the same moment, by one person, for one reason. There was
+   nowhere to hand over TO. A recovery plan that assumes a surviving sibling
+   is not a recovery plan.
 
-7. **The dot-truncated legacy titles. DONE 2026-08-27 — repaired, not left
-   alone.** The old JSX did `split('.')[0]` on the filename, so every poster
-   in a title containing a dot overwrote the previous one.
-
-   **The figure is 44, confirmed twice** — 44 folders on disk holding one
-   file each, and independently 44 entries in `faa_upload_tracking.json`
-   whose filename carries no poster number. The owner's recollection of
-   61-65 was high; treat 44 as measured.
-
-   **This entry used to say "NO LONGER NEEDS A TOOL — SOLVED BY DOING
-   NOTHING… building one would be wasted work", and accept 44 near-duplicate
-   listings. The owner chose to repair them instead, and it took one
-   afternoon.** Both halves were fixed:
-
-     * the FILES on `S:` renamed (`rename_painted.py`), so the archive index
-       can match a painted image to its poster
-     * the 44 keys in `faa_upload_tracking.json` rewritten, so the pipeline
-       knows they are already on FineArtAmerica and does not upload them
-       again — renaming files does NOT touch that file, and forgetting it
-       would have produced exactly the duplicates this was avoiding
-
-   The rule that made it possible, read out of `FAA_Real_Paint_FX.jsx`
-   rather than guessed: it walks a folder with an ascending loop and saves
-   with `saveAs(..., true, ...)`, which overwrites silently, so **the file
-   left standing is the LAST one processed — the highest-numbered poster.**
-   Both things that could break that rule were checked and neither applied:
-   no title here has 10+ posters (where Windows sorts "10" before "2"), and
-   every poster in each title shares one save date, so none was added after
-   its painting run.
-
-   **Not yet in effect.** The repaired JSON only does anything when the
-   import runs against the FINAL database at migration time. The ~62 other
-   posters in those 37 titles were painted and instantly overwritten, so
-   they never reached the marketplace and are ordinary unprocessed work —
-   and because the Photoshop queue is oldest-save-date-first and they date
-   from 30 April to 24 May, they will be at the FRONT of it.
-
-   **The general lesson, which is why this entry is kept rather than
-   deleted: "no tool is needed" was a judgement about cost, not a fact, and
-   it was written down in the same voice as the measured figures around
-   it.** Nothing distinguished the two on the page.
-
-8. **THE INTERACTION AUDIT — a whole-system pass, on his explicit
-   instruction, once the foundational mechanisms are all in.**
-   `DECIDED 2026-08-24` — not started. Not a code
+7. **THE INTERACTION AUDIT.** `DECIDED 2026-08-24` — not started. Not a code
    review and not a test suite: a deliberate trace of every action against
    every OTHER thing it can touch, written out as a tree.
 
    **The class of bug it exists to catch** is the one this project keeps
    producing: two or three mechanisms that are each individually correct,
-   combining into something wrong. Nothing is broken in isolation, so
-   nothing finds it except asking "what else is true while this happens".
+   combining into something wrong. Nothing is broken in isolation, so nothing
+   finds it except asking "what else is true while this happens".
 
-   The specimen, 2026-08-23, and it is worth keeping because it is typical:
-   PAUSE worked. The node's stop-reporting worked. RESUME worked. But a
-   pause ended the scan JOB cleanly, the server read a clean job end as a
-   finished SCAN, and resume on an automatic run therefore dispatched a mass
-   deactivation off a sweep that had covered 199 designs of 1,543. Three
-   correct parts, one wrong outcome.
+   The specimen, 2026-08-23: PAUSE worked. The node's stop-reporting worked.
+   RESUME worked. But a pause ended the scan JOB cleanly, the server read a
+   clean job end as a finished SCAN, and resume therefore dispatched a mass
+   deactivation off a sweep covering 199 designs of 1,543. Three correct
+   parts, one wrong outcome.
 
-   **His own example, and it is not yet handled:** what happens to the
-   earnings read when FineArtAmerica serves a MAINTENANCE page? Today the
-   parser would fail to find the figures and report "FAA has changed its
-   page" — sending the next session hunting a redesign that never happened.
-   Same shape as the wall being reported as "TeePublic has changed it".
+   **How to do it, because "be thorough" is worthless:**
 
-   **How to actually do it, because "be thorough" is worthless:**
-
-   * Enumerate ACTIONS, not screens — every button, every scheduled trigger,
-     every node job, every stage transition.
-   * For each, ask the three questions that have actually caught things
-     here: what else is RUNNING while this happens; what does this leave in
-     a half-state if it stops midway; and what does the far side (a
-     marketplace, the node, the clock) do that we have not seen yet.
-   * Pay special attention where TWO mechanisms both claim the same
-     resource — the node, an account, a browser profile, the pipeline hold.
-     Every serious bug so far has been at one of those seams.
+   * Enumerate ACTIONS, not screens — every button, scheduled trigger, node
+     job, stage transition.
+   * For each: what else is RUNNING while this happens; what does this leave
+     half-done if it stops midway; what does the far side (a marketplace, the
+     node, the clock) do that we have not seen.
+   * Pay special attention where TWO mechanisms claim the same resource — the
+     node, an account, a browser profile, the pipeline hold. Every serious
+     bug so far has been at one of those seams.
    * Write the tree down as a file. It is the artefact, not the fixes.
 
-   **Seed it with what is already known** rather than starting cold: the
-   quiet window vs a store run vs a scheduled earnings read; an account
-   paused for uploading vs the same account being read for money; a wall
-   appearing during a scan vs during a deactivation; a node going offline
-   mid-stage in each of the six stages; a marketplace serving maintenance,
-   a redesign, or a challenge to any of the three readers.
+   **His own example, not yet handled:** what happens to the earnings read
+   when FineArtAmerica serves a MAINTENANCE page? The parser would fail to
+   find the figures and report "FAA has changed its page" — sending the next
+   session hunting a redesign that never happened.
 
-9. **SPEED. MEASURED 2026-08-27 — IT WAS THE NETWORK, NOT THE DATABASE.
-   This entry previously blamed the 201,133 titles. That was wrong, and it
-   was written confidently enough to have cost an evening.**
+8. **THE RETROFIT AUDIT — build the extension points before the next thing
+   needs them.** `DECIDED 2026-08-25` — not started. His words: *"we should
+   revamp everything for as little retrospect headache as possible."*
+
+   The pattern is the same every time: **a field that describes one thing
+   gets used for two, and a mechanism built for one marketplace becomes the
+   template for the next.** Every one of these cost a session:
+
+     * `UploadAccount.project_id` — one column could not say "this account
+       serves two niches". Became the `account_projects` link table.
+     * `paused_until` — one field for an account that cannot upload AND one
+       that cannot be read for money. Two unrelated failures, each silencing
+       the other. Became `earnings_paused_until` beside it.
+     * `action_error` — one field for "could not switch off" and "could not
+       switch back on", which are opposites. While it was one field, a live
+       listing sat hidden.
+     * Marketplace behaviour as if-statements — became `CAPABILITIES` rows
+       only after TeePublic's habits were applied to FineArtAmerica, where
+       they were exactly wrong.
+     * A stage counter — became work derived from the catalogue only after
+       one account finishing ended the stage for five.
+
+   So the audit is: **for every field and every mechanism, ask what the
+   SECOND user of it will need, and whether it can express that today.**
+
+     * Every column naming a single owner (`project_id`, `account_id`,
+       `target_site`) — can the thing it points at ever be plural?
+     * Every status field — can the thing it describes fail in more than one
+       way independently?
+     * Every mechanism that exists once — the listing sweep, the store sweep
+       and the earnings read each grew their own chunked-job machinery. Which
+       parts are genuinely one shared mechanism?
+
+   **The concrete test is now travel's own growth**, plus TeePublic as an
+   uploading project and Redbubble as a third marketplace. For each, say
+   which existing pieces would be DEAD — BEFORE building.
+
+9. **SPEED. `MEASURED 2026-08-27` — IT WAS THE NETWORK, NOT THE DATABASE.**
+   Kept because it is the worked example of why the provenance tags exist.
 
        login page built by the app          8.7 ms
        dashboard group-by over 201,133 rows 0.16 s
-       plain COUNT(*)                       0.00 s
        server pulling from Hetzner's mirror  130 MB/s
        laptop pulling from THIS server       12.6 KB/s
        laptop pulling from the OLD server    16.3 KB/s
 
-   Two different servers in two different datacentres, equally slow to the
-   same laptop within a minute of each other, while the box itself pulled at
-   130 MB/s. So it was the link out to Kenya. It recovered on its own the
-   next day, and the owner confirmed the site felt normal again.
+   Two servers in two datacentres, equally slow to the same laptop within a
+   minute, while the box itself pulled at 130 MB/s. It was the link to Kenya,
+   and it recovered on its own.
 
-   **The original text said "the reason is not mysterious" and named the row
-   count. Nothing had been timed.** The candidate list below was explicitly
-   marked "found by reading rather than timing" — and was then read by the
-   next session as a diagnosis anyway. A lead and a finding must not sit in
-   the same list in the same voice.
+   **This entry previously blamed the row count, confidently, having timed
+   nothing — and cost an evening.** A lead and a finding must not sit in the
+   same list in the same voice.
 
-   What is STILL worth doing, on its own merits rather than as a cure:
+   Done since and worth keeping whatever the link does: the
+   `(project_id, status)` index, and gzip, which cuts HTML/CSS/JS by 70-80%
+   and costs the server nothing.
 
-     * an index on `(project_id, status)` — takes the dashboard grouping
-       from 0.16s to about 0.01s and removes a TEMP B-TREE. Real, small,
-       and it was never what he felt.
-     * `preflight.py` warns about six queries running once per item inside
-       a comprehension. Harmless at nineteen rows, worth tidying at 201k.
-     * Diagnostics walks the disk for 10,092 posters. That one IS genuinely
-       slow and belongs behind an explicit "run it" rather than a page load.
-
-   Deliberately removed from that list: "the worker's Browse All Titles
-   pages 201,133 rows." It is properly paginated — 100 a page, and the page
-   itself says `page 1 / 1017`. Paging through a large table is the correct
-   behaviour, not a defect, and listing it as a speed candidate is what a
-   lead turning into a finding looks like.
-
-   `gzip` compression was added on 2026-08-27 and is worth keeping whatever
-   the link is doing: it cuts HTML, CSS and JS by 70-80%, which matters
-   enormously on a bad connection and costs the server nothing.
-
-   An index is a schema change, so it goes in `schema_migrations.py` as
-   `CREATE INDEX IF NOT EXISTS` — safe, idempotent, and SQLite builds one
-   over 201k rows in seconds.
-
-   The invariant to leave behind: **a page that scans a whole table is a
-   defect once the table is real.** Worth a preflight check that flags a
-   query with no filter on a table known to be large.
-
-10. **THE RETROFIT AUDIT — build the extension points before the next thing
-    needs them.** `DECIDED 2026-08-25` — not started. Folded into the QoL
-    stage in `ROADMAP.md`, because it asks the same question that stage
-    already asks. His words, 2026-08-25: *"we should revamp everything for
-    as little retrospect headache as possible. You have by now seen the
-    pattern when we add stuff."*
-
-    He is right that there is a pattern, and it is worth naming exactly,
-    because it is the same shape every time: **a field that describes one
-    thing gets used for two, and a mechanism built for one marketplace
-    becomes the template for the next.** Every one of these cost a session:
-
-      * `UploadAccount.project_id` — one column could not say "this account
-        serves two niches". Became the `account_projects` link table; the
-        column survives as dead weight.
-      * `paused_until` — one field for an account that cannot upload AND an
-        account that cannot be read for money. Two unrelated failures, each
-        silencing the other. Became `earnings_paused_until` beside it.
-      * `action_error` — one field for "could not switch off" and "could not
-        switch back on", which are opposites. Became `action_error_kind`,
-        and while it was one field a live listing sat hidden.
-      * Marketplace behaviour as if-statements — became `CAPABILITIES` rows
-        only after TeePublic's habits were applied to FineArtAmerica, where
-        they were exactly wrong.
-      * A stage counter — became work derived from the catalogue only after
-        one account finishing ended the stage for five.
-
-    So the audit is not "tidy the code". It is: **for every field and every
-    mechanism, ask what the SECOND user of it will need, and whether it can
-    express that today.** Concretely, walk these and write down the answer:
-
-      * Every column that names a single owner (`project_id`, `account_id`,
-        `target_site`) — can the thing it points at ever be plural?
-      * Every status field — can the thing it describes fail in more than
-        one way independently?
-      * Every mechanism that exists once (a run with stages, a chunked node
-        job, a nightly read, a review gate) — the store sweep, the listing
-        sweep and the earnings read each grew their own. Which parts are
-        genuinely one shared mechanism and which are genuinely different?
-      * Every screen that shows a shared fact inside one project.
-
-    **The known next arrivals, and they are the test:** celebrity portraits
-    from Pinterest, TeePublic as an uploading project rather than only an
-    earning one, Redbubble as a third marketplace, and the master-level
-    Accounts tab. For each, say which existing pieces would be DEAD and
-    which existing field would have to be split — BEFORE building.
-
-    Do this AFTER the interaction audit and BEFORE the UI revamp: the audit
-    tells you which seams leak, this fixes the seams, and the revamp is
-    cheapest once nothing underneath is about to move.
+   The invariant: **a page that scans a whole table is a defect once the
+   table is real.**
 
 Concretely, this means:
 
@@ -697,8 +645,23 @@ clicking at a sign-in page and the report reads "stuck at the wall" when the
 answer is two minutes with PROFILES.bat.
 
 **TeePublic keeps you signed in for weeks and punishes knocking; FAA forgets
-you in minutes and does not mind.** Hence `signin_on_read` per marketplace —
-see rule 5b.
+you in minutes.** Hence `signin_on_read` per marketplace — see rule 5b.
+
+**This used to end "and does not mind". That half is withdrawn —
+`MEASURED 2026-09-01`.** FAA states publicly that it monitors and blocks
+automated login attempts, and the node made about 70 sign-in attempts in 13
+days. Their tolerance is not established; what is established is that they
+watch.
+
+Two things follow, and neither is "stop signing in":
+
+  * **It was NOT why the accounts were closed.** That was the content, said
+    in writing by their staff. Do not reopen it.
+  * **The BURST is the shape to avoid, not the daily total.** Four logins
+    spread across a day is a person working; five in ninety seconds — which
+    a retry loop once produced — is what an attack looks like. The cheapest
+    real fix is to read the balance at the END of an upload run, where the
+    browser is already signed in, which costs no login at all.
 
 **THE WALL ARRIVES MID-RUN, not only at the start.** Measured 25 Aug: an
 account switched 81 designs cleanly at ~20 seconds each, then every
@@ -933,6 +896,24 @@ non-ASCII characters from the celebrity database and reading back what saved:
 - A title that normalises to EMPTY is rejected with a page reading
   "Please use only A-Z in your artwork title" — an HTML error page, not an
   HTTP error, so it must be detected by content.
+- **A TITLE THE ACCOUNT ALREADY HOLDS IS SILENTLY RENUMBERED.** Stated by
+  the owner, `MEASURED 2026-09-03`: send "Los Angeles" twice and the second
+  one lists as **"Los Angeles #2"**. Not refused — renamed, with no error.
+
+  **This makes a title half of a primary key, not a label.** Everything
+  downstream derives the listing address from `{title-slug}-{artist-slug}`,
+  so a renumbered listing lives at an address we never computed, and
+  `listing_check.py` reads the miss as a 404. A 404 is defined two sections
+  up as "OUR ADDRESS IS WRONG" rather than a takedown, which is the correct
+  reading — but only after the sweep has already spent the request, every
+  sweep, for as long as the pair exists.
+
+  So a duplicate title is not a cosmetic problem and it cannot be left for
+  the marketplace to sort out. **Titles must be unique ACROSS THE WHOLE
+  CATALOGUE, after FAA's folding, before anything is dispatched** — "Los
+  Angeles" and "Los Ángeles" are the same title to FAA and must not both
+  exist. Uniqueness is checked against the folded form, never the raw
+  string.
 
 Consequences that are not optional:
 
@@ -981,19 +962,33 @@ app/
                        worse than no match.
     service.py         Storing rows, queueing the node's reads, and the
                        figures each screen needs.
+  schema_migrations.py Additive, idempotent column and index migrations, run
+                       at startup. Data migrations do NOT belong here.
+  brave_search.py      Query building and the image search. `{title}` is the
+                       placeholder; `{artist}` is a legacy alias.
+  gpt_worker.py        Image generation, on THIS server. Started only if a
+                       project declares processor='gpt'.
+  listing_check.py     Is what we think is live on FineArtAmerica actually
+                       there? 410 means removed, 404 means our ADDRESS is
+                       wrong. Never collapse the two.
   routes/
     worker.py          Worker-facing (file name is historical; URLs don't say
                        "worker")
     admin.py           Admin dashboard, review, payments, users, backups
     pipeline_api.py    Machine API,  /api/pipeline,    node bearer token
     pipeline_admin.py  Dashboard API, /admin/pipeline, admin session
+    listing_admin.py   The Listing check tab.
+    store_*.py         TeePublic store health. PARKED — the owner plans to
+                       move this to his laptop and drop it from the server.
   templates/           Jinja2. base.html holds the nav.
   static/js/           One file per page, vanilla JS, no build step.
 
 worker_service/        Runs on the Windows VPS. agent.py is the loop.
+                       Updated by COPYING THE FOLDER, which has no receipt —
+                       so AGENT_VERSION is bumped whenever anything in here
+                       changes, and read back on the Nodes tab.
 scripts/
   create_admin.py
-  migrate_pipeline.py  Schema + legacy import + backfill. Idempotent.
   reset_workflow.py    Wipe all WORK (posters, pipeline, payments, chat, log)
                        and reset titles to pending. Keeps users, accounts,
                        settings, projects. Backs up first; refuses on a
@@ -1084,115 +1079,39 @@ tool needs, add it to `REQUIRED_MODULES` in `dev_setup.py` too.
 
 ---
 
-## The legacy processed archive (2026-08-04)
+## The legacy archive and the old data — GONE `2026-09-01`
 
-The 4,865 files the owner processed by hand live on his laptop at
-`FineArtAmerica Tell-A-Vision\Outputs\Straight From Photoshop\` in exactly
-the layout the pipeline now writes: `{date}/{external_id}. {Title} ({Year})/`.
-22 date folders, 2,077 titles.
+Both earlier niches are deleted and the database is being replaced with an
+empty one. Everything that used to live here — the 4,865 hand-processed
+movie images, the dot-truncated 44, the renumbered 10, the 101,605-row master
+sheet, the migration tool and its rehearsal — described work that no longer
+exists or a marketplace catalogue that has been taken down.
 
-They are being copied to `S:/fineartamerica/GR(Movie&Series)/processed/` with
-rclone (`UPLOAD_TO_STORAGE.bat` next to the Outputs folder), which is a plain
-file copy — no database involvement.
+**What is worth carrying forward from it, because it was paid for twice:**
 
-**THESE ARE TWO DIFFERENT RECORDS AND ONLY ONE OF THEM IS URGENT.** Confusing
-them wasted a conversation, so it is worth being blunt:
+* **`external_id` is unique only INSIDE one project.** Every sheet starts
+  again at 1. A lookup by `external_id` that is not scoped to a project will
+  find another project's row, silently, and report confidently about the
+  wrong data. Enforced by the GUARDED table in `preflight.py`.
+* **Two records for one fact drift, and the newer copy is the one that
+  breaks.** The old system kept JSON files beside the images; every one
+  became a second record that could disagree with the database.
+* **A file rename does not update the record that points at it.** Renaming
+  44 files on disk fixed nothing until the JSON keys were rewritten too.
+* **"No tool is needed" was a judgement about cost, written in the same voice
+  as the measured figures around it.** Nothing on the page distinguished
+  them. That is what the provenance tags are for.
 
-  * **"already on FineArtAmerica"** — `UploadTracking`, imported from
-    `faa_upload_tracking.json`. This is what stops the pipeline uploading
-    all 4,865 a SECOND time, and it needs no files at all. It also WINS over
-    the archive record in `backfill_statuses`, so the tracking import alone
-    is enough to be safe. Steps 6b/6c of `tools/migrate_gui.py`.
-  * **"the finished file is at this path"** — `ProcessedImage`. An index of
-    the archive. Nothing breaks without it; you simply could not re-upload
-    after a ban without hunting through folders. `app/archive_index.py` and
-    the READ THE STORAGE BOX button.
+## Data state — `2026-09-01`
 
-The archive half CANNOT run on the server: the files are on the storage box,
-mounted as a drive letter on the Windows machine, and the database is on
-Linux. Neither can see both. So the machine with the drive lists what is on
-it and posts the paths home — the same split as the listing checker, and the
-reason `scripts/migrate_pipeline.py --processed-root` is now dead. It read a
-local folder that no longer exists on the laptop.
+**Starting from an empty database.** No master titles, no posters, no
+payment runs, no users beyond the admin that gets created, no accounts.
 
-The match is:
-
-    folder prefix  -> MasterTitle.external_id      (exact)
-    " N_Painted"   -> the Nth poster of that title (exact)
-
-Both halves must be run against the FINAL database. Settings travel from the
-test box at migration time; DATA does not, so an import done on a rehearsal
-is practice and is redone once for real. That is why it is a step in the
-migration tool rather than a tool of its own.
-
-**MEASURED 2026-08-25 against the real promoted database, so these are
-facts rather than estimates:**
-
-    4,811  match a live poster exactly
-       44  the dot-truncated titles (planned item 7)
-       10  renumbered — posters deleted and re-saved, all on 2026-04-29
-    ─────
-    4,865
-
-4,811 is also the figure the old notes carry for "images live on
-FineArtAmerica", recorded months earlier by a different route. Two
-independent records agreeing to the image is the best confirmation
-available that the matching rule is right.
-
-The 10 are their own story and need no action: while the first worker was
-learning, extra images were saved and some deleted, and `save_image`
-derives a poster's number from the LIVE COUNT at save time — so deleting
-two shifts every later number. Shawshank is `4,5,6` in the database against
-`1,2,3,4` in the archive. Those three listings are live with no row to
-attach them to, and the posters that ARE on file were never processed, so
-the pipeline correctly treats them as new work.
-
-An earlier version of this file guessed "about 54, the earliest batch" for
-the whole miss and it was repeated as if measured. The owner pushed back —
-"there is no way i deleted 50" — and he was right. 10.
-
-## Data state
-
-**Two boxes, and they hold DIFFERENT data. Read the right column.**
-Measured 2026-08-27 on both.
-
-| | LIVE 178.105.34.144 | TEST 178.105.232.196 |
-|---|---|---|
-| version | v15, sourcing only | current |
-| master titles | 101,605 | 201,133 (the extra ~99.5k is MUSIK) |
-| saved posters | 10,697 | — |
-| payment runs | 15 | — |
-| pipeline tables | **none exist** | all |
-
-The live box has never had the post-production half. Every pipeline table
-arrives at once on migration, empty, and is filled by the imports — which is
-the easiest kind of migration, not the hardest.
-
-MUSIK exists ONLY on the test box, which is why cleaning its master sheet is
-free right now and expensive after any real work.
-
-### The figures below are from 2026-07-30 and describe the LIVE box
-
-The worker has added roughly 2,700 posters since (7,972 → 10,697), so treat
-the poster counts as a floor rather than a current figure.
-
-| | |
-|---|---|
-| Master titles | 101,605 (98,004 still pending) |
-| Completed | 3,467 titles / 7,972 live posters |
-| Processed + uploaded to FAA | 4,811 images (+4 removed) |
-| **Backlog awaiting processing** | **~3,161 posters ≈ 32 days at the 100/day cap** |
-| Paid | 12 runs, 7,975 posters, ~39,875 KES at 5 KES/poster |
-| Workers | `humphrey` (currently disabled, idle since ~24 Jun), `test1` (deleted) |
-
-Processing stopped 24 May while the worker kept going to 24 Jun — that gap is
-the backlog. The owner paused work to get this automation built.
-
-Legacy → DB matching was verified at **98.9%**; the 54 misses are the earliest
-batch, live on the marketplace but with no surviving poster rows. The migration
-writes them to a report rather than guessing.
-
----
+The live box `178.105.34.144` still holds the old sourcing-only build (v15,
+101,605 movie titles, ~10,700 posters, 15 payment runs). It is to be wiped,
+not migrated: the owner has chosen a genuine fresh start, keeping no snapshot.
+Every count that follows the wipe should be zero, and any screen that shows
+otherwise is a defect worth chasing rather than a leftover to explain away.
 
 ## Deployment
 
@@ -1201,12 +1120,19 @@ ssh root@178.105.34.144
 cd /path/to/poster_downloader_web
 git pull
 # Back up poster.db BEFORE any schema change.
-docker compose exec web python scripts/migrate_pipeline.py --schema-only
 docker compose up -d --build
 ```
 
-Full sequence, including the legacy import and the Windows node, is in
-`PIPELINE.md` §5.
+**There is no separate migration step any more.** Startup runs
+`create_all()`, then `migrate_schema()`, then `sync_projects()`, in that
+order and for that reason — see `app/main.py`. `scripts/migrate_pipeline.py`
+was deleted on 2026-09-01: 920 lines of one-off legacy import, plus a
+re-export of `migrate_schema` that made a disposable script load-bearing for
+`dev_setup.py`.
+
+The Windows node is updated by COPYING `worker_service/`. That has no
+receipt, so `AGENT_VERSION` is bumped in the same edit and read back on the
+Nodes tab.
 
 ---
 
@@ -2352,6 +2278,71 @@ His words, 2026-08-17: *"explain to me step by step using simple words you
 keep using big words. From now on make it easy to understand in layman terms
 everything we talk about."*
 
+**He had to say it again on 2026-09-02, and more strongly:** *"I strictly
+need from now on literally everything you give me, doesnt matter 50 years
+from now our chat, make the vocabulary extremely easy and simple to
+understand. Explain things very simply and dont use verbose complicated
+terms."*
+
+**Read that as: EVERYTHING, ALWAYS, NO EXPIRY.** Not just the hard
+explanations. Not just when he is stuck. Every sentence of every reply, for
+as long as this project exists. Having to ask twice means the rule was
+written down and then quietly ignored once the writing got technical — which
+is exactly when it matters most.
+
+The test is simple: **would a smart person who has never seen a line of code
+understand this sentence the first time they read it?** If not, rewrite it.
+
+**AND SHORT WORDS ARE ONLY HALF OF IT. THE SENTENCES HAVE TO READ WELL
+TOO.** He said this on 2026-09-02, after a reply that used simple words and
+was still hard to read: *"you are using simple words yes but the way you
+write sentences is so rigid... i need readable sentence."*
+
+He then rewrote the reply himself, and the differences are the rule:
+
+| Rigid, what I wrote | Readable, what he wanted |
+|---|---|
+| "It will look at the ~990 places that currently just say UK" | "The tool will check the ~990 places that currently only say UK" |
+| "Should take about 5 minutes." | "It should take about 5 minutes." |
+| "Everything already looked up stays cached, so it won't redo the 36,000 regions from before." | "Anything the tool has already checked is saved, so it will not check the 36,000 regions again." |
+| "Some subtitles just repeat the name." | "Some subtitles simply repeat the place name. For example, ..." |
+
+So, concretely:
+
+- **Write whole sentences.** Every sentence gets a subject and a verb.
+  "Should take five minutes" is a fragment. "It should take about five
+  minutes" is a sentence. Fragments read like notes, not like talking.
+- **One idea per sentence.** If a sentence has a dash in the middle
+  carrying a second thought, split it into two sentences.
+- **Say "for example" out loud.** Do not just drop the example next to the
+  claim and hope the link is obvious.
+- **Name the thing doing the action.** "The tool will check" beats "it will
+  look at". He should never have to work out what "it" refers to.
+- **Stop bolding half the sentence.** Bold is for the one thing that
+  matters most in a section, not for every clause.
+- **Do not compress.** Cramming a fact, its reason, and its consequence
+  into one clause is not efficient. It just moves the work onto him.
+
+**KEEP THE BULLET POINTS. HE ASKED FOR THIS BACK ON 2026-09-02**, after a
+reply that followed everything above and came out as five plain paragraphs:
+*"i didnt mean stop formatting, i just meant the structure in sentences was
+hard to read, so i need back the bullet points etc to make the wall of text
+you are giving me more easy to read not just paragraphs."*
+
+The complaint was never about structure. It was about the SENTENCES inside
+the structure. So:
+
+- **Use bullets, headings and short tables as much as before.** They are
+  what makes a long reply scannable.
+- **Write each bullet as a full sentence, or two.** A bullet is not an
+  excuse for a fragment. "Drowned by a dam in 1982" becomes "The falls were
+  drowned when the Itaipu dam was built in 1982."
+- **A table is still right for real data**, such as a list of places and
+  their view counts. It is wrong for an explanation, because a table forces
+  him to reassemble the sentence in his head.
+
+The two rules work together: keep the shape, fix the prose inside it.
+
 He is not a coder. Every explanation is judged on whether HE can act on it,
 not on whether it is technically complete. Concretely:
 
@@ -2372,6 +2363,13 @@ not on whether it is technically complete. Concretely:
   explanation.** Rewrite it from scratch in simpler words; do not repeat it
   with more detail bolted on. He asked twice before I stopped using jargon,
   and that was two wasted rounds.
+
+- **Do not dress up a simple thing.** "The tool asks the website one
+  question about 500 places at once" beats "a batched lookup resolves the
+  dependency for the affected subset". Same fact, and only one of them can
+  be read at speed.
+- **A number he can picture beats a percentage.** "500 titles would be
+  wrong" lands; "a 4% error rate" does not.
 
 This applies to CHAT, not to code comments. Comments explain *why* to the
 next engineer and stay technical.

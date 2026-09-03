@@ -385,9 +385,21 @@ DEFAULTS: dict[str, Any] = {
 
     # Title submitted to the marketplace. Variables: {title} {year}
     # {letter} {index} {content_type} {external_id}
-    "title_template":     "{title} - {year} {letter}",
+    #
+    # NICHE-NEUTRAL ON PURPOSE. This used to be "{title} - {year} {letter}",
+    # which is only correct for a project whose sheet HAS a year — and
+    # `has_year` exists precisely because most do not. A project declaring
+    # has_year = 0 that inherited this default listed every item with an
+    # empty gap where the year should be. A global default is what the NEXT
+    # project gets before anyone has configured it, so it must be the thing
+    # that is true of every project, not of the first one.
+    "title_template":     "{title} {letter}",
     # Appended to the auto-derived keywords. Leading comma intentional.
-    "keywords_static":    ", movie, series, tv, film, show, actor, cinema",
+    # Deliberately EMPTY at global level: keywords are the most niche-specific
+    # value there is, and a wrong one is published on a real marketplace under
+    # the owner's name. Blank produces no tags; a stale niche's tags would
+    # produce confident, wrong ones.
+    "keywords_static":    "",
     # Where the listing description comes from: 'master' uses
     # MasterTitle.description, 'template' renders description_template.
     "description_source": "master",
@@ -436,36 +448,49 @@ DEFAULTS: dict[str, Any] = {
     "soft_limit_per_title": 3,
     # Where the worker is sent to find source images. `{query}` and
     # `{content_type}` are substituted. Empty means the project searches
-    # in-page instead of linking out — which is what MUSIK does.
-    "source_search_url":  "https://www.themoviedb.org/search?query={query}",
+    # IN-PAGE instead of linking out.
+    #
+    # Blank is the right global default now that no project links out. A
+    # leftover URL here is worse than none: a new project inherits it and
+    # grows an "Open <somewhere>" button pointing at a site it has never
+    # heard of — the exact defect that put a live TMDB link on a project
+    # that never touched TMDB.
+    "source_search_url":  "",
     # Hosts a worker may download from. Empty means unrestricted.
     "allowed_download_hosts": "",
-    # Below this width the admin gallery outlines an image in red. It exists
-    # because a movie poster under 800px prints badly. MUSIK sources are
-    # deliberately small — GPT redraws them and the result is upscaled — so
-    # the warning would fire on every single image and mean nothing.
-    # 0 turns it off.
+    # Below this width the admin gallery outlines an image in red, because a
+    # print source under 800px prints badly. A project whose images are
+    # REDRAWN and then upscaled sets this to 0 — otherwise the warning fires
+    # on every single image and stops meaning anything.
     "review_min_width_px": 800,
 
-    # ── Brave image search (MUSIK) ───────────────────────────────────────
+    # ── Brave image search ───────────────────────────────────────────────
     # Two keys. Normal searches use the free key; deep searches go straight to
     # the paid one because they fire two queries at once and the free key
     # allows only 1 request/second. A normal search that hits a 429 retries
     # once on the paid key rather than showing the worker an error.
+    #
+    # `{title}` is substituted with the master title's name. `{artist}` still
+    # works as an alias — see build_queries() for why both are accepted.
+    #
+    # Both queries are deliberately GENERIC here. The useful phrasing is
+    # per-project and the owner sets it: a project searching for mountains and
+    # one searching for musicians want nothing in common, and a plausible
+    # inherited query is worse than an obviously empty one because it returns
+    # results that merely look wrong rather than none at all.
     "brave_api_key_free": "",
     "brave_api_key_paid": "",
-    "brave_query_normal": 'site:pinterest.com "{artist}"',
+    "brave_query_normal": '"{title}"',
     # Deep search runs EVERY line below and merges the results, de-duplicated
-    # by image URL. Two queries because no single phrase serves both bands and
-    # solo artists: "U2 musician" returns Bono, "Kanye West band" returns
-    # nothing useful. At half a cent a query, paying beats being clever.
-    "brave_query_deep":   '"{artist}" band\n"{artist}" musician',
+    # by image URL. Multiple lines exist because one phrase rarely covers a
+    # whole niche. At half a cent a query, paying beats being clever.
+    "brave_query_deep":   '"{title}"',
     "brave_min_dimension": 300,
     "brave_results_per_query": 50,
     # Off by default — turn it on only if a bug starts looping.
     "brave_daily_query_cap": 0,
 
-    # ── OpenAI image generation (MUSIK) ──────────────────────────────────
+    # ── OpenAI image generation ──────────────────────────────────────────
     "openai_api_key":     "",
     # Separate, higher-privilege credential. Only the nightly cost
     # reconciliation uses it; image generation never does.
@@ -478,11 +503,18 @@ DEFAULTS: dict[str, Any] = {
     "openai_model":       "gpt-image-2",
     "openai_size":        "auto",
     "openai_quality":     "low",
+    # THE PROMPT IS PER-PROJECT AND THE OWNER WRITES IT. What is here is the
+    # niche-neutral skeleton — style transfer from the reference image, and
+    # the aspect-ratio instruction, which are true of any generation project.
+    #
+    # The previous default carried "zoom in to the upper body areas", which
+    # is correct for portraits and actively wrong for a landscape. That is
+    # the shape of default worth avoiding: it does not fail, it quietly
+    # produces the wrong picture and charges for it.
     "openai_prompt": (
         "Transform the style of the second image to style of the first image. "
         "Favor a clean, minimal treatment with broad shapes and restrained "
-        "detail. Use second image color scheme. Zoom in to the upper body "
-        "areas and strictly avoid empty space.\n"
+        "detail. Use second image color scheme.\n"
         "Ratio should either be 1:1, 2:3, 3:2 or 16:9 depending on second "
         "image overall structure and which it would look best in."
     ),
@@ -694,12 +726,6 @@ DEFAULTS: dict[str, Any] = {
     # ever moves the number — never because it is optional in principle.
     "store_count_check": 1,
 
-    # ── Archive index (what is already on the storage box?) ──────────────
-    # How many file paths the worker machine sends home at a time. It runs
-    # ONE job at a time, so this is really "how long may Photoshop be made
-    # to wait" — the walk itself takes seconds and the server's matching is
-    # the slow half. 200 keeps each round trip under a second or two.
-    "archive_index_chunk": 200,
 
     # ── Listing reconciliation (does the marketplace still show it?) ─────
     # How many addresses go out in one job. The worker machine runs ONE job
@@ -850,7 +876,7 @@ def all_settings(db: Session, *, project: Optional[Project | str] = None) -> dic
 #  PROJECTS
 # ═════════════════════════════════════════════════════════════════════════
 
-DEFAULT_PROJECT_SLUG = "tell-a-vision"
+DEFAULT_PROJECT_SLUG = "travel"
 
 # WHICH PROCESSORS RUN ON THE WINDOWS NODE.
 #
@@ -940,56 +966,56 @@ PROCESSOR_LABELS = {
 
 PROJECT_DEFS: list[dict] = [
     {
-        "slug":             DEFAULT_PROJECT_SLUG,     # 'tell-a-vision' — frozen, it is the identity
-        "name":             "GR(Movie&Series)",
-        "source_site":      "tmdb",
-        "target_site":      "fineartamerica",
-        "images_per_title": 3,
-        "notes":            "Original workflow: TMDB posters -> Real Paint FX -> FineArtAmerica.",
-        "item_noun":        "poster",
-        "item_noun_plural": "posters",
-        "processor":        "photoshop",
-        "has_year":         1,
-        "has_content_type": 1,
-        "has_review_gate":  0,
-        "search_mode":      "external",
-    },
-    {
-        "slug":             "musik",
-        "name":             "MUSIK",
+        "slug":             DEFAULT_PROJECT_SLUG,     # 'travel' — frozen, it is the identity
+        "name":             "Travel Locations",
         "source_site":      "brave",
         "target_site":      "fineartamerica",
+        # STILL TO BE SPECIFIED BY THE OWNER. Two is the MUSIK figure and is
+        # a placeholder, not a decision — it sets how many images a worker
+        # saves per location and therefore the size of the whole catalogue.
         "images_per_title": 2,
-        "notes":            "Music artists: Brave image search -> GPT Image 2 restyle -> FineArtAmerica.",
+        "notes":            "Travel locations: Brave image search -> GPT Image 2 -> FineArtAmerica.",
         "item_noun":        "image",
         "item_noun_plural": "images",
         "processor":        "gpt",
-        # Searches inside the site, so no "Open TMDB" button.
+        # Searches inside the site. No external source, so no "Open <site>"
+        # button anywhere in the worker UI.
         "search_mode":      "inpage",
-        # Source resolution is irrelevant here: GPT redraws the image and the
-        # result is upscaled to print size, so a red "640px wide" warning on
-        # every artist would be pure noise.
-        "settings":         {
-            "review_min_width_px": 0,
-            # No external source. Belt and braces alongside the search_mode
-            # check in _source_search_url(): without this the project simply
-            # inherits the global default, which is TMDB.
-            "source_search_url": "",
-            # "Carla Bruni #A" / "Carla Bruni #B". No year — artists have
-            # none.
-            #
-            # The '#' is doing real work: an artist called "Alison A" sitting
-            # beside a plain "Alison" makes a bare letter suffix ambiguous at
-            # a glance in a list of 500 listings. "Alison #A" cannot be read
-            # as part of a name.
-            "title_template": "{title} #{letter}",
-        },
-        # One column of artist names — no year, no movie/tv distinction.
+        # A location has no year and no movie/tv distinction. If the sheet
+        # later carries a CATEGORY (park / city / lake / mountain), that is a
+        # new field rather than a reuse of has_content_type — one column that
+        # means two things is the mistake this codebase keeps paying for.
         "has_year":         0,
         "has_content_type": 0,
-        # GPT output varies in a way Photoshop's deterministic effect does
-        # not, so it gets an approval step before anything is listed.
+        # GPT output varies in a way a deterministic effect does not, so it
+        # gets an approval step before anything is listed.
         "has_review_gate":  1,
+        "settings":         {
+            # Source resolution is irrelevant: GPT redraws the image and the
+            # result is upscaled to print size, so a red "640px wide" warning
+            # on every location would be pure noise.
+            "review_min_width_px": 0,
+            # No external source. Belt and braces alongside the search_mode
+            # check in _source_search_url() — without this the project
+            # inherits whatever the global default happens to be.
+            "source_search_url": "",
+            # "Santorini #A" / "Santorini #B". No year — locations have none.
+            #
+            # The '#' is doing real work: a place called "Victoria A" sitting
+            # beside a plain "Victoria" makes a bare letter suffix ambiguous
+            # at a glance in a list of 500 listings.
+            "title_template": "{title} #{letter}",
+            # ── STILL TO BE SPECIFIED BY THE OWNER ──────────────────────
+            # These three are the project's whole personality and none of
+            # them can be guessed. Placeholders below are deliberately
+            # generic so a wrong value is obvious rather than plausible.
+            #
+            #   brave_query_normal  what the worker's SEARCH button asks for
+            #   keywords_static     the tags appended to every FAA listing
+            #   openai_prompt       how the sourced photo becomes artwork
+            "brave_query_normal": '"{title}" travel photography',
+            "keywords_static": ", travel, wall art, landscape, destination",
+        },
     },
 ]
 
@@ -1045,6 +1071,36 @@ def sync_projects(db: Session) -> list[str]:
                     )
                 else:
                     changes.append(f"{spec['slug']}.{field} -> {spec[field]!r}")
+
+    # ── A PROJECT REMOVED FROM THE REGISTRY IS SWITCHED OFF ──────────────
+    #
+    # Until 2026-09-01 this loop only ever CREATED and UPDATED. Deleting a
+    # project from PROJECT_DEFS therefore did nothing at all to a database
+    # that already had it: the row kept `is_active = 1`, so the card stayed
+    # on the dashboard, the switcher still offered it, and workers could
+    # still stand in it. The owner found it by running the app after the
+    # niche was removed and seeing the deleted project still listed.
+    #
+    # THE ASYMMETRY IS DELIBERATE AND IS THE WHOLE DESIGN. This only ever
+    # turns a project OFF, never on. The standing rule that a deploy must
+    # not silently re-enable a project you switched off by hand still holds
+    # — `is_active` stays out of _SYNCED_FIELDS for exactly that reason.
+    # What changes is that removing a project from the code now means
+    # something, instead of meaning nothing.
+    #
+    # Switched off rather than DELETED, because the row is pointed at by
+    # titles, posters, upload records and payment history. Deleting it would
+    # orphan real data — and an audit trail that outlives the thing it
+    # describes is the point of keeping it. Put the spec back and it returns
+    # with its data intact.
+    declared = {spec["slug"] for spec in PROJECT_DEFS}
+    for proj in db.query(Project).filter(Project.is_active == 1).all():
+        if proj.slug not in declared:
+            proj.is_active = 0
+            changes.append(
+                f"switched OFF project '{proj.slug}' ({proj.name}) — it is no "
+                f"longer declared in PROJECT_DEFS. Its rows are untouched; "
+                f"restore the spec to bring it back.")
 
     return changes
 

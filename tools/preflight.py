@@ -50,7 +50,7 @@ import json
 import re
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parent.parent
 APP = ROOT / "app"
@@ -1209,6 +1209,27 @@ def check_no_orphan_documents() -> None:
             fail(f"{rel} is not named in CLAUDE.md — a document nothing "
                  f"points at is a document nobody reads. Add it to the "
                  f"index, or delete it if it is finished with.")
+
+    # ── AND THE OTHER DIRECTION ─────────────────────────────────────────
+    #
+    # The check above finds a document nobody points at. It cannot find a
+    # POINTER TO A DOCUMENT THAT IS GONE, and those are the more dangerous
+    # half: an orphan file is merely unread, whereas a dangling reference
+    # sends the next session looking for guidance that no longer exists —
+    # and, worse, implies the thing it described is still true.
+    #
+    # Found on 2026-09-01 by deleting two documents during the strip-down.
+    # Every check stayed green while CLAUDE.md went on listing both in its
+    # index table. The hole was at the edge of the pattern, which is where
+    # they usually are.
+    present = {p.name for p in docs} | {"CLAUDE.md"}
+    for m in re.finditer(r"`([\w./-]+\.md)`", text):
+        named = m.group(1)
+        if PurePosixPath(named).name not in present:
+            fail(f"CLAUDE.md points at {named}, which does not exist. A "
+                 f"reference to a deleted document is worse than no "
+                 f"reference: it sends the next session hunting for advice "
+                 f"that is gone, and implies it still applies.")
 
 
 def _calls_made_in(node: ast.AST) -> set[str]:

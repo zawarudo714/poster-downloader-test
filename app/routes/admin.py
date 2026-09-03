@@ -981,18 +981,24 @@ def _import_worker(job_id: int, raw_bytes: bytes, file_ext: str, replace: bool,
             db.commit()
 
         # ── Which column holds the title? ───────────────────────────────
-        # The movie sheet has a `title` column. The MUSIK sheet has exactly
-        # one column, `artist_mb`. Rather than hardcode a list of known
-        # header names — which would need editing for every future niche —
-        # fall back to "the only column there is" when `title` is absent.
-        # A single-column sheet is unambiguous by definition.
+        # Sheets differ per niche and always will: one may have a `title`
+        # column, another exactly one column called something else. Rather
+        # than hardcode a list that needs editing for every future niche,
+        # fall back to "the only column there is" when `title` is absent —
+        # a single-column sheet is unambiguous by definition — and only then
+        # to a list of likely names.
+        #
+        # The candidate list is a convenience, not the mechanism. Anything
+        # not on it still imports fine as a single-column sheet, or by
+        # naming the column `title`.
         title_key = "title"
         if rows and "title" not in rows[0]:
             headers = [k for k in rows[0].keys() if k]
             if len(headers) == 1:
                 title_key = headers[0]
             else:
-                for candidate in ("artist_mb", "artist", "name", "subject"):
+                for candidate in ("location", "place", "destination",
+                                  "name", "subject"):
                     if candidate in rows[0]:
                         title_key = candidate
                         break

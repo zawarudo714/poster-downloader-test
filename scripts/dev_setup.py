@@ -130,33 +130,39 @@ def make_placeholder_png(width: int, height: int, seed: int) -> bytes:
 # ═════════════════════════════════════════════════════════════════════════
 
 # Enough real-looking titles to exercise the UI, including deliberately awkward
-# ones — colons, accents, ampersands, apostrophes — because those are exactly
-# what break marketplace title cleaning.
+# ones — colons, accents, apostrophes, and a þ — because those are exactly what
+# break marketplace title cleaning. FineArtAmerica folds some of these to ASCII
+# and DELETES others outright, so a seed list of plain English words would let
+# a title-rendering bug through untouched.
+#
+# The year is "N/A" and the type is blank because a location has neither. That
+# is what the importer produces for a sheet without those columns, so the demo
+# data has the same shape as the real thing rather than a tidier one.
 _DEMO_TITLES = [
-    ("The Shawshank Redemption", "1994", "movie", "Two convicts form a friendship over several years, finding consolation and eventual redemption."),
-    ("The Dark Knight", "2008", "movie", "Batman faces the Joker, a criminal mastermind who plunges Gotham into anarchy."),
-    ("Inception", "2010", "movie", "A thief who steals corporate secrets through dream-sharing technology takes on one last job."),
-    ("Léon: The Professional", "1994", "movie", "A hitman reluctantly takes in a young girl after her family is murdered."),
-    ("Star Wars: Episode V - The Empire Strikes Back", "1980", "movie", "The Rebels scatter after an Imperial attack while Luke seeks training with Yoda."),
-    ("Schindler's List", "1993", "movie", "An industrialist gradually becomes concerned for his Jewish workforce during the war."),
-    ("Amélie", "2001", "movie", "A shy Parisian waitress decides to change the lives of those around her for the better."),
-    ("Pirates of the Caribbean: The Curse of the Black Pearl", "2003", "movie", "A blacksmith allies with a roguish pirate to rescue his love from a cursed crew."),
-    ("Breaking Bad", "2008", "tvSeries", "A chemistry teacher diagnosed with cancer turns to manufacturing drugs to secure his family's future."),
-    ("Game of Thrones", "2011", "tvSeries", "Noble families vie for control of the Iron Throne as an ancient enemy returns."),
-    ("The Sopranos", "1999", "tvSeries", "A New Jersey mob boss balances the demands of his crime family and his own."),
-    ("Spirited Away", "2001", "movie", "A young girl wanders into a world of spirits and must work to free her parents."),
-    ("Parasite", "2019", "movie", "A poor family schemes to infiltrate the household of a wealthy one."),
-    ("Mad Max: Fury Road", "2015", "movie", "In a desert wasteland, a drifter and a rebel flee a tyrant across the sands."),
-    ("The Grand Budapest Hotel", "2014", "movie", "A concierge and his protégé become entangled in the theft of a priceless painting."),
-    ("Chernobyl", "2019", "tvSeries", "The 1986 nuclear disaster and the people who responded to it."),
-    ("Whiplash", "2014", "movie", "A young drummer is pushed to his limits by an abusive instructor."),
-    ("Blade Runner 2049", "2017", "movie", "A replicant blade runner uncovers a secret that could upend what is left of society."),
-    ("Fight Club", "1999", "movie", "An insomniac office worker forms an underground fight club with a soap salesman."),
-    ("Arrival", "2016", "movie", "A linguist is recruited to communicate with visitors whose language bends time."),
-    ("Tokyo Story", "1953", "movie", "An elderly couple travel to Tokyo to visit their grown children."),
-    ("The Good, the Bad and the Ugly", "1966", "movie", "Three gunslingers compete to find a fortune in buried Confederate gold."),
-    ("Cowboy Bebop", "1998", "tvSeries", "A crew of bounty hunters chase criminals across the solar system."),
-    ("Portrait of a Lady on Fire", "2019", "movie", "A painter is commissioned to produce a wedding portrait in secret."),
+    ("Santorini", "N/A", None, "White-washed cliff villages above the caldera of a drowned volcano."),
+    ("Reykjavík", "N/A", None, "Iceland's harbour capital, painted roofs under a low northern sun."),
+    ("Machu Picchu", "N/A", None, "An Inca citadel on a saddle of rock between two Andean peaks."),
+    ("Côte d'Azur", "N/A", None, "The French Mediterranean coast, pine, limestone and very blue water."),
+    ("Kyoto: Fushimi Inari", "N/A", None, "Thousands of vermilion gates climbing a wooded hillside shrine."),
+    ("São Paulo", "N/A", None, "Brazil's restless megacity, concrete horizon in every direction."),
+    ("Þingvellir", "N/A", None, "The rift valley where two continental plates pull slowly apart."),
+    ("Cinque Terre", "N/A", None, "Five Ligurian fishing villages stacked on terraced cliffs."),
+    ("Banff National Park", "N/A", None, "Glacial lakes the colour of turquoise beneath the Canadian Rockies."),
+    ("Kraków", "N/A", None, "A medieval market square and the largest brick Gothic altarpiece in Europe."),
+    ("Isle of Skye", "N/A", None, "Black ridges, sea lochs and weather that changes its mind hourly."),
+    ("Ha Long Bay", "N/A", None, "Limestone karsts rising out of jade water in the Gulf of Tonkin."),
+    ("Zürich", "N/A", None, "A lake, an old town, and the Alps on a clear day."),
+    ("Petra", "N/A", None, "A city carved into rose sandstone at the end of a narrow gorge."),
+    ("Torres del Paine", "N/A", None, "Granite towers over Patagonian steppe and wind that never stops."),
+    ("Cappadocia", "N/A", None, "Soft volcanic rock eroded into valleys of cones and cave dwellings."),
+    ("Lofoten Islands", "N/A", None, "Red fishing cabins under steep Arctic peaks above the sea."),
+    ("Québec City", "N/A", None, "The only walled city north of Mexico, French to its foundations."),
+    ("Serengeti", "N/A", None, "Open grassland crossed twice a year by more than a million wildebeest."),
+    ("Malmö", "N/A", None, "A southern Swedish port facing Copenhagen across the sound."),
+    ("Angkor Wat", "N/A", None, "The largest religious monument on earth, reflected in its own moat."),
+    ("Bora Bora", "N/A", None, "A drowned volcano ringed by a lagoon and a necklace of islets."),
+    ("Amalfi Coast", "N/A", None, "Lemon terraces and pastel towns pinned to a near-vertical shoreline."),
+    ("Mount Kilimanjaro", "N/A", None, "A free-standing volcano with snow on the equator, for now."),
 ]
 
 
@@ -414,7 +420,12 @@ class DevSetup:
         self.log("  all tables created")
 
         try:
-            from scripts.migrate_pipeline import migrate_schema
+            # Straight from the module that owns it. This used to come via
+            # scripts/migrate_pipeline.py, which only re-exported it — and
+            # that file existed for the one-off legacy import, so importing
+            # a live dependency through it made a disposable script load
+            # bearing.
+            from app.schema_migrations import migrate_schema
             result = migrate_schema()
             added = len(result.get("added", []))
             self.log(f"  pipeline migration verified ({added} columns added, "
@@ -572,7 +583,10 @@ class DevSetup:
                     original_save_date=save_date,
                     title_folder_path=title.title_folder_path,
                     filename=filename,
-                    source_url=f"https://image.tmdb.org/t/p/original/dev-seed-{title.external_id}-{n}.png",
+                    # A plainly fake host. It used to be a real TMDB address,
+                    # which read as though the seed had genuinely fetched
+                    # something from a site this system no longer touches.
+                    source_url=f"https://dev-seed.invalid/{title.external_id}-{n}.png",
                     file_size=len(payload),
                     image_width=width,
                     image_height=height,

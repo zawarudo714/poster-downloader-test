@@ -32,8 +32,8 @@ Every entry must be idempotent and fast. SQLite's ADD COLUMN doesn't rewrite
 the table, so this stays quick even on the 100k-row master list.
 
 DO NOT put data migrations here — backfills, imports, anything that rewrites
-rows or could take minutes. Those belong in scripts/migrate_pipeline.py where
-a human runs them deliberately, can dry-run them first, and can take a backup.
+rows or could take minutes. Those belong in a script under scripts/ that a
+human runs deliberately, can dry-run first, and can take a backup before.
 A destructive step that runs itself on every boot is a very bad day.
 """
 

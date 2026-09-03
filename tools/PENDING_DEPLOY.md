@@ -1,81 +1,69 @@
 # Not yet deployed
 
-**The strip-down to a single Travel Locations project.** Written and green,
-but intended for a FRESH EMPTY DATABASE on main, not as an upgrade over the
-existing one. Do not deploy this on top of the old data.
-
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.
 
-## What is waiting
+## v143 — the two names a rule cannot rebuild
 
-* **One project.** `DEFAULT_PROJECT_SLUG` is `travel`; `PROJECT_DEFS` holds
-  only Travel Locations — Brave in-page -> GPT Image 2 -> FineArtAmerica,
-  review gate on, no year, no content type.
-* **Global defaults made niche-neutral**, because a global default is what
-  the next project inherits before anyone configures it. `title_template`
-  lost `{year}`, `keywords_static` is blank, `source_search_url` is blank,
-  the Brave queries are generic, and the GPT prompt no longer says "zoom in
-  to the upper body areas".
-* **`build_queries()` accepts `{title}` as well as `{artist}`.** The old
-  placeholder was hardcoded and is a music word.
-* **Deleted, all dead with the movie catalogue:** `archive_index` and
-  everything behind it (two admin endpoints, two node endpoints, the READ THE
-  STORAGE BOX panel, its setting, its tests) · `scripts/migrate_pipeline.py`
-  (920 lines; startup already does create_all -> migrate_schema ->
-  sync_projects) · `backfill_upload_status.py` ·
-  `fix_crossproject_processing.py` · `tools/migrate_gui.py` ·
-  the rehearsal db and note · `fineartamerica-bulk-delete.md`.
-* **Photoshop is DORMANT, not deleted.** Hidden by `processor`. The test
-  panels no longer fall back to assuming Photoshop when there is no active
-  project — no project now means no tests.
-* **New preflight check:** a reference in CLAUDE.md to a document that does
-  not exist now fails. Sabotage-tested — it goes red.
-* Dev seed data is travel locations, keeping the awkward-character coverage.
+The titles table held ONE name. A title is three in practice: what the
+worker reads, what gets searched for, and what the marketplace lists. The
+movie niche could derive the last two, travel cannot — "Niagara Falls"
+searches as "Niagara Falls USA" and "Taj Mahal" as "Taj Mahal Agra India",
+decided by different rules across the whole catalogue, so no single pattern
+reproduces both. The answer has to travel with the row.
 
-## Found by the owner running it — 2026-09-01
+* **Two nullable columns on `master_titles`** — `search_query` and
+  `marketplace_title` — with their entries in `NEW_COLUMNS`.
+* **`listing_name()` and `search_text()` in pipeline.py.** ONE place each
+  for the fallback. Inlining `x.marketplace_title or x.title` at every use
+  is how two callers end up disagreeing, which happened here before with
+  the Chrome profile folder — one function defaulted it, another did not,
+  and the cleanup never ran for any account for months.
+* **Both fall back to the plain title**, so a sheet without the columns
+  imports and behaves exactly as it did. That is the third-project test:
+  a niche that does not need them is untouched.
+* The importer reads them. The in-page search searches `search_text(t)`
+  rather than `t.title`. `{title}` in the marketplace template renders the
+  listing name.
+* **APP_VERSION 143.** The last deploy shipped as a SECOND v142 against a
+  different commit; the tool warned at the time and the log still shows
+  both.
+* Repo cleaned: the LibreOffice lock file is gone and `.gitignore` now
+  covers those plus the catalogue CSV. `travel_titled.csv` — 21 MB of DATA
+  that was going into every Docker image as a second copy of a file living
+  one folder up — **still needs deleting by hand**, the mount refused.
 
-Two real defects the static checks could not see. Both fixed here.
+## The invariant that ships with it
 
-* **`sync_projects()` never removed a project deleted from the registry.**
-  It only created and updated, so stripping `PROJECT_DEFS` did nothing to a
-  database that already had the old rows — the movie project kept its card,
-  its place in the switcher, and workers could still stand in it. It is now
-  switched OFF (never deleted; titles, posters and payment history point at
-  that row). The asymmetry is deliberate: sync only ever turns a project
-  off, never on, so the standing rule that a deploy must not re-enable
-  something you switched off by hand still holds.
-* **The worker's empty-state hint said "click the Open TMDB link to find a
-  poster"** — hardcoded, shown in every project. It now reads from
-  `PD.searchMode`, `PD.sourceLabel` and `PD.noun`, so an in-page project is
-  told to search and tap.
+`check_sheet_columns_all_or_nothing`: within one project the two columns
+are on every title or on none.
 
-**New Diagnostics invariant: `check_projects_match_registry`.** An active
-project the code no longer declares is now reported against the live
-database. Nothing mechanical could have caught the first defect — preflight
-proves nothing is DISCONNECTED, and registry-versus-database is a fact about
-data.
+Both are optional and both fall back silently, and that is precisely what
+makes a lost column invisible. Rename a header, or re-export a sheet that
+drops one, and every title quietly searches on the bare name and lists
+under the wrong one — no error, and the first sign is the listing checker
+calling healthy listings missing, weeks later. A half-filled project is the
+only tell there is.
 
-## Verified
+**SABOTAGE-TESTED ONLY IN PART, and that matters.** The decision was lifted
+out of the shipped source and exercised: it fires on a partial fill and
+stays silent on a whole or empty project. The QUERY was not tested — it
+needs sqlalchemy, and the machine this was written on has none.
 
-**By running:** preflight green on all 20 checks · 42 behaviour tests pass ·
-all 10 sabotages still caught · the new document check goes red when broken ·
-everything compiles.
+    docker compose exec web python tools/test_sheet_columns_check.py
 
-**NOT verified: the site has never been run against a database.** No FastAPI
-in the sandbox to boot it. `DEV_SETUP.bat` is the first real proof and only
-the owner can run it.
+Run that before believing the check. Note that its own first version
+pointed at `DB_PATH`, which is DERIVED from `DATABASE_URL` rather than read
+from the environment — so it would have created and deleted rows in the
+live catalogue. Its guard caught it. That is the argument for the guard.
 
-## Owner still to specify
+## Deliberately not done
 
-`images_per_title` (2 is a placeholder), the Brave query, the FAA keywords,
-the GPT prompt, the listing title scheme, and the master sheet itself.
+The worker screen still carries the movie-era columns. Year, content type,
+votes and rating are dead for travel and must not appear; the kind
+("city", "lake") belongs where the film description sat. Left for its own
+change rather than bundled into a schema one.
 
-## Node — THE FOLDER MUST BE COPIED
+## The node
 
-`worker_service/` HAS CHANGED. `archive_index.py` is deleted there and
-`agent.py` no longer imports, builds or dispatches that stage.
-
-`AGENT_VERSION` bumped **1.28.0 -> 1.29.0**. That number on the Nodes tab is
-the only thing that can tell the owner from the website whether the copy
-actually happened.
+`worker_service/` is UNCHANGED in this release. **No copy needed.**

@@ -107,6 +107,30 @@ class MasterTitle(Base):
     rating        = Column(Float, nullable=True)
     description   = Column(Text, nullable=True)
 
+    # ── Two names the sheet supplies, because no rule can rebuild them ──
+    # A title is one string here and THREE in practice: what the worker
+    # reads, what gets searched for, and what the marketplace lists. For the
+    # movie niche the last two were derivable — the search was the title and
+    # the listing was the title plus a template — so one column was enough.
+    #
+    # Travel broke that. "Niagara Falls" is searched for as "Niagara Falls
+    # USA" and "Taj Mahal" as "Taj Mahal Agra India": one gained a country,
+    # the other a city AND a country, decided by different rules over the
+    # whole catalogue. No single pattern reproduces both, so the answer has
+    # to travel with the row rather than be recomputed from it.
+    #
+    # BOTH ARE OPTIONAL AND BOTH FALL BACK. A sheet that does not supply
+    # them leaves them NULL and every caller behaves exactly as it did
+    # before — which is what keeps the movie-shaped path, and any future
+    # niche that does not need them, working untouched.
+    search_query      = Column(Text, nullable=True)
+    # What to type into the marketplace. NOT the same as
+    # UploadTracking.remote_title: that one records what was actually SENT,
+    # after the template and FAA's own folding, and is what the listing
+    # checker compares against. This is only the base name we intend to
+    # send. Keep the distinction — one is a record, the other an intention.
+    marketplace_title = Column(String(512), nullable=True)
+
     # Workflow state
     status            = Column(String(32), nullable=False, default="pending", index=True)
     # 'pending' | 'in_progress' | 'complete_pending' | 'complete' | 'skipped'

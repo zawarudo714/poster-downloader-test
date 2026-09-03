@@ -56,6 +56,11 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("saved_posters", "process_error",    "TEXT"),
     ("saved_posters", "claimed_at",       "DATETIME"),
     ("saved_posters", "claimed_by",       "VARCHAR(64)"),
+    # ── The two names a sheet can supply that no rule can rebuild ───────
+    # See MasterTitle.search_query. Nullable on purpose: a sheet that does
+    # not carry them leaves every caller on its existing path.
+    ("master_titles", "search_query",      "TEXT"),
+    ("master_titles", "marketplace_title", "VARCHAR(512)"),
     # ── Fair sharing between projects / rotation between accounts ───────
     ("projects",        "process_weight", "INTEGER NOT NULL DEFAULT 1"),
     ("upload_accounts", "rotation_order", "INTEGER NOT NULL DEFAULT 100"),

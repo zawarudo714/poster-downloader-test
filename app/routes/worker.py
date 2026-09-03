@@ -685,7 +685,13 @@ def api_search(
 
     project = resolve_project(db, t.project_id)
     try:
-        outcome = search(db, t.title, deep=bool(deep), project=project)
+        # Not t.title. The words that find a PHOTOGRAPH are not always the
+        # words on the poster: "Niagara Falls" prints bare and searches as
+        # "Niagara Falls USA", because a bare name finds the wrong continent.
+        # search_text() falls back to the title, so a sheet without the
+        # column searches exactly as it used to.
+        from ..pipeline import search_text
+        outcome = search(db, search_text(t), deep=bool(deep), project=project)
     except BraveError as e:
         log_activity(db, user=user, action="search_failed", target_type="master_title",
                      target_id=t.id, details={"error": str(e), "variant": variant})

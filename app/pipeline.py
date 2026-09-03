@@ -1358,9 +1358,37 @@ def validate_marketplace_title(original: str, rendered: str) -> Optional[str]:
     return None
 
 
+def listing_name(title: MasterTitle) -> str:
+    """
+    The name to put on the marketplace listing.
+
+    ONE function, because the fallback is the whole point. A sheet that
+    supplies `marketplace_title` gets it; one that does not gets the plain
+    title and behaves exactly as before. Inlining `x.marketplace_title or
+    x.title` at each use is how two callers end up disagreeing — which has
+    happened here before, with the Chrome profile folder that one function
+    defaulted and another did not, so the cleanup never ran for any account
+    for months.
+    """
+    return (title.marketplace_title or title.title or "").strip()
+
+
+def search_text(title: MasterTitle) -> str:
+    """
+    The words to search for. Same shape and same reason as listing_name().
+
+    This is what the query TEMPLATE substitutes into, not the finished
+    query — so a stored "Niagara Falls USA" under a template of
+    "{title} at sunset" searches for "Niagara Falls USA at sunset". The
+    stored text is the subject; the template is the styling.
+    """
+    return (title.search_query or title.title or "").strip()
+
+
 def _title_vars(title: MasterTitle, poster: SavedPoster, index: int) -> dict[str, Any]:
     return {
-        "title":        title.title or "",
+        # the LISTING name, which is not always the name the worker reads
+        "title":        listing_name(title),
         "year":         title.year or "",
         "letter":       letter_for_index(index),
         "index":        index + 1,

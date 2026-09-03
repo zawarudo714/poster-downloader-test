@@ -493,6 +493,86 @@ def check_unassigned_titles(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def check_sheet_columns_all_or_nothing(db: Session, scope: Scope) -> CheckResult:
+    """
+    Within one project, `search_query` and `marketplace_title` are either on
+    EVERY title or on none.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS IS THE CHECK, AND WHY IT CANNOT BE A TEST
+    ════════════════════════════════════════════════════════════════════════
+    Both columns are optional and both fall back to the plain title. That is
+    what lets an old sheet import untouched — and it is also what makes them
+    dangerous, because a sheet that MEANT to carry them and lost them along
+    the way fails completely silently. A renamed header, a column dropped
+    while editing, a re-export that quietly changed the name: every title
+    then searches on the bare name and lists under the worker's name, no
+    error anywhere, and the first sign is the listing checker reporting
+    healthy listings as missing weeks later.
+
+    A test cannot catch it — the code is correct either way, and a test would
+    be written by whoever chose the column names. The state is what is wrong,
+    so the state is what gets watched.
+
+    HALF a project filled is the tell. Nobody produces a sheet where some
+    rows have a search query and some do not; that only happens when the
+    import or the sheet went wrong.
+    """
+    # Grouped by project because "all or nothing" is a statement about ONE
+    # sheet, and one sheet is one project. Asked per project even when the
+    # run is scoped, so the query shape does not change between the two.
+    totals = dict(
+        db.query(MasterTitle.project_id, func.count(MasterTitle.id))
+          .filter(scope.titles)
+          .group_by(MasterTitle.project_id).all()
+    )
+
+    def filled_per_project(column) -> dict:
+        return dict(
+            db.query(MasterTitle.project_id, func.count(MasterTitle.id))
+              .filter(scope.titles, column.isnot(None), column != "")
+              .group_by(MasterTitle.project_id).all()
+        )
+
+    have_search = filled_per_project(MasterTitle.search_query)
+    have_listing = filled_per_project(MasterTitle.marketplace_title)
+
+    rows = []
+    for project_id, total in totals.items():
+        total = int(total or 0)
+        if not total:
+            continue
+        name = scope.label(project_id) or "this project"
+        for label, filled, column in (
+            ("search query", int(have_search.get(project_id, 0)),
+             "search_query"),
+            ("marketplace title", int(have_listing.get(project_id, 0)),
+             "marketplace_title"),
+        ):
+            if filled == 0 or filled == total:
+                continue        # all or nothing — the two healthy states
+            rows.append(Finding(
+                f"{name}: {filled:,} of {total:,} titles have a {label}",
+                f"Every title in one project should carry this column or "
+                f"none of them should. A partial fill means the sheet lost "
+                f"the column part-way, or two sheets were imported with "
+                f"different headers. The {total - filled:,} without it will "
+                f"quietly fall back to the plain title — no error, wrong "
+                f"listing name. Re-import the sheet with the "
+                f"`{column}` column present on every row.",
+                "/admin/master",
+            ))
+
+    return _result(
+        "sheet_columns_all_or_nothing",
+        "Sheet columns filled on every title or none",
+        "The search query and the marketplace name are optional and fall "
+        "back to the title. That fallback is what makes a missing column "
+        "invisible, so a half-filled project is the only sign there is.",
+        "attention", rows, len(rows),
+    )
+
+
 def check_projects_match_registry(db: Session, scope: Scope) -> CheckResult:
     """
     Every ACTIVE project must be one the code still declares.
@@ -1732,6 +1812,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_open_revisions_on_deleted,
     check_stale_claims,
     check_projects_match_registry,
+    check_sheet_columns_all_or_nothing,
     check_claims_by_inactive,
     check_greenlit_not_complete,
     check_uploaded_without_processed,

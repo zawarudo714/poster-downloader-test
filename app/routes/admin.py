@@ -1044,10 +1044,21 @@ def _import_worker(job_id: int, raw_bytes: bytes, file_ext: str, replace: bool,
             description = r.get("description")
             description = str(description).strip() if description not in (None, "") else None
 
+            # The two names a rule cannot rebuild — see MasterTitle for why.
+            # Absent columns leave these NULL, which every caller treats as
+            # "carry on as before", so an old sheet imports unchanged.
+            sq = r.get("search_query") or r.get("brave_query")
+            search_query = str(sq).strip() if sq not in (None, "") else None
+            mtitle = r.get("marketplace_title") or r.get("faa_title")
+            marketplace_title = (str(mtitle).strip()
+                                 if mtitle not in (None, "") else None)
+
             mt = MasterTitle(
                 external_id=ext_id, title=title, year=year_str,
                 content_type=content_type, votes=votes, rating=rating,
                 description=description, status="pending",
+                search_query=search_query,
+                marketplace_title=marketplace_title,
                 project_id=project_id,
             )
             batch.append(mt)

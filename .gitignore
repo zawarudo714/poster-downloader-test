@@ -49,3 +49,13 @@ tools/next_deploy.done.txt
 # machine API, and the repo is the one place it must not appear.
 # worker_service/config.example.json is the template that IS tracked.
 worker_service/config.json
+
+# Spreadsheet lock files, created by LibreOffice when a sheet is open.
+.~lock.*#
+
+# The catalogue is DATA, not application code. It lives one folder up, it
+# is 21 MB, and a second copy inside the repo is a second record of the
+# same fact that nobody updates. Import it through the admin screen
+# rather than shipping it inside the image.
+/travel_titled.csv
+/CHECK_catalogue.csv

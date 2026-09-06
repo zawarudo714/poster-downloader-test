@@ -1862,7 +1862,8 @@ def api_test_gpt_process(
 
     started = datetime.utcnow()
     try:
-        gen = G.generate(db, source=source, style=style, project=project, log_fn=emit)
+        gen = G.generate(db, source=source, style=style, project=project,
+                         location=(title.title or ""), log_fn=emit)
     except G.PermanentFailure as e:
         return JSONResponse({"ok": False, "fatal": True, "kind": e.kind,
                              "categories": getattr(e, "categories", []),
@@ -3542,17 +3543,9 @@ def serve_review_master(
 
 
 def _review_cache_file(rel_path: str, variant: str):
-    """
-    Where a review image's local copy lives.
-
-    A plain content-addressed file under the app's own folder: the Storage
-    Box stays the archive of record, this is only a window onto it. Safe to
-    delete wholesale at any time — the next view refills it.
-    """
-    import hashlib
-    from pathlib import Path as _P
-    key = hashlib.sha1(f"{variant}:{rel_path}".encode("utf-8")).hexdigest()
-    return _P("review_cache") / key[:2] / f"{key}.bin"
+    """Where a review image's local copy lives — see app/review_cache.py."""
+    from ..review_cache import cache_file
+    return cache_file(rel_path, variant)
 
 
 def _reflatten(db: Session, processed, color: str, project) -> str:
@@ -3599,17 +3592,11 @@ def _reflatten(db: Session, processed, color: str, project) -> str:
                                         quality=quality)
         make_preview(out, prev)
         write_bytes(db, processed.storage_path, out.read_bytes(), project=project)
-        # The local review cache now holds a copy of the OLD preview under
-        # this same path — drop it, or the review screen would show the old
-        # colour for an hour after a re-flatten (same-path rewrite is the
-        # one case a content-addressed-by-PATH cache cannot see).
-        for variant in ("raw",):
-            for rel in (processed.storage_path, processed.preview_path):
-                if rel:
-                    c = _review_cache_file(rel, variant)
-                    if c.is_file():
-                        try: c.unlink()
-                        except OSError: pass
+        # Drop the stale cached copies for these paths, or the review screen
+        # would keep showing the old colour after a re-flatten.
+        from ..review_cache import clear as _clear_review_cache
+        _clear_review_cache([processed.storage_path, processed.preview_path,
+                             processed.master_path])
         if processed.preview_path:
             write_bytes(db, processed.preview_path, prev.read_bytes(),
                         project=project)

@@ -129,7 +129,13 @@ def process_one(db: Session, poster, title, project) -> bool:
     style = WORKSPACE_DIR / style_rel if style_rel else Path("")
 
     try:
-        gen = G.generate(db, source=source, style=style, project=project)
+        # The title travels to the generator so the poster carries the FULL
+        # place name. Until 2026-09-06 the prompt's {LOCATION} was never
+        # filled in — sent verbatim — so the model captioned the PHOTO
+        # instead, guessing e.g. "JAPAN" for Mount Fuji. The owner chose the
+        # `title` column as the poster text.
+        gen = G.generate(db, source=source, style=style, project=project,
+                         location=(title.title or ""))
     except G.PermanentFailure as e:
         # Never retried automatically. GPT's own words are kept so the admin
         # can judge, and so a policy change a year from now is actionable.
@@ -214,6 +220,12 @@ def process_one(db: Session, poster, title, project) -> bool:
         write_bytes(db, preview_rel, preview_tmp.read_bytes(), project=project)
         if master_rel:
             write_bytes(db, master_rel, raw.read_bytes(), project=project)
+        # A RERUN overwrites these deterministic paths with new bytes, but
+        # the review cache is keyed on the path — so without this the
+        # Approve-Artwork screen keeps serving the OLD picture and the rerun
+        # looks like it did nothing (owner's find, 2026-09-06).
+        from .review_cache import clear as _clear_review_cache
+        _clear_review_cache([full_rel, preview_rel, master_rel])
     except StorageError as e:
         # The image exists and was paid for, but we could not file it. Treat
         # as transient — storage comes back, and re-running would spend again.

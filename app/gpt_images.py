@@ -188,7 +188,7 @@ def _part(path: Path) -> tuple[str, bytes, str]:
 
 
 def generate(db: Session, *, source: Path, style: Path, project=None,
-             log_fn=None) -> Generation:
+             location: str = "", log_fn=None) -> Generation:
     """
     Send one image through the style transfer and return the result.
 
@@ -231,9 +231,17 @@ def generate(db: Session, *, source: Path, style: Path, project=None,
     if not source.is_file():
         raise PermanentFailure(f"Source image is missing: {source}", kind="bad_request")
 
+    # {LOCATION} is filled in HERE, before the prompt is sent. It was the
+    # one placeholder the generation prompt never resolved — the upload
+    # title/keywords/description have always been rendered, but the prompt
+    # went out raw, so the model invented the poster text from the picture.
+    # Both cases are replaced so a prompt written either way works.
+    prompt = str(get_setting(db, "openai_prompt", project=project))
+    prompt = (prompt.replace("{LOCATION}", location)
+                    .replace("{location}", location))
     data = {
         "model":  str(get_setting(db, "openai_model", project=project)),
-        "prompt": str(get_setting(db, "openai_prompt", project=project)),
+        "prompt": prompt,
         "n": "1",
     }
     size = str(get_setting(db, "openai_size", project=project) or "auto")

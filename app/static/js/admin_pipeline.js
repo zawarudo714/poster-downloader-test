@@ -226,8 +226,28 @@
   syncStickyOffset();
   window.addEventListener('resize', syncStickyOffset);
 
+  // Which DOOR owns each section, since the page split of 2026-09-06.
+  // A click that targets a section this door does not show is a normal
+  // navigation to the door that does — carrying the hash so it opens there.
+  const SECTION_DOOR = {
+    overview: '/admin/pipeline', attention: '/admin/pipeline',
+    nodes: '/admin/pipeline',
+    greenlight: '/admin/pipeline/greenlight',
+    search: '/admin/pipeline/settings', processing: '/admin/pipeline/settings',
+    upload: '/admin/pipeline/settings', test: '/admin/pipeline/settings',
+  };
+  function sectionOnThisPage(name) {
+    return !!q(`.pipe-tab[data-section="${name}"]`);
+  }
+
   function showSection(name, opts) {
     const silent = opts && opts.silent;
+
+    if (!sectionOnThisPage(name)) {
+      const door = SECTION_DOOR[name];
+      if (door) { location.href = door + '#' + name; }
+      return;
+    }
 
     qa('.pipe-tab').forEach((t) =>
       t.classList.toggle('active', t.dataset.section === name));
@@ -254,7 +274,7 @@
         toast(`Could not load ${name}: ${e.message}`, 'error');
       });
     }
-    try { sessionStorage.setItem('pipe-section', name); } catch (e) {}
+    try { sessionStorage.setItem(PIPE_SECTION_KEY, name); } catch (e) {}
   }
 
   qa('.pipe-tab').forEach((tab) => {
@@ -372,6 +392,14 @@
     el.querySelectorAll('[data-funnel-stage]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const stage = btn.dataset.funnelStage;
+        if (!sectionOnThisPage('greenlight')) {
+          // The greenlight door will read this on boot and apply the filter
+          // — the value cannot ride in the URL because the hash already
+          // carries the section name.
+          try { sessionStorage.setItem('pipe-jump-stage', stage); } catch (e) {}
+          showSection('greenlight');       // navigates to the other door
+          return;
+        }
         showSection('greenlight');
         const sel = q('[data-titles-status]');
         // Map the funnel's per-image failure buckets onto the title-level
@@ -2490,22 +2518,37 @@
   });
 
   // ── Boot ─────────────────────────────────────────────────────────────────
-  // The URL wins, then the last-visited section, then Overview.
-  let initial = 'overview';
+  // The URL wins, then this DOOR's last-visited section, then the door's
+  // own default. Validation is against the TAB BUTTONS, not the panels:
+  // every panel exists behind every door, but only this door's tabs may be
+  // opened here — anything else redirects (see showSection).
+  const PIPE_SECTION_KEY = 'pipe-section:' + ((root && root.dataset.pageMode) || 'ops');
+  let initial = (root && root.dataset.defaultSection) || 'overview';
   const fromHash = (location.hash || '').replace('#', '');
-  if (fromHash && q(`[data-section-panel="${fromHash}"]`)) {
+  if (fromHash && sectionOnThisPage(fromHash)) {
     initial = fromHash;
   } else {
     try {
-      const saved = sessionStorage.getItem('pipe-section');
-      if (saved && q(`[data-section-panel="${saved}"]`)) initial = saved;
+      const saved = sessionStorage.getItem(PIPE_SECTION_KEY);
+      if (saved && sectionOnThisPage(saved)) initial = saved;
     } catch (e) {}
   }
 
-  // Back/forward between sections.
+  // A funnel click on the Pipeline door lands here carrying a filter.
+  try {
+    const jump = sessionStorage.getItem('pipe-jump-stage');
+    if (jump && sectionOnThisPage('greenlight')) {
+      sessionStorage.removeItem('pipe-jump-stage');
+      const sel = q('[data-titles-status]');
+      if (sel) sel.value = jump.startsWith('failed') ? 'failed' : jump;
+    }
+  } catch (e) {}
+
+  // Back/forward between sections on this door.
   window.addEventListener('popstate', () => {
-    const name = (location.hash || '').replace('#', '') || 'overview';
-    if (q(`[data-section-panel="${name}"]`)) showSection(name, { silent: true });
+    const name = (location.hash || '').replace('#', '')
+      || ((root && root.dataset.defaultSection) || 'overview');
+    if (sectionOnThisPage(name)) showSection(name, { silent: true });
   });
 
   // Overview and settings both load up front.

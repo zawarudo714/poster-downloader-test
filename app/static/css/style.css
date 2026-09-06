@@ -4829,3 +4829,132 @@ label.inline-check {
   .review-img img { max-height: 40vh; }
   .review-tally { margin-left: 0; width: 100%; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   UI REVAMP PART 1 (2026-09-06): nav groups · pulse strip · project home
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Nav groups (desktop dropdowns; open sections in the phone drawer) ── */
+.nav-group { position: relative; display: inline-flex; }
+.nav-group-btn {
+  background: none; border: none; cursor: pointer;
+  font: inherit; color: inherit;
+}
+.nav-group-menu {
+  display: none;
+  position: absolute; top: 100%; left: 0;
+  min-width: 180px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  z-index: 120;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+}
+.nav-group.open .nav-group-menu { display: flex; flex-direction: column; gap: 2px; }
+.nav-group-menu .navlink { display: block; }
+/* A group holding the current page shows it even when closed. */
+.nav-group.has-active .nav-group-btn { color: var(--accent, #ffc850); }
+
+@media (max-width: 700px) {
+  /* In the drawer a dropdown would be a menu inside a menu. The group
+     button becomes a small heading and its links are simply always shown. */
+  .nav-group { display: block; }
+  .nav-group-btn {
+    pointer-events: none;
+    width: 100%; text-align: left;
+    padding: 12px 18px 4px;
+    font-size: 11px; letter-spacing: 0.1em;
+    opacity: 0.6; text-transform: uppercase;
+  }
+  .nav-group-menu {
+    display: block !important;
+    position: static;
+    border: none; box-shadow: none; background: none;
+    padding: 0; min-width: 0;
+  }
+}
+
+/* ── The pulse strip ──────────────────────────────────────────────────── */
+.pulse-strip {
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+  padding: 4px 16px;
+  font-size: 12px;
+}
+.pulse-row {
+  display: flex; align-items: center; gap: 14px;
+  overflow-x: auto;                /* phones: scroll, never wrap into a wall */
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+.pulse-row::-webkit-scrollbar { display: none; }
+.pulse-item { opacity: 0.85; flex: 0 0 auto; }
+.pulse-ok   { color: #4cd07d; }
+.pulse-warn { color: #ffc850; }
+.pulse-bad  { color: #ff6b6b; font-weight: 600; }
+.pulse-alarms { display: flex; flex-direction: column; gap: 2px; padding: 2px 0 4px; }
+.pulse-alarm {
+  color: #ff8f8f; text-decoration: none; font-size: 12px;
+}
+.pulse-alarm:hover { text-decoration: underline; }
+
+/* ── Project home: the journey strip ─────────────────────────────────── */
+.journey {
+  display: flex; align-items: stretch; gap: 6px;
+  overflow-x: auto; padding-bottom: 4px;
+}
+.journey-arrow { align-self: center; opacity: 0.4; flex: 0 0 auto; }
+.journey-step {
+  flex: 0 0 auto;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  min-width: 92px;
+  padding: 10px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  text-decoration: none; color: inherit;
+  opacity: 0.55;
+}
+.journey-step.has-some { opacity: 1; border-color: rgba(255,200,80,0.4); }
+.journey-step:hover { background: rgba(255,255,255,0.04); }
+.journey-n { font-size: 20px; }
+.journey-lbl { font-size: 10.5px; text-align: center; opacity: 0.8; }
+
+/* ── Project home: the needs-you cards ───────────────────────────────── */
+.needs-you {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+}
+.needs-card {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 14px;
+  border: 1px solid rgba(255,200,80,0.45);
+  border-radius: 10px;
+  text-decoration: none; color: inherit;
+  background: rgba(255,200,80,0.05);
+}
+.needs-card:hover { background: rgba(255,200,80,0.1); }
+.needs-n { font-size: 26px; }
+.needs-lbl { font-size: 13px; }
+.needs-hint { font-size: 11px; }
+
+/* ── Mobile quality of life (2026-09-06) ─────────────────────────────── */
+@media (max-width: 700px) {
+  /* Wide tables scroll sideways inside their panel instead of squeezing
+     seven columns into an unreadable strip. */
+  .panel-body { overflow-x: auto; }
+
+  /* Thumb-sized targets on touch screens. */
+  .btn-tiny { padding: 8px 12px; min-height: 34px; }
+}
+
+/* The bar that commits review decisions stays reachable while you scroll a
+   long day of images. Sticky is inert where the bar is short-page anyway. */
+.review-actionbar, .review-tally {
+  position: sticky; bottom: 0; z-index: 30;
+  background: var(--card);
+}
+
+/* A tab bar with exactly one tab is a heading pretending to be a choice —
+   the Greenlight door hides it (the section's own panel head does the job). */
+.pipe-tabs-single { display: none; }

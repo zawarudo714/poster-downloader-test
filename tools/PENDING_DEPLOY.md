@@ -1,61 +1,66 @@
 # Not yet deployed
 
-## v147 — TeePublic removed from the site entirely
+## v148 — UI Revamp Part 1: home page, pulse strip, nav groups, Pipeline split
 
-**The owner's instruction, 2026-09-06:** the TeePublic mechanism causes too
-many problems running on the site, so he will rebuild it as a Python GUI
-tool on his laptop. Everything was saved FIRST: the full working code and a
-mechanism write-up live in `../teepublic_tool/` beside this repo.
+### The Pipeline page is now THREE DOORS
 
-### What was deleted (~4,700 lines)
+The old page mixed watching, deciding and configuring. The project nav now
+has:
 
-* The **TeePublic tab** — template, JS, and all of `store_admin.py`.
-* The whole **store-health machinery**, server and node: scan, deactivate,
-  reactivate, stages, the pipeline hold, the count check.
-* The **interstitial-wall machinery**: recorded mouse paths, the recorder,
-  `wall.py`, the wall panel on the Earnings screen, `clear_wall` on the node.
-* The **TeePublic earnings reader**. TeePublic accounts still exist as rows
-  but are skipped — the Earnings tab is FineArtAmerica only now.
-* Eight **Diagnostics checks** that watched the store mechanism.
-* Fifteen wall/scan/store **settings** from DEFAULTS, plus the TeePublic
-  selectors map.
-* `beautifulsoup4` from the node — nothing there parses HTML any more.
+* **Greenlight** — its own tab, because it is a work queue like Worker
+  Images. Its badge shows how many posters are waiting for the word.
+* **Pipeline** — the live room only: Overview, Needs Attention, Nodes.
+* **Settings** — Image Search, Processing, Upload, Test & Debug.
 
-### What deliberately SURVIVES
+Under the hood it is still ONE template and ONE script — each door shows its
+own tab buttons, every section's markup renders everywhere, and a click that
+targets another door's section simply navigates there. A real three-file
+split was rejected as the most expensive class of edit this project knows,
+for zero extra behaviour. Old `/admin/pipeline#upload`-style links redirect
+to the right door, and the Diagnostics links were updated.
 
-* **The FAA listing check** — untouched, by instruction.
-* **The FAA earnings read** — untouched.
-* **The database tables** (`store_listings` and friends). They hold the only
-  record of which designs were switched off and never switched back on.
-  The models are gone so nothing touches them; the laptop tool will read
-  them. Do NOT drop them.
+### What is new on screen
+
+* **Opening a project now lands on a HOME page** (`/admin/home`): a journey
+  strip showing every stage of the pipeline with live counts (each number is
+  a link), and "waiting on you" cards that only appear when their count is
+  above zero. The old behaviour dropped you straight into Worker Images.
+* **A live status strip under the top bar, on every admin screen**: worker
+  machine on/off, what it is doing, quiet window, workers online — plus red
+  alarm lines from ANYWHERE (machine offline, paused accounts, failed
+  uploads, pipeline halted), each a link to the right screen.
+* **The master nav is five items instead of ten**: Dashboard · Money
+  (Payments, Earnings) · Marketplace (Listing check) · People (Chat, Users,
+  Activity Log) · System (Backups, All-Project Stats, Diagnostics). Dropdowns
+  on desktop; headed, always-open sections in the phone drawer. The chat
+  badge also shows on the People button so it is never hidden.
+* **Renames**: "Review Images" is now "Worker Images" (it judges what the
+  worker found; Approve Artwork judges what the machine painted); the master
+  "Stats" is "All-Project Stats".
+* **Nav badges**: Worker Images, Changes Requested, Approve Artwork and
+  Pipeline now carry live counts of what is waiting.
+* **One poll feeds all of it**: `/admin/api/pulse`, every 15 seconds per
+  tab. Anything new that wants live data should ride in it, not add a timer.
+* Mobile: wide tables scroll sideways instead of squeezing; tiny buttons are
+  thumb-sized on touch; the review screen's commit bar sticks to the bottom.
+* The Worker Images empty state now says what to do next; RETURN ALL asks a
+  question that names what it includes.
 
 ### Schema
 
-No new columns. The store-table migration rows were removed; on a fresh
-database those tables simply are not created any more.
-
-### THE NODE CHANGED — copy `worker_service/` to the Windows box
-
-`AGENT_VERSION` bumped to **1.30.0**. The Nodes tab will confirm the copy
-happened. No new pip installs are needed (a dependency was removed, not
-added).
+None. No node change either — **no folder copy this time.**
 
 ### Verified
 
-* `preflight.py` green — and it CAUGHT a real casualty during the removal:
-  cutting one node function took five neighbouring helpers with it, and the
-  undefined-names check went red before anything shipped. Restored from git.
-* Every touched Python file compiles; `admin_earnings.js` passes
-  `node --check`; template tag balance checked by preflight.
-* `tools/test_background_flatten.py` 21/21 locally.
-* **Run after deploying:**
-  `cd /opt/poster && docker compose exec web python tools/test_search_phrasings.py`
-  (needs the container's installed packages; could not run in this sandbox).
-* **NOT verified:** the Earnings page render with TeePublic accounts still
-  present in the database — first click after deploy should be Earnings.
-
-Also riding along: `TO_TEST.md` (new), roadmap renames (UI Revamp Part 1/2).
+* `preflight.py` green on every check; all new and touched JS passes
+  `node --check`; template tags balance; every touched Python file compiles.
+* **NOT verified — and this matters more than usual**: the new
+  `/admin/api/pulse` endpoint, the home page, and the three Pipeline doors
+  have NEVER RUN against a database. The queries follow the codebase's own scoping patterns
+  (`scope_titles`, `scalar_subquery`), but the first click after deploying
+  should be opening the Travel project and watching the home page fill in.
+  If the strip stays on "Loading…", the endpoint is failing — the browser's
+  console (F12) will show the error to send me.
 
 ---
 

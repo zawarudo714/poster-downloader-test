@@ -62,12 +62,25 @@ router = APIRouter(prefix="/admin/pipeline", tags=["pipeline-admin"])
 #  PAGE
 # ═══════════════════════════════════════════════════════════════════════════
 
-@router.get("", response_class=HTMLResponse)
-def pipeline_page(
-    request: Request,
-    admin: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
+# ─────────────────────────────────────────────────────────────────────────
+# ONE TEMPLATE, THREE DOORS (2026-09-06, UI Revamp Part 1).
+#
+# The old Pipeline page mixed three activities nobody does at the same time:
+# WATCHING the machinery, DECIDING what to promote, and CONFIGURING it. They
+# are now three nav entries — Pipeline, Greenlight, Settings — but ONE
+# template and ONE script, because the sections already live behind tabs and
+# the script switches them by name. Each door renders only its own tab
+# buttons; every section's markup still renders on every door, so the script
+# finds every hook it queries wherever it runs, and clicking through to a
+# section another door owns is a normal navigation (the script redirects).
+#
+# A real three-file split was considered and rejected: cutting an 874-line
+# template three ways is the most expensive class of edit in this project's
+# history, for zero behaviour the mode flag does not already buy.
+# ─────────────────────────────────────────────────────────────────────────
+
+def _pipeline_shell(request, admin, db, *, page_mode, active_tab,
+                    default_section):
     P.ensure_default_project(db)
     db.commit()
 
@@ -77,9 +90,17 @@ def pipeline_page(
     from ..routes.admin import current_project
     project = current_project(request, admin, db)
 
+    if default_section == "_settings_first":
+        # The settings door opens on the first settings tab this project
+        # actually has: image search only exists for in-page projects.
+        default_section = ("search" if project.search_mode == "inpage"
+                          else "processing")
+
     return templates.TemplateResponse(
         request, "admin_pipeline.html",
-        {"user": admin, "active_tab": "pipeline",
+        {"user": admin, "active_tab": active_tab,
+         "page_mode": page_mode,
+         "default_section": default_section,
          "project": project,
          "processor": project.processor,
          # 'inpage' means the workers search inside the site, so the Brave
@@ -92,6 +113,42 @@ def pipeline_page(
          "item_noun": project.item_noun,
          "item_nouns": project.item_noun_plural},
     )
+
+
+@router.get("", response_class=HTMLResponse)
+def pipeline_page(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """The live-operations door: overview, needs attention, nodes."""
+    return _pipeline_shell(request, admin, db, page_mode="ops",
+                           active_tab="pipeline",
+                           default_section="overview")
+
+
+@router.get("/greenlight", response_class=HTMLResponse)
+def greenlight_page(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """The deciding door: a work queue, like Worker Images — its own tab."""
+    return _pipeline_shell(request, admin, db, page_mode="greenlight",
+                           active_tab="greenlight",
+                           default_section="greenlight")
+
+
+@router.get("/settings", response_class=HTMLResponse)
+def pipeline_settings_page(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """The configuring door: image search, processing, upload, test."""
+    return _pipeline_shell(request, admin, db, page_mode="settings",
+                           active_tab="pipe_settings",
+                           default_section="_settings_first")
 
 
 

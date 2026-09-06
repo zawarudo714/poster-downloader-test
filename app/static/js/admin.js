@@ -45,7 +45,10 @@
       const id = btn.getAttribute('data-release-user-id');
       const keepStarted = btn.getAttribute('data-keep-started') || '1';
       const label = keepStarted === '1' ? 'unworked' : 'ALL';
-      if (!confirm(`Return ${label} titles for this user back to the pool?`)) return;
+      const warning = keepStarted === '1'
+        ? 'Return this user\'s UNWORKED titles to the pool? Titles they have started stay with them.'
+        : 'Return ALL of this user\'s titles to the pool — including ones they are working on right now? They would lose their place.';
+      if (!confirm(warning)) return;
       const fd = new FormData();
       fd.append('keep_started', keepStarted);
       const r = await fetch(`/admin/users/${id}/release_queue`, { method: 'POST', body: fd });
@@ -167,7 +170,7 @@
   function renderGallery() {
     gallery.innerHTML = '';
     if (titles.length === 0) {
-      gallery.innerHTML = `<div class="empty-hint">No saved ${PD.nouns} for this user / date.</div>`;
+      gallery.innerHTML = `<div class="empty-hint">No saved ${PD.nouns} for this user on this date. Try <strong>ALL DATES</strong>, use the ‹ › arrows, or pick another worker above.</div>`;
       $('ib-title-counter').textContent = '— / —';
       return;
     }

@@ -65,6 +65,7 @@
     setBadge('revisions', b.revisions || 0);
     setBadge('skipped', b.skipped || 0);
     setBadge('review', b.review || 0);
+    setBadge('greenlight', b.greenlight || 0);
     setBadge('attention', b.attention || 0);
 
     // Anyone else who wants this answer (the home page) hears it here.

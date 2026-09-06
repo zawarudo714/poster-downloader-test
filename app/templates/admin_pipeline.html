@@ -26,12 +26,30 @@
 #}
 {% set pctx = request.state.project_ctx if request and request.state.project_ctx else {} %}
 {% set proj = pctx.get('active_project') %}
-<div class="admin-grid" data-pipeline data-no-global-scroll>
+<div class="admin-grid" data-pipeline data-no-global-scroll
+     data-page-mode="{{ page_mode | default('ops', true) }}"
+     data-default-section="{{ default_section | default('overview', true) }}">
 
-  {# ── Sub-navigation ─────────────────────────────────────────────── #}
-  <div class="pipe-tabs" role="tablist">
+  {# ── Sub-navigation ───────────────────────────────────────────────
+     Since 2026-09-06 this page has THREE DOORS in the nav — Pipeline
+     (watching), Greenlight (deciding), Settings (configuring) — and each
+     renders only its own tab buttons here. Every SECTION below still
+     renders on every door, so admin_pipeline.js finds all of its hooks
+     whichever door it is running behind; the script redirects to the right
+     door when a click targets a section this one does not show. #}
+  <div class="pipe-tabs {% if page_mode == 'greenlight' %}pipe-tabs-single{% endif %}" role="tablist">
+    {% set mode = page_mode | default('ops', true) %}
+    {% if mode == 'ops' %}
     <button class="pipe-tab active" data-section="overview"   role="tab">OVERVIEW</button>
-    <button class="pipe-tab"        data-section="greenlight" role="tab">GREENLIGHT<span class="pipe-tab-badge" data-badge="greenlight" hidden>0</span></button>
+    {# Replaced the old FAILURES tab. It listed rows whose status was literally
+       'failed', which misses every way this pipeline stops quietly — a spend
+       cap, a bad key, a stale claim, a title held before dispatch. Two tabs
+       showing overlapping subsets of the same problem is worse than one. #}
+    <button class="pipe-tab"        data-section="attention"  role="tab">NEEDS ATTENTION<span class="pipe-tab-badge pipe-tab-badge-error" data-badge="attention" hidden>0</span></button>
+    <button class="pipe-tab"        data-section="nodes"      role="tab">NODES</button>
+    {% elif mode == 'greenlight' %}
+    <button class="pipe-tab active" data-section="greenlight" role="tab">GREENLIGHT<span class="pipe-tab-badge" data-badge="greenlight" hidden>0</span></button>
+    {% else %}
     {# Only for projects whose workers search inside the site. This is a
        SOURCING setting, not a post-production one, so it gets its own tab
        rather than being tucked inside PROCESSING where nobody would look
@@ -42,12 +60,7 @@
     <button class="pipe-tab"        data-section="processing" role="tab">PROCESSING</button>
     <button class="pipe-tab"        data-section="upload"     role="tab">UPLOAD</button>
     <button class="pipe-tab"        data-section="test"       role="tab">TEST &amp; DEBUG</button>
-    {# Replaced the old FAILURES tab. It listed rows whose status was literally
-       'failed', which misses every way this pipeline stops quietly — a spend
-       cap, a bad key, a stale claim, a title held before dispatch. Two tabs
-       showing overlapping subsets of the same problem is worse than one. #}
-    <button class="pipe-tab"        data-section="attention"  role="tab">NEEDS ATTENTION<span class="pipe-tab-badge pipe-tab-badge-error" data-badge="attention" hidden>0</span></button>
-    <button class="pipe-tab"        data-section="nodes"      role="tab">NODES</button>
+    {% endif %}
   </div>
 
   {# ═══════════════════════════════════════════════════════════════ #}

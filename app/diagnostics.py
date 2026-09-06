@@ -624,7 +624,7 @@ def check_search_phrasings_name_a_place(db: Session, scope: Scope) -> CheckResul
                     "the grid looks normal, so nobody would notice. Fix it "
                     "on the Pipeline page under IMAGE SEARCH — for example "
                     "'places to visit in {title}'.",
-                    "/admin/pipeline#search",
+                    "/admin/pipeline/settings#search",
                 ))
 
     return _result(
@@ -695,7 +695,7 @@ def check_prompt_matches_style_toggle(db: Session, scope: Scope) -> CheckResult:
                 "still produce a picture and you will still be charged for "
                 "it. Either switch 'Send the style reference image' back on, "
                 "or reword the prompt to describe the look in words.",
-                "/admin/pipeline#processing",
+                "/admin/pipeline/settings#processing",
             ))
         elif uses_style and not mentions_two:
             rows.append(Finding(
@@ -707,7 +707,7 @@ def check_prompt_matches_style_toggle(db: Session, scope: Scope) -> CheckResult:
                 "switch the reference off, or say in the prompt what the "
                 "first image is for. Worth a look rather than certainly "
                 "wrong — a prompt can refer to the reference in other words.",
-                "/admin/pipeline#processing",
+                "/admin/pipeline/settings#processing",
             ))
 
     return _result(
@@ -912,7 +912,7 @@ def check_orphaned_bans(db: Session, scope: Scope) -> CheckResult:
         rows.append(Finding(
             f"{acct.name} — {lost} listing(s) not rebuilt",
             f"banned {acct.banned_at:%Y-%m-%d}: {acct.banned_reason or 'no reason recorded'}",
-            "/admin/pipeline#upload",
+            "/admin/pipeline/settings#upload",
             project=scope.label(scope.project_id)))
 
     return _result(
@@ -969,7 +969,7 @@ def check_duplicate_accounts(db: Session, scope: Scope) -> CheckResult:
                 f"{site}: {len(group)} accounts share {email}",
                 f"ids {', '.join(str(a.id) for a in group)} — "
                 f"named {', '.join(repr(a.name) for a in group)}",
-                "/admin/pipeline#upload"))
+                "/admin/pipeline/settings#upload"))
 
     for (site, name), group in sorted(by_name.items()):
         if len(group) > 1 and tuple(sorted(a.id for a in group)) not in seen:
@@ -977,7 +977,7 @@ def check_duplicate_accounts(db: Session, scope: Scope) -> CheckResult:
                 f"{site}: {len(group)} accounts are called '{group[0].name}'",
                 " · ".join(f"id={a.id} {a.email or 'no address'}"
                            for a in group),
-                "/admin/pipeline#upload"))
+                "/admin/pipeline/settings#upload"))
 
     return _result(
         "duplicate_accounts", "The same marketplace account entered twice",
@@ -1102,7 +1102,7 @@ def check_upload_project_starved(db: Session, scope: Scope) -> CheckResult:
                     f"{account.name}: {name} has {queued} upload(s) waiting "
                     f"and none sent in 7 days",
                     f"the same account uploaded for {other} in that time",
-                    "/admin/pipeline#upload"))
+                    "/admin/pipeline/settings#upload"))
 
     return _result(
         "upload_project_starved", "One niche not uploading through a shared account",
@@ -1259,7 +1259,7 @@ def check_orphaned_upload_rows(db: Session, scope: Scope) -> CheckResult:
     rows = [
         Finding(title or f"poster {t.saved_poster_id}",
                 f"queued against account #{t.account_id}, which no longer exists",
-                "/admin/pipeline#upload",
+                "/admin/pipeline/settings#upload",
                 project=scope.label(t.project_id))
         for t, title in q.all() if t.account_id not in live
     ]

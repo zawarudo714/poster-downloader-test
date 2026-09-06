@@ -171,6 +171,55 @@ still in the database on purpose.
 
 ---
 
+## 8. THE NEW HOME PAGE AND PULSE STRIP — v148
+
+**What to click**
+
+- From the master dashboard, open the Travel project. You should land on a
+  new **Home** page: a left-to-right strip of the whole pipeline with a
+  count at each step, and "waiting on you" cards below it.
+- Every number on that page is a link. Click a few and check each one lands
+  on the screen that deals with that number.
+- The thin **status strip** under the top bar should appear on every admin
+  screen within a few seconds, showing the worker machine, workers online,
+  and any red alarm lines.
+- The master nav should now be five items. Open each dropdown. On your
+  phone, the hamburger menu should show the groups as headed sections.
+- **Changes Requested**, **Worker Images**, **Approve Artwork** and
+  **Pipeline** should show small count badges when something is waiting.
+
+**What failure looks like**
+
+- The home page stuck on "Loading…" — the pulse endpoint is failing. Press
+  F12, copy the red console line, send it to me.
+- A count on the strip that disagrees with the screen it links to.
+
+---
+
+## 9. THE PIPELINE SPLIT — v148
+
+The one Pipeline page is now three nav tabs: **Greenlight** (deciding),
+**Pipeline** (watching: Overview, Needs Attention, Nodes) and **Settings**
+(Image Search, Processing, Upload, Test & Debug).
+
+**What to click**
+
+- Open each of the three tabs and check the right sections appear on each.
+- On **Pipeline**, click a number in the funnel. It should carry you to the
+  **Greenlight** tab with the matching filter already applied.
+- On **Settings**, change any value and save it, then reload — it should
+  stick, exactly as before the split.
+- In **Diagnostics**, click a finding that points at a settings section. It
+  should land on the Settings tab with the right section open.
+
+**What failure looks like**
+
+- A section that shows the wrong content, or a button that does nothing —
+  tell me which tab and which button.
+- A settings form that comes up empty on the Settings tab.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

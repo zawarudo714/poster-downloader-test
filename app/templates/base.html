@@ -49,7 +49,7 @@
       {% set pctx = request.state.project_ctx if request and request.state.project_ctx else {} %}
       {% set proj = pctx.get('active_project') %}
       {% set scope = nav_scope | default('master', true) %}
-      <a href="{% if user is defined and user and user.role == 'admin' %}{% if scope == 'project' and proj %}/admin/browse{% else %}/admin{% endif %}{% else %}/{% endif %}" class="brand">
+      <a href="{% if user is defined and user and user.role == 'admin' %}{% if scope == 'project' and proj %}/admin/home{% else %}/admin{% endif %}{% else %}/{% endif %}" class="brand">
         <span class="brand-mark">▌</span>
         {% if user is defined and user and user.role != 'admin' %}
           <span class="brand-full">{{ (pctx.get('worker_label') or 'Poster Downloader') | upper }}</span>
@@ -88,7 +88,11 @@
             {% if pctx.get('review_gate') %}
               <a href="/admin/pipeline/review" class="navlink {% if active_tab == 'review' %}active{% endif %}">Approve&nbsp;Artwork<span class="nav-badge" data-nav-badge="review" hidden>0</span></a>
             {% endif %}
+            {# Greenlight is a WORK QUEUE — you go there to decide, like
+               Worker Images — so it is a tab, not a corner of Pipeline. #}
+            <a href="/admin/pipeline/greenlight" class="navlink {% if active_tab == 'greenlight' %}active{% endif %}">Greenlight<span class="nav-badge" data-nav-badge="greenlight" hidden>0</span></a>
             <a href="/admin/pipeline"  class="navlink {% if active_tab == 'pipeline' %}active{% endif %}">Pipeline<span class="nav-badge nav-badge-error" data-nav-badge="attention" hidden>0</span></a>
+            <a href="/admin/pipeline/settings" class="navlink {% if active_tab == 'pipe_settings' %}active{% endif %}">Settings</a>
             <a href="/admin/stats"     class="navlink {% if active_tab == 'stats' %}active{% endif %}">Stats</a>
             <a href="/admin/peek"      class="navlink {% if active_tab == 'peek' %}active{% endif %}">Peek</a>
           {% elif user.role == 'admin' %}

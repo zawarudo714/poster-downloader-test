@@ -233,17 +233,17 @@ def api_pulse(request: Request, admin: User = Depends(require_admin),
 
         # Scoped through the SAME helper as every other title query — by a
         # subquery of the project's title ids, never a hand-rolled filter.
-        title_ids = scope_titles(db.query(MasterTitle.id), proj).subquery()
+        title_ids = scope_titles(db.query(MasterTitle.id), proj).scalar_subquery()
         rev_open = (db.query(func.count(Revision.id))
                       .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
                       .filter(Revision.status == "awaiting_approval",
-                              SavedPoster.master_title_id.in_(title_ids.select()))
+                              SavedPoster.master_title_id.in_(title_ids))
                       .scalar() or 0)
         review_art = (db.query(func.count(ProcessedImage.id))
                         .join(SavedPoster, ProcessedImage.saved_poster_id == SavedPoster.id)
                         .filter(ProcessedImage.review_status == "pending",
                                 SavedPoster.deleted_at.is_(None),
-                                SavedPoster.master_title_id.in_(title_ids.select()))
+                                SavedPoster.master_title_id.in_(title_ids))
                         .scalar() or 0)
 
         funnel = P.funnel_counts(db, project_id=proj.id)
@@ -257,6 +257,7 @@ def api_pulse(request: Request, admin: User = Depends(require_admin),
             "revisions": rev_open,
             "skipped": skipped,
             "review": review_art,
+            "greenlight": funnel.get("awaiting_greenlight", 0),
             "attention": (funnel.get("failed_processing", 0)
                           + funnel.get("failed_upload", 0)),
         }
@@ -270,7 +271,7 @@ def api_pulse(request: Request, admin: User = Depends(require_admin),
             {"label": "awaiting your review", "n": awaiting_you,
              "href": "/admin/browse"},
             {"label": "waiting for greenlight", "n": funnel.get("awaiting_greenlight", 0),
-             "href": "/admin/pipeline"},
+             "href": "/admin/pipeline/greenlight"},
             {"label": "being processed", "n": (funnel.get("greenlit", 0)
                                                + funnel.get("processing", 0)),
              "href": "/admin/pipeline"},
@@ -287,7 +288,7 @@ def api_pulse(request: Request, admin: User = Depends(require_admin),
         saved_today = (db.query(func.count(SavedPoster.id))
                          .filter(SavedPoster.deleted_at.is_(None),
                                  func.date(SavedPoster.created_at) == today.isoformat(),
-                                 SavedPoster.master_title_id.in_(title_ids.select()))
+                                 SavedPoster.master_title_id.in_(title_ids))
                          .scalar() or 0)
         today_line = (f"{saved_today} image(s) saved today · "
                       f"{processing_now} processing · {uploading_now} uploading")

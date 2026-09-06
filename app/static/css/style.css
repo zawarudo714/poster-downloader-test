@@ -4752,6 +4752,38 @@ label.inline-check {
 .review-title { font-family: Georgia, serif; font-size: 20px; color: var(--accent); }
 .review-nav { display: flex; align-items: center; gap: 8px; font-size: 11px; }
 
+/* ── The review pair: the worker's photo beside the finished poster ──────
+   The source is deliberately the SMALLER of the two. It is there to answer
+   one question — is this the same place — and the poster is the thing being
+   judged, so it gets the room. */
+.review-img-source { max-width: 34%; opacity: .92; }
+.review-img-source img { object-fit: contain; }
+
+/* The coloured box the poster sits on. The browser composites the
+   transparent picture over this, which is the same arithmetic the server
+   does when it flattens — so the preview IS the result, not a guess at it. */
+.review-canvas {
+  display: block;
+  line-height: 0;
+  transition: background-color .08s linear;
+}
+.review-canvas img { display: block; width: 100%; height: auto; }
+.review-canvas.is-picking { outline: 2px dashed var(--accent); cursor: crosshair; }
+.review-canvas.is-picking img { cursor: crosshair; }
+
+.review-color {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 6px 0;
+}
+.review-color input[type="color"] {
+  width: 34px; height: 26px; padding: 0;
+  border: 1px solid var(--border); background: none; cursor: pointer;
+}
+.review-color-value { opacity: .7; }
+
 .review-pair {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));

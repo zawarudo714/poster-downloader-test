@@ -88,6 +88,8 @@
       ['openai_model',    'text',   'Model',    'gpt-image-2 unless you have a reason.'],
       ['openai_size',     'select', 'Size',     'auto lets the model choose a ratio to suit the photo. Larger sizes cost proportionally more.', ['auto', '1024x1024', '1024x1536', '1536x1024']],
       ['openai_quality',  'select', 'Quality',  'low is roughly a fifth the price of medium and is upscaled afterwards anyway.', ['auto', 'low', 'medium', 'high']],
+      ['gpt_background_color', 'text', 'Background colour behind transparency',
+       'Only used when the picture comes back with see-through areas, which happens when Background is set to transparent above. A hex colour like #000000. Black suits nearly every poster; the odd one needs its own colour, and you set that per image on the Approve Artwork screen with the eyedropper. This is just the starting point.'],
       ['openai_use_style_image', 'bool', 'Send the style reference image',
        'On, the style reference is sent as the FIRST image and the worker\'s photo as the second — so the prompt can say things like "the style of the first image". Off, only the worker\'s photo is sent and the prompt has to describe the look in words. Match this to the prompt you have written: if the prompt talks about two images, this must be on.'],
       ['gpt_review_required', 'bool', 'Review images before upload', 'On, every generated image waits for you on the Review Images tab. Off, they go straight to the upload queue. Turning it OFF does not release what is already waiting — those still need approving, so nothing is ever listed that you never looked at.'],

@@ -100,7 +100,22 @@ Then:
 
   Read that file rather than running `git log`, `git diff` or `git status`:
   those cost far more and answer a different question (what is committed,
-  not what shipped). On a mounted working copy `git status` cannot even
+  not what shipped).
+
+  **AND RE-READ IT. A deploy state read at the START of a session is stale
+  by the middle of it.** On 2026-09-03 I told him v144 was not deployed and
+  that a test would fail because the file was not on the server. It had been
+  live for some time. I had read the log hours earlier, then reasoned from
+  the SCROLLBACK of his terminal — which showed an older session — instead
+  of opening the file that answers the question. He had to send a screenshot
+  of the deploy tool reading `live 144` to correct me.
+
+  The general shape, and it is rule 3b wearing a new hat: **his terminal
+  output, his screenshots and anything said earlier in the conversation are
+  all a record of a MOMENT, not of the present.** Before making any claim
+  about what is deployed, running, or present on a machine, open
+  `DEPLOY_LOG.md` again. It costs one read. Being wrong about it sends him
+  to run commands that cannot work. On a mounted working copy `git status` cannot even
   refresh its index — it reports stale answers with no warning, and on
   2026-08-27 it showed two edited files as unmodified.
 
@@ -894,6 +909,51 @@ Option deliberately kept open: these are PUBLIC pages and the OWNER'S LAPTOP
 fetches them perfectly with no wall at all. A sweep that runs there and
 posts results back would never compete with the pipeline. The only cost is
 that it runs when the laptop is on.
+
+## GPT Image 2 behaviour — `LEAD 2026-09-03`, from a third-party guide
+
+Read from a WaveSpeed blog post, NOT from OpenAI. Tagged LEAD rather than
+MEASURED on purpose: nothing here has been tested against the API by us. Two
+of its claims match what this repo already knows independently — the model
+ID, and the per-million-token prices in `gpt_images.PRICE_PER_MTOK` — which
+is why the rest is worth writing down at all. Confirm before acting.
+
+* **`moderation` defaults to `auto`; the owner's playground uses `low`.** An
+  omitted parameter is therefore NOT the same as the playground's setting.
+  This is the general trap OpenAI's own troubleshooting note describes, and
+  the only concrete mismatch found so far between the two surfaces.
+* **`input_fidelity` must be OMITTED.** gpt-image-2 always works at high
+  fidelity and refuses the request if the parameter is present. It also
+  cannot explain any difference between surfaces, because both are high.
+* **`background: transparent` WORKS, AND THE OWNER USES IT ON PURPOSE.**
+  `MEASURED 2026-09-05`, and it overturns what this file said before, which
+  came from the WaveSpeed post and claimed the model refuses it.
+
+  It is not a background setting in any ordinary sense: asking for
+  transparency changes HOW gpt-image-2 renders, and the owner's whole poster
+  look depends on it. The see-through result is a side effect he flattens
+  away afterwards, not the goal.
+
+  Most posters flatten correctly onto black. A few come back with a
+  semi-transparent sky, which goes muddy on black and reads correctly on its
+  own colour — Bangkok was the specimen. So the review screen carries a
+  colour per image with an eyedropper, the transparent original is kept as
+  `ProcessedImage.master_path`, and changing the colour is a local re-render
+  rather than another call to OpenAI.
+
+  **The lesson is about the source, not the setting.** That WaveSpeed entry
+  is tagged LEAD for a reason and this is the first of its claims anybody
+  tested. One of five was wrong. Treat the other four the same way.
+* **Every image input is processed at high fidelity**, so a 4K reference
+  costs the same input tokens as a small one. Downscaling references is free
+  money. Untested here, and it would change the picture, so not to be done
+  in the middle of a comparison.
+* **PIN THE MODEL SNAPSHOT IN PRODUCTION.** `gpt-image-2` is a floating
+  alias, so OpenAI can change what it points at and the pictures drift with
+  no deploy on our side and nothing on any screen to say why. That is the
+  worst shape this project has: a silent change with a plausible-looking
+  result. Worth doing before the first real batch — `openai_model` is
+  already a dashboard setting, so it costs one edit.
 
 ## FineArtAmerica title rules — `MEASURED 2026-08-13`
 

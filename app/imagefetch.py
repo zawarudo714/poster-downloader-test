@@ -135,6 +135,101 @@ def fetch_as_jpeg(url: str, target_path: Path, *, quality: int = 92) -> tuple[in
     return target_path.stat().st_size, img.width, img.height
 
 
+DEFAULT_BACKGROUND = "#000000"
+
+
+def parse_color(text: str | None) -> tuple[int, int, int]:
+    """
+    A hex colour to RGB, falling back to black rather than raising.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS NEVER RAISES
+    ════════════════════════════════════════════════════════════════════════
+    The value arrives from a text box on a dashboard, so it can be anything
+    a person can type. The cost of getting it wrong is not symmetrical: a
+    crash here stops a finished picture — already paid for — from reaching
+    storage, while a wrong colour merely produces a poster the admin is
+    about to look at anyway and can fix in one click.
+
+    So a bad value quietly becomes black, which is the default the owner
+    wanted in the first place.
+
+    Accepts #rgb, #rrggbb, with or without the hash.
+    """
+    raw = (text or "").strip().lstrip("#")
+    if len(raw) == 3:
+        raw = "".join(c * 2 for c in raw)
+    if len(raw) != 6:
+        return (0, 0, 0)
+    try:
+        return (int(raw[0:2], 16), int(raw[2:4], 16), int(raw[4:6], 16))
+    except ValueError:
+        return (0, 0, 0)
+
+
+def flatten_onto(src: Path, dest: Path, color: str | None) -> tuple[int, int]:
+    """
+    Put a solid colour behind a picture that may be see-through, and save it
+    as a JPEG. Returns the size.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS EXISTS AT ALL
+    ════════════════════════════════════════════════════════════════════════
+    gpt-image-2 asked for a transparent background renders differently, and
+    better for this niche — MEASURED by the owner 2026-09-05. The see-through
+    result is a side effect, not the goal, and it cannot go to a marketplace
+    as it is.
+
+    ════════════════════════════════════════════════════════════════════════
+    IT MUST HAPPEN BEFORE THE UPSCALE
+    ════════════════════════════════════════════════════════════════════════
+    Enlarging a picture that still has an alpha channel means resampling that
+    alpha, and the colour hiding UNDER the clear pixels gets averaged in
+    along every soft edge. Flattening first removes the possibility outright:
+    there is no alpha left to resample.
+
+    MEASURED 2026-09-05 — and the measurement is weaker than the reasoning.
+    On a hard-edged test shape the two orders came out within two levels of
+    each other, so this is not a fault anybody has SEEN here. It is the safe
+    order, it costs nothing, and that is the whole case for it. Do not repeat
+    the fringing claim as though it had been observed.
+
+    A picture with no transparency at all passes through this unchanged
+    apart from the format, so it is safe to call on anything.
+    """
+    from PIL import Image
+
+    with Image.open(src) as img:
+        img.load()
+        if img.mode in ("RGBA", "LA") or (
+                img.mode == "P" and "transparency" in img.info):
+            img = img.convert("RGBA")
+            plate = Image.new("RGB", img.size, parse_color(color))
+            # The alpha channel is the mask, so a HALF-transparent pixel comes
+            # out half its own colour and half the plate — which is exactly
+            # why a semi-transparent sky reads muddy on black and correct on
+            # its own blue.
+            plate.paste(img, mask=img.split()[-1])
+            img = plate
+        else:
+            img = img.convert("RGB")
+
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        img.save(dest, "JPEG", quality=95, subsampling=0)
+        return img.size
+
+
+def has_transparency(path: Path) -> bool:
+    """Is any part of this picture see-through? Cheap; reads the header."""
+    from PIL import Image
+    try:
+        with Image.open(path) as img:
+            return (img.mode in ("RGBA", "LA")
+                    or (img.mode == "P" and "transparency" in img.info))
+    except OSError:
+        return False
+
+
 def upscale_to_width(path: Path, *, width: int, sharpen: int = 0,
                      quality: int = 92) -> tuple[int, int]:
     """

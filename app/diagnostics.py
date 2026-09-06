@@ -70,7 +70,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Callable, Optional
 
-from sqlalchemy import func, true as sa_true
+from sqlalchemy import func, or_, true as sa_true
 from sqlalchemy.orm import Session
 
 from .config import BASE_DIR, WORKSPACE_DIR
@@ -717,6 +717,58 @@ def check_prompt_matches_style_toggle(db: Session, scope: Scope) -> CheckResult:
         "an image that is not being sent, produces a paid-for picture that "
         "is quietly wrong rather than an error.",
         "attention", rows, len(rows),
+    )
+
+
+def check_approved_images_have_a_background(db: Session, scope: Scope) -> CheckResult:
+    """
+    Every APPROVED image made from a transparent generation has a colour.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS IS WORTH WATCHING WHEN THE STATE IS ALREADY MEANT TO BE SAFE
+    ════════════════════════════════════════════════════════════════════════
+    The order is supposed to make it impossible: approving is what records
+    the colour, and only approved images are released for upload. So an
+    approved image without one should not exist.
+
+    It is watched anyway because of HOW it would fail. Nothing errors, no
+    upload is refused, no screen turns red — the picture simply ships on
+    whatever colour it happened to have, and a semi-transparent sky that
+    should have been blue goes to the marketplace looking muddy. It is a
+    money defect that looks like a taste defect, and the owner would find it
+    by noticing that a poster he liked on screen sells nothing.
+
+    A single row here means someone has added a second way to approve an
+    image and it does not set the colour. That is exactly the change nobody
+    would think to test.
+    """
+    rows = []
+    q = (db.query(ProcessedImage, MasterTitle)
+           .join(SavedPoster, ProcessedImage.saved_poster_id == SavedPoster.id)
+           .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+           .filter(scope.titles,
+                   ProcessedImage.review_status == "approved",
+                   ProcessedImage.master_path.isnot(None),
+                   or_(ProcessedImage.background_color.is_(None),
+                       ProcessedImage.background_color == "")))
+    for processed, title in q.limit(200).all():
+        rows.append(Finding(
+            f"{title.title}: approved with no background colour recorded",
+            "This picture came back from the model with see-through areas, "
+            "and nothing says what colour was put behind them. It will "
+            "upload on whatever it was last flattened onto, which for a "
+            "semi-transparent sky usually means it looks muddy. Send it "
+            "back through Approve Artwork and set a colour.",
+            "/admin/pipeline/review",
+        ))
+
+    return _result(
+        "approved_images_have_a_background",
+        "Approved artwork says what colour is behind it",
+        "A transparent generation must be flattened onto a chosen colour "
+        "before it is listed. Nothing errors if it is not — the poster just "
+        "ships looking wrong.",
+        "error", rows, len(rows),
     )
 
 
@@ -1960,6 +2012,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_stale_claims,
     check_projects_match_registry,
     check_sheet_columns_all_or_nothing,
+    check_approved_images_have_a_background,
     check_search_phrasings_name_a_place,
     check_prompt_matches_style_toggle,
     check_claims_by_inactive,

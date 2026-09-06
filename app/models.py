@@ -932,6 +932,29 @@ class ProcessedImage(Base):
     #   'rerun'    — rejected; a fresh generation is queued
     review_status   = Column(String(16), nullable=True, index=True)
     reviewed_at     = Column(DateTime, nullable=True)
+
+    # ── The transparent master, and the colour flattened onto it ─────────
+    #
+    # gpt-image-2 in `background: transparent` mode renders differently, and
+    # BETTER for this niche — MEASURED by the owner 2026-09-05, and the whole
+    # reason the setting is on. The transparency is a side effect he flattens
+    # away, not the point.
+    #
+    # `master_path` keeps that transparent original untouched and un-enlarged.
+    # `storage_path` holds the finished print file: flattened onto
+    # `background_color`, then upscaled.
+    #
+    # TWO FILES RATHER THAN ONE, on purpose. Most posters look right on black
+    # and never need a second thought, but some do — a semi-transparent sky
+    # goes muddy on black and correct on its own blue. Keeping the master
+    # means changing that decision costs a local re-render instead of paying
+    # OpenAI for the picture again.
+    #
+    # FLATTEN BEFORE UPSCALING. With the alpha already gone there is nothing
+    # for the resize to average the hidden colour into. Chosen for safety
+    # rather than from an observed fault — see imagefetch.flatten_onto().
+    master_path      = Column(String(768), nullable=True)
+    background_color = Column(String(16), nullable=True)
     reviewed_by     = Column(String(64), nullable=True)
     # Web-sized copy for the review screens. Serving the 4000px print file
     # would be ~6 MB per screen; this is ~120 KB. Relative to storage_root

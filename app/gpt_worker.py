@@ -115,7 +115,9 @@ def process_one(db: Session, poster, title, project) -> bool:
     recorded on the poster so the dashboard can explain it.
     """
     from . import gpt_images as G
-    from .imagefetch import make_preview, upscale_to_width
+    from .imagefetch import (DEFAULT_BACKGROUND, flatten_onto,
+                             has_transparency, make_preview,
+                             upscale_to_width)
     from .pipeline import get_setting, recompute_title_status, storage_path_for
     from .models import ProcessedImage
     from .storage_remote import StorageError, write_bytes
@@ -166,10 +168,30 @@ def process_one(db: Session, poster, title, project) -> bool:
     rel_path, filename = storage_path_for(db, title, poster, project=project)
     full_rel = f"{rel_path}"
 
-    # Write to a temp file so Pillow can work on it, then upscale in place.
+    # ── The model's own output, kept exactly as it arrived ───────────────
+    #
+    # Saved BEFORE anything is done to it, and kept. Asked for a transparent
+    # background this model renders differently and better for this niche,
+    # and the see-through result is a side effect to be flattened away — but
+    # WHICH colour is flattened on is a judgement the admin makes later, on
+    # the review screen, looking at the picture.
+    #
+    # Keeping the original means changing that judgement costs a local
+    # re-render rather than paying OpenAI for the picture a second time.
+    raw = WORKSPACE_DIR / "_gpt_tmp" / f"{poster.id}_raw.png"
+    raw.parent.mkdir(parents=True, exist_ok=True)
+    raw.write_bytes(gen.image_bytes)
+
     tmp = WORKSPACE_DIR / "_gpt_tmp" / f"{poster.id}.jpg"
-    tmp.parent.mkdir(parents=True, exist_ok=True)
-    tmp.write_bytes(gen.image_bytes)
+    background = str(get_setting(db, "gpt_background_color", project=project)
+                     or DEFAULT_BACKGROUND)
+    transparent = has_transparency(raw)
+
+    # FLATTEN FIRST, ENLARGE SECOND. With no alpha channel left there is
+    # nothing for the resize to average the hidden colour into. The safe
+    # order, and it costs nothing — see imagefetch.flatten_onto() for why the
+    # measurement behind this is weaker than it first looked.
+    flatten_onto(raw, tmp, background)
 
     width = int(get_setting(db, "upscale_width_px", project=project) or 4000)
     sharpen = int(get_setting(db, "upscale_sharpen", project=project) or 0)
@@ -182,10 +204,16 @@ def process_one(db: Session, poster, title, project) -> bool:
     preview_rel = full_rel.rsplit("/", 1)
     preview_rel = (preview_rel[0] + "/previews/" + preview_rel[1]) if len(preview_rel) == 2 \
         else f"previews/{full_rel}"
+    # Beside the finished file, under its own name. Only written when there
+    # is actually something to keep — an opaque generation has no master to
+    # go back to, and storing a second identical copy would be waste.
+    master_rel = (full_rel.rsplit(".", 1)[0] + "_master.png") if transparent else None
 
     try:
         write_bytes(db, full_rel, tmp.read_bytes(), project=project)
         write_bytes(db, preview_rel, preview_tmp.read_bytes(), project=project)
+        if master_rel:
+            write_bytes(db, master_rel, raw.read_bytes(), project=project)
     except StorageError as e:
         # The image exists and was paid for, but we could not file it. Treat
         # as transient — storage comes back, and re-running would spend again.
@@ -200,6 +228,7 @@ def process_one(db: Session, poster, title, project) -> bool:
     finally:
         tmp.unlink(missing_ok=True)
         preview_tmp.unlink(missing_ok=True)
+        raw.unlink(missing_ok=True)
 
     # Supersede any previous generation rather than deleting it — a rerun must
     # not destroy the evidence of what was rejected.
@@ -229,6 +258,11 @@ def process_one(db: Session, poster, title, project) -> bool:
         attempt=prior + 1,
         preview_path=preview_rel,
         review_status="pending" if gate else None,
+        master_path=master_rel,
+        # The colour ALREADY baked into storage_path, not a request for one.
+        # Recording it is what lets the review screen know whether a change
+        # actually needs a re-render or is a no-op.
+        background_color=background if transparent else None,
     )
     db.add(processed)
     # Flushed so it has an id. ensure_upload_rows() below stores that id on

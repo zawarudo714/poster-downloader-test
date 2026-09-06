@@ -88,6 +88,8 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("processed_images", "reviewed_by",   "VARCHAR(64)"),
     ("processed_images", "preview_path",  "VARCHAR(768)"),
     ("processed_images", "attempt",       "INTEGER NOT NULL DEFAULT 1"),
+    ("processed_images", "master_path",      "VARCHAR(768)"),
+    ("processed_images", "background_color", "VARCHAR(16)"),
     ("saved_posters",    "unusable_reason", "TEXT"),
     ("saved_posters",    "unusable_at",     "DATETIME"),
     ("saved_posters",    "unusable_by",     "VARCHAR(64)"),

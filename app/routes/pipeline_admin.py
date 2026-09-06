@@ -3346,10 +3346,21 @@ def api_review_queue(
             "height": processed.output_height,
             "preview_url": f"/admin/pipeline/review/image/{processed.id}",
             "source_url": f"/admin/file/{poster.id}",
+            # The colour already flattened in, and whether there is a
+            # transparent master to re-flatten from. No master means the
+            # generation was opaque and the colour control does nothing —
+            # so the screen hides it rather than offering a dead knob.
+            "background_color": processed.background_color or "",
+            "can_recolor": bool(processed.master_path),
+            "master_url": (f"/admin/pipeline/review/master/{processed.id}"
+                           if processed.master_path else ""),
         })
 
     return JSONResponse({"titles": list(titles.values()),
-                         "count": len(titles), "status": status})
+                         "count": len(titles), "status": status,
+                         "default_background": str(
+                             P.get_setting(db, "gpt_background_color",
+                                           project=project) or "#000000")})
 
 
 @router.get("/review/image/{processed_id}")
@@ -3379,6 +3390,90 @@ def serve_review_preview(
         raise HTTPException(404, str(e))
     return Response(content=data, media_type="image/jpeg",
                     headers={"Cache-Control": "private, max-age=3600"})
+
+
+@router.get("/review/master/{processed_id}")
+def serve_review_master(
+    processed_id: int,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Stream the TRANSPARENT original for the review screen.
+
+    The live colour preview is done in the browser: this picture sits on a
+    coloured box and the browser composites it. That is the same arithmetic
+    the server does when flattening, so what you see is what you get — and it
+    costs no round trip, so dragging a colour picker is instant.
+
+    Served at its generated size, around 1024px, not the 4000px print file.
+    """
+    from ..storage_remote import read_bytes, StorageError
+
+    processed = db.query(ProcessedImage).filter_by(id=processed_id).first()
+    if processed is None or not processed.master_path:
+        raise HTTPException(404, "No transparent original for this image.")
+    try:
+        data = read_bytes(db, processed.master_path)
+    except StorageError as e:
+        raise HTTPException(404, str(e))
+    return Response(content=data, media_type="image/png",
+                    headers={"Cache-Control": "private, max-age=3600"})
+
+
+def _reflatten(db: Session, processed, color: str, project) -> str:
+    """
+    Rebuild the print file on a different background colour, from the master.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS IS CHEAP AND WHY THAT MATTERS
+    ════════════════════════════════════════════════════════════════════════
+    Nothing here talks to OpenAI. The transparent original was kept at
+    generation time precisely so that changing your mind about the colour is
+    a local re-render — a second or two of Pillow — instead of paying for the
+    picture again.
+
+    Runs only when the colour ACTUALLY differs. Nineteen approvals in twenty
+    keep the default, and re-rendering those would turn a batch of a hundred
+    into several minutes of pointless work.
+
+    Returns a note for the log, or "" if nothing needed doing.
+    """
+    from ..imagefetch import flatten_onto, make_preview, upscale_to_width
+    from ..storage_remote import read_bytes, write_bytes
+    from ..config import WORKSPACE_DIR
+
+    if not processed.master_path:
+        return ""                       # opaque generation; nothing to redo
+    if (processed.background_color or "").lower() == (color or "").lower():
+        return ""                       # already this colour
+
+    tmpdir = WORKSPACE_DIR / "_recolor"
+    tmpdir.mkdir(parents=True, exist_ok=True)
+    raw = tmpdir / f"{processed.id}_master.png"
+    out = tmpdir / f"{processed.id}.jpg"
+    prev = tmpdir / f"{processed.id}_preview.jpg"
+    try:
+        raw.write_bytes(read_bytes(db, processed.master_path))
+        # Flatten THEN enlarge, the same order as generation. Doing it the
+        # other way drags dark fringes along every soft edge.
+        flatten_onto(raw, out, color)
+        w = int(P.get_setting(db, "upscale_width_px", project=project) or 4000)
+        sharpen = int(P.get_setting(db, "upscale_sharpen", project=project) or 0)
+        quality = int(P.get_setting(db, "upscale_jpeg_quality", project=project) or 92)
+        out_w, out_h = upscale_to_width(out, width=w, sharpen=sharpen,
+                                        quality=quality)
+        make_preview(out, prev)
+        write_bytes(db, processed.storage_path, out.read_bytes(), project=project)
+        if processed.preview_path:
+            write_bytes(db, processed.preview_path, prev.read_bytes(),
+                        project=project)
+        processed.output_width, processed.output_height = out_w, out_h
+        processed.file_size = out.stat().st_size
+        return f"recoloured to {color}"
+    finally:
+        for f in (raw, out, prev):
+            f.unlink(missing_ok=True)
 
 
 @router.post("/api/review/decide")
@@ -3414,6 +3509,30 @@ def api_review_decide(
         action = item.get("action")
 
         if action == "approve":
+            # THE COLOUR IS SETTLED HERE, ON APPROVAL, AND NOWHERE ELSE.
+            #
+            # Approving is what releases the picture for upload, so it is the
+            # last moment anybody looks at it. Recording the colour at the
+            # same instant means an approved image can never be sitting in
+            # the upload queue with nobody having decided what is behind it.
+            wanted = (item.get("background_color") or "").strip()
+            if processed.master_path:
+                if not wanted:
+                    wanted = str(P.get_setting(
+                        db, "gpt_background_color",
+                        project=P.project_for_title(db, title) if title else None)
+                        or "#000000")
+                try:
+                    _reflatten(db, processed, wanted,
+                               P.project_for_title(db, title) if title else None)
+                except Exception as e:          # noqa: BLE001
+                    # The picture is already stored on its old colour, so
+                    # nothing is lost — but the request must NOT report a
+                    # success it did not achieve.
+                    raise HTTPException(
+                        500, f"Could not apply the background colour to "
+                             f"{processed.filename}: {e}")
+                processed.background_color = wanted
             processed.review_status = "approved"
             # RELEASING IS WHAT CREATES THE UPLOAD WORK.
             #

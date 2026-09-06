@@ -90,6 +90,10 @@
     const r = await fetch(`${API}/review/queue?${qs}`);
     const d = await r.json();
     titles = d.titles || [];
+    // The dashboard's colour, so RESET goes back to what the
+    // project is set to rather than to a number hardcoded here.
+    defaultBackground = d.default_background || '#000000';
+    colors.clear();
     if (!titles.length) { alert('Nothing to review in that range.'); return; }
 
     index = 0;
@@ -105,6 +109,42 @@
 
   function current() { return titles[index]; }
 
+  // ── The colour chosen per image, held here until you commit ─────────────
+  //
+  // Keyed on processed_id, like the decisions. Nothing is sent until SAVE,
+  // so dragging a colour picker costs no requests and you can change your
+  // mind about a poster three titles back.
+  const colors = new Map();
+  let defaultBackground = '#000000';
+
+  function colorFor(img) {
+    return colors.get(img.processed_id)
+        || img.background_color
+        || defaultBackground;
+  }
+
+  document.addEventListener('input', (e) => {
+    if (e.target.matches('[data-color-input]')) {
+      setColor(Number(e.target.dataset.pid), e.target.value);
+    }
+  });
+
+  // The eyedropper click. Capture phase, because the poster sits inside a
+  // link to the full-size file — without this the browser opens that file
+  // instead of sampling the pixel.
+  document.addEventListener('click', (e) => {
+    if (eyedropFor === null) return;
+    const img = e.target.closest('[data-poster-img]');
+    if (!img || Number(img.dataset.pid) !== eyedropFor) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const box = img.closest('[data-canvas]');
+    const hex = sampleAt(img, box, e);
+    if (hex) setColor(eyedropFor, hex);
+    box.classList.remove('is-picking');
+    eyedropFor = null;
+  }, true);
+
   function render() {
     const t = current();
     if (!t) return;
@@ -116,16 +156,61 @@
     $('[data-review-pair]').innerHTML = t.images.map((img) => {
       const d = decisions.get(img.processed_id);
       const state = d ? d.action : '';
+      const bg = colorFor(img);
+
+      // THE SOURCE PHOTOGRAPH, BESIDE THE POSTER.
+      //
+      // The one question this screen exists to answer is whether the model
+      // painted the place the worker actually found, or wandered off and
+      // invented a grander building of the same type. That cannot be judged
+      // from the poster alone — you have to see what it was given.
+      const source = `
+        <figure class="review-img review-img-source">
+          <a href="${img.source_url}" target="_blank" rel="noopener"
+             title="Open the worker's photograph">
+            <img loading="lazy" src="${img.source_url}" alt="">
+          </a>
+          <figcaption><span class="muted mono">what the worker found</span></figcaption>
+        </figure>`;
+
+      // THE POSTER, SITTING ON ITS COLOUR.
+      //
+      // When there is a transparent original we show THAT, on a coloured
+      // box, and let the browser composite the two. The browser does exactly
+      // the arithmetic the server does when flattening, so this preview is
+      // the finished poster rather than an approximation of it — and it
+      // updates the instant you change the colour, with no round trip.
+      const shown = img.can_recolor ? img.master_url : img.preview_url;
+      const colorBar = img.can_recolor ? `
+          <div class="review-color" data-pid="${img.processed_id}">
+            <span class="muted mono">background</span>
+            <input type="color" value="${esc(bg)}" data-color-input
+                   data-pid="${img.processed_id}" title="Pick a colour">
+            <button class="btn btn-ghost btn-tiny" data-img-action="eyedrop"
+                    data-pid="${img.processed_id}"
+                    title="Click this, then click a colour in the poster">
+              EYEDROPPER</button>
+            <button class="btn btn-ghost btn-tiny" data-img-action="color-reset"
+                    data-pid="${img.processed_id}">RESET</button>
+            <span class="mono review-color-value">${esc(bg)}</span>
+          </div>` : '';
+
       return `
+        ${source}
         <figure class="review-img ${state ? 'is-' + state : ''}" data-pid="${img.processed_id}">
           <a href="${img.preview_url}?full=1" target="_blank" rel="noopener"
              title="Open the full-resolution file">
-            <img loading="lazy" src="${img.preview_url}" alt="">
+            <span class="review-canvas" data-canvas data-pid="${img.processed_id}"
+                  style="background-color:${esc(bg)}">
+              <img loading="lazy" src="${shown}" alt="" data-poster-img
+                   data-pid="${img.processed_id}" crossorigin="anonymous">
+            </span>
           </a>
           <figcaption>
             <span class="mono">${esc(img.filename)}</span>
             <span class="muted mono">${img.width || '?'}×${img.height || '?'}${img.attempt > 1 ? ' · attempt ' + img.attempt : ''}</span>
           </figcaption>
+          ${colorBar}
           <div class="review-img-actions">
             <button class="btn btn-success btn-tiny" data-img-action="approve"  data-pid="${img.processed_id}">KEEP</button>
             <button class="btn btn-skip btn-tiny"    data-img-action="rerun"    data-pid="${img.processed_id}">RERUN</button>
@@ -136,6 +221,64 @@
     }).join('');
 
     updateTally();
+  }
+
+  // ── Changing the colour ────────────────────────────────────────────────
+  //
+  // Repainted in place rather than by re-rendering the whole title. A full
+  // render would reload both images from the server on every nudge of the
+  // colour picker, which makes dragging it feel broken.
+  function setColor(pid, value) {
+    colors.set(pid, value);
+    const box = document.querySelector(`[data-canvas][data-pid="${pid}"]`);
+    if (box) box.style.backgroundColor = value;
+    const input = document.querySelector(`[data-color-input][data-pid="${pid}"]`);
+    if (input && input.value !== value) input.value = value;
+    const label = box && box.closest('figure')
+        ? box.closest('figure').querySelector('.review-color-value') : null;
+    if (label) label.textContent = value;
+  }
+
+  // ── The eyedropper ─────────────────────────────────────────────────────
+  //
+  // Samples the COMPOSITED poster, not the raw transparent file. Click the
+  // Bangkok sky and you want the blue you can see — which is a
+  // half-transparent pixel already sitting on the current background — not
+  // the raw value hiding underneath, which is not what anybody is looking at.
+  let eyedropFor = null;
+
+  function startEyedrop(pid) {
+    eyedropFor = pid;
+    const box = document.querySelector(`[data-canvas][data-pid="${pid}"]`);
+    if (box) box.classList.add('is-picking');
+    toast('Click a colour in the poster.');
+  }
+
+  function sampleAt(imgEl, box, ev) {
+    const rect = imgEl.getBoundingClientRect();
+    const c = document.createElement('canvas');
+    c.width = imgEl.naturalWidth || rect.width;
+    c.height = imgEl.naturalHeight || rect.height;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    // Paint the background first, then the picture on top — the same order
+    // the server flattens in, so the sampled pixel is the finished one.
+    ctx.fillStyle = getComputedStyle(box).backgroundColor;
+    ctx.fillRect(0, 0, c.width, c.height);
+    try {
+      ctx.drawImage(imgEl, 0, 0, c.width, c.height);
+      const x = Math.floor((ev.clientX - rect.left) / rect.width * c.width);
+      const y = Math.floor((ev.clientY - rect.top) / rect.height * c.height);
+      const [r, g, b] = ctx.getImageData(x, y, 1, 1).data;
+      const hex = '#' + [r, g, b].map(
+          (v) => v.toString(16).padStart(2, '0')).join('');
+      return hex;
+    } catch (e) {
+      // Reading pixels back needs the image to be same-origin. It is — both
+      // come from this server — so this should not happen; if it ever does,
+      // say so rather than silently doing nothing.
+      toast('Could not read that pixel: ' + e.message, 'error');
+      return null;
+    }
   }
 
   function totalImages() {
@@ -188,6 +331,16 @@
       if (existing && existing.action === imgAction) {
         decisions.delete(pid);
         render();
+        return;
+      }
+
+      if (imgAction === 'eyedrop') {
+        startEyedrop(pid);
+        return;
+      }
+
+      if (imgAction === 'color-reset') {
+        setColor(pid, defaultBackground);
         return;
       }
 
@@ -259,6 +412,10 @@
         processed_id: img.processed_id,
         action: d ? d.action : 'approve',
         reason: d ? d.reason : '',
+        // Sent on every image, not just the ones you touched. An untouched
+        // poster still needs a colour recorded, and "the one showing on
+        // screen" is exactly what you just approved by not changing it.
+        background_color: img.can_recolor ? colorFor(img) : '',
       });
     }));
 

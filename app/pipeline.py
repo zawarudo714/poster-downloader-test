@@ -562,6 +562,17 @@ DEFAULTS: dict[str, Any] = {
     # Default ON, because that is what every existing project does. A default
     # that changes behaviour on upgrade is not a default, it is a bug.
     "openai_use_style_image": True,
+    # ── The colour flattened behind a transparent generation ─────────────
+    #
+    # Only used when the model returns transparency, which for this niche is
+    # deliberate: `background: transparent` makes gpt-image-2 render in a way
+    # the owner wants, and the see-through parts are flattened away here.
+    #
+    # Black suits nearly every poster. The exceptions are pictures whose sky
+    # came out semi-transparent — those go muddy on black and read correctly
+    # on their own colour, which is why the review screen lets him pick one
+    # per image with an eyedropper. This is only the starting point.
+    "gpt_background_color": "#000000",
     # ── Storage access from THIS server ──────────────────────────────────
     # The Windows node writes to the drive letter in `storage_root`. This
     # server has no such drive, so the GPT stage pushes over SFTP to the same

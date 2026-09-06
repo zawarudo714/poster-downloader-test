@@ -238,10 +238,17 @@ def generate(db: Session, *, source: Path, style: Path, project=None,
     }
     size = str(get_setting(db, "openai_size", project=project) or "auto")
     quality = str(get_setting(db, "openai_quality", project=project) or "auto")
+    background = str(get_setting(db, "openai_background", project=project) or "auto")
     if size != "auto":
         data["size"] = size
     if quality != "auto":
         data["quality"] = quality
+    # "auto" means omit the parameter entirely, letting the API decide.
+    # Transparent is the owner's production look (MEASURED 2026-09-05) and
+    # the flatten step downstream depends on knowing it may come back
+    # see-through — which it detects from the file itself, not from here.
+    if background != "auto":
+        data["background"] = background
 
     if use_style:
         # The reference FIRST. Every prompt that mentions two pictures calls

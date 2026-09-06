@@ -518,6 +518,13 @@ DEFAULTS: dict[str, Any] = {
     "openai_model":       "gpt-image-2",
     "openai_size":        "auto",
     "openai_quality":     "low",
+    # MEASURED 2026-09-05, and it is the owner's whole look: asking for a
+    # transparent background changes HOW gpt-image-2 renders. The see-through
+    # result is flattened onto gpt_background_color afterwards. "auto" means
+    # the parameter is omitted — which is NOT the same as the playground's
+    # transparent, the exact omitted-parameter trap the moderation note in
+    # this file already describes.
+    "openai_background":  "transparent",
     # THE PROMPT IS PER-PROJECT AND THE OWNER WRITES IT. What is here is the
     # niche-neutral skeleton — style transfer from the reference image, and
     # the aspect-ratio instruction, which are true of any generation project.

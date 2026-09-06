@@ -128,9 +128,15 @@ out; it has to be tried on real places.
 
 ---
 
-## 5. THE STYLE REFERENCE SWITCH — Pipeline settings · v144
+## 5. THE STYLE REFERENCE SWITCH AND THE BACKGROUND OPTION — v144 · v152
 
-**What to click**
+The Settings screen's IMAGE GENERATION panel now has a **Background**
+choice (transparent / auto / opaque), set to transparent. Run one TEST
+IMAGE GENERATION and check the result comes back with see-through areas
+that flatten onto your chosen colour — that proves the parameter reaches
+OpenAI.
+
+**What to click for the style switch**
 
 - Turn `openai_use_style_image` OFF and process one image. It should work
   with no reference picture at all.
@@ -270,5 +276,6 @@ sidebar on desktop, pill buttons, rounded cards.
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and
-the files now hold 88,926, because 44 war and grave sites were cut. That is a
-job to do, not a thing to test, so it lives in `ROADMAP.md`.
+the files now hold 88,876 — 44 war and grave sites were cut, then 50 bare
+country names (2026-09-06). A job to do, not a thing to test, so it lives
+in `ROADMAP.md`.

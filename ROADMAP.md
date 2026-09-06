@@ -121,8 +121,11 @@ neither should have needed a developer.
   rather than of the project, and he expects to rewrite the prompt whenever a
   new model appears.
 
-**The master sheet is DONE and imported.** 88,970 places, numbered 1 to
-88,970 in traffic order, built by `build_titles.py` and exported by
+**The master sheet is DONE; the FILES have moved on since the import.**
+88,970 places were imported; the files now hold 88,876 after the war-sites
+cut (44) and the bare-country-names cut (50, 2026-09-06 — `cut_bare_countries.py`,
+six city-states deliberately kept). The database needs RE-IMPORTING before
+testing starts. Numbered 1 to 88,970 in traffic order, built by `build_titles.py` and exported by
 `make_check_file.py` as `IMPORT_titles.csv`. Read by hand in rank order;
 9,131 places cut, 8,186 titles rewritten. Column `0` is the number, and it
 prefixes the folder on disk — **assign once, never renumber.**

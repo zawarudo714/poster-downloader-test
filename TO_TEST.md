@@ -321,6 +321,10 @@ Each of these is one of your own findings; check it does what you asked.
 - **On your phone**: tap a title — the screen should go to the work panel
   by itself. Scroll away: a floating "↓ TO THE TITLE" button appears; tap
   it to come back. It hides when no title is open.
+- **v156**: the painted poster shows again on Approve Artwork (v155 blanked
+  it); opening a title as the worker no longer 500s — the real cause is
+  fixed, not just cushioned; Needs Attention header tick selects/unselects
+  its whole table.
 
 ---
 

@@ -280,6 +280,17 @@
     try { sessionStorage.setItem(PIPE_SECTION_KEY, name); } catch (e) {}
   }
 
+  // Select-all in the Needs Attention tables (owner's ask, 2026-09-06).
+  // Scoped to the toggle's OWN table, so ticking the failed-uploads header
+  // never silently selects the unusable list below it.
+  document.addEventListener('change', (e) => {
+    const all = e.target.closest('[data-attn-all]');
+    if (!all) return;
+    all.closest('table').querySelectorAll('[data-attn-pick]').forEach((cb) => {
+      cb.checked = all.checked;
+    });
+  });
+
   qa('.pipe-tab').forEach((tab) => {
     tab.addEventListener('click', () => showSection(tab.dataset.section));
   });
@@ -2093,7 +2104,8 @@
 
     if (f.key === 'unusable') {
       return `<table class="data-table">
-        <thead><tr><th style="width:34px"></th><th>TITLE</th><th>REASON</th><th>RETIRED</th></tr></thead>
+        <thead><tr><th style="width:34px"><input type="checkbox" data-attn-all
+                   title="Tick or untick every row below"></th><th>TITLE</th><th>REASON</th><th>RETIRED</th></tr></thead>
         <tbody>${f.items.map((i) => `
           <tr>
             <td><input type="checkbox" data-attn-pick="${i.poster_id}" data-attn-kind="poster"></td>
@@ -2122,7 +2134,8 @@
 
     if (f.key === 'upload_failed') {
       return `<table class="data-table">
-        <thead><tr><th style="width:34px"></th><th>LISTING TITLE</th><th>ACCOUNT</th><th>TRIES</th><th>ERROR</th><th>EVIDENCE</th></tr></thead>
+        <thead><tr><th style="width:34px"><input type="checkbox" data-attn-all
+                   title="Tick or untick every row below"></th><th>LISTING TITLE</th><th>ACCOUNT</th><th>TRIES</th><th>ERROR</th><th>EVIDENCE</th></tr></thead>
         <tbody>${f.items.map((i) => `
           <tr>
             <td><input type="checkbox" data-attn-pick="${i.tracking_id}" data-attn-kind="tracking"></td>

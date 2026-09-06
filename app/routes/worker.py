@@ -46,7 +46,7 @@ from ..config import (
 )
 from ..db import get_db
 from ..models import ActivityLog, MasterTitle, Project, Revision, SavedPoster, User
-from ..pipeline import (resolve_project,
+from ..pipeline import (resolve_project, search_text,
                         phrasing_cache_key as P_phrasing_cache_key,
                         search_phrasings as P_search_phrasings)
 from ..projects import (
@@ -782,7 +782,6 @@ def api_search(
         # "Niagara Falls USA", because a bare name finds the wrong continent.
         # search_text() falls back to the title, so a sheet without the
         # column searches exactly as it used to.
-        from ..pipeline import search_text
         # {kind} comes from the sheet's own description column — city,
         # island, mountain. Passed rather than looked up inside the search so
         # that ONE function knows where a title's words come from.
@@ -1374,7 +1373,7 @@ def _validate_image_url(url: str, db: Optional[Session] = None,
         from ..pipeline import get_setting
         raw = str(get_setting(db, "allowed_image_hosts", project=project) or "")
         allowed = {h.strip().lower() for h in raw.replace(",", " ").split() if h.strip()}
-        if allowed and host.lower() not in allowed:
+        if allowed and (parsed.hostname or "").lower() not in allowed:
             return False, (f"Images for this project may only come from: "
                            f"{', '.join(sorted(allowed))}")
 

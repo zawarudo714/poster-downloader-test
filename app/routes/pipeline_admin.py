@@ -3476,6 +3476,13 @@ def serve_review_preview(
 @router.get("/review/master/{processed_id}")
 def serve_review_master(
     processed_id: int,
+    # v155 SHIPPED WITHOUT THIS PARAMETER while the body referenced `full` —
+    # a NameError on every request, so the poster pane rendered EMPTY. The
+    # owner's screenshot found it within the hour. The lesson is recorded in
+    # MEGA_AUDIT.md: the undefined-name check missed a name that exists in a
+    # SIBLING route's signature, and a sabotage-test of the new cache path
+    # would have caught it before deploy.
+    full: int = Query(0),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):

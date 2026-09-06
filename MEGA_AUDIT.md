@@ -198,6 +198,22 @@ places that render a year.
 
 All thirteen are fixed in v154; the deploy note carries the list.
 
+## THE 500'S TRUE CAUSE — and the check that was blind to it (v156)
+
+The "Failed to open title: 500" resisted code-reading because the code
+LOOKED right and `preflight` was green. The cause: `search_text` was
+imported inside one function and used bare in three others — a NameError
+on every title open since v146. The undefined-name check pooled bound
+names FILE-WIDE, so that one local import vouched for the whole file; and
+v155 then shipped the identical shape (`full` used in a route whose
+sibling declared it), which blanked the poster pane.
+
+The check is rewritten to per-function scope, was run over the entire
+codebase (it found the second live NameError on the allow-list path too),
+and was sabotage-tested with the exact shipped bug: red with it, green
+without. Rule 5e answered properly this time: what found it was the owner,
+twice; what finds it now is preflight, before deploy, every time.
+
 ## What this audit did NOT do
 
 Say it plainly so nobody trusts it further than it goes: it did not re-walk

@@ -1,27 +1,31 @@
 # Not yet deployed
 
-## v155 — Approve Artwork made fast, and the phone jump button
+## v156 — the empty poster pane (v155 broke it), the 500's true cause, select-all
 
-* **Approve Artwork loads fast now.** The recolourable posters were
-  shipping their full transparent PNG master, re-fetched from the Storage
-  Box on every view. The master now goes out at display size (1000px,
-  alpha kept — live recolour and the eyedropper still work), and review
-  images are cached on the server's own disk (`review_cache/`, safe to
-  delete any time; a re-flatten clears its own entries so a changed colour
-  can never show stale). The full print file still comes on request.
-  The owner's "upscale only after approve" idea was considered and not
-  taken: the upscale runs once at generation and every kept image needs it
-  anyway — the waste was in what the BROWSER was sent.
-* **The phone jump.** Tapping a title now scrolls straight to its work
-  panel on a phone, and a floating "↓ TO THE TITLE" button appears
-  whenever a title is open but its panel is off-screen — the DONE PICKING
-  button's twin, pointing the other way.
+* **The painted image not showing was v155's own bug**: the master-image
+  route's body read a `full` flag that only its SIBLING route declared — a
+  NameError on every request, an empty pane on every poster. Fixed, and
+  the CLASS is now impossible to ship again:
+* **`check_undefined_names` rewrote from file-wide to PER-FUNCTION scope.**
+  The old version pooled every bound name in the file, so any function's
+  parameter vouched for the same name everywhere. Sabotage-tested with the
+  exact v155 bug: red with it, green without.
+* **The rewritten check immediately solved the owner's "Failed to open
+  title: 500"**: `search_text` was imported inside ONE function and used
+  bare in three others, `lock_title` among them — NameError on every title
+  open since v146. Imported properly now. It also caught a second live
+  NameError on the paste-a-URL allow-list path (`host` never bound) that
+  would have fired the first time `allowed_image_hosts` was filled in.
+* **Needs Attention has a select-all tick** in the header of each table,
+  scoped to its own table.
 
 No schema change, no node copy.
 
-**Verified**: preflight green; JS parses; the re-flatten stale-cache hole
-was found by reasoning and closed before shipping. **NOT verified**: never
-rendered — the speed difference and the jump button are judged by eye.
+**Verified**: preflight green including the new scoped checker across the
+whole codebase; the sabotage (re-inserting v155's bug) goes red and the
+restore goes green. **NOT verified**: nothing rendered, as ever — but the
+500 explanation fits the symptom exactly (title opened fine after refresh,
+because the lock committed before the crash).
 
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.

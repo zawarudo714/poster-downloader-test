@@ -99,42 +99,124 @@ def check_python_compiles() -> None:
 
 def check_undefined_names() -> None:
     """
-    Names used but never bound anywhere in the file.
+    Names used but never bound IN SCOPE.
 
-    `py_compile` does NOT catch this — a typo'd function name compiles fine
-    and explodes the first time that line runs, which for an admin page is
-    the first time you click the button.
+    `py_compile` does NOT catch this — a typo'd name compiles fine and
+    explodes the first time that line runs.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY PER-FUNCTION AND NOT PER-FILE (v156, and it cost a broken screen)
+    ════════════════════════════════════════════════════════════════════════
+    The first version pooled every bound name FILE-WIDE, so a parameter of
+    any function vouched for the same name in every OTHER function. v155
+    shipped a route whose body read `full` while only its SIBLING route had
+    a `full` parameter — a NameError on every request, the poster pane
+    rendered empty, and this check was green. A check that looks at the
+    wrong scope is coverage-shaped blindness.
+
+    Scope model (deliberately simple, tuned to zero false positives on this
+    codebase): a function may use its own bindings, its enclosing
+    functions' bindings, module-level bindings, and builtins. Class bodies
+    are treated as module-level. Wildcard imports would blind it — there
+    are none here, and the sabotage test will notice if the model rots.
     """
+    def bindings_of(node) -> set[str]:
+        """Names BOUND directly inside `node`'s own scope (not nested defs)."""
+        out: set[str] = set()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            a = node.args
+            for arg in (a.posonlyargs + a.args + a.kwonlyargs):
+                out.add(arg.arg)
+            if a.vararg: out.add(a.vararg.arg)
+            if a.kwarg: out.add(a.kwarg.arg)
+        stack = list(ast.iter_child_nodes(node))
+        while stack:
+            n = stack.pop()
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                out.add(n.name)
+                continue                      # nested scope binds elsewhere
+            if isinstance(n, ast.ClassDef):
+                out.add(n.name)
+                continue
+            if isinstance(n, ast.Lambda):
+                continue
+            if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)):
+                out.add(n.id)
+            elif isinstance(n, ast.arg):
+                out.add(n.arg)
+            elif isinstance(n, (ast.Import, ast.ImportFrom)):
+                for alias in n.names:
+                    out.add((alias.asname or alias.name).split(".")[0])
+            elif isinstance(n, ast.ExceptHandler) and n.name:
+                out.add(n.name)
+            elif isinstance(n, (ast.Global, ast.Nonlocal)):
+                out.update(n.names)
+            stack.extend(ast.iter_child_nodes(n))
+        return out
+
+    def loads_of(fn) -> set[str]:
+        """Names LOADED in `fn`'s own scope (not nested defs/lambdas),
+        including inside comprehensions (which bind their own targets)."""
+        loads: set[str] = set()
+        comp_bound: set[str] = set()
+        stack = list(ast.iter_child_nodes(fn))
+        while stack:
+            n = stack.pop()
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda,
+                              ast.ClassDef)):
+                continue
+            if isinstance(n, (ast.ListComp, ast.SetComp, ast.DictComp,
+                              ast.GeneratorExp)):
+                for comp in n.generators:
+                    for t2 in ast.walk(comp.target):
+                        if isinstance(t2, ast.Name):
+                            comp_bound.add(t2.id)
+            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load):
+                loads.add(n.id)
+            stack.extend(ast.iter_child_nodes(n))
+        return loads - comp_bound
+
     for path in py_files():
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
         except SyntaxError:
             continue                      # already reported above
 
-        bound: set[str] = {"__file__", "__name__", "__doc__"}
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
-                                 ast.ClassDef)):
-                bound.add(node.name)
-            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-                bound.add(node.id)
-            elif isinstance(node, ast.arg):
-                bound.add(node.arg)
-            elif isinstance(node, (ast.Import, ast.ImportFrom)):
-                for alias in node.names:
-                    bound.add((alias.asname or alias.name).split(".")[0])
-            elif isinstance(node, ast.ExceptHandler) and node.name:
-                bound.add(node.name)
-            elif isinstance(node, ast.Global):
-                bound.update(node.names)
+        module_bound = bindings_of(tree) | {"__file__", "__name__", "__doc__"}
 
-        unknown = sorted({
-            n.id for n in ast.walk(tree)
-            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
-            and n.id not in bound and n.id not in BUILTINS
-        })
-        if unknown:
-            fail(f"{path.relative_to(ROOT)}: undefined name(s) {unknown}")
+        # every function, with its chain of enclosing function scopes
+        problems: list[str] = []
+
+        def visit(node, enclosing: set[str]):
+            for child in ast.walk(node):
+                pass
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    own = bindings_of(child)
+                    scope = module_bound | enclosing | own
+                    unknown = sorted(
+                        n for n in loads_of(child)
+                        if n not in scope and n not in BUILTINS)
+                    if unknown:
+                        problems.append(
+                            f"{child.name}() uses undefined name(s) {unknown}")
+                    visit(child, enclosing | own)
+                elif isinstance(child, ast.ClassDef):
+                    visit(child, enclosing)
+                else:
+                    visit(child, enclosing)
+
+        visit(tree, set())
+
+        # module level itself
+        top_unknown = sorted(
+            n for n in loads_of(tree)
+            if n not in module_bound and n not in BUILTINS)
+        if top_unknown:
+            problems.append(f"module level uses undefined name(s) {top_unknown}")
+
+        for msg in problems:
+            fail(f"{path.relative_to(ROOT)}: {msg}")
 
 
 def check_settings_keys_declared() -> None:

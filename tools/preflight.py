@@ -693,8 +693,7 @@ def check_tool_calls_exist() -> None:
     file you are writing, look it up.
     """
     app_defined: set[str] = set()
-    for path in (APP / "pipeline.py", APP / "listing_check.py",
-                 APP / "earnings" / "store_health.py"):
+    for path in (APP / "pipeline.py", APP / "listing_check.py"):
         if not path.is_file():
             continue
         try:
@@ -965,28 +964,6 @@ def check_falsy_zero_defaults() -> None:
                      f"ZERO here is silently replaced: {stripped[:60]}")
 
 
-def check_store_logic() -> None:
-    """
-    The only BEHAVIOUR check in here, and it earns its place.
-
-    Everything else above proves the wiring is connected. This runs the two
-    decisions that stop a stage switching live listings — the stop signal and
-    the skip-what-already-failed rule — against worked examples, using the
-    shipped source rather than a copy. See tools/test_store_logic.py, and run
-    it with --sabotage to confirm its checks can still go red.
-    """
-    sys.path.insert(0, str(ROOT / "tools"))
-    try:
-        import test_store_logic as T
-        for label, ok in T.run_suite(T.SOURCE.read_text(encoding="utf-8")):
-            if not ok:
-                fail(f"listing-health rule broken: {label}")
-    except SystemExit as e:                 # the functions were renamed away
-        fail(f"store logic test could not run: {e}")
-    finally:
-        sys.path.pop(0)
-
-
 # ── A GUARD IS ONLY A GUARD IF EVERY PATH CALLS IT ──────────────────────
 #
 # (file, what the risky thing looks like, what protects it, plain words).
@@ -995,9 +972,6 @@ def check_store_logic() -> None:
 # point is not the individual rule — it is that "somebody remembered" stops
 # being the mechanism.
 GUARDED: list[tuple[str, str, tuple[str, ...], str]] = [
-    ("worker_service/store_health.py", "driver.get(",
-     ("clear_wall(", "_open_page(", "page_is_theirs("),
-     "navigates the browser without consulting the interstitial wall"),
     # ── external_id REPEATS ACROSS PROJECTS ─────────────────────────────
     #
     # It is the `0` column from a project's OWN sheet, so every project
@@ -1435,13 +1409,11 @@ NOT_ON_THE_SETTINGS_FORMS = {
     "earnings_daily_run_started_at": "written by the nightly earnings read",
     "run_mode":        "set by the PAUSE NEW WORK and RESUME buttons",
     "run_mode_reason": "set by the PAUSE NEW WORK and RESUME buttons",
-    "wall_path_cursor": "a position the node keeps, not a choice",
     # Their own panels, which are better than a one-line box.
     "process_script":     "the JSX editor",
     "openai_prompt":      "the PROMPT panel, with its own save and reset",
     "openai_style_image": "the STYLE REFERENCE panel, which uploads a file",
     "selectors":          "the selectors grid",
-    "selectors_teepublic": "the selectors grid",
     "timings":            "the timings grid",
 }
 
@@ -1469,8 +1441,7 @@ SETTINGS_WITH_NO_BOX_YET = {
     "earnings_sales_url", "earnings_balance_url", "earnings_retry_window_hours",
     "listing_check_alarm_ratio", "listing_check_max_attempts",
     "listing_check_min_sample",
-    "scan_delay_s", "scan_retry_delays_min", "store_stage_max_attempts",
-    "upload_pause_after_failures", "wall_max_attempts", "wall_wait_s",
+    "upload_pause_after_failures",
 }
 
 
@@ -1596,7 +1567,6 @@ CHECKS = [
     ("pages get what the layout needs", check_page_context),
     ("no queries inside loops",   check_queries_in_loops),
     ("zero is not treated as missing", check_falsy_zero_defaults),
-    ("listing-health rules behave", check_store_logic),
     ("guards are called on every path", check_guards_are_called),
     ("state changes are logged", check_state_changes_are_logged),
     ("every document is linked", check_no_orphan_documents),

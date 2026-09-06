@@ -48,7 +48,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..models import LedgerEntry, MasterTitle, UploadAccount
-from . import faa, teepublic
+from . import faa
 from .matching import MatchIndex, match_entry
 
 log = logging.getLogger(__name__)
@@ -59,7 +59,10 @@ log = logging.getLogger(__name__)
 # simply skipped rather than being an error.
 READERS: dict[str, Any] = {
     "fineartamerica": faa,
-    "teepublic": teepublic,
+    # TeePublic's reader left with the whole TeePublic mechanism on
+    # 2026-09-06 — the owner reads that marketplace from a tool on his own
+    # laptop now. TeePublic accounts still exist as rows; with no reader
+    # here they are simply skipped, which is this dict's designed behaviour.
 }
 
 # How long a marketplace may still revise a figure after a sale. Used only to
@@ -116,104 +119,25 @@ CAPABILITIES: dict[str, dict] = {
                         "published, so how much of this arrives next is not "
                         "knowable — only the total owed."),
     },
-    "teepublic": {
-        "label":       "TeePublic",
-        "shape":       "snapshot",   # running totals, read once a day
-        "sales":       False,        # no list of individual sales exists
-        "per_design":  False,
-        "refunds":     False,
-        "payouts":     False,
-        "balance":     True,
-        # TeePublic DOES keep you signed in, for weeks — and it challenges a
-        # datacentre address that keeps opening the sign-in page. The owner's
-        # own TeePublic tool ran for years and never met a security check for
-        # exactly this reason: it never signed in, it opened a profile he had
-        # signed into by hand. So we do not either. A stale session here is
-        # rare and is fixed by a person, through PROFILES.bat.
-        "signin_on_read": False,
-        "payout_rule": ("Paid on the 15th of every month, for the previous "
-                        "calendar month, in full. So this figure drops to "
-                        "near zero just after the 15th — that is the payment "
-                        "landing, not a fault."),
-    },
+    # TeePublic's row left with its reader, 2026-09-06. The "snapshot" shape
+    # it introduced stays supported below, because the next totals-only
+    # marketplace will need it.
 }
-
-
-def page_markers(marketplace: str) -> list[str]:
-    """
-    Words that prove we are looking at the page we asked for.
-
-    ════════════════════════════════════════════════════════════════════════
-    THIS IS ALSO HOW THE WALL IS DETECTED
-    ════════════════════════════════════════════════════════════════════════
-    TeePublic's interstitial cannot be recognised by anything ON it — its
-    class names are randomised and would break on their next deploy while
-    blaming something else. So it is detected by what is MISSING: we asked
-    for the account page, and the account page's own words are not there.
-
-    Which makes this one definition doing two jobs — "we are stuck" and "we
-    are through" are the same test, so they can never disagree. Two separate
-    definitions of a good page is precisely how a node and a server end up
-    quietly believing different things.
-
-    Sourced from the labels the PARSER already requires, so adding a
-    marketplace does not mean remembering to update a second list.
-    """
-    return {
-        "teepublic": ["next payment", "this month", "total earned",
-                      "items sold"],
-        # FineArtAmerica has no wall and never has. Empty means "do not look",
-        # which is different from "look and find nothing".
-        "fineartamerica": [],
-    }.get(marketplace, [])
 
 
 def site_markers(marketplace: str) -> list[str]:
     """
-    Proof we are on an ORDINARY page of this site rather than the wall.
+    Words or markup that prove an account page really loaded before parsing.
 
-    ════════════════════════════════════════════════════════════════════════
-    WHY THE LOGO
-    ════════════════════════════════════════════════════════════════════════
-    `page_markers` above works for the account page, because that page has
-    its own four labels. The scan visits SEARCH pages, which share nothing
-    with the account page — so they need a marker of their own.
-
-    The header logo is the right one: every ordinary TeePublic page carries
-    it — search results, the store listing, a design's own page — and the
-    interstitial carries nothing at all. One marker therefore covers every
-    page the scan and the deactivation stages touch.
-
-    Matched against raw HTML because a logo is an IMAGE and has no text.
-    That is the same exception the sign-in field name gets, and for the same
-    reason: it is structural, not a vendor word that might merely be loaded.
-
-    Both the class and the asset path are listed so a redesign of one does
-    not take the check down with it. Neither is randomised — compare the
-    wall's own `tOHY4`, which is why the wall is never matched directly.
+    Empty means "do not look", which is different from "look and find
+    nothing". FineArtAmerica needs no marker. A future totals-only
+    marketplace declares its own line here — TeePublic's logo markers lived
+    here until 2026-09-06, when that marketplace moved to the owner's
+    laptop tool.
     """
     return {
-        "teepublic": ["vc-header-logo__image",
-                      "assets/logos/tp-full"],
-        # FineArtAmerica has no wall, so there is nothing to prove.
         "fineartamerica": [],
     }.get(marketplace, [])
-
-
-def signed_out_markers(marketplace: str) -> list[str]:
-    """
-    How the node can tell a sign-in page from the wall, before clicking.
-
-    Without this, a lapsed session looks exactly like the wall — figures
-    missing, no known challenge — so the node would spend three recorded
-    paths clicking at a sign-in form and then report "stuck at the wall". The
-    fix is a person signing in, and the message has to say so.
-
-    Taken from the reader module rather than restated here, so the node and
-    the parser cannot hold two different ideas of "signed out".
-    """
-    reader = READERS.get(marketplace)
-    return list(getattr(reader, "SIGNED_OUT_MARKERS", ()) or ())
 
 
 def signin_on_read(marketplace: str) -> bool:

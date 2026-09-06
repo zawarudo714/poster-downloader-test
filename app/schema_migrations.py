@@ -110,24 +110,10 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     # read stopped uploading too — and vice versa.
     ("upload_accounts",  "earnings_paused_until", "DATETIME"),
     ("upload_accounts",  "earnings_pause_reason", "TEXT"),
-    # Listing-health runs: automatic mode, pause, and the scan mode. Added
-    # after the first working sweeps, so the table already exists.
-    ("store_scan_runs",  "auto",       "INTEGER NOT NULL DEFAULT 0"),
-    ("store_scan_runs",  "paused_at",  "DATETIME"),
-    ("store_scan_runs",  "paused_by",  "VARCHAR(64)"),
-    ("store_scan_runs",  "scan_mode",  "VARCHAR(16) NOT NULL DEFAULT 'full'"),
-    ("store_scan_runs",  "retry_at",    "DATETIME"),
-    ("store_scan_runs",  "retry_count", "INTEGER NOT NULL DEFAULT 0"),
-    ("store_scan_runs",  "retry_note",  "TEXT"),
-    ("store_scan_runs",  "stage_jobs_total", "INTEGER NOT NULL DEFAULT 0"),
-    ("store_scan_runs",  "stage_jobs_done",  "INTEGER NOT NULL DEFAULT 0"),
-    # One account at a time through the action stages, so there is only ever
-    # one job to cancel when the run is stopped.
-    ("store_scan_runs",  "stage_account_id", "INTEGER"),
-    ("store_scan_runs",  "stage_attempts",   "INTEGER NOT NULL DEFAULT 0"),
-    # Stops a design that cannot be switched off from being handed out
-    # forever now that the stage's end is derived from the catalogue.
-    ("store_listings",   "action_error_at",  "DATETIME"),
+    # The TeePublic store tables kept their rows here until 2026-09-06, when
+    # that mechanism moved to the owner's laptop tool. The TABLES survive on
+    # existing installs (they hold the switched-off-designs record) but are
+    # no longer created or migrated.
     # ── Listing reconciliation ──────────────────────────────────────────
     # The name the marketplace prints on a listing. Not the account name and
     # not derivable from the profile URL, but the public address is built
@@ -142,14 +128,6 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     # legitimately runs for an hour and was being declared dead at 45
     # minutes while it was reporting every sixteen seconds.
     ("pipeline_jobs",    "last_report_at",   "DATETIME"),
-    # WHICH action failed. One error field served both directions, so a
-    # design that could not be switched OFF was then skipped when the run
-    # tried to switch it back ON — and stayed hidden.
-    ("store_listings",   "action_error_kind", "VARCHAR(16)"),
-    # How many runs in a row have failed to switch this one design on a page
-    # that was plainly ours. Retrying a genuine failure for ever is how a
-    # broken design quietly costs an hour of every sweep.
-    ("store_listings",   "action_fail_count", "INTEGER NOT NULL DEFAULT 0"),
     # The marketplace's OWN count of switched-off designs, and when it was
     # read. The only figure in the system that does not come from our own
     # records, which is exactly why it can catch us being wrong.

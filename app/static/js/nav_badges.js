@@ -10,6 +10,9 @@
   // ── Chat unread polling ──────────────────────────────────────────────────
   const inlineBadge = document.getElementById('nav-chat-badge');
   const toggleBadge = document.getElementById('nav-toggle-badge');
+  // The People group button carries the chat count too, or the unread badge
+  // would be invisible while the dropdown is closed — which is always.
+  const groupBadge  = document.getElementById('nav-chat-badge-group');
   const isAdmin = !!document.querySelector('.role-badge.role-admin');
 
   function setBadge(el, n) {
@@ -46,6 +49,7 @@
       if (n !== null) {
         setBadge(inlineBadge, n);
         setBadge(toggleBadge, n);
+        setBadge(groupBadge, n);
       }
     } catch (e) { /* ignore */ }
   }
@@ -54,6 +58,39 @@
     tickBadges();
     setInterval(tickBadges, 12000);
   }
+
+  // ── Nav group dropdowns (desktop) ────────────────────────────────────────
+  // Click to open, click anywhere else to close. Hover-only menus fail on
+  // touch screens, which is half the point of grouping. In the phone drawer
+  // the CSS renders every group permanently open, so this code simply never
+  // matters there.
+  const groups = Array.from(document.querySelectorAll('[data-nav-group]'));
+  function closeGroups(except) {
+    groups.forEach((g) => {
+      if (g !== except) {
+        g.classList.remove('open');
+        const b = g.querySelector('.nav-group-btn');
+        if (b) b.setAttribute('aria-expanded', 'false');
+      }
+    });
+  }
+  groups.forEach((g) => {
+    const btn = g.querySelector('.nav-group-btn');
+    if (!btn) return;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const opening = !g.classList.contains('open');
+      closeGroups(null);
+      if (opening) {
+        g.classList.add('open');
+        btn.setAttribute('aria-expanded', 'true');
+      }
+    });
+  });
+  document.addEventListener('click', () => closeGroups(null));
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeGroups(null);
+  });
 
   // ── Hamburger drawer ─────────────────────────────────────────────────────
   const toggle = document.getElementById('nav-toggle');

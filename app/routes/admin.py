@@ -95,7 +95,9 @@ def enter_project(
     if proj is None:
         raise HTTPException(status_code=404, detail="No such project")
 
-    resp = RedirectResponse(url="/admin/browse", status_code=303)
+    # Land on the project HOME — the "what is going on" page — rather than
+    # in the middle of one specific job. Owner's request, 2026-09-06.
+    resp = RedirectResponse(url="/admin/home", status_code=303)
     set_project_cookie(resp, proj)
     remember_project(db, admin, proj)
     db.commit()
@@ -121,6 +123,194 @@ def current_project(request: Request, admin: User, db: Session) -> Project:
     single-project install must be byte-identical to what it does today.
     """
     return active_project(request, db, admin) or ensure_default_project(db)
+
+
+# ── The project home page, and the pulse behind every screen ────────────────
+
+@router.get("/home", response_class=HTMLResponse)
+def project_home(request: Request, admin: User = Depends(require_admin),
+                 db: Session = Depends(get_db)):
+    """
+    What greets you when you open a project: where everything stands, and
+    what is waiting on YOU. Added 2026-09-06 at the owner's request — landing
+    straight in a work screen answered a question nobody had asked yet.
+
+    The numbers are fetched by /admin/api/pulse from the page's own script,
+    so this route stays a cheap shell and the strip refreshes live.
+    """
+    return templates.TemplateResponse(
+        request, "admin_project_home.html",
+        {"user": admin, "admin": admin, "active_tab": "home"})
+
+
+@router.get("/api/pulse")
+def api_pulse(request: Request, admin: User = Depends(require_admin),
+              db: Session = Depends(get_db)):
+    """
+    One cheap answer to "what is going on right now", polled by the status
+    strip on EVERY admin screen and by the project home page.
+
+    ════════════════════════════════════════════════════════════════════════
+    ONE ENDPOINT, ONE TIMER
+    ════════════════════════════════════════════════════════════════════════
+    Five widgets each polling their own endpoint would mean five requests
+    per open tab every few seconds. Everything the strip, the nav badges and
+    the home page need rides in this single reply, and they all share one
+    timer in pulse.js.
+
+    A shared fact is reported here whatever screen you are on — the rule
+    from the node-offline incident: an alarm displayed inside one project is
+    invisible to every other one.
+    """
+    from .. import pipeline as P
+    from ..models import WorkerNode
+
+    now = datetime.utcnow()
+    proj = active_project(request, db, admin)
+
+    # ── The machines (shared, always reported) ──────────────────────────
+    stale_after = now - timedelta(minutes=5)
+    nodes = db.query(WorkerNode).filter(WorkerNode.is_enabled == 1).all()
+    offline = [n.name for n in nodes
+               if not (n.last_seen_at and n.last_seen_at > stale_after)]
+
+    processing_now = (db.query(func.count(SavedPoster.id))
+                        .filter(SavedPoster.pipeline_status == "processing",
+                                SavedPoster.deleted_at.is_(None)).scalar() or 0)
+    uploading_now = (db.query(func.count(UploadTracking.id))
+                       .filter(UploadTracking.status == "uploading")
+                       .scalar() or 0)
+
+    run = P.run_mode_state(db, proj)
+    quiet = run.get("quiet") or {}
+
+    workers_online = (db.query(func.count(User.id))
+                        .filter(User.role == "worker", User.is_deleted == 0,
+                                User.last_seen_at > now - timedelta(minutes=5))
+                        .scalar() or 0)
+
+    # ── Alarms: red things from ANYWHERE, in words with a link ──────────
+    alarms = []
+    if nodes and offline:
+        held = (db.query(func.count(UploadTracking.id))
+                  .filter(UploadTracking.status.in_(("pending", "failed")))
+                  .scalar() or 0)
+        alarms.append({
+            "text": (f"The worker machine ({', '.join(offline)}) has not been "
+                     f"seen for over 5 minutes — processing and uploads are "
+                     f"stopped" + (f", {held} uploads waiting" if held else "")),
+            "href": "/admin/pipeline"})
+    paused_accounts = (db.query(func.count(UploadAccount.id))
+                         .filter(UploadAccount.paused_until.isnot(None),
+                                 UploadAccount.paused_until > now).scalar() or 0)
+    if paused_accounts:
+        alarms.append({
+            "text": f"{paused_accounts} marketplace account(s) are paused "
+                    f"after failures",
+            "href": "/admin/pipeline"})
+    failed_uploads = (db.query(func.count(UploadTracking.id))
+                        .filter(UploadTracking.status == "failed").scalar() or 0)
+    if failed_uploads:
+        alarms.append({
+            "text": f"{failed_uploads} upload(s) have failed and are waiting "
+                    f"for a decision",
+            "href": "/admin/pipeline"})
+    if run.get("mode") and run["mode"] != "run":
+        alarms.append({
+            "text": f"The pipeline is switched to '{run['mode']}'"
+                    + (f" — {run['reason']}" if run.get("reason") else ""),
+            "href": "/admin/pipeline"})
+
+    # ── What is waiting on the admin, in the ACTIVE project ─────────────
+    badges = {}
+    funnel = {}
+    strip = []
+    today_line = ""
+    if proj is not None:
+        def scoped_titles(status):
+            return (scope_titles(db.query(func.count(MasterTitle.id)), proj)
+                    .filter(MasterTitle.status == status).scalar() or 0)
+
+        # Scoped through the SAME helper as every other title query — by a
+        # subquery of the project's title ids, never a hand-rolled filter.
+        title_ids = scope_titles(db.query(MasterTitle.id), proj).subquery()
+        rev_open = (db.query(func.count(Revision.id))
+                      .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
+                      .filter(Revision.status == "awaiting_approval",
+                              SavedPoster.master_title_id.in_(title_ids.select()))
+                      .scalar() or 0)
+        review_art = (db.query(func.count(ProcessedImage.id))
+                        .join(SavedPoster, ProcessedImage.saved_poster_id == SavedPoster.id)
+                        .filter(ProcessedImage.review_status == "pending",
+                                SavedPoster.deleted_at.is_(None),
+                                SavedPoster.master_title_id.in_(title_ids.select()))
+                        .scalar() or 0)
+
+        funnel = P.funnel_counts(db, project_id=proj.id)
+        pending = scoped_titles("pending")
+        working = scoped_titles("in_progress")
+        awaiting_you = scoped_titles("complete_pending")
+        skipped = scoped_titles("skipped")
+
+        badges = {
+            "browse": awaiting_you,
+            "revisions": rev_open,
+            "skipped": skipped,
+            "review": review_art,
+            "attention": (funnel.get("failed_processing", 0)
+                          + funnel.get("failed_upload", 0)),
+        }
+
+        # The journey, left to right, each step a link. A step is only shown
+        # by the page when its count matters — that is the page's decision.
+        strip = [
+            {"label": "waiting to be claimed", "n": pending,
+             "href": "/admin/master"},
+            {"label": "being worked on", "n": working, "href": "/admin/master?status=in_progress"},
+            {"label": "awaiting your review", "n": awaiting_you,
+             "href": "/admin/browse"},
+            {"label": "waiting for greenlight", "n": funnel.get("awaiting_greenlight", 0),
+             "href": "/admin/pipeline"},
+            {"label": "being processed", "n": (funnel.get("greenlit", 0)
+                                               + funnel.get("processing", 0)),
+             "href": "/admin/pipeline"},
+            {"label": "artwork awaiting approval", "n": review_art,
+             "href": "/admin/pipeline/review"},
+            {"label": "waiting to upload", "n": funnel.get("processed", 0)
+                                                 + funnel.get("uploading", 0),
+             "href": "/admin/pipeline"},
+            {"label": "live on the marketplace", "n": funnel.get("uploaded", 0),
+             "href": "/admin/pipeline"},
+        ]
+
+        today = local_today()
+        saved_today = (db.query(func.count(SavedPoster.id))
+                         .filter(SavedPoster.deleted_at.is_(None),
+                                 func.date(SavedPoster.created_at) == today.isoformat(),
+                                 SavedPoster.master_title_id.in_(title_ids.select()))
+                         .scalar() or 0)
+        today_line = (f"{saved_today} image(s) saved today · "
+                      f"{processing_now} processing · {uploading_now} uploading")
+
+    return JSONResponse({
+        "ok": True,
+        "scope": "project" if proj is not None else "master",
+        "project": ({"id": proj.id, "name": proj.name, "slug": proj.slug}
+                    if proj is not None else None),
+        "node": {"total": len(nodes), "offline": offline,
+                 "busy": (f"{processing_now} processing · "
+                          f"{uploading_now} uploading"
+                          if (processing_now or uploading_now) else "idle")},
+        "run": {"running": bool(run.get("running")),
+                "reason": run.get("reason") or ""},
+        "quiet": {"blocking": bool(quiet.get("blocking")),
+                  "starts_at": quiet.get("starts_at") or ""},
+        "workers_online": workers_online,
+        "alarms": alarms,
+        "badges": badges,
+        "strip": strip,
+        "today_line": today_line,
+    })
 
 
 # ── Diagnostics ──────────────────────────────────────────────────────────────

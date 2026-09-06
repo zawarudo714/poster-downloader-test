@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% set nav_scope = 'project' %}
+{#
+  The project's front door, added 2026-09-06 at the owner's request.
+
+  Three questions, in order, and nothing else:
+    1. Where does everything stand?   — the journey strip
+    2. What is waiting on ME?         — the needs-you cards (hidden at zero)
+    3. What happened today?           — one line of words
+
+  Every number on this page comes from /admin/api/pulse — the same endpoint
+  the status strip polls — so this page can never disagree with the strip at
+  the top of it. The counts are links; the page is a map, not a report.
+#}
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <span>WHERE EVERYTHING STANDS</span>
+    <span class="muted mono" data-home-today></span>
+  </div>
+  <div class="panel-body">
+    {# The journey, left to right. Filled by project_home.js. #}
+    <div class="journey" data-home-strip>
+      <div class="muted">Loading…</div>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><span>WAITING ON YOU</span></div>
+  <div class="panel-body">
+    {# Cards appear only when their count is above zero. An empty card
+       teaches you to stop reading, which is how five zeros on the old
+       dashboard trained everyone to ignore it. #}
+    <div class="needs-you" data-home-cards>
+      <div class="muted">Loading…</div>
+    </div>
+    <p class="muted" data-home-clear hidden>Nothing is waiting on you right
+      now. New work from the team lands here as it arrives.</p>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/project_home.js?v={{ app_version }}"></script>
+{% endblock %}

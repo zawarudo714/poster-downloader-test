@@ -43,7 +43,6 @@ from typing import Optional
 from .client import PipelineClient, PipelineError, load_config
 from .processor import ProcessStage
 from .listing_check import ListingCheckStage
-from .store_health import StoreHealthStage
 from .uploader import UploadStage
 
 
@@ -60,7 +59,7 @@ from .uploader import UploadStage
 # either way. `check_worker_agent_current` in diagnostics.py now compares
 # what the machine reports against what this file says, so a stale copy is
 # reported instead of assumed.
-AGENT_VERSION = "1.29.0"
+AGENT_VERSION = "1.30.0"
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_CONFIG = HERE / "config.json"
@@ -82,7 +81,6 @@ class Agent:
         self.uploader = UploadStage(self.client, config, self.log)
         # Marketplace listing health: scan, deactivate, reactivate. Rides on
         # the upload capability — same browser, same accounts, same profiles.
-        self.store_health = StoreHealthStage(self.client, config, self.log)
         self.listing_check = ListingCheckStage(self.client, config, self.log)
 
         self.hostname = socket.gethostname()
@@ -259,10 +257,6 @@ class Agent:
                 result = self.uploader.remove_profile(job_id, payload)
             elif kind == "earnings_read":
                 result = self.uploader.read_earnings(job_id, payload)
-            elif kind == "store_scan":
-                result = self.store_health.scan(job_id, payload)
-            elif kind in ("store_deactivate", "store_reactivate"):
-                result = self.store_health.act(job_id, payload)
             elif kind == "listing_check":
                 result = self.listing_check.run(job_id, payload)
             elif kind == "test_upload":
@@ -461,7 +455,8 @@ REQUIRED_MODULES = {
     "requests":  "requests",
     "selenium":  "selenium",
     "psutil":    "psutil",
-    "bs4":       "beautifulsoup4",
+    # beautifulsoup4 left this list on 2026-09-06 with the TeePublic store
+    # tool — nothing on the node parses HTML any more; pages go to the server.
 }
 
 

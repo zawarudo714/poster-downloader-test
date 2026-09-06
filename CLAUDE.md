@@ -63,6 +63,7 @@ its work from scratch.
 |---|---|
 | `tools/PENDING_DEPLOY.md` | What is written but NOT on the server |
 | `tools/DEPLOY_LOG.md` | What IS on the server, newest first |
+| `TO_TEST.md` | What is LIVE but no person has ever clicked. **Asked for by the owner 2026-09-06, and kept separate on purpose.** Deployed and passing its checks is not the same as working; only he can judge a screen. An item is DELETED when he says he has done it, never ticked and left — see the file's own rules |
 
 **Before writing any code:**
 
@@ -245,9 +246,10 @@ commitments with dates.
 1. **Get Travel Locations earning.** The only active work. Needs the master
    sheet, the Brave query, the FAA keywords and the GPT prompt — all four are
    the owner's to state, and none can be guessed.
-2. **More marketplaces.** TeePublic named specifically. Needs a reader
-   module, an entry in `service.READERS` and a `CAPABILITIES` row — nothing
-   else.
+2. **More marketplaces.** A new one needs a reader module, an entry in
+   `service.READERS` and a `CAPABILITIES` row — nothing else. (TeePublic is
+   NOT a candidate any more: the owner runs everything TeePublic from a tool
+   on his own laptop — see the 2026-09-06 entry below.)
 3. **A second travel-adjacent project** if the sheet justifies splitting
    parks from cities. Deliberately one project for now.
 
@@ -258,8 +260,8 @@ before acting on it:**
    `routes/listing_admin.py`, the Listing check tab, and the node's
    `listing_check` job. Manual only, no schedule, by instruction.
 
-   Deliberately NOT shaped like the TeePublic tool, for measured reasons in
-   the FineArtAmerica section below: a listing is live or deleted with no
+   Deliberately simple, for measured reasons in the FineArtAmerica
+   section below: a listing is live or deleted with no
    hidden state, a missing one returns a real 404, and HEAD is honoured. So
    there are no stages, no gates, no cure, and NO PIPELINE HOLD.
 
@@ -271,9 +273,11 @@ before acting on it:**
    in the database. Needs the shop's own pages paged and parsed, which is a
    different mechanism and a rarer question.
 
-5. **Cross-marketplace earnings tab (master level).** NOT a pipeline.
-   **BUILT for FineArtAmerica 2026-08-20, TeePublic 2026-08-22.** The owner
-   has TeePublic accounts earning passively with no uploading.
+5. **Earnings tab (master level).** NOT a pipeline.
+   **BUILT for FineArtAmerica 2026-08-20.** It reads FineArtAmerica only:
+   the TeePublic reader was REMOVED 2026-09-06 with the rest of that
+   marketplace (see the entry below). The design stays multi-marketplace —
+   READERS and CAPABILITIES are still the way a new site is added.
 
    The rules that held, and are the reason it works:
 
@@ -482,7 +486,7 @@ The admin UI now has two levels, and the nav **replaces itself** between them.
 
 | | |
 |---|---|
-| **Master** | Dashboard (project cards), Payments, Chat, Projects, Users, Backups, Email, Activity Log, Stats, Diagnostics, TeePublic, Listing check |
+| **Master** | Dashboard (project cards), Payments, Chat, Projects, Users, Backups, Email, Activity Log, Stats, Diagnostics, Listing check |
 | **Project** | Review Posters, Title List, Changes Requested, Skipped, Pipeline, Stats, Peek |
 
 The active project is session state — cookie `pd_project`, falling back to
@@ -624,179 +628,30 @@ the claim while it still passes. `Current Balance` remains the authoritative
 "what you are owed" — never replace it with arithmetic, which is how the page
 once read "probably $1,477.21" against a real $298.28.
 
-## TeePublic behaviour — `MEASURED` (do not re-derive these)
+## TeePublic — REMOVED FROM THE SITE `2026-09-06`
 
-**TeePublic no longer uses Cloudflare** (observed 2026-08-23, after weeks of
-it). All challenge detection was removed with it — FineArtAmerica never
-challenged the NODE either, only the Linux server, so nothing was left using
-it. If a challenge ever returns, the symptom is three failed mouse paths and
-a screenshot, not a silent stall.
+**The owner's decision, in his words: running it on the site caused too many
+problems, so he will run the same mechanism from a Python GUI tool on his
+laptop, from time to time.** Everything TeePublic was deleted from the
+server and the node in v147: the tab, the store-health scan and switching,
+the interstitial-wall machinery and its recorded mouse paths, and the
+earnings reader.
 
-**It DOES serve a full-page interstitial wall**, and its "No Thanks" control
-is an `<input type="checkbox">` inside a **closed shadow root**. Closed means
-sealed: Selenium cannot find it, and page JavaScript cannot reach it either.
-There is no selector to write and waiting does not help. Do not try —
-`querySelector`, `shadowRoot` and text search were all considered and all fail
-by design.
+What a future session needs to know:
 
-A real click does not need a selector. It carries a POSITION and the browser
-hit-tests what is under it, sealed or not. So the position comes from mouse
-paths the owner records himself (`RECORD_PATHS.bat`), replayed through
-Chrome's own input channel — which also means **no Remote Desktop session is
-needed for playback**, only for recording. An OS-level macro recorder was the
-obvious alternative and was rejected for exactly that reason: it would have
-required a live RDP session forever and failed silently the moment it dropped.
-
-**The wall is detected by what is MISSING**, never by anything on it. Its
-class names are randomised (`tOHY4`, `qrvwN4`) and would break on their next
-deploy while blaming something else entirely.
-
-Two markers, because two kinds of page:
-
-  * the ACCOUNT page — its own four labels, the same ones the parser needs
-  * everything else (search, store, design, edit) — the **header logo**,
-    `vc-header-logo__image` / `assets/logos/tp-full`. Matched in raw HTML
-    because a logo has no text, which is the same exception the sign-in
-    field name gets and for the same reason: it is structural, not a vendor
-    word that might merely be loaded.
-
-**The logo test is what separates "no search results" from "we never
-looked", and getting that backwards would deactivate a healthy catalogue.**
-An empty results page and the wall are both "no designs found"; only the
-logo tells them apart. So the scan asks the cheap question first — were
-there results? — and only consults the logo when there were none. Asking
-before every page would add the settling delay to every one of several
-thousand designs.
-
-The wall is also cleared ONCE per browser when it opens, on a page we do not
-care about, so the per-page check stays a rare fallback.
-
-**A lapsed session looks identical to the wall** and must be ruled out FIRST,
-by the sign-in form's field name. Otherwise three recorded paths get spent
-clicking at a sign-in page and the report reads "stuck at the wall" when the
-answer is two minutes with PROFILES.bat.
-
-**TeePublic keeps you signed in for weeks and punishes knocking; FAA forgets
-you in minutes.** Hence `signin_on_read` per marketplace — see rule 5b.
-
-**This used to end "and does not mind". That half is withdrawn —
-`MEASURED 2026-09-01`.** FAA states publicly that it monitors and blocks
-automated login attempts, and the node made about 70 sign-in attempts in 13
-days. Their tolerance is not established; what is established is that they
-watch.
-
-Two things follow, and neither is "stop signing in":
-
-  * **It was NOT why the accounts were closed.** That was the content, said
-    in writing by their staff. Do not reopen it.
-  * **The BURST is the shape to avoid, not the daily total.** Four logins
-    spread across a day is a person working; five in ninety seconds — which
-    a retry loop once produced — is what an attack looks like. The cheapest
-    real fix is to read the balance at the END of an upload run, where the
-    browser is already signed in, which costs no login at all.
-
-**THE WALL ARRIVES MID-RUN, not only at the start.** Measured 25 Aug: an
-account switched 81 designs cleanly at ~20 seconds each, then every
-remaining design failed in three. Clearing it once per browser is still
-right — it is per-browser and clearing per design cost an hour and a half —
-but "once" is not "for the duration". Every page load has to be able to
-notice, which is what `_open_page` is for.
-
-**The tell is SPEED.** Real work takes ~20 seconds a design; a wall fails in
-three, because there is nothing on the page to wait for. A run of failures
-arriving much faster than the successes is one environmental problem
-repeated, never N independent ones. Worth remembering when reading any log
-here.
-
-**A JavaScript click GOES THROUGH the wall and reports success.** This is
-why `js_click` and `real_click` both exist and are not interchangeable.
-Dispatching the event on the element ignores anything drawn on top — correct
-for FineArtAmerica, whose promo bar and inspiration banner sit over every
-page and mean nothing; wrong wherever the thing on top IS the problem. The
-last design attempted before a wall run was recorded as republished and was
-still switched off afterwards, which is exactly what a swallowed click looks
-like. TeePublic's publish and deactivate buttons are pressed for real, and
-an intercepted click is treated as the answer rather than as a nuisance.
-
-**TeePublic's count of switched-off designs needs a SIGNED-IN session.**
-Measured 25 Aug: signed out, `teepublic.com/user/<store>` answers "You do
-not have permission to edit this store" and shows no counts at all. So it
-cannot be a cheap public fetch — it rides along inside the switching job,
-which is already signed in as that account. Found by the link's own address
-(`/inactive`), never by a class name; the classes there are randomised.
-
-**Designs silently drop out of search.** The listing still exists and the
-page still loads; it just stops being findable, earns nothing, and nothing
-tells you. Deactivating and immediately reactivating usually restores it.
-That is what the TeePublic tab automates.
-
-**The numeric design ID is in the design's own address** —
-`/t-shirt/86734220-tomb-raider`. It comes free with the store listing, and
-EVERYTHING matches on it: search results, the deactivate form, the edit page.
-Never compare URLs. The previous tool did, and a design sitting on page one
-of the results read MISSING because the store's copy of the link carried
-`?store_id=4129428` and the search result's copy did not.
-
-**Switching designs costs about an hour per account, measured 2026-08-24.**
-Every design needs its own freshly loaded page, because the deactivate form
-carries a one-time token — so it is one page load per design and there is no
-batching available. A neglected account with ~100 missing designs is an hour
-to switch off and an hour to switch back on; five accounts came to roughly
-ten hours. Weekly running is small, but never write code that assumes this
-stage is short: it must be stoppable, resumable and survivable across a
-reboot. (This file previously said "minutes, not hours". It was a guess.)
-
-**Deactivate is a form POST, not a link.** On the design page:
-`<form class="button_to" method="post" action="/designs/<id>/deactivate">`
-with a one-time `authenticity_token`. So navigating to that address returns
-404 — the button must be pressed on a freshly loaded page — and the old
-tool's `a[href*='/deactivate']` matches nothing there, because it is a
-`<button>`. Reactivate is `/designs/<id>/edit` → tick `#terms` → press
-`button.publish-and-promote-button[value='publish']`.
-
-**NEVER reactivate from the marketplace's inactive list.** One real account
-has 92 active designs and **379 inactive** ones the owner turned off himself
-over months. Republishing "the first N on `/inactive`" cannot tell those
-apart from the handful we just switched off. Reactivate the exact IDs we
-recorded deactivating, and nothing else.
-
-**Search results are not in the raw HTML**, so the visibility check needs a
-real browser. The store listing and the individual design pages ARE plain
-HTML and are fetched with `requests` — which is why most of a scan costs
-almost nothing. Only the search step is expensive.
-
-**One browser per ACCOUNT, held open — never one per design.** The owner's
-original script launched and quit a whole Chrome for every design; at 1,881
-designs and 3-5s per launch that was over two hours of doing nothing but
-starting browsers, and it was most of why a scan took ten.
-
-**Page through search by BUILDING the address, never by following a "next"
-link.** TeePublic's pager offers numbers up to 7 and then stops: page 7 has
-no "8" on it, only an arrow. So `a[rel="next"]` works for six pages and then
-silently gives up, and every design whose match sits beyond page 7 reads
-MISSING. The owner's own scanner hit this and special-cased page 7; that
-patches one instance, whereas `?page=N&query=` removes the class. Page 1
-carries no `page=` parameter, matching what the site itself produces.
-
-**The search check pages 25 deep, and that is a REAL limit, not a bug.** For
-"Shadow of the Colossus" it is conclusive. For "Queen" it is nowhere near —
-a healthy design sits at page four hundred and reads MISSING every sweep,
-forever. So `store_listings.fix_attempts` counts completed cures, and a
-design still missing after `scan_vague_after_fixes` (2) is FLAGGED rather
-than cycled again. Deactivating a live listing that was never broken costs
-money twice per sweep and achieves nothing.
-
-**The catalogue is kept between runs, and that is what makes the interesting
-questions askable at all.** Has this been missing three sweeps running? Did
-the account gain designs? Did one vanish? A per-run table could answer none
-of them. A design the store no longer lists keeps its row with `removed_at`
-set — never deleted, because "this account lost eleven designs" is only
-answerable if the rows survive.
-
-**Scope note, deliberately open:** a TeePublic project WITH uploading is
-plausible later — the owner's tool already contains a working uploader. This
-tab is therefore marketplace-level (accounts), not project-level, and slots
-beside such a project rather than tangling with it.
+  * **Every measured TeePublic fact and the complete working code are saved
+    in `../teepublic_tool/` beside this repo** — a notes file plus the
+    shipped source. Build the laptop tool from there; re-derive nothing.
+  * **The database TABLES survive on existing installs** (`store_listings`
+    and friends). They hold the only record of which designs were switched
+    off and never switched back on. Do not drop them; the laptop tool will
+    import them.
+  * **TeePublic account rows survive too.** An account whose marketplace has
+    no entry in `service.READERS` is skipped by design, not an error.
+  * The general lessons TeePublic taught — real clicks vs JavaScript clicks,
+    a wall detected by what is missing, the speed tell, blocked-vs-broken —
+    are woven through HOW TO WORK HERE and stay there, because they were
+    never really about TeePublic.
 
 ## FineArtAmerica listing pages — `MEASURED 2026-08-24` (do not re-derive)
 
@@ -1055,8 +910,6 @@ app/
     pipeline_api.py    Machine API,  /api/pipeline,    node bearer token
     pipeline_admin.py  Dashboard API, /admin/pipeline, admin session
     listing_admin.py   The Listing check tab.
-    store_*.py         TeePublic store health. PARKED — the owner plans to
-                       move this to his laptop and drop it from the server.
   templates/           Jinja2. base.html holds the nav.
   static/js/           One file per page, vanilla JS, no build step.
 

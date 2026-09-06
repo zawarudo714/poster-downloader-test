@@ -87,7 +87,7 @@ mechanism the celebrity workflow will use.
 
 ### 2.3 Multi-project and multi-target from day one
 Every pipeline table carries `project_id`. Accounts and tracking rows carry
-`target_site` (`'faa'`, `'teepublic'`, …). There is exactly one project today
+`target_site` (`'fineartamerica'`, …). There is exactly one project today
 (`tell-a-vision`), but adding another is **inserting rows, never migrating
 schema**.
 
@@ -399,8 +399,11 @@ Source-site differences (Pinterest instead of TMDB) affect the **worker-facing**
 save flow, not the pipeline. `Project.source_site` is already there to drive
 that when you get to it.
 
-### A second marketplace (TeePublic)
-1. New account row with `target_site = 'teepublic'`.
+### A second marketplace
+(TeePublic itself is ruled out — it moved wholesale to the owner's laptop
+tool on 2026-09-06. The recipe below is for whatever comes next, e.g.
+Redbubble.)
+1. New account row with its own `target_site`.
 2. Settings block for its selectors — the map is per-project already; add a
    target-scoped key if two marketplaces need different maps in one project.
 3. A worker-side upload module for its form. `uploader.py` is written against

@@ -15,6 +15,7 @@ cost far more to read, answer a different question, and on a mounted working
 copy `git status` cannot refresh its index — it reports stale answers with
 no warning.
 
+- **2026-09-06 13:41** · `[178.105.232.196]` · `0f82f305` · v146 · deploy v146
 - **2026-09-06 12:55** · `[178.105.232.196]` · `1d3ac58f` · v145 · deploy v145
 - **2026-09-03 13:04** · `[178.105.232.196]` · `23f71f85` · v144 · deploy v144
 - **2026-09-03 11:39** · `80b64fa7` · v143 · v143 — two names a rule cannot rebuild, and the number column
@@ -44,4 +45,3 @@ no warning.
 - **2026-08-25 17:12** · `6c2f9afc` · v121 — legacy upload history, archive index, and the settings-drift warning
 - **2026-08-25 17:00** · `44676a70` · v121 — legacy upload history, archive index, and the settings-drift warning
 - **2026-08-25 15:36** · `264148df` · v120 — the wall now stops a reactivation instead of blaming 79 designs
-- **2026-08-25 10:54** · `dcc9c48d` · deploy v119

@@ -4225,7 +4225,6 @@ label.inline-check {
 
 /* Marketplace pills */
 .status-faa       { background: rgba(120,160,255,0.16) !important; color: #bcd0ff !important; border: 1px solid rgba(120,160,255,0.35); }
-.status-teepublic { background: rgba(180,120,255,0.16) !important; color: #dcc4ff !important; border: 1px solid rgba(180,120,255,0.35); }
 
 @media (max-width: 720px) {
   .pipe-tabs { gap: 2px; }

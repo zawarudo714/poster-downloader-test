@@ -233,33 +233,6 @@ run();
 # redesigns its upload form — which is exactly why they are settings and not
 # code. Edit in the dashboard (Pipeline → Upload Settings → Selectors), hit
 # Test Upload on one image, done.
-# TeePublic's sign-in, measured from the real page 2026-08-20.
-#
-# There is deliberately NO new login code for this. The uploader's login()
-# already does the right things: it treats the first "click through to the
-# artist login" step as optional, and it decides whether to type credentials
-# by whether the email field is on the page. TeePublic redirects an
-# already-signed-in visitor away from the sign-in page, so the field is
-# absent and the session is reused — the same signal, for free.
-#
-# Only the strings differ, which is the whole point of keeping them as
-# settings.
-DEFAULT_TEEPUBLIC_SELECTORS = {
-    "login_url":         "https://www.teepublic.com/users/sign_in",
-    # No equivalent of FAA's "choose your account type" page. Left blank on
-    # purpose: login() logs one line and carries on when it cannot find it.
-    "artist_login_link": "",
-    "username_field":    "css:#user_email",
-    "password_field":    "css:#user_password",
-    "login_submit":      "css:#login",
-    "control_panel_url": "https://www.teepublic.com/account/sales",
-    "popup_close":       "css:.jsCloseFlash",
-    # TeePublic sits behind Cloudflare, which serves a "managed challenge" —
-    # an interstitial that clears itself for a browser that looks like a
-    # browser. Headless is one of the loudest signals it looks for, so this
-    # marketplace runs with a visible window. The node has a desktop anyway.
-    "headless":          "0",
-}
 
 
 DEFAULT_FAA_SELECTORS = {
@@ -380,7 +353,6 @@ DEFAULTS: dict[str, Any] = {
     "selectors":          DEFAULT_FAA_SELECTORS,
     # Chosen by the account's marketplace, not by its project — an account
     # may serve no project at all, and the sign-in form belongs to the SITE.
-    "selectors_teepublic": DEFAULT_TEEPUBLIC_SELECTORS,
     "timings":            DEFAULT_TIMINGS,
 
     # Title submitted to the marketplace. Variables: {title} {year}
@@ -705,95 +677,6 @@ DEFAULTS: dict[str, Any] = {
     # 23:50 and 00:10. Written only by run_daily_if_due().
     "earnings_daily_run_started_at": "",
 
-    # ── The interstitial wall ────────────────────────────────────────────
-    # TeePublic serves a full-page wall whose dismiss control is sealed
-    # inside a closed shadow root, so it cannot be clicked by selector — only
-    # by position, from a recorded mouse path. See models.WallPath.
-    #
-    # `wall_wait_s` is how long to let the page settle before deciding we are
-    # looking at the wall rather than a slow account page. It is deliberately
-    # NOT the old bot-wall timer: two numbers that mean different things must
-    # not share one setting, or changing either forces you to move both.
-    "wall_wait_s":          5,
-    # Attempts per read, each using the NEXT recording. Three because a path
-    # that has failed twice is unlikely to work on a third go, and every
-    # extra attempt is another click at a page we may have misread.
-    "wall_max_attempts":    3,
-    # Where the sequential rotation has got to. A single counter across all
-    # accounts, so no account is ever tied to one path. Stored rather than
-    # derived because it must survive both the node and the server restarting.
-    "wall_path_cursor":     0,
-
-    # ── Marketplace visibility scan ──────────────────────────────────────
-    # How many accounts are scanned at the same time. Each one holds ONE
-    # browser open for its whole account — not one per design, which is what
-    # the owner's original script did and what made a scan take ten hours.
-    # Three at roughly 400MB each is comfortable on the node's 12GB, and the
-    # pipeline is held anyway while this runs, so Photoshop is not competing.
-    "scan_parallel_accounts": 3,
-    # How deep to page through search results before calling a design
-    # missing. A design that IS visible is usually found on page one; this
-    # bound is what stops a genuinely missing one paging forever.
-    "scan_max_search_pages":  25,
-    # Seconds between designs, per account. Not a rate limit the site asked
-    # for — a courtesy, and the knob to turn if it ever starts complaining.
-    "scan_delay_s":           1,
-    # Stop each account after this many designs. 0 = check them all, which is
-    # the real setting; anything else is for TESTING the later stages without
-    # sitting through ninety designs first. Kept as a dashboard value rather
-    # than a code constant because that is exactly when you need to change it
-    # and exactly when editing code is most annoying.
-    "scan_limit_per_account": 0,
-    # After this many completed deactivate/reactivate cycles, a design that is
-    # STILL missing is flagged as a probable vague tag rather than cycled
-    # again. The search only pages 25 deep; a tag like "Queen" has tens of
-    # thousands of results, so a healthy design can read MISSING forever and
-    # no amount of cycling will change that. 2 because the cure is reliable
-    # when it is the right cure — a third failure is evidence, not bad luck.
-    "scan_vague_after_fixes": 2,
-    # How long to wait before trying again after a TRANSIENT failure — the
-    # wall, a maintenance page. Growing gaps, and the list length is also how
-    # many times it will try before giving up. Three attempts inside one
-    # minute is not three chances; these are.
-    "scan_retry_delays_min": "30,60,90",
-    # CONTINUE skips designs checked more recently than this. It is what
-    # makes "carry on where the night left off" work without freezing the
-    # catalogue: a design checked 20 hours ago is still current, one checked
-    # last week is not.
-    "scan_continue_within_h": 24,
-    # How many times to restart ONE account's switching after the worker
-    # machine stopped reporting. The usual cause is dull — a reboot, a Chrome
-    # that would not start — and the work itself is fine, so retrying is
-    # right. But retrying for ever is a loop that holds Photoshop and the
-    # uploads all night doing nothing, so the run gives up and says so.
-    "store_stage_max_attempts": 3,
-    # How many designs in a row may be blocked by the wall before the whole
-    # account is given up on and the run waits. Blocked designs cost three
-    # seconds each and tell us nothing, so grinding through 161 of them is
-    # four minutes of writing errors against healthy designs. Was a bare 5
-    # in the node's own code, which is exactly the kind of number the owner
-    # cannot change without editing a file on a machine he does not read.
-    "store_wall_give_up_after": 5,
-    # Immediate second attempts at ONE design after a blocked one. Covers
-    # the wall arriving between two page loads, which clearing it and going
-    # again fixes in seconds. Small on purpose: a wall that is properly in
-    # the way is not beaten by trying harder in the same ten seconds — that
-    # is what the spaced run-level wait above is for.
-    "store_design_retries": 1,
-    # After this many GENUINE failures — the page was ours, the button was
-    # not there — a design is flagged for a person instead of being retried
-    # at the front of every future sweep. Failures caused by the wall never
-    # count here, because the wall says nothing about the design. Same
-    # reasoning and same number as the vague-tag flag above.
-    "store_action_give_up_after": 3,
-    # Read the marketplace's own count of switched-off designs at both ends
-    # of an account's switching turn, and say so when it disagrees with what
-    # we believe we did. Two page loads against an hour of work. A switch
-    # only because it needs to be turnable off from the screen if TeePublic
-    # ever moves the number — never because it is optional in principle.
-    "store_count_check": 1,
-
-
     # ── Listing reconciliation (does the marketplace still show it?) ─────
     # How many addresses go out in one job. The worker machine runs ONE job
     # at a time, so this is really "how long may Photoshop be made to wait" —
@@ -1053,7 +936,11 @@ NODE_PROCESSORS = ("photoshop",)
 # exist. Nothing would say why.
 #
 # Adding one means adding it here, plus a reader and a capability row.
-MARKETPLACES = ("fineartamerica", "teepublic")
+# One entry today, and the tuple stays: rendering the account form,
+# the site filter and the capability checks all iterate it, and
+# marketplace number two is one line here. (TeePublic left 2026-09-06 —
+# the owner runs it from a tool on his laptop now.)
+MARKETPLACES = ("fineartamerica",)
 
 # ════════════════════════════════════════════════════════════════════════════
 #  HUMAN LABELS FOR THE THINGS A PROJECT PLUGS INTO
@@ -1070,7 +957,6 @@ SITE_LABELS = {
     "brave":          "Brave image search",
     "pinterest":      "Pinterest",
     "fineartamerica": "FineArtAmerica",
-    "teepublic":      "TeePublic",
     "redbubble":      "Redbubble",
 }
 
@@ -2514,13 +2400,6 @@ def intake_open(db: Session, project: Optional[Project] = None) -> bool:
     """
     if str(get_setting(db, "run_mode", project=project) or "run") != "run":
         return False
-    # A marketplace visibility run holds everything: it is hours of browser
-    # work on the same node, and it is a deliberate manual operation. The
-    # hold belongs to the RUN and is released when the run ends, so there is
-    # no switch anyone has to remember to turn back on.
-    from .earnings.store_health import holds_pipeline
-    if holds_pipeline(db):
-        return False
     return not quiet_window_state(db)["blocking"]
 
 
@@ -2587,23 +2466,16 @@ def quiet_window_state(db: Session) -> dict:
 
 
 def run_mode_state(db: Session, project: Optional[Project] = None) -> dict:
-    from .earnings.store_health import holds_pipeline
-
     mode = str(get_setting(db, "run_mode", project=project) or "run")
     quiet = quiet_window_state(db)
-    held = holds_pipeline(db)
     return {
         "mode": mode,
         # "running" must reflect what the dispatcher will ACTUALLY do, not
         # just the switch, or the page says running while nothing moves.
-        "running": mode == "run" and not quiet["blocking"] and not held,
-        # The store run's sentence wins when it applies, because it is the
-        # most specific answer to "why is nothing happening" — and it names
-        # the screen to go and look at.
-        "reason": (held or quiet["reason"] if (held or quiet["blocking"])
+        "running": mode == "run" and not quiet["blocking"],
+        "reason": (quiet["reason"] if quiet["blocking"]
                    else str(get_setting(db, "run_mode_reason", project=project) or "")),
         "quiet": quiet,
-        "store_run": held or "",
     }
 
 
@@ -2677,7 +2549,7 @@ def detach_account(db: Session, *, account_id: int, project_id: int) -> bool:
 # The marketplace used to be stored as "faa" on accounts while projects called
 # the same site "fineartamerica". Nothing compared the two, so it never broke —
 # but the moment anything did, every earnings total would have split in half.
-MARKETPLACE_RENAMES = {"faa": "fineartamerica", "tp": "teepublic"}
+MARKETPLACE_RENAMES = {"faa": "fineartamerica"}
 
 
 def backfill_marketplace_names(db: Session) -> int:

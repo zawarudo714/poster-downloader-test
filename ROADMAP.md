@@ -50,8 +50,11 @@ step 2 below and only the owner can do it.
 
     1. TRAVEL SPECIFICS   the owner states them; nothing else can start
     2. RUN IT LOCALLY     DEV_SETUP.bat — first proof it boots at all
-    3. QoL / STRUCTURE    what screens exist, what lives where
-    4. UI REVAMP          how it looks, on a settled structure
+    3. UI REVAMP PART 1   structure and navigation — what screens exist,
+                          what lives where, and the old QoL list folded in
+                          (DECIDED 2026-09-06, owner merged QoL into this)
+    4. UI REVAMP PART 2   the visual skin only — theme, colours, spacing,
+                          on a structure that has stopped moving
     5. THE MEGA AUDIT     every audit at once, on a frozen structure
     6. MOVE TO PRODUCTION wipe .34.144, deploy the finished thing
     7. FULL WALKTHROUGH   owner as worker and as admin, ON PRODUCTION
@@ -145,7 +148,11 @@ reads zero, open the Pipeline tab and confirm NO Photoshop settings and no
 JSX editor appear, claim a title as the worker, confirm the in-page search
 grid shows and there is no "Open <somewhere>" button.
 
-## 3. QoL / STRUCTURE
+## 3. UI REVAMP PART 1 — structure, navigation, and the old QoL list
+
+**Renamed 2026-09-06 at the owner's instruction**: QoL/Structure and the
+navigation half of the UI revamp are now ONE stage. Part 2 (next stage) is
+the visual skin only. Everything below still belongs here.
 
 **Diagnostics made actionable.** A count that never goes down stops being
 read. Let a finding be SETTLED — acknowledge with a reason, it drops into a
@@ -179,9 +186,10 @@ list as its box is built.
 written here is a sketch, not the list — said plainly 2026-09-03 so a future
 session does not treat these four bullets as the whole job.
 
-## 4. UI REVAMP
+## 4. UI REVAMP PART 2 — the visual skin
 
-Visual only, on a structure that has stopped moving.
+Theme, colours, spacing, typography. Visual only, on a structure that has
+stopped moving (the structure work is stage 3 now).
 
 **The risk in this stage is structural template edits**, the most expensive
 class of bug in this project's history: removing a panel and leaving one
@@ -236,7 +244,8 @@ away. Every guard that depends on a flag somebody else sets.
 did not write? An invariant over our own data cannot catch our own data being
 wrong — that is how a reactivation recorded 80 designs switched on while one
 sat on the inactive tab and nothing internal disagreed. FAA prints a balance;
-TeePublic prints an inactive count. Find every place a free outside number
+A marketplace often prints a free outside number (TeePublic printed an
+inactive count). Find every place such a number
 exists and is not being used.
 
 **6 · WORDS AND NUMBERS.** Read every screen as a stranger. Does each count
@@ -323,12 +332,12 @@ changes.
 
 ## PARKED — the owner will say when
 
-**Remove TeePublic from the server.** Roughly 20 settings, `store_health.py`
-(~55k), the TeePublic tab, all `wall_*` / `scan_*` / `store_*` machinery. His
-reasoning: they no longer get through the wall reliably, and repeated failed
-attempts risk drawing the same kind of attention FAA gave him. He plans to
-run the earnings check, scan, deactivate and reactivate tools **locally on
-his laptop**, where there is no wall.
+**~~Remove TeePublic from the server~~ — DONE, v147, 2026-09-06.** The
+owner said the word and everything TeePublic left the site in one pass: the
+tab, the store machinery, the wall machinery, the earnings reader, ~15
+settings. The code and every measured fact are saved in
+`../teepublic_tool/`, and the database tables survive because they hold the
+switched-off-designs record his laptop tool will import.
 
 **Photoshop.** Dormant and hidden. Comes back as a project's `processor` if a
 future niche wants it — no rebuild needed.

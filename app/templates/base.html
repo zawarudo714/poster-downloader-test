@@ -67,9 +67,14 @@
           {% if user.role == 'admin' and scope == 'project' and proj %}
             {# ── Inside a project ─────────────────────────────────────── #}
             <a href="/admin" class="navlink navlink-exit">&larr;&nbsp;All&nbsp;Projects</a>
-            <a href="/admin/browse"    class="navlink {% if active_tab == 'browse' %}active{% endif %}">Review&nbsp;{{ Nouns | default('Posters', true) }}</a>
+            <a href="/admin/home"      class="navlink {% if active_tab == 'home' %}active{% endif %}">Home</a>
+            {# "Worker Images", not "Review Images": this tab judges what the
+               WORKER found; Approve Artwork judges what the machine painted.
+               Two tabs both starting with "Review" needed the code read to
+               tell apart — renamed 2026-09-06 with the owner's approval. #}
+            <a href="/admin/browse"    class="navlink {% if active_tab == 'browse' %}active{% endif %}">Worker&nbsp;{{ Nouns | default('Posters', true) }}<span class="nav-badge" data-nav-badge="browse" hidden>0</span></a>
             <a href="/admin/master"    class="navlink {% if active_tab == 'master' %}active{% endif %}">Title&nbsp;List</a>
-            <a href="/admin/revisions" class="navlink {% if active_tab == 'revisions' %}active{% endif %}">Changes&nbsp;Requested</a>
+            <a href="/admin/revisions" class="navlink {% if active_tab == 'revisions' %}active{% endif %}">Changes&nbsp;Requested<span class="nav-badge" data-nav-badge="revisions" hidden>0</span></a>
             <a href="/admin/skipped"   class="navlink {% if active_tab == 'skipped' %}active{% endif %}">Skipped</a>
             {# Only projects whose output needs judging get this. Photoshop is
                deterministic; GPT is not. #}
@@ -81,34 +86,57 @@
                the artwork GPT MADE from it. A label that needs you to know
                the code is the wrong label. #}
             {% if pctx.get('review_gate') %}
-              <a href="/admin/pipeline/review" class="navlink {% if active_tab == 'review' %}active{% endif %}">Approve&nbsp;Artwork</a>
+              <a href="/admin/pipeline/review" class="navlink {% if active_tab == 'review' %}active{% endif %}">Approve&nbsp;Artwork<span class="nav-badge" data-nav-badge="review" hidden>0</span></a>
             {% endif %}
-            <a href="/admin/pipeline"  class="navlink {% if active_tab == 'pipeline' %}active{% endif %}">Pipeline</a>
+            <a href="/admin/pipeline"  class="navlink {% if active_tab == 'pipeline' %}active{% endif %}">Pipeline<span class="nav-badge nav-badge-error" data-nav-badge="attention" hidden>0</span></a>
             <a href="/admin/stats"     class="navlink {% if active_tab == 'stats' %}active{% endif %}">Stats</a>
             <a href="/admin/peek"      class="navlink {% if active_tab == 'peek' %}active{% endif %}">Peek</a>
           {% elif user.role == 'admin' %}
             {# ── Master level ─────────────────────────────────────────── #}
+            {# Ten flat tabs became five items on 2026-09-06, at the owner's
+               request — they did not fit a phone and barely fit a monitor.
+               Groups by the JOB, not the mechanism:
+                 Money        — out to workers, in from marketplaces
+                 Marketplace  — the far side of the business (Accounts joins
+                                this group when it is built)
+                 People       — the team
+                 System       — the machinery watching itself
+               On desktop each group is a small dropdown; in the phone drawer
+               the same markup renders as a headed section, always open. #}
             <a href="/admin"           class="navlink {% if active_tab == 'dashboard' %}active{% endif %}">Dashboard</a>
-            <a href="/admin/payments"  class="navlink {% if active_tab == 'payments' %}active{% endif %}">Payments</a>
-            {# Earnings sits beside Payments deliberately: one is money going
-               out to workers, the other money coming in from marketplaces.
-               Master level, because an account belongs to a marketplace and
-               may belong to no project at all. #}
-            <a href="/admin/earnings"  class="navlink {% if active_tab == 'earnings' %}active{% endif %}">Earnings</a>
-            {# Listing health. Master level for the same reason Earnings is:
-               a design belongs to an ACCOUNT, and an account may serve
-               several projects or none. #}
-            <a href="/admin/store"     class="navlink {% if active_tab == 'store' %}active{% endif %}">TeePublic</a>
-            {# Master level, beside TeePublic rather than inside a project:
-               one FineArtAmerica account carries both niches, so a
-               per-project home would hide half of it from the other. #}
-            <a href="/admin/listings"  class="navlink {% if active_tab == 'listings' %}active{% endif %}">Listing check</a>
-            <a href="/admin/chat"      class="navlink chat-nav {% if active_tab == 'chat' %}active{% endif %}">Chat<span class="nav-badge" id="nav-chat-badge" hidden>0</span></a>
-            <a href="/admin/users"     class="navlink {% if active_tab == 'users' %}active{% endif %}">Users</a>
-            <a href="/admin/backups"   class="navlink {% if active_tab == 'backups' %}active{% endif %}">Backups</a>
-            <a href="/admin/audit"     class="navlink {% if active_tab == 'audit' %}active{% endif %}">Activity&nbsp;Log</a>
-            <a href="/admin/master_stats" class="navlink {% if active_tab == 'master_stats' %}active{% endif %}">Stats</a>
-            <a href="/admin/diagnostics"   class="navlink {% if active_tab == 'diagnostics' %}active{% endif %}">Diagnostics</a>
+            {% set money_active = active_tab in ('payments', 'earnings') %}
+            <div class="nav-group {% if money_active %}has-active{% endif %}" data-nav-group>
+              <button type="button" class="navlink nav-group-btn {% if money_active %}active{% endif %}" aria-expanded="false">Money&nbsp;▾</button>
+              <div class="nav-group-menu">
+                <a href="/admin/payments"  class="navlink {% if active_tab == 'payments' %}active{% endif %}">Payments</a>
+                <a href="/admin/earnings"  class="navlink {% if active_tab == 'earnings' %}active{% endif %}">Earnings</a>
+              </div>
+            </div>
+            {% set market_active = active_tab in ('listings',) %}
+            <div class="nav-group {% if market_active %}has-active{% endif %}" data-nav-group>
+              <button type="button" class="navlink nav-group-btn {% if market_active %}active{% endif %}" aria-expanded="false">Marketplace&nbsp;▾</button>
+              <div class="nav-group-menu">
+                <a href="/admin/listings"  class="navlink {% if active_tab == 'listings' %}active{% endif %}">Listing check</a>
+              </div>
+            </div>
+            {% set people_active = active_tab in ('chat', 'users', 'audit') %}
+            <div class="nav-group {% if people_active %}has-active{% endif %}" data-nav-group>
+              <button type="button" class="navlink nav-group-btn {% if people_active %}active{% endif %}" aria-expanded="false">People&nbsp;▾<span class="nav-badge" id="nav-chat-badge-group" hidden>0</span></button>
+              <div class="nav-group-menu">
+                <a href="/admin/chat"      class="navlink chat-nav {% if active_tab == 'chat' %}active{% endif %}">Chat<span class="nav-badge" id="nav-chat-badge" hidden>0</span></a>
+                <a href="/admin/users"     class="navlink {% if active_tab == 'users' %}active{% endif %}">Users</a>
+                <a href="/admin/audit"     class="navlink {% if active_tab == 'audit' %}active{% endif %}">Activity&nbsp;Log</a>
+              </div>
+            </div>
+            {% set system_active = active_tab in ('backups', 'master_stats', 'diagnostics') %}
+            <div class="nav-group {% if system_active %}has-active{% endif %}" data-nav-group>
+              <button type="button" class="navlink nav-group-btn {% if system_active %}active{% endif %}" aria-expanded="false">System&nbsp;▾</button>
+              <div class="nav-group-menu">
+                <a href="/admin/backups"   class="navlink {% if active_tab == 'backups' %}active{% endif %}">Backups</a>
+                <a href="/admin/master_stats" class="navlink {% if active_tab == 'master_stats' %}active{% endif %}">All-Project&nbsp;Stats</a>
+                <a href="/admin/diagnostics"   class="navlink {% if active_tab == 'diagnostics' %}active{% endif %}">Diagnostics</a>
+              </div>
+            </div>
           {% else %}
             <a href="/"                class="navlink {% if active_tab == 'dashboard' %}active{% endif %}">Dashboard</a>
             <a href="/history"         class="navlink {% if active_tab == 'history' %}active{% endif %}">Save&nbsp;History</a>
@@ -141,6 +169,14 @@
       </div>
     </div>
   </header>
+
+  {# The pulse strip: what is happening RIGHT NOW, on every admin screen.
+     Filled by pulse.js from /admin/api/pulse — one poll for the strip, the
+     nav badges and the home page together. Hidden until the first answer so
+     a slow network never shows an empty grey bar. #}
+  {% if user is defined and user and user.role == 'admin' %}
+    <div class="pulse-strip" id="pulse-strip" hidden></div>
+  {% endif %}
 
   <main class="page">
     {% block content %}{% endblock %}
@@ -181,6 +217,7 @@
   <script src="/static/js/tooltip.js?v={{ app_version }}"></script>
   <script src="/static/js/theme.js?v={{ app_version }}"></script>
   {% if user is defined and user %}<script src="/static/js/nav_badges.js?v={{ app_version }}"></script>{% endif %}
+  {% if user is defined and user and user.role == 'admin' %}<script src="/static/js/pulse.js?v={{ app_version }}"></script>{% endif %}
   {% block scripts %}{% endblock %}
   <script>
     // Global scroll-position persistence. Saves scrollY per page path.

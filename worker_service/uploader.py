@@ -117,49 +117,6 @@ def _clone_options(source: Options, profile_dir: str) -> Options:
     return clone
 
 
-def _visible_text(html: str) -> str:
-    """
-    What a person would actually read on the page, lowercased.
-
-    Scripts, styles and markup are stripped, because a challenge announces
-    itself in words. Falls back to a crude tag-strip if BeautifulSoup is not
-    installed on this node — degraded, but still far better than searching
-    raw HTML.
-    """
-    try:
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(html or "", "html.parser")
-        for tag in soup(["script", "style", "noscript", "template"]):
-            tag.decompose()
-        text = soup.get_text(" ")
-    except Exception:
-        text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html or "",
-                      flags=re.S | re.I)
-        text = re.sub(r"<[^>]+>", " ", text)
-    return re.sub(r"\s+", " ", text).lower()
-
-
-def report_wall_result(client, path_id, worked: bool) -> None:
-    """
-    Tell the server which recorded path was used and whether it landed.
-
-    Module level because TWO stages replay paths — the earnings read and the
-    listing scan — and a second copy of "how do we report a path" is exactly
-    the drift this codebase keeps getting bitten by.
-
-    Swallows its own errors deliberately: this is bookkeeping, and a server
-    hiccup while reporting a path must not turn a successful read into a
-    failed job. The work itself reports separately.
-    """
-    if not path_id:
-        return
-    try:
-        client.post("/wall/result",
-                    {"path_id": int(path_id), "worked": bool(worked)})
-    except Exception:
-        pass
-
-
 def _tail(path: Path, lines: int = 25) -> str:
     """Last few lines of a log file, or '' if there isn't one."""
     try:
@@ -558,212 +515,6 @@ class MarketplaceUploader:
                 pause_reason=f"Selector '{key}' no longer matches",
                 pause_immediate=False,
             )
-
-    # ── The interstitial wall ──────────────────────────────────────────────
-
-    def page_shows(self, markers) -> bool:
-        """
-        Does the page's VISIBLE TEXT contain these words?
-
-        Visible text, never markup — matching raw HTML once turned an ordinary
-        sign-in page into a three-hour pause, because the word it looked for
-        appeared in a dormant script tag.
-        """
-        try:
-            raw = self.driver.page_source or ""
-        except WebDriverException:
-            return False
-        page = _visible_text(raw)
-        return all(m.lower() in page for m in markers)
-
-    def page_shows_any(self, markers) -> bool:
-        try:
-            raw = self.driver.page_source or ""
-        except WebDriverException:
-            return False
-        page = _visible_text(raw)
-        return any(m.lower() in page for m in markers)
-
-    def page_offset(self) -> tuple[int, int]:
-        """
-        Where the web page's top-left corner sits on the screen.
-
-        Only needed by the RECORDER, which captures screen coordinates and has
-        to convert. Replay never uses it: mouse events are dispatched straight
-        into the page, in page coordinates, so the window can be anywhere.
-        """
-        try:
-            box = self.driver.execute_script(
-                "return [window.screenX, window.screenY, "
-                "window.outerHeight - window.innerHeight];")
-            return int(box[0]), int(box[1]) + int(box[2])
-        except (WebDriverException, TypeError, ValueError, IndexError):
-            return 0, 0
-
-    def replay_path(self, points: list) -> None:
-        """
-        Move the mouse along a recorded path, then click where it ended.
-
-        ════════════════════════════════════════════════════════════════════
-        WHY NOT A SELECTOR, AND WHY NOT A JS CLICK
-        ════════════════════════════════════════════════════════════════════
-        The control this aims at is sealed inside a CLOSED shadow root.
-        Selenium cannot find it and page JavaScript cannot reach it. But a
-        mouse event carries a POSITION, and the browser hit-tests whatever is
-        underneath — sealed or not, exactly as it does for a real hand.
-
-        Dispatched through Chrome's own input channel rather than by moving
-        the Windows cursor. Two consequences that decided the design:
-
-          · No desktop session is needed. The nightly reads run with nobody
-            logged in and the screen locked. An OS-level mouse would have
-            required a live Remote Desktop connection kept open forever, and
-            would fail silently the moment it dropped.
-          · The events are genuine browser input — the same kind a real mouse
-            produces, not the synthetic `element.click()` used elsewhere.
-
-        The timings from the recording are honoured, so this takes about as
-        long as the owner's hand did.
-        """
-        if not points:
-            return
-        last_ms = 0
-        for x, y, ms in points:
-            gap = max(0, int(ms) - last_ms)
-            if gap:
-                time.sleep(min(gap, 2000) / 1000.0)
-            last_ms = int(ms)
-            self.driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
-                "type": "mouseMoved", "x": int(x), "y": int(y), "buttons": 0,
-            })
-
-        x, y, _ms = points[-1]
-        for kind in ("mousePressed", "mouseReleased"):
-            self.driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
-                "type": kind, "x": int(x), "y": int(y),
-                "button": "left", "buttons": 1, "clickCount": 1,
-            })
-
-    def page_has_markup(self, markers) -> bool:
-        """
-        Is one of these strings in the RAW HTML?
-
-        For markers that are not words on the page — a logo's image, a form
-        field's name. Matching raw HTML is normally the wrong test (see
-        `page_shows`), and the difference is what is being matched: a vendor
-        name in a dormant script tag says nothing about what the page is
-        doing, while the site's own header logo is structural.
-        """
-        try:
-            raw = self.driver.page_source or ""
-        except WebDriverException:
-            return False
-        return any(m in raw for m in markers)
-
-    def clear_wall(self, markers: list, paths: list, *, wait_s: float = 5.0,
-                   attempts: int = 3, on_result=None,
-                   signed_out_markers: Optional[list] = None,
-                   html_markers: Optional[list] = None) -> bool:
-        """
-        Get past a full-page interstitial, or say plainly that we could not.
-
-        ════════════════════════════════════════════════════════════════════
-        THE WALL IS DETECTED BY WHAT IS MISSING
-        ════════════════════════════════════════════════════════════════════
-        Not by anything on the wall itself. Its class names are randomised
-        (`tOHY4`, `qrvwN4`) and would break on the site's next deploy while
-        pointing the blame somewhere else entirely.
-
-        So the question asked is "is what we came for on this page?". That
-        definition survives the wall being redesigned, renamed, or replaced by
-        a completely different wall — and it is the SAME test used to confirm
-        we got through, so the two can never disagree.
-
-        Two kinds of marker, because two kinds of page:
-
-          · TEXT — words the page shows. The account page's own labels.
-          · HTML — structure it contains. The site's header logo, which is
-            an image and therefore has no text to match. Every ordinary
-            TeePublic page carries it; the wall carries nothing.
-
-        Either kind matching means we are through.
-
-        Returns True if the page is now the one we wanted.
-        """
-        def ours() -> bool:
-            return (self.page_shows_any(markers)
-                    or (bool(html_markers) and self.page_has_markup(html_markers)))
-
-        time.sleep(wait_s)
-        if ours():
-            return True                      # never walled in the first place
-
-        # A lapsed session looks EXACTLY like the wall from here — figures
-        # missing, nothing else recognisable. Asked before clicking anything,
-        # because otherwise three recorded paths get spent on a sign-in form
-        # and the report reads "stuck at the wall" when the real answer is
-        # "sign in by hand, it takes two minutes".
-        if signed_out_markers:
-            try:
-                raw = self.driver.page_source or ""
-            except WebDriverException:
-                raw = ""
-            if any(m in raw for m in signed_out_markers):
-                raise UploadError(
-                    "Signed out — this is the sign-in page, not the wall. "
-                    "Open this account's Chrome profile with PROFILES.bat, "
-                    "sign in by hand, close Chrome, then press READ NOW.",
-                    pause_minutes=720,
-                    pause_reason="Signed out — needs a manual sign-in",
-                    fatal=True)
-
-        if not paths:
-            raise UploadError(
-                "A wall is in the way and no mouse paths have been recorded "
-                "yet. Run RECORD_PATHS.bat on this machine to record some.",
-                fatal=True)
-
-        for attempt in range(1, min(attempts, len(paths)) + 1):
-            path = paths[attempt - 1]
-            label = path.get("label") or f"path {path.get('id')}"
-            self.emit(f"  wall in the way — trying {label} "
-                      f"(attempt {attempt} of {attempts})")
-            try:
-                self.replay_path(path.get("points") or [])
-            except WebDriverException as e:
-                self.emit(f"  could not replay {label}: {e}", level="warn")
-                if on_result:
-                    on_result(path.get("id"), False)
-                continue
-
-            # It is a real page change, not a box disappearing, so give the
-            # navigation time before judging it.
-            time.sleep(wait_s)
-            worked = ours()
-            if on_result:
-                on_result(path.get("id"), worked)
-            if worked:
-                self.emit(f"  through the wall using {label}", level="ok")
-                return True
-            self.emit(f"  {label} did not get through", level="warn")
-
-        shot = self.capture_evidence("wall_stuck")
-        tried = ", ".join(str(p.get("label") or p.get("id"))
-                          for p in paths[:attempts])
-        raise UploadError(
-            f"Could not get past the wall after {min(attempts, len(paths))} "
-            f"attempts (tried: {tried}). The screenshot shows the page it was "
-            f"looking at — if it is not the usual wall, that is why.",
-            pause_minutes=180,
-            pause_reason=f"Stuck at the wall (tried: {tried})",
-            fatal=True,
-            # The wall is the far side having a moment, and moments pass.
-            # Three attempts inside one minute is not three chances — it is
-            # one chance taken three times. Whoever catches this should wait
-            # and come back, not give up on the night's work.
-            transient=True,
-        )
-
 
     def capture_evidence(self, label: str) -> Optional[str]:
         """
@@ -1576,10 +1327,6 @@ class UploadStage:
         self.log(f"Deleted profile {resolved} ({size // 1024} KB)", level="ok")
         return {"removed": True, "path": str(resolved), "bytes": size}
 
-    def _report_wall_result(self, path_id, worked: bool) -> None:
-        """Thin wrapper so the earnings read can pass a bound method."""
-        report_wall_result(self.client, path_id, worked)
-
     def read_earnings(self, job_id: int, payload: dict) -> dict:
         """
         Fetch an account's ledger pages in the SAME browser the uploader uses.
@@ -1646,16 +1393,6 @@ class UploadStage:
         stored = 0
         problems: list[str] = []
 
-        # Everything about the wall arrives with the job — the words that mean
-        # "we are through", the recorded paths, and the two timings. The node
-        # decides nothing here: which marketplace has a wall, and what its
-        # account page says, are facts the server holds.
-        markers = payload.get("wall_markers") or []
-        paths = payload.get("wall_paths") or []
-        wall_wait_s = float(payload.get("wall_wait_s") or 5)
-        wall_attempts = int(payload.get("wall_max_attempts") or 3)
-        signed_out = payload.get("signed_out_markers") or []
-
         try:
             # Same three exits as run_batch (rule: claimed work must always
             # end in a reported state). A failure here is reported against
@@ -1677,17 +1414,6 @@ class UploadStage:
                     uploader.emit(f"{kind}: page {page_no}",
                                   progress=min(95, 5 + fetched * 4))
                     uploader.driver.get(url)
-
-                    # Every page we fetch, not just the first. A wall served
-                    # on page three is still a wall, and handing it to the
-                    # parser produced "TeePublic has changed it" — sending the
-                    # reader off to hunt a redesign that never happened.
-                    if markers:
-                        uploader.clear_wall(
-                            markers, paths,
-                            wait_s=wall_wait_s, attempts=wall_attempts,
-                            on_result=self._report_wall_result,
-                            signed_out_markers=signed_out)
 
                     html = uploader.driver.page_source
                     fetched += 1

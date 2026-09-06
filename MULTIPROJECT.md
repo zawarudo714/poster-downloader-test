@@ -32,7 +32,7 @@ a source, a script, accounts and worker assignments, all of which are code.
 | `slug` | Stable id. **Immutable** — per-project settings are keyed `pipeline.<slug>.<key>`, so renaming orphans them silently. |
 | `name` | What humans see. Safe to change. |
 | `source_site` | Where images come from: `tmdb`, `brave`, … |
-| `target_site` | Where they are listed: `fineartamerica`, `teepublic`, … |
+| `target_site` | Where they are listed: `fineartamerica`, … |
 | `processor` | How they are made: `photoshop` (Windows node) or `gpt` (this server). |
 | `search_mode` | `external` (open the source in a tab) or `inpage` (search grid). |
 | `images_per_title` | How many per title. |

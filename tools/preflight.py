@@ -1550,6 +1550,38 @@ def check_settings_are_reachable() -> None:
              f"longer a pipeline setting — remove the line")
 
 
+def check_no_filter_on_fixed_element_ancestors() -> None:
+    """
+    The top bar must never carry a CSS filter.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE DEFECT THIS EXISTS FOR (2026-09-06, v149)
+    ════════════════════════════════════════════════════════════════════════
+    `backdrop-filter: blur(...)` was put on `.topbar` for a frosted-glass
+    look. A filter (or transform) on an element quietly makes it the
+    CONTAINING BLOCK for every `position: fixed` descendant — and the
+    sidebar nav lives INSIDE the top bar — so the whole rail was squeezed
+    into the bar's 48 pixels and shipped as a broken scrollbox. Nothing
+    else could have caught it: the CSS is valid, every hook exists, and
+    the failure is purely geometric.
+
+    Narrow on purpose: it checks the selectors that ANCESTOR the fixed
+    sidebar (.topbar, .topbar-inner), not all of CSS. Add a selector here
+    if another fixed element ever gains a styled ancestor.
+    """
+    import re as _re
+    css = (APP / "static" / "css" / "style.css").read_text(encoding="utf-8")
+    # Rule blocks whose selector list targets the bar itself.
+    for m in _re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
+        sel, body = m.group(1), m.group(2)
+        if not _re.search(r"\.topbar(-inner)?\s*(,|$)", sel.strip()):
+            continue
+        if _re.search(r"(?<!-)\b(backdrop-)?filter\s*:", body) or \
+           _re.search(r"\btransform\s*:", body):
+            fail(".topbar carries a filter/transform — that traps the "
+                 "fixed sidebar inside the 48px bar (see v149). Remove it.")
+
+
 CHECKS = [
     ("python compiles",           check_python_compiles),
     ("no undefined names",        check_undefined_names),
@@ -1571,6 +1603,7 @@ CHECKS = [
     ("state changes are logged", check_state_changes_are_logged),
     ("every document is linked", check_no_orphan_documents),
     ("local imports come before use", check_local_imports_not_used_earlier),
+    ("the top bar carries no filter", check_no_filter_on_fixed_element_ancestors),
 ]
 
 

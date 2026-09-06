@@ -1954,8 +1954,12 @@
   let attention = [];
 
   const ATTENTION_ACTIONS = {
-    rejected:      ['return_to_worker', 'unusable'],
-    process_failed:['retry_process', 'return_to_worker', 'unusable'],
+    // 'Return to worker' was removed 2026-09-06 at the owner's word:
+    // the worker is already PAID by the time anything reaches these
+    // lists, so nothing ever goes back. The admin replaces the photo
+    // himself (Worker Images → paste a URL) or retires the image.
+    rejected:      ['unusable'],
+    process_failed:['retry_process', 'unusable'],
     config_blocked:['retry_process_all'],
     title_held:    ['retitle'],
     upload_failed: ['retry_upload', 'mark_removed', 'skip_upload'],
@@ -1972,7 +1976,6 @@
     retry_process:      'RETRY',
     retry_process_all:  'RETRY ALL AFFECTED',
     retry_upload:       'RETRY',
-    return_to_worker:   'RETURN TO WORKER',
     unusable:           'MARK UNUSABLE',
     return_to_pipeline: 'RETURN TO PIPELINE',
     mark_removed:       'MARK REMOVED',
@@ -2258,15 +2261,6 @@
         const d = await postJSON(API + '/failures/retry',
                                  { kind: 'upload', tracking_ids: trackings });
         toast(`Requeued ${d.requeued}.`);
-      } else if (action === 'return_to_worker') {
-        const comment = prompt(
-          'What should the worker be told?\n\n' +
-          'Leave blank for the default: "find a different picture of the same subject".'
-        );
-        if (comment === null) return;
-        const d = await postJSON(API + '/attention/return_to_worker',
-                                 { poster_ids: posters, comment });
-        toast(`Sent ${d.sent} back to the worker.`);
       } else if (action === 'unusable') {
         const reason = prompt('Why can this never be used? (kept permanently)');
         if (!reason || !reason.trim()) return;

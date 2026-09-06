@@ -5399,3 +5399,16 @@ html.theme-light .stat-value, html.theme-light .stat-pill-num {
   cursor: pointer;
 }
 .jump-to-work:hover { box-shadow: var(--glow); }
+
+
+/* The coloured plate must be VISIBLE (v158). It used to hug the poster
+   exactly, so on a mostly-opaque artwork changing the colour changed
+   nothing you could see — the owner read that as a broken eyedropper. The
+   plate now fills the card's width and the poster sits centred on it,
+   like the zoom view, so the chosen colour always shows around the art. */
+.review-canvas {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+.review-canvas img { width: auto; max-width: 100%; max-height: 68vh; }

@@ -59,7 +59,7 @@ from .uploader import UploadStage
 # either way. `check_worker_agent_current` in diagnostics.py now compares
 # what the machine reports against what this file says, so a stale copy is
 # reported instead of assumed.
-AGENT_VERSION = "1.30.0"
+AGENT_VERSION = "1.31.0"
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_CONFIG = HERE / "config.json"

@@ -448,12 +448,33 @@ class MarketplaceUploader:
                       f"continuing in the login tab", level="warn")
 
     def find(self, key: str, *, clickable: bool = False, timeout: Optional[float] = None):
-        by, value = parse_selector(self.sel(key))
+        # ── A SELECTOR MAY HOLD ALTERNATIVES, separated by "||" ──────────
+        # FineArtAmerica serves more than one version of its upload form at
+        # the same time, chosen per request (updateartwork.html, then 2025,
+        # and on 2026-09-06 a NEW 2026 variant appeared and broke the
+        # submit). One selector that names both pages' controls lets one
+        # account straddle every variant unattended — the fix the project
+        # notes have asked for since the two-forms discovery. All
+        # candidates are polled together until the timeout; whichever the
+        # served page actually has wins. Editing stays a dashboard job.
+        pairs = [parse_selector(c)
+                 for c in str(self.sel(key)).split("||") if c.strip()]
+        if not pairs:
+            pairs = [parse_selector("")]
         wait = WebDriverWait(self.driver, timeout or self.t("element_timeout", 30))
-        condition = (EC.element_to_be_clickable((by, value)) if clickable
-                     else EC.presence_of_element_located((by, value)))
+
+        def _first_match(driver):
+            for by, value in pairs:
+                try:
+                    for el in driver.find_elements(by, value):
+                        if not clickable or (el.is_displayed() and el.is_enabled()):
+                            return el
+                except WebDriverException:
+                    continue
+            return False
+
         try:
-            return wait.until(condition)
+            return wait.until(_first_match)
         except TimeoutException:
             # The single most useful fact when an element is missing is which
             # page we were actually looking at — nine times out of ten the

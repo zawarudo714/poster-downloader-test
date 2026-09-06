@@ -2698,7 +2698,7 @@ def api_attention(
             "and is refused again unless the SOURCE changes — so the real "
             "choices are send it back to a worker for a different photo, or "
             "retire it.",
-            "RETURN TO WORKER for a new source, or MARK UNUSABLE.",
+            "Replace the photo yourself (Worker Images → paste a new URL on the title), or MARK UNUSABLE. Nothing goes back to the worker — they were paid when they saved it.",
             items=items,
             note=(f"Showing {len(items)} of {rejected_count}." if rejected_count > len(items) else ""),
         ))
@@ -3059,78 +3059,6 @@ def api_attention_retry_group(
                  details={"key": "config_blocked", "count": len(rows)})
     db.commit()
     return JSONResponse({"ok": True, "requeued": len(rows)})
-
-
-@router.post("/api/attention/return_to_worker")
-def api_attention_return_to_worker(
-    request: Request,
-    payload: dict = Body(...),
-    admin: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    """
-    Send an image back to the worker who found it, for a different source.
-
-    This is the right answer whenever the PROCESSOR refused the picture
-    rather than failing at it: no amount of retrying changes what the source
-    photo contains. Retrying costs money to be refused identically.
-
-    Two things happen together, and both are necessary:
-
-      · a revision is raised, exactly as the Review Posters page does, so it
-        appears in the worker's queue with the reason attached
-      · the image LEAVES the pipeline (status back to NULL, attempts zeroed)
-
-    Without the second step the replacement bytes would arrive under a poster
-    still marked failed_processing, and nothing would ever look at it again.
-    """
-    from ..models import Revision
-
-    poster_ids = payload.get("poster_ids") or []
-    comment = (payload.get("comment") or "").strip()
-    if not poster_ids:
-        raise HTTPException(400, "poster_ids is required.")
-
-    sent = 0
-    for pid in poster_ids:
-        poster = db.query(SavedPoster).filter_by(id=pid).first()
-        if poster is None or poster.deleted_at is not None:
-            continue
-
-        note = comment or (
-            "This image could not be processed automatically. Please find a "
-            "different picture of the same subject."
-        )
-        existing = (
-            db.query(Revision)
-              .filter(Revision.saved_poster_id == poster.id,
-                      Revision.status.in_(("open", "awaiting_approval")))
-              .first()
-        )
-        if existing is None:
-            db.add(Revision(saved_poster_id=poster.id, comment=note,
-                            flagged_by=admin.username, status="open"))
-
-        title = db.query(MasterTitle).filter_by(id=poster.master_title_id).first()
-        if title is not None:
-            title.needs_revision = 1
-
-        # Out of the pipeline entirely. NULL means "not greenlit", so the
-        # replacement goes through the normal gate rather than silently
-        # inheriting an approval given to a different picture.
-        poster.pipeline_status = None
-        poster.process_attempts = 0
-        poster.claimed_at = None
-        poster.claimed_by = None
-        if title is not None:
-            P.recompute_title_status(db, title)
-        sent += 1
-
-    log_activity(db, user=admin, action="pipeline_return_to_worker",
-                 target_type="pipeline",
-                 details={"poster_ids": poster_ids, "comment": comment})
-    db.commit()
-    return JSONResponse({"ok": True, "sent": sent})
 
 
 @router.post("/api/attention/release")
@@ -3547,10 +3475,16 @@ def serve_review_master(
     if processed is None or not processed.master_path:
         raise HTTPException(404, "No transparent original for this image.")
 
-    cache = _review_cache_file(processed.master_path,
-                               "full" if full else "disp")
+    # Display copies go out as WEBP: a full-art PNG at 1000px is still one
+    # to three megabytes, and the owner measured the pane lagging behind
+    # the arrow keys (2026-09-06). WebP keeps the alpha the live recolour
+    # needs at roughly a tenth of the bytes. `full=1` still serves the
+    # untouched PNG master.
+    variant = "full" if full else "dispw"
+    media = "image/png" if full else "image/webp"
+    cache = _review_cache_file(processed.master_path, variant)
     if cache.is_file():
-        return Response(content=cache.read_bytes(), media_type="image/png",
+        return Response(content=cache.read_bytes(), media_type=media,
                         headers={"Cache-Control": "private, max-age=3600"})
     try:
         data = read_bytes(db, processed.master_path)
@@ -3563,20 +3497,24 @@ def serve_review_master(
             from PIL import Image
             with Image.open(io.BytesIO(data)) as img:
                 img.load()
+                img = img.convert("RGBA")
                 if img.width > 1000 or img.height > 1000:
                     img.thumbnail((1000, 1000), Image.LANCZOS)
                 out = io.BytesIO()
-                img.save(out, "PNG")
+                img.save(out, "WEBP", quality=82)
                 data = out.getvalue()
         except Exception:
-            pass          # a failed downscale serves the original, never a 500
-
+            # A failed conversion serves the original PNG and does NOT
+            # cache it — caching PNG bytes under the webp key would make
+            # every later hit lie about its content type.
+            return Response(content=data, media_type="image/png",
+                            headers={"Cache-Control": "private, max-age=3600"})
     cache.parent.mkdir(parents=True, exist_ok=True)
     try:
         cache.write_bytes(data)
     except OSError:
         pass              # a full disk must not break the review
-    return Response(content=data, media_type="image/png",
+    return Response(content=data, media_type=media,
                     headers={"Cache-Control": "private, max-age=3600"})
 
 

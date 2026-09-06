@@ -267,7 +267,15 @@ DEFAULT_FAA_SELECTORS = {
     "title_field":          "name:artworkname",
     "keywords_field":       "name:artworkkeywords",
     "description_field":    "name:artworkdescription",
-    "submit_button":        "xpath://div[contains(@id, 'submittopdiv')]//a",
+    # TWO candidates, tried together (the node polls every "||" alternative
+    # until one exists — v158). The first is the old form's submit; the
+    # second is MEASURED 2026-09-06 from the owner's saved copy of the NEW
+    # updateartwork2026.html, where the submit is an anchor
+    # <a class="buttonSubmit" href="javascript: submitartworkform('…')">
+    # and no submittopdiv exists. Every other field name on the 2026 form
+    # is identical to the old one — checked against the same page dump.
+    "submit_button":        ("xpath://div[contains(@id, 'submittopdiv')]//a"
+                             " || css:a.buttonSubmit"),
     # If the URL still matches this after submitting, the submit silently failed.
     "still_on_form_marker": "updateartwork",
 }

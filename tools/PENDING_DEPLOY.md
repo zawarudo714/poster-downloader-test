@@ -1,32 +1,53 @@
 # Not yet deployed
 
-## v157 — invisible failures made visible, and the review pane truly light
+## v158 — the owner's evening findings, round two
 
-* **"Failed processing with nothing anywhere saying why."** The Needs
-  Attention panel had buckets for `[auth]`/`[billing]`, `[rejected]`, and
-  "everything untagged" — but `[bad_request]`, a real kind the classifier
-  emits, matched NO bucket. Six failures showed as a badge of 6 and a
-  panel explaining none of them. The catch-all now excludes only the kinds
-  a bucket above already displays, so a kind nobody anticipated lands
-  there WITH its full error text instead of vanishing. (And the NULL-error
-  case is kept via `or_(IS NULL, …)` — three bare NOT-LIKEs would have
-  silently dropped every failure with no text, recreating the bug.)
-* **The review pane was STILL loading 4000×6000 for some rows** — any
-  processed image whose preview_path is empty fell back to the print
-  file. The route now refuses to send print pixels at all: anything big
-  is downscaled to 1200px on the way out, once, and cached. It no longer
-  matters why a preview is missing.
+* **RETURN TO WORKER is gone** — button, prompt and endpoint. His rule is
+  absolute: the worker is paid at save time, nothing ever goes back. The
+  rejected-image guidance now says what actually happens instead: replace
+  the photo yourself on Worker Images, or retire the image.
+* **The "broken" eyedropper was a visibility problem, not a logic one.**
+  The coloured plate hugged the poster exactly, so on a mostly-opaque
+  artwork a colour change changed nothing visible. The plate now fills
+  the card width with the poster centred on it — same as the zoom view —
+  so the chosen colour always shows around the art.
+* **The zoom pane lag**: the display master was a 1000px PNG, still
+  megabytes for full-art. It now goes out as WebP with alpha intact —
+  roughly a tenth of the bytes — cached as before. (A failed conversion
+  serves the PNG and skips the cache rather than mislabelling bytes.)
+* **THE UPLOAD FAILURE IS A NEW FAA FORM, NOT TRANSPARENCY.** The node
+  uploads the flattened print JPEG, never the transparent file. The log
+  shows FAA serving a THIRD form variant — `updateartwork2026.html` —
+  whose fields all matched but whose submit control does not. Built the
+  fix the notes have demanded since the two-forms discovery: **a selector
+  may now hold several candidates separated by `||`**, all polled
+  together; whichever the served page has wins. The 2026 submit selector
+  itself is NOT guessed (never invent a value aimed at a real
+  marketplace) — the node captured the page at the moment of failure, so
+  the owner sends the FAILURE EVIDENCE page dump from Diagnostics and the
+  right candidate becomes a dashboard edit, no deploy.
 
-No schema change, no node copy.
+* **The 2026 submit selector is now MEASURED, not guessed.** The owner
+  saved the new form's HTML; its submit is `<a class="buttonSubmit">`
+  calling `submitartworkform(...)`, and every other field name matches the
+  old form exactly. The default `submit_button` selector now carries both
+  candidates: the old form's div-anchor `||` the new form's
+  `css:a.buttonSubmit`. Whichever page FAA serves, the node finds its
+  button. (If a hand-edited selector override exists in the dashboard, it
+  wins over this default — paste the same two-candidate value there.)
 
-**Verified**: preflight green (including the per-function undefined-name
-checker). **NOT verified**: why those six generations failed — the error
-text will be readable on Needs Attention after this deploys, and the
-command in the chat reads it straight from the database right now.
+### THE NODE CHANGED — copy `worker_service/` to the Windows box
+
+`AGENT_VERSION` is **1.31.0**; the Nodes tab confirms the copy landed. No
+new installs.
+
+### Verified
+
+preflight green; both JS files parse; every touched Python file compiles.
+NOT verified: never rendered; the `||` mechanism has not met a real page
+(it degrades to exactly the old behaviour for any selector without `||`).
 
 ---
-
-Nothing. Everything written is on the server.
 
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.

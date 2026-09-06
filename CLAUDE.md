@@ -2343,6 +2343,22 @@ inherits the wrong half of another one.
   screen that displays "quiet from 22:00" is the Earnings page and that is
   where he looked. One stored value, editable from wherever it is relevant.
 - He notices the thing you glossed over. Say the uncomfortable part first.
+- **EVERY SSH COMMAND STARTS WITH THE `cd`.** Standing instruction, 2026-09-05.
+  Never write `docker compose exec ...` on its own — write
+  `cd /opt/poster && docker compose exec ...`, as one line he can paste.
+
+  He asked for this after the SECOND time a bare `docker compose` command
+  came back with "no configuration file provided: not found". The reason it
+  keeps happening is that his shell opens in `/root`, and `docker compose`
+  only works where the `docker-compose.yml` is. The command is not wrong; it
+  is incomplete, and the error it gives names the missing file rather than
+  the missing folder, so it reads like a broken tool.
+
+  The general shape: **a command handed to somebody else must carry
+  everything it needs to run.** Assuming a working directory, a virtual
+  environment, an environment variable or a previous command is the same
+  defect as assuming a value — it works on the machine where you imagined it
+  and fails on his.
 
 ### Every number and label must make sense to someone who never built this
 

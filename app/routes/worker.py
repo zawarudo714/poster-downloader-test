@@ -205,13 +205,18 @@ def _my_queue(db: Session, user: User, project=None):
 
 
 def _source_search_url(db: Session, title: str, content_type: Optional[str],
-                       project=None) -> str:
+                       project=None, kind: str = "") -> str:
     """
     Where this project's workers go to find source images.
 
+    For travel this is GOOGLE IMAGES, opened in another tab when the Brave
+    grid inside the page comes up short. Brave's picture catalogue is the
+    thinner of the two — MEASURED by the owner 2026-09-06, by using both —
+    so the grid is the first try and this is the backstop.
+
     Resolves through the per-project settings cascade rather than assuming
-    TMDB, because MUSIK searches Brave in-page and returns an empty string
-    here — meaning "no external link, use the built-in search".
+    any one site. A project with no outside link returns an empty string,
+    meaning "no button".
 
     The movie project keeps its content-type-aware TMDB behaviour via the
     legacy helper below, since /search/tv and /search/movie are genuinely
@@ -219,12 +224,19 @@ def _source_search_url(db: Session, title: str, content_type: Optional[str],
     """
     from ..pipeline import get_setting
 
-    # A project that searches IN-PAGE has no external source, full stop.
-    # Asking the setting first was the bug: MUSIK never overrode
-    # source_search_url, so it inherited the global TMDB default and every
-    # "Open source" link on a flag card pointed at a site that has never
-    # heard of the artist. Capability first, configuration second.
-    if project is not None and getattr(project, "search_mode", "") == "inpage":
+    # CAPABILITY FIRST, CONFIGURATION SECOND — the rule survives, only the
+    # field it reads has changed.
+    #
+    # This used to ask "does the project search in-page", and return nothing
+    # if it did. That was one field answering two questions, and it broke the
+    # moment travel wanted both a Brave grid AND a Google link. It now asks
+    # the field that means exactly this and nothing else.
+    #
+    # The original bug is still worth remembering: MUSIK never overrode
+    # source_search_url, inherited the global TMDB default, and every "Open
+    # source" button pointed at a site that had never heard of the artist.
+    # Asking the setting first is what did that.
+    if project is not None and not getattr(project, "has_source_link", 0):
         return ""
 
     try:
@@ -235,9 +247,30 @@ def _source_search_url(db: Session, title: str, content_type: Optional[str],
         return ""
     if "themoviedb.org" in template:
         return _tmdb_search_url(title, content_type)
+
+    # ── WHAT THE OUTSIDE SITE IS ASKED FOR ───────────────────────────────
+    #
+    # Built from `google_query`, the same way the in-page grid builds its
+    # own, so the two searches ask for the same thing in the same words. A
+    # separate spelling here would mean the Google button quietly looking for
+    # something else, which is the hardest kind of difference to notice.
+    #
+    # Falls back to the plain title when that setting is empty, which is what
+    # every project except travel does.
+    words = title or ""
+    try:
+        from ..brave_search import build_queries
+        built = build_queries(db, title or "", project=project, kind=kind,
+                              template=str(get_setting(
+                                  db, "google_query", project=project) or ""))
+        if built:
+            words = built[0]
+    except Exception:
+        pass                            # a bad template must not kill the page
+
     from urllib.parse import quote_plus
     return (template
-            .replace("{query}", quote_plus(title or ""))
+            .replace("{query}", quote_plus(words))
             .replace("{content_type}", quote_plus(content_type or "")))
 
 
@@ -369,8 +402,9 @@ def _active_revisions_for_user(db: Session, user: User, project=None):
             "title_folder": sp.title_folder_path,
             "date": sp.original_save_date.isoformat(),
             "master_id": mt.id,
-            "tmdb_search": _source_search_url(db, mt.title, mt.content_type,
-                                              resolve_project(db, mt.project_id)),
+            "tmdb_search": _source_search_url(db, search_text(mt), mt.content_type,
+                                              resolve_project(db, mt.project_id),
+                                              kind=(mt.description or "")),
             **_project_ui(db, mt.project_id),
         })
     return out
@@ -650,7 +684,6 @@ def api_master(
 @router.get("/api/search/{master_id}")
 def api_search(
     master_id: int,
-    deep: int = Query(0),
     phrase: int = Query(-1),
     refresh: int = Query(0),
     cache_only: int = Query(0),
@@ -661,9 +694,9 @@ def api_search(
     Image results for a title the worker is holding, from cache when possible.
 
     Cache is keyed on (title, worker, variant) and lives for the claim, so
-    toggling between the normal and deep grids is free after the first look.
-    `refresh=1` forces a new query — the escape hatch when results look stale
-    or a thumbnail has expired.
+    pressing the same button twice is free after the first look. `refresh=1`
+    forces a new query — the escape hatch when results look stale or a
+    thumbnail has expired.
     """
     from ..brave_search import BraveError, search
     from ..models import SearchCache
@@ -696,7 +729,7 @@ def api_search(
         template = phrasings[phrase]
         variant = P_phrasing_cache_key(template)
     else:
-        variant = "deep" if deep else "normal"
+        variant = "normal"
 
     if not refresh:
         cached = (
@@ -726,8 +759,11 @@ def api_search(
         # search_text() falls back to the title, so a sheet without the
         # column searches exactly as it used to.
         from ..pipeline import search_text
-        outcome = search(db, search_text(t), deep=bool(deep), project=project,
-                         template=template)
+        # {kind} comes from the sheet's own description column — city,
+        # island, mountain. Passed rather than looked up inside the search so
+        # that ONE function knows where a title's words come from.
+        outcome = search(db, search_text(t), project=project,
+                         kind=(t.description or ""), template=template)
     except BraveError as e:
         log_activity(db, user=user, action="search_failed", target_type="master_title",
                      target_id=t.id, details={"error": str(e), "variant": variant})
@@ -1027,8 +1063,9 @@ def lock_title(
         "year": t.year,
         "content_type": t.content_type,
         "description": (t.description or "")[:600],
-        "tmdb_search": _source_search_url(db, t.title, t.content_type,
-                                          resolve_project(db, t.project_id)),
+        "tmdb_search": _source_search_url(db, search_text(t), t.content_type,
+                                          resolve_project(db, t.project_id),
+                                          kind=(t.description or "")),
         **_project_ui(db, t.project_id),
     })
 
@@ -1171,8 +1208,9 @@ def go_to_title(
         "year":         t.year,
         "content_type": t.content_type,
         "description":  (t.description or "")[:600],
-        "tmdb_search":  _source_search_url(db, t.title, t.content_type,
-                                           resolve_project(db, t.project_id)),
+        "tmdb_search":  _source_search_url(db, search_text(t), t.content_type,
+                                           resolve_project(db, t.project_id),
+                                           kind=(t.description or "")),
         **_project_ui(db, t.project_id),
         "reopened":     reopened,
     })

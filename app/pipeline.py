@@ -465,26 +465,27 @@ DEFAULTS: dict[str, Any] = {
     "review_min_width_px": 800,
 
     # ── Brave image search ───────────────────────────────────────────────
-    # Two keys. Normal searches use the free key; deep searches go straight to
-    # the paid one because they fire two queries at once and the free key
-    # allows only 1 request/second. A normal search that hits a 429 retries
-    # once on the paid key rather than showing the worker an error.
+    # Two keys. Searches use the free key; the paid one is the FALLBACK for
+    # when the free key is inside its one-per-second window or has spent its
+    # monthly two thousand. It is not optional garnish — without it a busy
+    # moment shows the worker a rate-limit error instead of pictures.
     #
-    # `{title}` is substituted with the master title's name. `{artist}` still
-    # works as an alias — see build_queries() for why both are accepted.
+    # ── THREE PLACEHOLDERS ───────────────────────────────────────────────
     #
-    # Both queries are deliberately GENERIC here. The useful phrasing is
-    # per-project and the owner sets it: a project searching for mountains and
-    # one searching for musicians want nothing in common, and a plausible
-    # inherited query is worse than an obviously empty one because it returns
-    # results that merely look wrong rather than none at all.
+    #   {title}  the sheet's own search_query, which already carries the
+    #            country: "Chicago Illinois USA"
+    #   {kind}   the sheet's description — city, island, mountain, beach
+    #   {artist} a legacy spelling of {title}, still accepted
+    #
+    # {kind} exists because Brave answers a bare place name very differently
+    # from a place name with its type on the end. Whether that helps is not
+    # something anybody can reason out in advance, so it is a PLACEHOLDER
+    # rather than something glued on automatically — the owner can put it in,
+    # take it out and compare, which a rule baked into the code would take
+    # away from him.
     "brave_api_key_free": "",
     "brave_api_key_paid": "",
-    "brave_query_normal": '"{title}"',
-    # Deep search runs EVERY line below and merges the results, de-duplicated
-    # by image URL. Multiple lines exist because one phrase rarely covers a
-    # whole niche. At half a cent a query, paying beats being clever.
-    "brave_query_deep":   '"{title}"',
+    "brave_query_normal": "{title} {kind}",
     # ── EXTRA PHRASINGS THE WORKER CAN TRY, ONE PER LINE ─────────────────
     #
     # Each line becomes ONE MORE BUTTON on the worker screen, in this order.
@@ -512,6 +513,21 @@ DEFAULTS: dict[str, Any] = {
     # somewhere else, for every title, while the screen looks completely
     # normal — and it charges for each one.
     "brave_search_phrasings": "",
+
+    # ── THE GOOGLE FALLBACK ──────────────────────────────────────────────
+    #
+    # Brave's picture catalogue is thinner than Google's — MEASURED by the
+    # owner 2026-09-06, by using both. When the grid inside the site offers
+    # nothing usable, the worker opens Google Images in another tab, copies
+    # an image address and pastes it back.
+    #
+    # ONE QUERY, NOT A LIST. The phrasing buttons exist so the owner can
+    # compare wordings against Brave. Google is the backstop you reach for
+    # when Brave has already failed, and a row of buttons there would be a
+    # second thing to fiddle with at exactly the wrong moment.
+    #
+    # Same placeholders as the Brave query.
+    "google_query": "{title} {kind}",
     "brave_min_dimension": 300,
     "brave_results_per_query": 50,
     # Off by default — turn it on only if a bug starts looping.
@@ -912,8 +928,8 @@ def set_setting(
 
 # The three settings that hold search phrasings. Named once, here, because a
 # second list of them somewhere else is a list somebody forgets to extend.
-SEARCH_QUERY_KEYS = ("brave_query_normal", "brave_query_deep",
-                     "brave_search_phrasings")
+SEARCH_QUERY_KEYS = ("brave_query_normal", "brave_search_phrasings",
+                     "google_query")
 
 
 def _reject_a_search_line_with_no_place_in_it(key: str, value) -> None:
@@ -1111,9 +1127,17 @@ PROJECT_DEFS: list[dict] = [
         "item_noun":        "image",
         "item_noun_plural": "images",
         "processor":        "gpt",
-        # Searches inside the site. No external source, so no "Open <site>"
-        # button anywhere in the worker UI.
+        # Searches inside the site — the Brave grid.
         "search_mode":      "inpage",
+        # AND ALSO sends the worker to Google when that grid comes up short.
+        #
+        # These are TWO SEPARATE FACTS and it took a change to see it. The
+        # code used to derive "has an outside link" from "does not search
+        # in-page", which made them one switch — fine while every project was
+        # one or the other, wrong the moment travel needed both. Brave's
+        # picture catalogue is thinner than Google's, so the grid is the
+        # first try and Google is the backstop.
+        "has_source_link":  1,
         # A location has no year and no movie/tv distinction. If the sheet
         # later carries a CATEGORY (park / city / lake / mountain), that is a
         # new field rather than a reuse of has_content_type — one column that
@@ -1128,10 +1152,12 @@ PROJECT_DEFS: list[dict] = [
             # result is upscaled to print size, so a red "640px wide" warning
             # on every location would be pure noise.
             "review_min_width_px": 0,
-            # No external source. Belt and braces alongside the search_mode
-            # check in _source_search_url() — without this the project
-            # inherits whatever the global default happens to be.
-            "source_search_url": "",
+            # WHERE THE GOOGLE BUTTON GOES. A setting, not a constant,
+            # because it is somebody else's address and they can move it —
+            # and because it was one of eighteen settings that existed with
+            # no box on any screen. {query} is filled in already encoded.
+            "source_search_url":
+                "https://www.google.com/search?q={query}&tbm=isch",
             # JUST THE NAME. No suffix, because images_per_title is 1 and a
             # suffix only exists to tell several images of one place apart.
             # It was "{title} #{letter}", which at one image per title would
@@ -1186,7 +1212,8 @@ PROJECT_DEFS: list[dict] = [
 # a project you turned off or re-weighted.
 _SYNCED_FIELDS = ("name", "source_site", "target_site", "images_per_title", "notes",
                   "item_noun", "item_noun_plural", "processor",
-                  "has_year", "has_content_type", "has_review_gate", "search_mode")
+                  "has_year", "has_content_type", "has_review_gate",
+                  "search_mode", "has_source_link")
 
 
 def sync_projects(db: Session) -> list[str]:

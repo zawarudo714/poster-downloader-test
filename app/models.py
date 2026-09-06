@@ -680,6 +680,19 @@ class Project(Base):
     # blank: a project must never end up showing BOTH an "Open TMDB" button
     # and a search grid, or neither.
     search_mode      = Column(String(16), nullable=False, default="external")
+    # ── DOES THIS PROJECT SEND THE WORKER TO AN OUTSIDE SITE? ────────────
+    #
+    # SEPARATE from search_mode, and that separation is the point. The code
+    # used to derive this from "search_mode != 'inpage'", which made one
+    # field answer two questions — fine while every project either searched
+    # in-page or went outside, wrong the moment travel needed both.
+    #
+    # Travel searches Brave in-page AND offers a Google link, because Brave's
+    # picture catalogue is the thinner of the two. One field could not say
+    # that. This is the retrofit lesson in miniature: before reusing a field,
+    # ask whether the thing it describes can ever be true in more than one
+    # way at once.
+    has_source_link  = Column(Integer, nullable=False, default=0)
 
     is_active       = Column(Integer, nullable=False, default=1)
     notes           = Column(Text, nullable=True)

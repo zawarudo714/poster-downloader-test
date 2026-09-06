@@ -29,12 +29,17 @@ The paid key is also the fallback when the free monthly quota runs out, and
 when two workers happen to search within the same second.
 
 ════════════════════════════════════════════════════════════════════════════
-WHY DEEP SEARCH RUNS TWO QUERIES
+DEEP SEARCH IS GONE — REMOVED 2026-09-06
 ════════════════════════════════════════════════════════════════════════════
-No single phrase serves both bands and solo artists. `"U2" musician` returns
-Bono alone; `"Kanye West" band` returns nothing useful. Running both and
-merging costs about half a cent and needs no cleverness — the worker's eye
-discards whichever half is wrong, which it would do anyway.
+It fired two queries and merged the results, which made sense when one
+phrase could not serve both bands and solo artists. The travel project has
+the owner's own phrasing buttons instead, and each one is a query he chose,
+so a second automatic query added nothing a button could not do better.
+
+THE PAID KEY STAYED. It was never only for deep search — it is the fallback
+whenever the free key is inside its one-per-second window or has spent its
+monthly allowance. Deleting it alongside deep search would have left a
+worker looking at a rate-limit error with no way through.
 """
 
 from __future__ import annotations
@@ -102,7 +107,7 @@ def _setting(db: Session, key: str, project=None):
     return get_setting(db, key, project=project)
 
 
-def build_queries(db, artist: str, *, deep: bool, project=None,
+def build_queries(db, artist: str, *, project=None, kind: str = "",
                   template: str | None = None) -> list[str]:
     """
     Render the configured query templates for one master title.
@@ -138,14 +143,23 @@ def build_queries(db, artist: str, *, deep: bool, project=None,
     if template is not None:
         raw = str(template)
     else:
-        key = "brave_query_deep" if deep else "brave_query_normal"
-        raw = str(_setting(db, key, project) or "")
+        raw = str(_setting(db, "brave_query_normal", project) or "")
+
     clean = normalise_for_search(artist)
+    kind_clean = normalise_for_search(kind or "")
+
     out = []
     for line in raw.splitlines():
         line = line.strip()
-        if line:
-            out.append(line.replace("{title}", clean).replace("{artist}", clean))
+        if not line:
+            continue
+        line = (line.replace("{title}", clean)
+                    .replace("{artist}", clean)
+                    .replace("{kind}", kind_clean))
+        # A title with no kind leaves "{kind}" as nothing, which would
+        # otherwise leave a double space in the middle of the query. Harmless
+        # to Brave, but it makes the query printed on screen look broken.
+        out.append(" ".join(line.split()))
     return out
 
 
@@ -236,7 +250,7 @@ def _parse(raw: list[dict], min_dimension: int) -> tuple[list[ImageResult], int]
 
 # ── Public entry point ──────────────────────────────────────────────────────
 
-def search(db: Session, artist: str, *, deep: bool = False, project=None,
+def search(db: Session, artist: str, *, project=None, kind: str = "",
            template: str | None = None) -> SearchOutcome:
     """
     Run a normal or deep search and return de-duplicated results.
@@ -261,7 +275,7 @@ def search(db: Session, artist: str, *, deep: bool = False, project=None,
 
     per_query = int(_setting(db, "brave_results_per_query", project) or 50)
     min_dim = int(_setting(db, "brave_min_dimension", project) or 300)
-    queries = build_queries(db, artist, deep=deep, project=project,
+    queries = build_queries(db, artist, project=project, kind=kind,
                             template=template)
     if not queries:
         raise BraveError("No search query template configured")
@@ -273,36 +287,35 @@ def search(db: Session, artist: str, *, deep: bool = False, project=None,
 
     for query in queries:
         raw = None
-        # Deep searches go straight to the paid key: two queries fired
-        # together would trip the free key's one-per-second ceiling.
-        if deep and paid_key:
+        if free_key:
+            try:
+                wait = _FREE_MIN_INTERVAL - (time.time() - _last_free_call)
+                if wait > 0:
+                    # Another worker searched within the last second. Rather
+                    # than making this one wait, spill to the paid key — it
+                    # costs half a cent and nobody sees a delay.
+                    raise _RateLimited("free key inside its 1/second window")
+                _last_free_call = time.time()
+                raw = _call(free_key, query, per_query)
+                key_used = "free"
+            except _RateLimited:
+                raw = None
+        if raw is None:
+            # THE PAID KEY IS STILL LOAD-BEARING, EVEN THOUGH DEEP SEARCH IS
+            # GONE. It was never only for deep search: it is what answers a
+            # worker when the free key is inside its one-per-second window or
+            # has spent its monthly two thousand. Removing it with deep search
+            # would have left a worker staring at a rate-limit error.
+            if not paid_key:
+                raise BraveError("Brave free key is rate limited and no paid key is set")
             raw = _call(paid_key, query, per_query)
             key_used = "paid"
-        else:
-            if free_key:
-                try:
-                    wait = _FREE_MIN_INTERVAL - (time.time() - _last_free_call)
-                    if wait > 0:
-                        # Another worker searched within the last second. Rather
-                        # than making this one wait, spill to the paid key —
-                        # it costs half a cent and nobody sees a delay.
-                        raise _RateLimited("free key inside its 1/second window")
-                    _last_free_call = time.time()
-                    raw = _call(free_key, query, per_query)
-                    key_used = "free"
-                except _RateLimited:
-                    raw = None
-            if raw is None:
-                if not paid_key:
-                    raise BraveError("Brave free key is rate limited and no paid key is set")
-                raw = _call(paid_key, query, per_query)
-                key_used = "paid"
 
         parsed, dropped = _parse(raw, min_dim)
         filtered += dropped
         for r in parsed:
             if r.url in seen:
-                continue          # the two deep queries overlap heavily
+                continue          # a multi-line phrasing can overlap itself
             seen.add(r.url)
             merged.append(r)
 

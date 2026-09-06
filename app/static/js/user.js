@@ -325,29 +325,38 @@
       fb.querySelector('.att-active-flags-plural').textContent = myRevs.length === 1 ? '' : 's';
     }
 
-    // An external source link, or the in-page grid — never both, decided by
-    // the project's declared search_mode rather than by guessing from whether
-    // some URL happens to be blank.
+    // ── TWO INDEPENDENT QUESTIONS, ASKED SEPARATELY ────────────────────
+    //
+    // Does this project search IN-PAGE, and does it have an OUTSIDE LINK.
+    // These used to be one either/or — a project got the grid or the link,
+    // never both — and that was correct until travel needed both. Brave's
+    // picture catalogue is thinner than Google's, so the grid is the first
+    // try and Google is the backstop when it comes up short.
+    //
+    // The paste-a-URL box belongs to the LINK, not to the absence of a
+    // grid: it is how an image found on the outside site gets back here.
     const tmdb = node.querySelector('.att-tmdb');
     const searchBox = node.querySelector('[data-search-box]');
     const saveBox = node.querySelector('.save-box');
-    if (t.search_mode === 'inpage') {
-      // No external source, so no link and no paste-a-URL box. The worker
-      // picks from the grid; a URL field they can never sensibly fill is
-      // clutter, and on a phone it is what summons the keyboard.
-      tmdb.hidden = true;
-      if (saveBox) saveBox.hidden = true;
-      if (searchBox) { searchBox.hidden = false; wireSearch(searchBox, t); }
-    } else {
-      tmdb.href = t.tmdb_search || '#';
-      tmdb.hidden = !t.tmdb_search;
+    const hasLink = !!t.tmdb_search;
+
+    if (searchBox) {
+      searchBox.hidden = (t.search_mode !== 'inpage');
+      if (!searchBox.hidden) wireSearch(searchBox, t);
+    }
+
+    tmdb.hidden = !hasLink;
+    if (hasLink) {
+      tmdb.href = t.tmdb_search;
       // The button is named by the project, not by the markup. A worker on
       // a niche that has never heard of TMDB should never be told to open
       // it — and the day a third source appears, this needs no edit.
       tmdb.textContent = `↗ Open ${t.source_label || 'source'}`;
-      if (saveBox) saveBox.hidden = false;
-      if (searchBox) searchBox.hidden = true;
     }
+    // Shown with the link and hidden without it. A URL field a worker can
+    // never sensibly fill is clutter, and on a phone it is what summons the
+    // keyboard.
+    if (saveBox) saveBox.hidden = !hasLink;
 
     // The project's own word for what is being saved — "posters" for movies,
     // "images" for MUSIK. Every worker-facing label reads this.
@@ -369,7 +378,8 @@
     const grid  = node.querySelector('.posters-grid');
     const count = node.querySelector('.posters-count');
     count.textContent = (t.posters || []).length;
-    (t.posters || []).forEach((p) => grid.appendChild(buildPosterCard(p)));
+    (t.posters || []).forEach(
+      (p) => grid.appendChild(buildPosterCard(p, !!t.tmdb_search)));
     grid.dataset.sig = (t.posters || []).map((p) => `${p.id}:${p.size || 0}`).join('|');
 
     const completeBtn = node.querySelector('[data-action="complete"]');
@@ -419,7 +429,8 @@
     const newSig = (t.posters || []).map((p) => `${p.id}:${p.size || 0}`).join('|');
     if ((grid.dataset.sig || '') !== newSig) {
       grid.innerHTML = '';
-      (t.posters || []).forEach((p) => grid.appendChild(buildPosterCard(p, t.search_mode)));
+      (t.posters || []).forEach(
+        (p) => grid.appendChild(buildPosterCard(p, !!t.tmdb_search)));
       grid.dataset.sig = newSig;
     }
     const completeBtn = activePanel.querySelector('[data-action="complete"]');
@@ -433,14 +444,15 @@
     }
   }
 
-  // searchMode is the TITLE's, passed in by the caller. It is only ever
-  // called for the title the worker has open, which the server already
-  // filters to the project they are standing in — so the global would be
-  // right today. It would be right by accident, and the same assumption was
-  // wrong two functions down, where a flag card really can belong to the
-  // other project. Falls back to the global for safety.
-  function buildPosterCard(p, searchMode) {
-    const mode = searchMode || PD.searchMode;
+  // hasLink is the TITLE's own answer to "is there an outside site to paste
+  // an address from". Passed in by the caller rather than read from the
+  // project the worker happens to be standing in — a flag card can belong
+  // to their other project, and the two would disagree.
+  //
+  // It used to be the title's search MODE, on the reasoning that a project
+  // with a grid has nothing to paste. That stopped being true when travel
+  // got both a Brave grid and a Google link.
+  function buildPosterCard(p, hasLink) {
     const node = tplPoster.content.cloneNode(true);
     const img = node.querySelector('.poster-img');
     img.src = fileUrl(p.id, p.size);
@@ -455,14 +467,14 @@
     node.querySelector('.poster-size').textContent = humanSize(p.size || 0);
     // REPLACE-BY-URL ONLY EXISTS WHERE THERE IS A URL TO PASTE.
     //
-    // A project that searches in-page has no source URL — the worker picked
-    // from a grid and would have no idea what to type here. Their way to
-    // change their mind is DELETE and pick again, which is why that button
-    // stays. Removed rather than disabled: a control that can never do
-    // anything is not a labelling problem.
+    // With no outside site the worker picked from a grid and would have no
+    // idea what to type here; their way to change their mind is DELETE and
+    // pick again, which is why that button stays. Removed rather than
+    // disabled: a control that can never do anything is not a labelling
+    // problem.
     const replaceUrl = node.querySelector('.poster-replace-url');
     const replaceBtn = node.querySelector('[data-action="replace"]');
-    if (mode === 'inpage') {
+    if (!hasLink) {
       replaceUrl.remove();
       replaceBtn.remove();
     } else {
@@ -759,8 +771,10 @@
     // only way a movie poster can be replaced, so the worker could not fix
     // their own flagged image. The server already sends the title's own mode
     // with every revision; this just has to read it.
+    // The link stands or falls on its own now — a project can search
+    // in-page AND have one, which travel does.
     const tmdbA = wrap.querySelector('.rev-tmdb');
-    if (r.search_mode === 'inpage' || !r.tmdb_search) {
+    if (!r.tmdb_search) {
       tmdbA.remove();
     } else {
       tmdbA.href = r.tmdb_search;
@@ -845,10 +859,14 @@
         const deleteBtn  = wrap.querySelector('[data-action="delete-revision"]');
         const resolveBtn = wrap.querySelector('[data-action="resolve"]');
         if (r.status === 'awaiting_approval') resolveBtn.hidden = true;
-        // Same rule as the saved-image card, and the same correction: the
-        // TITLE's mode, not the mode of the project the worker happens to be
-        // standing in. See the note on the source link above.
-        if (r.search_mode === 'inpage') {
+        // REPLACING BY URL BELONGS TO THE OUTSIDE LINK, not to the absence
+        // of a grid. Travel has both, and a worker whose image was flagged
+        // needs to be able to paste a better one from Google.
+        //
+        // Still the TITLE's own values, never the project the worker happens
+        // to be standing in — a flag card can be for a title in their other
+        // project, and the two would disagree.
+        if (!r.tmdb_search) {
           urlInp.remove();
           replaceBtn.remove();
         } else {
@@ -1461,7 +1479,13 @@ function wireSearch(box, title) {
 
   function render() {
     if (!results.length) {
-      grid.innerHTML = '<p class="muted">No images found. Try DEEP SEARCH.</p>';
+      // NAMES THE NEXT STEP, rather than just reporting the emptiness.
+      // This is the moment the Google button exists for, and a worker
+      // staring at "no images found" should not have to work that out.
+      grid.innerHTML = '<p class="muted">Nothing found. Try one of the other '
+                     + 'search buttons, or open Google above and paste an '
+                     + 'image address. If Google has nothing either, SKIP '
+                     + 'this title and say why.</p>';
       return;
     }
     grid.innerHTML = results.map((r) => `
@@ -1488,11 +1512,11 @@ function wireSearch(box, title) {
     refreshBar();
   }
 
-  // `kind` is 'normal', 'deep', or a number — the index of one of the
-  // owner's own phrasings. A number rather than the words themselves because
-  // the server must decide what gets searched: letting the page post a
-  // sentence would let anyone with the console open spend Brave credits on
-  // anything they liked.
+  // `kind` is 'normal' or a number — the index of one of the owner's own
+  // phrasings. A number rather than the words themselves because the server
+  // must decide what gets searched: letting the page post a sentence would
+  // let anyone with the console open spend Brave credits on anything they
+  // liked.
   async function run(kind, force, cacheOnly) {
     selected.clear();
     refreshJump();
@@ -1503,8 +1527,8 @@ function wireSearch(box, title) {
     note.hidden = true;
     try {
       const phraseIndex = (typeof kind === 'number') ? kind : -1;
-      const qs = `?deep=${kind === 'deep' ? 1 : 0}`
-               + (phraseIndex >= 0 ? `&phrase=${phraseIndex}` : '')
+      const qs = `?`
+               + (phraseIndex >= 0 ? `phrase=${phraseIndex}` : '')
                + (force ? '&refresh=1' : '')
                + (cacheOnly ? '&cache_only=1' : '');
       const r  = await fetch(`/api/search/${title.id}${qs}`);
@@ -1546,8 +1570,6 @@ function wireSearch(box, title) {
 
   box.querySelector('[data-action="search-normal"]')
      .addEventListener('click', () => run('normal', false));
-  box.querySelector('[data-action="search-deep"]')
-     .addEventListener('click', () => run('deep', false));
   // querySelectorAll, because there are as many of these as the admin typed
   // lines — possibly none, in which case this loop simply does nothing.
   box.querySelectorAll('[data-action="search-phrase"]').forEach((b) => {

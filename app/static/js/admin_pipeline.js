@@ -76,11 +76,13 @@
     // about.
     search: [
       ['brave_query_normal',  'text',     'SEARCH button',
-       'What the plain SEARCH button asks Brave for. Write it as a sentence with {title} where the place name goes, for example: "{title}" or photo of {title}. The place already carries its own country, so you do not need to add one.'],
-      ['brave_query_deep',    'textarea', 'DEEP SEARCH button',
-       'One phrasing per line. DEEP SEARCH runs every line and merges the results into one grid, so it costs one paid query per line. Use it when a single phrasing keeps missing things.'],
+       'What the plain SEARCH button asks Brave for. {title} is the place with its country already in it — "Chicago Illinois USA". {kind} is what the place IS — city, island, mountain. So "{title} {kind}" searches "Chicago Illinois USA city". Add your own words on the end.'],
+      ['google_query',        'text',     'GOOGLE button',
+       'What the GOOGLE button searches for when it opens a new tab. One phrasing only — Google is the backstop you reach for when the grid here has already failed, so a row of buttons there would be one more thing to fiddle with at the wrong moment. Same placeholders: {title} and {kind}.'],
+      ['source_search_url',   'text',     'Google address',
+       'Where the GOOGLE button goes. {query} is filled in for you, already encoded. Normally https://www.google.com/search?q={query}&tbm=isch — a setting rather than a constant because it is somebody else\'s address and they can move it.'],
       ['brave_search_phrasings', 'textarea', 'Extra phrasing buttons',
-       'One phrasing per line, and each line becomes ONE MORE BUTTON on the worker screen, in this order. Every line must contain {title}. Leave this blank and no extra buttons appear at all. For example: places to visit in {title} / {title} skyline / aerial view of {title}.'],
+       'One phrasing per line, and each line becomes ONE MORE BUTTON on the worker screen, in this order. Every line must contain {title}; {kind} is optional. Leave this blank and no extra buttons appear. For example: {title} {kind} scenic / {title} skyline / aerial view of {title}.'],
       ['brave_results_per_query', 'number', 'Results per search', 'How many images Brave is asked for each time. 50 is a full screen to scroll; 100 is the most it will give.'],
       ['brave_min_dimension', 'number', 'Smallest usable image (px)', 'An image smaller than this on BOTH sides is hidden before the worker sees it. The count of what was hidden is shown under the grid.'],
     ],

@@ -166,15 +166,59 @@ class _NoDb:
 
 
 ok("the given wording is used, with the place dropped in",
-   B.build_queries(_NoDb(), "Kyoto", deep=False,
+   B.build_queries(_NoDb(), "Kyoto",
                    template="places to visit in {title}")
    == ["places to visit in Kyoto"])
+
+# ── {kind} ─────────────────────────────────────────────────────────────────
+#
+# The sheet's description column — city, island, mountain. A PLACEHOLDER
+# rather than something glued on automatically, so the owner can put it in,
+# take it out and compare. A rule baked into the code would take that away.
+print("\n  the {kind} placeholder")
+ok("the kind is dropped in where it is asked for",
+   B.build_queries(_NoDb(), "Chicago Illinois USA", kind="city",
+                   template="{title} {kind}")
+   == ["Chicago Illinois USA city"])
+ok("and his own words go on the end",
+   B.build_queries(_NoDb(), "Chicago Illinois USA", kind="city",
+                   template="{title} {kind} scenic")
+   == ["Chicago Illinois USA city scenic"])
+ok("a template that does not ask for it is left alone",
+   B.build_queries(_NoDb(), "Kyoto", kind="city", template="{title} skyline")
+   == ["Kyoto skyline"])
+ok("a MISSING kind leaves no double space behind it",
+   B.build_queries(_NoDb(), "Kyoto", kind="", template="{title} {kind} scenic")
+   == ["Kyoto scenic"],
+   "a gap in the middle of the query looks broken on screen")
+
 ok("typographic punctuation is still cleaned up for searching",
-   B.build_queries(_NoDb(), "Guns N’ Roses", deep=False,
+   B.build_queries(_NoDb(), "Guns N’ Roses",
                    template="{title}") == ["Guns N' Roses"])
 ok("one button is one query, never several",
-   len(B.build_queries(_NoDb(), "Kyoto", deep=True,
+   len(B.build_queries(_NoDb(), "Kyoto",
                        template="{title} skyline")) == 1)
+
+# ── DEEP SEARCH IS GONE — REMOVED 2026-09-06 ──────────────────────────────
+#
+# It fired two queries and merged them. The owner's phrasing buttons do the
+# same job better, because each one is wording he chose.
+#
+# THE PAID KEY STAYED, and that is the part worth checking. It was never only
+# for deep search: it is the fallback when the free key is inside its
+# one-per-second window or has spent its monthly allowance. Removing both
+# together would leave a worker looking at a rate-limit error.
+print("\nDeep search is gone; the paid key is not")
+import inspect                                          # noqa: E402
+src_search = inspect.getsource(B.search)
+ok("nothing takes a `deep` argument any more",
+   "deep" not in inspect.signature(B.build_queries).parameters
+   and "deep" not in inspect.signature(B.search).parameters)
+ok("the paid key is still the fallback",
+   "paid_key" in src_search and "_RateLimited" in src_search,
+   "removing this would show a worker an error instead of pictures")
+ok("brave_query_deep is no longer a setting",
+   "brave_query_deep" not in P.DEFAULTS)
 
 
 # ════════════════════════════════════════════════════════════════════════════

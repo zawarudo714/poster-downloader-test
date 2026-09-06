@@ -1,95 +1,94 @@
 # Not yet deployed
 
+Nothing. Everything written is on the server.
+
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.
 
-## v145 — the worker's photo beside the poster, and a background colour
+## v146 — Google as the backstop, {kind} in the search, deep search gone
 
-### Schema — TWO NEW COLUMNS, both nullable
+### Schema — ONE NEW COLUMN
 
-* `processed_images.master_path` — the transparent original, exactly as
-  OpenAI returned it, kept un-enlarged.
-* `processed_images.background_color` — the colour ALREADY flattened into
-  `storage_path`. Not a request for one; a record of what was done.
+`projects.has_source_link`, integer, default 0. In `NEW_COLUMNS`, added at
+startup. Every existing project gets 0, which is correct: none of them had
+an outside link except through the old derivation, and travel's spec sets
+its own to 1.
 
-Both are in `NEW_COLUMNS`, so startup adds them. Existing rows have NULL,
-which reads as "this generation was opaque" — correct for every image made
-before today.
+### THE FIELD THAT WAS ANSWERING TWO QUESTIONS
 
-### Why any of this exists
+The code worked out "does this project have an outside link" from "does it
+NOT search in-page". One field, two questions — fine while every project was
+one or the other, wrong the moment travel needed both.
 
-`background: transparent` is not a background setting. Asking for it changes
-HOW gpt-image-2 renders, and the owner's whole poster look depends on it —
-MEASURED 2026-09-05. The transparency is a side effect to be flattened away.
+Brave's picture catalogue is thinner than Google's (MEASURED by the owner,
+2026-09-06, by using both), so travel now has the Brave grid as the first try
+AND a Google button as the backstop. `has_source_link` says exactly that and
+nothing else.
 
-Most posters flatten correctly onto black. A few come back with a
-semi-transparent sky, which goes muddy on black and reads correctly on its
-own colour. Bangkok was the specimen.
+Four places decided by the old derivation and all four are corrected:
+the source link, the paste-a-URL box, replace-by-URL on a saved image, and
+replace-by-URL on a flagged one. **Nothing new was built for the paste box —
+it already existed and was being hidden.** Finding that saved building a
+second one beside it.
 
-### The review screen
+### {kind} — the sheet's description in the search
 
-* **The worker's photograph now shows beside the poster.** The API was
-  already sending it and the screen simply never drew it — a display fix,
-  not a new feature. It answers the one question the screen exists for: did
-  the model paint the place the worker found, or invent a grander building
-  of the same type.
-* **A colour control per image**, with an eyedropper. The preview is the
-  transparent original sitting on a coloured box, composited BY THE BROWSER
-  — the same arithmetic the server does, so what you see is the finished
-  poster rather than an approximation, and it updates with no round trip.
-* The eyedropper samples the COMPOSITED picture. Click the Bangkok sky and
-  you get the blue you can see, not the raw half-transparent value under it.
-* Colours are held locally until SAVE, like the decisions, so dragging the
-  picker costs nothing and you can change your mind three titles back.
-* The control is hidden entirely when there is no transparent master — an
-  opaque generation has nothing to recolour, and a dead knob is worse than
-  no knob.
+`{title}` is the place with its country: "Chicago Illinois USA".
+`{kind}` is what it IS: city, island, mountain, beach.
+So `{title} {kind}` searches "Chicago Illinois USA city", and adding a word
+gives "Chicago Illinois USA city scenic".
 
-### The pipeline
+**A placeholder, not glued on automatically**, and that was the owner's call
+after I put the choice to him. Automatic would have taken away his ability to
+test with the kind against without it, and he is still settling the wording.
 
-* Generation now saves the raw transparent PNG as the master, flattens onto
-  the dashboard's colour, THEN upscales.
-* Approval re-renders **only if the colour actually changed** — nineteen in
-  twenty keep the default, and re-rendering those would turn a batch of a
-  hundred into minutes of pointless work.
-* Re-rendering never calls OpenAI. That is the entire reason the master is
-  kept: changing your mind costs a second of Pillow, not another picture.
-* If a re-render fails the request errors rather than reporting a success it
-  did not achieve. The old file is still in place, so nothing is lost.
+The Google button builds its term the same way, from `google_query`, so both
+searches ask for the same thing in the same words. A separate spelling there
+would mean the Google button quietly looking for something else, which is the
+hardest kind of difference to notice.
 
-### New dashboard setting
+### DEEP SEARCH REMOVED
 
-`gpt_background_color`, default `#000000`, on the IMAGE GENERATION panel.
+It fired two queries and merged them. The phrasing buttons do that job better
+because each one is wording the owner chose. Gone from the settings, the
+worker screen, the endpoint, the query builder and the cache.
 
-### New Diagnostics check
+**THE PAID BRAVE KEY STAYED.** It was never only for deep search — it is the
+fallback when the free key is inside its one-per-second window or has spent
+its monthly two thousand. Removing both together would have left a worker
+looking at a rate-limit error instead of pictures. There is now a test that
+fails if anybody removes it.
 
-`approved_images_have_a_background` — an approved image made from a
-transparent generation must say what is behind it. The ordering already makes
-this near-impossible, but the failure would be silent: the poster ships on
-whatever colour it last had and merely looks slightly wrong. A money defect
-wearing the clothes of a taste defect.
+### Two settings that had no box now have one
+
+`google_query` (new) and `source_search_url` (existed since the beginning,
+never had a field anywhere). The boxless backlog is down from 18 to 17.
+
+`source_search_url` is where the Google button goes — a setting rather than a
+constant because it is somebody else's address and they can move it.
+
+### Also
+
+"No images found. Try DEEP SEARCH." now names what to actually do: try
+another button, or open Google and paste an address, and if Google has
+nothing either then SKIP and say why.
 
 ### Verified
 
-* **By running:** `preflight.py` green on all 21 checks. Every touched Python
-  file compiles. `admin_review_images.js` passes `node --check`. The
-  compositing maths exercised on real pixels — a half-transparent pixel lands
-  halfway to black, lands somewhere DIFFERENT on blue (which is the whole
-  point of the eyedropper), a fully clear pixel becomes the background, and
-  an opaque picture is untouched. Six junk colour values all fall back to
-  black instead of raising.
-* **A claim I had to withdraw.** I wrote, in four places, that upscaling
-  before flattening leaves a dark fringe. Measured, the two orders came out
-  within two levels of each other. Flatten-first is still what runs — it
-  cannot fringe by construction and costs nothing — but the comments now say
-  it is a safety argument rather than an observed fault, and the test reports
-  the numbers instead of asserting a difference it could not show.
-* **New file `tools/test_background_flatten.py`**, 20 checks with a sabotage.
-  **He needs to run this one:**
-  `docker compose exec web python tools/test_background_flatten.py`
-* **NOT verified:** no poster has been generated, reviewed or recoloured
-  through the real screen. The eyedropper has never been clicked.
+* `preflight.py` green on all 21 checks — and it CAUGHT the missing box for
+  `google_query` before I noticed, which is the check earning its place.
+* Every touched Python file compiles; `user.js` and `admin_pipeline.js` pass
+  `node --check`; tag counts balance in the worker template.
+* `build_queries` run for real on seven cases: the kind lands where it is
+  asked for, a template that does not ask for it is untouched, a MISSING kind
+  leaves no double space, and curly apostrophes are still cleaned up.
+* `tools/test_search_phrasings.py` extended — **run it after deploying:**
+  `cd /opt/poster && docker compose exec web python tools/test_search_phrasings.py`
+* **NOT verified:** the Google button has never been clicked, and no image
+  has been pasted back from Google. Nothing has run against a real Brave key.
 
 ### The node
 
 `worker_service/` is UNCHANGED. **No copy needed.**
+
+---

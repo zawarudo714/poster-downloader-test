@@ -4,8 +4,15 @@
 (function () {
 
   // ── Filesystem tree (admin dashboard) ────────────────────────────────────
+  // Loaded on the BUTTON, not on page load (Mega Audit speed pass,
+  // 2026-09-06): this endpoint walks the whole workspace on disk, and the
+  // dashboard is the first page of every session. With a real catalogue the
+  // walk is the slowest thing on the page, spent answering a question
+  // nobody asked yet.
   const fsTree = document.getElementById('fs-tree');
-  if (fsTree) {
+  const fsLoad = document.getElementById('fs-tree-load');
+  function loadTree() {
+    fsTree.innerHTML = '<p class="muted">Walking the workspace…</p>';
     fetch('/admin/api/tree').then((r) => r.json()).then((data) => {
       fsTree.innerHTML = '';
       if (!data.workers || !data.workers.length) {
@@ -37,6 +44,12 @@
         fsTree.appendChild(det);
       });
     });
+  }
+  if (fsTree) {
+    fsTree.innerHTML = '<p class="muted">Press LOAD TREE to walk the '
+      + 'workspace folders. Not loaded automatically — the walk is the '
+      + 'slowest thing this page could do.</p>';
+    if (fsLoad) fsLoad.addEventListener('click', loadTree);
   }
 
   // ── Release-user-queue buttons ───────────────────────────────────────────
@@ -407,8 +420,38 @@
   const lbFlagBtn    = $('ib-lb-flag-btn');
   const lbUnflagBtn  = $('ib-lb-unflag-btn');
 
+  // Every (title, image) pair currently on screen, flattened in reading
+  // order — one image per title in travel, so stepping through images IS
+  // stepping through titles. Asked for by the owner 2026-09-06: click one
+  // image, then arrow through the whole day without closing the lightbox.
+  function lightboxList() {
+    const out = [];
+    (titles || []).forEach((t) => (t.posters || []).forEach((p) => out.push({ t, p })));
+    return out;
+  }
+  function lightboxStep(delta) {
+    const list = lightboxList();
+    if (!list.length || !currentLightbox) return;
+    const at = list.findIndex((e) => e.p.poster_id === currentLightbox.poster.poster_id);
+    const next = list[at + delta];
+    if (next) openLightbox(next.t, next.p);
+  }
+
   function openLightbox(t, p) {
     currentLightbox = { master: t, poster: p };
+    // The PLACE, named first and large — a bare image of somewhere you
+    // cannot name is exactly what the owner asked to never see again.
+    const nameEl = $('ib-lb-title');
+    if (nameEl) {
+      nameEl.textContent = (t.external_id != null ? t.external_id + '. ' : '')
+        + t.title + (t.year ? ` (${t.year})` : '');
+    }
+    const posEl = $('ib-lb-pos');
+    if (posEl) {
+      const list = lightboxList();
+      const at = list.findIndex((e) => e.p.poster_id === p.poster_id);
+      posEl.textContent = at >= 0 ? `${at + 1} / ${list.length}` : '';
+    }
     lbImg.src = fileUrl(p.poster_id, p.size || p.filename);
     lbImg.alt = p.filename;
     const dims = (p.image_width && p.image_height) ? ` · ${p.image_width}×${p.image_height}` : '';
@@ -446,6 +489,9 @@
   document.querySelectorAll('[data-lightbox-close]').forEach((el) => {
     el.addEventListener('click', closeLightbox);
   });
+  const lbPrev = $('ib-lb-prev'), lbNext = $('ib-lb-next');
+  if (lbPrev) lbPrev.addEventListener('click', () => lightboxStep(-1));
+  if (lbNext) lbNext.addEventListener('click', () => lightboxStep(1));
 
   lbFlagBtn.addEventListener('click', async () => {
     if (!currentLightbox) return;
@@ -471,6 +517,8 @@
     if (ae && ['INPUT', 'SELECT', 'TEXTAREA'].includes(ae.tagName)) return;
     if (!lightbox.hidden) {
       if (e.key === 'Escape') closeLightbox();
+      if (e.key === 'ArrowLeft')  lightboxStep(-1);
+      if (e.key === 'ArrowRight') lightboxStep(1);
       return;
     }
     if (e.key === 'ArrowLeft')  navTitle(-1);

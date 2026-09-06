@@ -125,9 +125,9 @@
             </div>
             {% set people_active = active_tab in ('chat', 'users', 'audit') %}
             <div class="nav-group {% if people_active %}has-active{% endif %}" data-nav-group>
-              <button type="button" class="navlink nav-group-btn {% if people_active %}active{% endif %}" aria-expanded="false">People&nbsp;▾<span class="nav-badge" id="nav-chat-badge-group" hidden>0</span></button>
+              <button type="button" class="navlink nav-group-btn {% if people_active %}active{% endif %}" aria-expanded="false">People&nbsp;▾<span class="nav-badge nav-badge-error" id="nav-chat-badge-group" hidden>0</span></button>
               <div class="nav-group-menu">
-                <a href="/admin/chat"      class="navlink chat-nav {% if active_tab == 'chat' %}active{% endif %}">Chat<span class="nav-badge" id="nav-chat-badge" hidden>0</span></a>
+                <a href="/admin/chat"      class="navlink chat-nav {% if active_tab == 'chat' %}active{% endif %}">Chat<span class="nav-badge nav-badge-error" id="nav-chat-badge" hidden>0</span></a>
                 <a href="/admin/users"     class="navlink {% if active_tab == 'users' %}active{% endif %}">Users</a>
                 <a href="/admin/audit"     class="navlink {% if active_tab == 'audit' %}active{% endif %}">Activity&nbsp;Log</a>
               </div>
@@ -145,7 +145,7 @@
             <a href="/"                class="navlink {% if active_tab == 'dashboard' %}active{% endif %}">Dashboard</a>
             <a href="/history"         class="navlink {% if active_tab == 'history' %}active{% endif %}">Save&nbsp;History</a>
             <a href="/stats"           class="navlink {% if active_tab == 'stats' %}active{% endif %}">Stats</a>
-            <a href="/chat"            class="navlink chat-nav {% if active_tab == 'chat' %}active{% endif %}">Chat<span class="nav-badge" id="nav-chat-badge" hidden>0</span></a>
+            <a href="/chat"            class="navlink chat-nav {% if active_tab == 'chat' %}active{% endif %}">Chat<span class="nav-badge nav-badge-error" id="nav-chat-badge" hidden>0</span></a>
             {#
               Only shown to workers covering more than one project. Most
               workers have exactly one and should never see a control that

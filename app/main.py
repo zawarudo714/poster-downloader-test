@@ -8,6 +8,7 @@ Make sure to create the first admin first:
     python scripts/create_admin.py
 """
 
+import time
 from fastapi import FastAPI, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -42,6 +43,38 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 app.mount("/static", StaticFiles(directory=str(APP_DIR / "static")), name="static")
 
 
+# ── The slow-page ring ──────────────────────────────────────────────────
+# The last few hundred requests with their server-side cost, kept in memory
+# and shown on the Diagnostics page. In memory on purpose: this is a live
+# instrument, not a record — a restart clearing it is fine, and writing a
+# row per request to SQLite would BE a slowdown. One process serves the
+# site (uvicorn under docker), so one ring sees everything.
+import time as _time_mod
+from collections import deque
+
+_TIMINGS: deque = deque(maxlen=500)
+
+
+def _record_timing(path: str, ms: float) -> None:
+    _TIMINGS.append((_time_mod.time(), path, round(ms, 1)))
+
+
+def slowest_pages(limit: int = 15) -> list[dict]:
+    """The worst offenders of the last 500 requests, slowest first."""
+    worst: dict[str, dict] = {}
+    for ts, path, ms in _TIMINGS:
+        b = worst.setdefault(path, {"path": path, "hits": 0, "worst_ms": 0.0,
+                                    "total_ms": 0.0})
+        b["hits"] += 1
+        b["total_ms"] += ms
+        b["worst_ms"] = max(b["worst_ms"], ms)
+    out = sorted(worst.values(), key=lambda b: -b["worst_ms"])[:limit]
+    for b in out:
+        b["avg_ms"] = round(b["total_ms"] / b["hits"], 1)
+        del b["total_ms"]
+    return out
+
+
 @app.middleware("http")
 async def no_cache_dynamic(request: Request, call_next):
     """
@@ -55,10 +88,29 @@ async def no_cache_dynamic(request: Request, call_next):
     Also clears any leftover pd_env cookie from old builds. The env-switcher
     feature was removed; the cookie is harmless but no longer meaningful.
     """
+    started = time.perf_counter()
     response = await call_next(request)
+    elapsed_ms = (time.perf_counter() - started) * 1000
     path = request.url.path
-    if not (path.startswith("/static/") or path.startswith("/file_own/")
-            or path.startswith("/admin/file/") or path.startswith("/admin/zip/download/")):
+
+    # ── SAY HOW LONG THE SERVER TOOK, ON EVERY ANSWER ───────────────────
+    # The one measured slowness this project ever had was the NETWORK link,
+    # not the server — and telling those apart cost an evening. With this
+    # header, F12 shows the server's share of every load: a slow page with
+    # a small number here is the connection; a big number is ours. See also
+    # the SLOWEST PAGES panel on Diagnostics, fed by the same clock.
+    response.headers["Server-Timing"] = f"app;dur={elapsed_ms:.0f}"
+    if not path.startswith("/static/"):
+        _record_timing(path, elapsed_ms)
+
+    if path.startswith("/static/"):
+        # Everything under /static is referenced with ?v={APP_VERSION}, so a
+        # deploy changes every URL and the old copy can be cached for ever.
+        # Without this the browser revalidated each file on every page — and
+        # on the owner's measured 12 KB/s day, even a 304 costs a round trip.
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    elif not (path.startswith("/file_own/")
+              or path.startswith("/admin/file/") or path.startswith("/admin/zip/download/")):
         response.headers["Cache-Control"] = "no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
     # Garbage-collect leftover env cookies from older deployments.

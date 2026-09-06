@@ -469,11 +469,10 @@
         </button>
       </div>` : ''}
       <p class="setting-help" style="margin-top:8px">
-        A single Photoshop run commonly takes 1–6 minutes. STALE means the claim
-        has outlived the timeout; it would be reclaimed automatically the next
-        time a node asks for work, but only then — so if you stopped the agent
-        mid-batch, RELEASE puts the item straight back rather than making you
-        wait it out.
+        An image usually takes a minute or two here. STALE means the machine
+        working on it has gone quiet past the timeout — the work frees itself
+        automatically, but only when a machine next asks for work, so RELEASE
+        puts a stuck image straight back in the queue instead of waiting.
       </p>`;
 
     el.querySelectorAll('[data-release-id]').forEach((b) => {

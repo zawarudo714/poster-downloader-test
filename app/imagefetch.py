@@ -220,12 +220,28 @@ def flatten_onto(src: Path, dest: Path, color: str | None) -> tuple[int, int]:
 
 
 def has_transparency(path: Path) -> bool:
-    """Is any part of this picture see-through? Cheap; reads the header."""
+    """
+    Is any part of this picture ACTUALLY see-through?
+
+    ════════════════════════════════════════════════════════════════════════
+    PIXELS, NOT FILE MODE (the owner's find, 2026-09-06)
+    ════════════════════════════════════════════════════════════════════════
+    The first version answered "is the file RGBA", and gpt-image-2 returns
+    RGBA even when it painted a fully opaque poster. So the review screen
+    offered a background colour on images the colour could never change —
+    the owner set the plate red for dramatic effect and nothing happened,
+    which is the exact dead-knob shape these notes keep warning about.
+    A picture is transparent when at least one pixel's alpha is below 255.
+    """
     from PIL import Image
     try:
         with Image.open(path) as img:
-            return (img.mode in ("RGBA", "LA")
-                    or (img.mode == "P" and "transparency" in img.info))
+            if img.mode == "P" and "transparency" in img.info:
+                return True
+            if img.mode not in ("RGBA", "LA"):
+                return False
+            alpha_min, _ = img.split()[-1].getextrema()
+            return alpha_min < 255
     except OSError:
         return False
 

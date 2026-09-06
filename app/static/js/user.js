@@ -351,7 +351,7 @@
       // The button is named by the project, not by the markup. A worker on
       // a niche that has never heard of TMDB should never be told to open
       // it — and the day a third source appears, this needs no edit.
-      tmdb.textContent = `↗ Open ${t.source_label || 'source'}`;
+      tmdb.textContent = `↗ Open ${t.source_link_label || t.source_label || 'source'}`;
     }
     // Shown with the link and hidden without it. A URL field a worker can
     // never sensibly fill is clutter, and on a phone it is what summons the
@@ -778,7 +778,7 @@
       tmdbA.remove();
     } else {
       tmdbA.href = r.tmdb_search;
-      tmdbA.textContent = `↗ Open ${r.source_label || 'source'}`;
+      tmdbA.textContent = `↗ Open ${r.source_link_label || r.source_label || 'source'}`;
     }
 
     // VIEW ALL POSTERS — opens the catalog modal so the worker can see
@@ -1035,6 +1035,12 @@
         if (!confirm('Are you sure you have NOT received this payment? The admin will be notified.')) return;
         const btn = item.querySelector('.receipt-nr-btn');
         btn.disabled = true;
+        // The two receipt buttons sit side by side on a phone, so a slip of
+        // the thumb could tell the admin his payment never arrived. Asking
+        // first costs one tap; a false alarm costs a confused conversation.
+        if (!confirm('Report this payment as NOT received?\n\nOnly press OK '
+            + 'if the money truly has not arrived. If you tapped this by '
+            + 'accident, press Cancel.')) return;
         const rr = await fetch(`/api/receipts/${r.id}/not_received`, { method: 'POST' });
         if (rr.ok) {
           showToast('Marked as not received — admin has been notified.', 'ok', 4000);

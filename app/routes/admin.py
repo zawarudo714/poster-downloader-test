@@ -314,6 +314,20 @@ def api_pulse(request: Request, admin: User = Depends(require_admin),
     })
 
 
+@router.get("/api/slow_pages")
+def api_slow_pages(admin: User = Depends(require_admin)):
+    """
+    The slowest pages this server process has served recently.
+
+    Fed by the timing middleware in main.py — the same clock that stamps the
+    Server-Timing header on every response. This is the SERVER's share only:
+    a page that feels slow while these numbers stay small is the network,
+    which is exactly the distinction that once cost an evening.
+    """
+    from ..main import slowest_pages
+    return JSONResponse({"ok": True, "pages": slowest_pages()})
+
+
 # ── Diagnostics ──────────────────────────────────────────────────────────────
 
 @router.get("/diagnostics", response_class=HTMLResponse)
@@ -1087,6 +1101,26 @@ def master_clear(request: Request, admin: User = Depends(require_admin),
     folder path so the files are still locatable.
     """
     proj = current_project(request, admin, db)
+
+    # ── REFUSE while saved work points at this list (Mega Audit, 2026-09-06).
+    # Deleting titles that living posters reference does not delete the
+    # posters — it ORPHANS them: every join drops them silently, the funnel
+    # stops counting them, and nothing on any screen says why. The owner's
+    # own re-import is exactly when this would fire, so the message says
+    # what to do instead of just "no".
+    title_ids = scope_titles(db.query(MasterTitle.id), proj).scalar_subquery()
+    attached = (db.query(func.count(SavedPoster.id))
+                  .filter(SavedPoster.deleted_at.is_(None),
+                          SavedPoster.master_title_id.in_(title_ids))
+                  .scalar() or 0)
+    if attached:
+        raise HTTPException(400,
+            f"{attached} saved image(s) still point at this title list. "
+            f"Clearing it now would orphan them — they would vanish from "
+            f"every count while their files stay on disk. Deal with those "
+            f"images first (approve, delete, or let the pipeline finish), "
+            f"then clear.")
+
     q = scope_titles(db.query(MasterTitle), proj)
     n = q.count()
     scope_titles(db.query(MasterTitle), proj).delete(synchronize_session=False)
@@ -1168,6 +1202,23 @@ def _import_worker(job_id: int, raw_bytes: bytes, file_ext: str, replace: bool,
                     or_(MasterTitle.project_id == project_id,
                         MasterTitle.project_id.is_(None))
                 )
+
+            # ── Same refusal as the CLEAR button (Mega Audit, 2026-09-06).
+            # A replace-import while saved images point at the old rows
+            # orphans them just as surely; and this runs in a background
+            # thread, so the refusal has to land in the JOB, where the
+            # progress dialog will show it.
+            doomed_ids = q.with_entities(MasterTitle.id).scalar_subquery()
+            attached = (db.query(func.count(SavedPoster.id))
+                          .filter(SavedPoster.deleted_at.is_(None),
+                                  SavedPoster.master_title_id.in_(doomed_ids))
+                          .scalar() or 0)
+            if attached:
+                raise RuntimeError(
+                    f"{attached} saved image(s) still point at the current "
+                    f"title list. Importing with REPLACE would orphan them. "
+                    f"Deal with those images first, then import again.")
+
             q.delete(synchronize_session=False)
             db.commit()
 
@@ -1218,10 +1269,14 @@ def _import_worker(job_id: int, raw_bytes: bytes, file_ext: str, replace: bool,
                 # numbers; importing a re-ordered file would not, which is why
                 # Replace exists rather than merging.
                 ext_id = row_number
+            # NO YEAR MEANS NULL, NEVER THE TEXT "N/A" (owner's find,
+            # 2026-09-06). This used to store the literal string, and since
+            # "N/A" is truthy, every screen's `year ?` guard passed — so all
+            # 88,970 travel titles rendered "Cape Verde (N/A)". The guards
+            # were correct everywhere; the data was poisoned at the door.
             year_raw = r.get("releaseyear") or r.get("release_year") or r.get("year") or ""
-            year_str = str(year_raw).strip() if year_raw not in (None, "") else "N/A"
-            m = re.search(r"\d{4}", year_str)
-            year_str = m.group() if m else "N/A"
+            m = re.search(r"\d{4}", str(year_raw or "").strip())
+            year_str = m.group() if m else None
             try:
                 votes = int(str(r.get("votes")).strip()) if r.get("votes") not in (None, "") else None
             except (ValueError, TypeError):

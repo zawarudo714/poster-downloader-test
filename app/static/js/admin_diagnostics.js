@@ -172,3 +172,50 @@
   if (reload) reload.addEventListener('click', load);
   load();
 })();
+
+
+// ── Slowest pages (v153 speed instrument) ────────────────────────────────
+(function () {
+  var list = document.getElementById('slow-list');
+  var btn = document.getElementById('slow-reload');
+  if (!list) return;
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function load() {
+    fetch('/admin/api/slow_pages', { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var pages = d.pages || [];
+        if (!pages.length) {
+          list.innerHTML = '<p class="muted">Nothing recorded yet — the '
+            + 'server restarted recently. Browse a few pages and reload.</p>';
+          return;
+        }
+        list.innerHTML = '<table class="data-table"><thead><tr>'
+          + '<th>PAGE</th><th>WORST</th><th>AVERAGE</th><th>HITS</th>'
+          + '</tr></thead><tbody>'
+          + pages.map(function (p) {
+              var bad = p.worst_ms > 500;
+              return '<tr><td class="mono">' + esc(p.path) + '</td>'
+                + '<td class="mono' + (bad ? ' danger' : '') + '">'
+                + p.worst_ms + ' ms</td>'
+                + '<td class="mono">' + p.avg_ms + ' ms</td>'
+                + '<td class="mono">' + p.hits + '</td></tr>';
+            }).join('')
+          + '</tbody></table>'
+          + '<p class="muted" style="margin-top:8px">These are the server\'s '
+          + 'milliseconds only. If a page feels slow but reads small here, '
+          + 'the time is going to the network.</p>';
+      })
+      .catch(function () {
+        list.innerHTML = '<p class="muted">Could not load the timings.</p>';
+      });
+  }
+  if (btn) btn.addEventListener('click', load);
+  load();
+})();

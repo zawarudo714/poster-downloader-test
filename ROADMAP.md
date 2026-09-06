@@ -200,7 +200,13 @@ closing tag behind reparents everything below it, renders fine, parses fine,
 and breaks a button on a different tab. `preflight.py` checks tag balance and
 `data-` hooks; run it every time.
 
-## 5. THE MEGA AUDIT
+## 5. THE MEGA AUDIT — DONE 2026-09-06, artefact in `MEGA_AUDIT.md`
+
+**Run in one pass as designed, plus the owner's same-day addition: speed.**
+The artefact says what was found, what was fixed (orphan guards, WAL, cache
+headers, the slow-pages instrument) and — deliberately — what was NOT
+covered: the full click-through walk belongs to stage 7, and the payments
+eligibility internals were read only at the seams.
 
 **Named and scoped by the owner, `2026-09-03`.** Every audit this project has
 ever planned, done ONCE, together, as the last thing before he starts

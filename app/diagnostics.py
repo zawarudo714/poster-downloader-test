@@ -263,6 +263,42 @@ def check_missing_files(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def check_posters_without_title(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: every living poster's master title must still exist.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY (Mega Audit, 2026-09-06)
+    ════════════════════════════════════════════════════════════════════════
+    A poster whose title row is gone does not error anywhere — it VANISHES.
+    Every screen reaches posters by joining through master_titles, so an
+    orphan simply drops out of the funnel, the counts and the review queues
+    while its file sits on disk and its pay record stands. The clear button
+    and the replace-import now REFUSE while living posters would be
+    orphaned; this check is the net underneath that guard, because a state
+    that is supposed to be impossible still deserves a tripwire (the guard
+    itself could be walked around by a future code path).
+    """
+    rows = [
+        Finding(f"#{sp.id} · {sp.filename}",
+                f"saved by {sp.user_id}, title id {sp.master_title_id} "
+                f"no longer exists", "/admin/diagnostics")
+        for sp in (db.query(SavedPoster)
+                     .outerjoin(MasterTitle,
+                                SavedPoster.master_title_id == MasterTitle.id)
+                     .filter(SavedPoster.deleted_at.is_(None),
+                             MasterTitle.id.is_(None))
+                     .limit(MAX_ROWS).all())
+    ]
+    return _result(
+        "posters_without_title", "Saved images whose title row is gone",
+        "These images exist on disk and in pay records but appear on NO "
+        "screen — their title was deleted after they were saved. Restore "
+        "the title list they belonged to, or soft-delete them deliberately.",
+        "error", rows,
+    )
+
+
 def check_orphan_files(db: Session, scope: Scope) -> CheckResult:
     """
     Files sitting in the workspace with no database row pointing at them.
@@ -1597,6 +1633,7 @@ def _account_names(db: Session) -> dict[int, str]:
 
 CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_missing_files,
+    check_posters_without_title,
     check_orphan_files,
     check_complete_without_posters,
     check_open_revisions_on_deleted,

@@ -66,7 +66,8 @@
   {# ═══════════════════════════════════════════════════════════════ #}
   {#  OVERVIEW                                                       #}
   {# ═══════════════════════════════════════════════════════════════ #}
-  <div class="pipe-section" data-section-panel="overview">
+  <div class="pipe-section" data-section-panel="overview"
+       {% if default_section | default('overview', true) != 'overview' %}hidden{% endif %}>
 
     {#
       Shown only while this project is stopped. A banner that is always
@@ -162,7 +163,7 @@
   {# ═══════════════════════════════════════════════════════════════ #}
   {#  GREENLIGHT                                                     #}
   {# ═══════════════════════════════════════════════════════════════ #}
-  <div class="pipe-section" data-section-panel="greenlight" hidden>
+  <div class="pipe-section" data-section-panel="greenlight" {% if default_section == 'greenlight' %}{% else %}hidden{% endif %}>
 
     <section class="panel">
       <div class="panel-head">
@@ -291,7 +292,7 @@
       link, so Brave phrasings would govern nothing there.               #}
   {# ═══════════════════════════════════════════════════════════════ #}
   {% if search_mode == 'inpage' %}
-  <div class="pipe-section" data-section-panel="search" hidden>
+  <div class="pipe-section" data-section-panel="search" {% if default_section == 'search' %}{% else %}hidden{% endif %}>
     <section class="panel">
       <div class="panel-head">
         <span>IMAGE SEARCH
@@ -316,7 +317,7 @@
       Declared on the Project, never branched on its slug, so a third
       project picks whichever of these it needs with no template edit.  #}
   {# ═══════════════════════════════════════════════════════════════ #}
-  <div class="pipe-section" data-section-panel="processing" hidden
+  <div class="pipe-section" data-section-panel="processing" {% if default_section == 'processing' %}{% else %}hidden{% endif %}
        data-processor="{{ processor }}">
 
     {% if processor == 'photoshop' %}

@@ -902,8 +902,34 @@ def clear_setting(db: Session, key: str, *, project: Optional[Project | str] = N
 
 
 def all_settings(db: Session, *, project: Optional[Project | str] = None) -> dict[str, Any]:
-    """Every knob with its effective value — what the dashboard renders."""
-    return {k: get_setting(db, k, project=project) for k in DEFAULTS}
+    """
+    Every knob with its effective value — what the dashboard renders.
+
+    ONE query, not two per key. The naive version called get_setting() per
+    key — with ~100 keys in DEFAULTS that was ~200 round trips to SQLite
+    every time the Settings screen loaded. Loading every stored override
+    once and resolving in memory is the same answer, measured differently.
+    The resolution ORDER is get_setting's own and must stay identical:
+    project override → global override → default, and an EMPTY stored value
+    means "not set", never "set to empty".
+    """
+    slug = project.slug if isinstance(project, Project) else project
+    stored = {
+        row.key: row.value
+        for row in db.query(AppSetting)
+                     .filter(AppSetting.key.like(f"{SETTINGS_ROOT}.%"))
+                     .all()
+        if row.value != ""
+    }
+    out: dict[str, Any] = {}
+    for key, default in DEFAULTS.items():
+        raw = None
+        if slug is not None:
+            raw = stored.get(f"{SETTINGS_ROOT}.{slug}.{key}")
+        if raw is None:
+            raw = stored.get(f"{SETTINGS_ROOT}.{key}")
+        out[key] = _coerce(raw, default) if raw is not None else default
+    return out
 
 
 # ═════════════════════════════════════════════════════════════════════════

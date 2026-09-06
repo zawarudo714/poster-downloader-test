@@ -20,11 +20,19 @@
       <span class="muted mono" data-review-summary></span>
     </div>
     <div class="panel-body">
+      {# One obvious way in. The common case is "clear everything waiting",
+         so that is the big button; narrowing by date and the rerun queue are
+         the side doors. Reworked 2026-09-06 after the owner called the old
+         arrangement unintuitive. #}
       <div class="filter-row">
+        <button class="btn btn-primary" data-action="review-all">REVIEW&nbsp;EVERYTHING&nbsp;WAITING&nbsp;<span class="mono" data-review-waiting-count></span></button>
+        <button class="btn btn-ghost" data-action="review-reruns">JUST&nbsp;THE&nbsp;RERUNS&nbsp;<span data-rerun-count>0</span></button>
+      </div>
+      <div class="filter-row" style="margin-top:10px">
+        <span class="muted">…or a narrower slice:</span>
         <label>FROM <input type="date" data-review-start></label>
         <label>TO <input type="date" data-review-end></label>
-        <button class="btn btn-accent" data-action="review-start">REVIEW&nbsp;THIS&nbsp;RANGE</button>
-        <button class="btn btn-ghost" data-action="review-reruns">REVIEW&nbsp;RERUNS&nbsp;<span data-rerun-count>0</span></button>
+        <button class="btn btn-ghost btn-tiny" data-action="review-start">REVIEW&nbsp;THIS&nbsp;RANGE</button>
       </div>
       <table class="data-table" style="margin-top:12px">
         <thead><tr><th>SAVE DATE</th><th>TITLES</th><th>IMAGES</th><th></th></tr></thead>
@@ -84,6 +92,30 @@
     </div>
   </section>
 
+</div>
+
+{# Full-screen compare: the worker's photograph and the finished poster side
+   by side at reading size, arrow keys stepping through titles without
+   leaving the overlay. Click either image on the review card to open it. #}
+<div class="review-zoom" data-review-zoom hidden>
+  <div class="review-zoom-head">
+    <span class="review-zoom-title" data-zoom-title></span>
+    <span class="muted mono" data-zoom-pos></span>
+    <span style="margin-left:auto" class="filter-row">
+      <span class="muted">← → move between titles · Esc closes</span>
+      <button class="btn btn-ghost btn-tiny" data-action="zoom-close">CLOSE</button>
+    </span>
+  </div>
+  <div class="review-zoom-body">
+    <div class="review-zoom-cell">
+      <span class="zoom-label">WHAT THE WORKER FOUND</span>
+      <img data-zoom-source alt="">
+    </div>
+    <div class="review-zoom-cell">
+      <span class="zoom-label">THE FINISHED ARTWORK</span>
+      <span class="review-zoom-canvas" data-zoom-canvas><img data-zoom-poster alt=""></span>
+    </div>
+  </div>
 </div>
 {% endblock %}
 

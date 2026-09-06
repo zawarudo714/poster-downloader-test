@@ -3338,8 +3338,14 @@ def api_review_dates(
             {"date": d.isoformat() if d else None, "titles": t, "images": i}
             for d, t, i in rows
         ],
+        # Fresh attempts AWAITING review, not the superseded originals —
+        # those keep status 'rerun' for ever as evidence, so counting them
+        # left this button reading 4 with nothing to review (owner's find,
+        # 2026-09-06).
         "reruns": db.query(func.count(ProcessedImage.id))
-                    .filter(ProcessedImage.review_status == "rerun",
+                    .filter(ProcessedImage.review_status == "pending",
+                            ProcessedImage.is_current == 1,
+                            ProcessedImage.attempt > 1,
                             ProcessedImage.project_id == project.id).scalar() or 0,
     })
 
@@ -3367,9 +3373,17 @@ def api_review_queue(
           .join(SavedPoster, ProcessedImage.saved_poster_id == SavedPoster.id)
           .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
           .filter(ProcessedImage.is_current == 1,
-                  ProcessedImage.project_id == project.id,
-                  ProcessedImage.review_status == status)
+                  ProcessedImage.project_id == project.id)
     )
+    if status == "rerun":
+        # "Review reruns" means the FRESH attempts awaiting a verdict, not
+        # the superseded originals (those keep status 'rerun' for ever, as
+        # evidence). Asking for the originals gave the owner a button
+        # reading 4 with nothing behind it (2026-09-06).
+        q = q.filter(ProcessedImage.review_status == "pending",
+                     ProcessedImage.attempt > 1)
+    else:
+        q = q.filter(ProcessedImage.review_status == status)
     if start:
         try:
             q = q.filter(SavedPoster.original_save_date >= date.fromisoformat(start))

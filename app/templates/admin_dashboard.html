@@ -156,10 +156,11 @@
   <section class="panel">
     <div class="panel-head">
       <span>WORKSPACE TREE {{ info("Top-level folders are users; one folder under each is the original-save-date for the title; below that, every per-title folder.") }}</span>
-      <a class="btn btn-ghost" href="/admin/browse">OPEN REVIEW PANEL</a>
+      <span><button class="btn btn-ghost btn-tiny" id="fs-tree-load" type="button">LOAD TREE</button>
+        <a class="btn btn-ghost" href="/admin/browse">OPEN REVIEW PANEL</a></span>
     </div>
     <div class="panel-body">
-      <div id="fs-tree" class="fs-tree">Loading…</div>
+      <div id="fs-tree" class="fs-tree"></div>
     </div>
   </section>
 

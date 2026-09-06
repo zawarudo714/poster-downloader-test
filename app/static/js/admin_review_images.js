@@ -52,6 +52,11 @@
       const d = await r.json();
       const rows = d.dates || [];
       $('[data-rerun-count]').textContent = d.reruns || 0;
+      const waitEl = $('[data-review-waiting-count]');
+      if (waitEl) {
+        const totalImgs = (d.dates || []).reduce((n, r2) => n + (r2.images || 0), 0);
+        waitEl.textContent = totalImgs ? `(${totalImgs})` : '(0)';
+      }
 
       if (!rows.length) {
         datesBody.innerHTML =
@@ -165,12 +170,10 @@
       // invented a grander building of the same type. That cannot be judged
       // from the poster alone — you have to see what it was given.
       const source = `
-        <figure class="review-img review-img-source">
-          <a href="${img.source_url}" target="_blank" rel="noopener"
-             title="Open the worker's photograph">
-            <img loading="lazy" src="${img.source_url}" alt="">
-          </a>
-          <figcaption><span class="muted mono">what the worker found</span></figcaption>
+        <figure class="review-img review-img-source" data-zoom-open="${img.processed_id}"
+                title="Click to compare side by side, full screen">
+          <img loading="lazy" src="${img.source_url}" alt="">
+          <figcaption><span class="muted mono">what the worker found · click to enlarge</span></figcaption>
         </figure>`;
 
       // THE POSTER, SITTING ON ITS COLOUR.
@@ -197,15 +200,14 @@
 
       return `
         ${source}
-        <figure class="review-img ${state ? 'is-' + state : ''}" data-pid="${img.processed_id}">
-          <a href="${img.preview_url}?full=1" target="_blank" rel="noopener"
-             title="Open the full-resolution file">
+        <figure class="review-img ${state ? 'is-' + state : ''}" data-pid="${img.processed_id}"
+                data-zoom-open="${img.processed_id}"
+                title="Click to compare side by side, full screen">
             <span class="review-canvas" data-canvas data-pid="${img.processed_id}"
                   style="background-color:${esc(bg)}">
               <img loading="lazy" src="${shown}" alt="" data-poster-img
                    data-pid="${img.processed_id}" crossorigin="anonymous">
             </span>
-          </a>
           <figcaption>
             <span class="mono">${esc(img.filename)}</span>
             <span class="muted mono">${img.width || '?'}×${img.height || '?'}${img.attempt > 1 ? ' · attempt ' + img.attempt : ''}</span>
@@ -220,6 +222,7 @@
         </figure>`;
     }).join('');
 
+    probeTransparency();
     updateTally();
   }
 
@@ -313,13 +316,96 @@
     if (next < 0 || next >= titles.length) return;
     index = next;
     render();
+    if (zoomOpen) syncZoom();      // arrows work without leaving the overlay
+  }
+
+  // ── The compare overlay ──────────────────────────────────────────────
+  // Both pictures at reading size, side by side, with the PLACE named at
+  // the top and ← → stepping through titles without closing. Asked for by
+  // the owner 2026-09-06: the inline cards are for deciding fast, this is
+  // for looking properly.
+  let zoomOpen = false;
+
+  function syncZoom() {
+    const t = current();
+    if (!t || !t.images.length) { closeZoom(); return; }
+    const img = t.images[0];
+    const box = $('[data-review-zoom]');
+    $('[data-zoom-title]').textContent = `${t.external_id ?? '–'}. ${t.title}`;
+    $('[data-zoom-pos]').textContent = `${index + 1} / ${titles.length}`;
+    $('[data-zoom-source]').src = img.source_url;
+    const poster = $('[data-zoom-poster]');
+    poster.src = img.can_recolor ? img.master_url : img.preview_url;
+    $('[data-zoom-canvas]').style.backgroundColor = colorFor(img);
+    box.hidden = false;
+    zoomOpen = true;
+  }
+
+  function closeZoom() {
+    const box = $('[data-review-zoom]');
+    if (box) box.hidden = true;
+    zoomOpen = false;
+  }
+
+  // ── The honest colour bar ────────────────────────────────────────────
+  // A master can be RGBA and still fully opaque — gpt-image-2 sometimes
+  // paints its own background. Offering a colour then is a dead knob (the
+  // owner set red and nothing happened). After the master loads, its
+  // pixels are probed; a fully opaque one swaps the bar for one plain
+  // sentence. Server-side the same probe now runs at generation time, so
+  // this mostly matters for images made before that fix.
+  function probeTransparency() {
+    document.querySelectorAll('[data-poster-img]').forEach((imgEl) => {
+      if (imgEl.dataset.alphaProbed) return;
+      const pid = parseInt(imgEl.dataset.pid, 10);
+      const t = current();
+      const img = t && t.images.find((i2) => i2.processed_id === pid);
+      if (!img || !img.can_recolor) return;
+      const run = () => {
+        imgEl.dataset.alphaProbed = '1';
+        try {
+          const c = document.createElement('canvas');
+          const w = Math.min(imgEl.naturalWidth || 64, 256);
+          const h = Math.min(imgEl.naturalHeight || 64, 256);
+          c.width = w; c.height = h;
+          const ctx = c.getContext('2d');
+          ctx.drawImage(imgEl, 0, 0, w, h);
+          const data = ctx.getImageData(0, 0, w, h).data;
+          let transparent = false;
+          for (let i2 = 3; i2 < data.length; i2 += 4) {
+            if (data[i2] < 255) { transparent = true; break; }
+          }
+          if (!transparent) {
+            const bar = document.querySelector(
+              `.review-color[data-pid="${pid}"]`);
+            if (bar) {
+              bar.innerHTML = '<span class="review-color-dead">This artwork '
+                + 'has no see-through areas, so a background colour cannot '
+                + 'change it. New generations made with Background = '
+                + 'transparent will.</span>';
+            }
+          }
+        } catch (e2) { /* a probe must never break the review */ }
+      };
+      if (imgEl.complete && imgEl.naturalWidth) run();
+      else imgEl.addEventListener('load', run, { once: true });
+    });
   }
 
   // ── Events ───────────────────────────────────────────────────────────────
 
   document.addEventListener('click', async (e) => {
     const el = e.target.closest('[data-action], [data-img-action]');
-    if (!el) return;
+    if (!el) {
+      // A click on either PICTURE opens the compare overlay — but never
+      // while the eyedropper is armed (that click is picking a colour),
+      // and never on the colour bar itself.
+      const zoomEl = e.target.closest('[data-zoom-open]');
+      if (zoomEl && !eyedropFor && !e.target.closest('.review-color')) {
+        syncZoom();
+      }
+      return;
+    }
 
     const imgAction = el.dataset.imgAction;
     if (imgAction) {
@@ -364,8 +450,14 @@
       case 'review-day':
         await openRange(el.dataset.date, el.dataset.date, 'pending');
         break;
+      case 'review-all':
+        await openRange('', '', 'pending');
+        break;
       case 'review-start':
         await openRange(startEl.value, endEl.value, 'pending');
+        break;
+      case 'zoom-close':
+        closeZoom();
         break;
       case 'review-reruns':
         await openRange('', '', 'rerun');
@@ -391,6 +483,7 @@
   document.addEventListener('keydown', (e) => {
     if (stage.hidden) return;
     if (e.target.matches('input, textarea, select')) return;
+    if (e.key === 'Escape' && zoomOpen) { closeZoom(); e.preventDefault(); return; }
     if (e.key === 'ArrowRight') { move(1);  e.preventDefault(); }
     if (e.key === 'ArrowLeft')  { move(-1); e.preventDefault(); }
     if (e.key.toLowerCase() === 'c') { clearTitleMarks(); e.preventDefault(); }

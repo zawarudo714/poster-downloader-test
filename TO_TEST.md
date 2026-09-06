@@ -273,6 +273,51 @@ sidebar on desktop, pill buttons, rounded cards.
 
 ---
 
+## 12. THE SPEED PASS AND THE AUDIT GUARDS — v153
+
+**What to click**
+
+- Browse a few pages, then open **Diagnostics**. The new **SLOWEST PAGES**
+  panel should list them with their server milliseconds. Anything over
+  500 ms shows red — tell me what.
+- Second visit to any page should feel snappier: the styling files now
+  come from your browser's cache instead of the server. (Press F12 →
+  Network → the static files should say "memory cache" or "disk cache".)
+- **The re-import**: when you re-import the catalogue with REPLACE, it
+  should either succeed cleanly (no saved images yet) or REFUSE with a
+  plain sentence naming how many saved images block it. A refusal with
+  zero work in the system would be a bug — tell me.
+- Run a Diagnostics scan: a new check called "Saved images whose title row
+  is gone" should exist and report nothing.
+
+---
+
+## 13. THE THIRTEEN FIXES — v154 (retest of what you found)
+
+Each of these is one of your own findings; check it does what you asked.
+
+- Open a title as the worker: no 500 (if one still appears, run
+  `cd /opt/poster && docker compose logs web --tail 100` and send the
+  traceback — the hardening logs the true cause now).
+- The outside-link button reads **Open Google image search**.
+- The ALSO TRY chips read as plain words ("landscape"), tooltip shows the
+  full wording.
+- NOT RECEIVED asks before it reports; Cancel does nothing.
+- Chat badges are red (worker sidebar and admin People button).
+- Worker Images: click an image → title named large, ‹ › arrows and ← →
+  keys walk the whole day, counter shows "3 / 10".
+- Approve Artwork: big REVIEW EVERYTHING WAITING (n) button; equal-size
+  side-by-side; click a picture → full-screen compare with arrows; the
+  colour bar either works or says plainly why it cannot.
+- JUST THE RERUNS shows 0 when nothing awaits, and opens fresh attempts
+  when something does.
+- "(N/A)" disappears after the re-import (or the cleanup command from
+  chat) — new imports can never store it again.
+- Home page: hovering "being processed" no longer overlaps the header.
+- The in-flight explainer mentions no Photoshop.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

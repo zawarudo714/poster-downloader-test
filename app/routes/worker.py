@@ -137,12 +137,36 @@ def _project_ui(db: Session, project_id) -> dict:
         # project that has never heard of TMDB. Sent as a label rather than
         # the raw key because it is displayed, never compared.
         "source_label":     SITE_LABELS.get(proj.source_site, proj.source_site or "the source"),
+        # The label for the OUTSIDE-LINK button, derived from where the link
+        # actually goes. It used to reuse source_label above — the IN-PAGE
+        # grid's source — so travel's Google button read "OPEN BRAVE IMAGE
+        # SEARCH" (owner's find, 2026-09-06). Two different sources, two
+        # labels, each derived from its own destination.
+        "source_link_label": _source_link_label(db, proj),
         # Whether a year is meaningful. Artists have none, films do — and a
         # blank "(N/A)" beside every name is noise the worker learns to
         # ignore, which is how real warnings get ignored too.
         "has_year":         bool(proj.has_year),
         "has_content_type": bool(proj.has_content_type),
     }
+
+
+def _source_link_label(db: Session, proj) -> str:
+    """What the outside-link button should call the place it opens."""
+    try:
+        from ..pipeline import get_setting
+        from urllib.parse import urlparse
+        template = str(get_setting(db, "source_search_url", project=proj) or "")
+        host = (urlparse(template).hostname or "").lower()
+        if "google" in host:
+            return "Google image search"
+        if "themoviedb" in host:
+            return "TMDB"
+        if "pinterest" in host:
+            return "Pinterest"
+        return host.removeprefix("www.") or "the source"
+    except Exception:
+        return "the source"
 
 
 def _default_project_id_cached(db: Session):
@@ -1056,18 +1080,40 @@ def lock_title(
     log_activity(db, user=user, action="locked", target_type="master_title", target_id=master_id)
     db.commit()
 
-    return JSONResponse({
+    # The LOCK is already committed above. Everything below is decoration,
+    # and decoration that throws must not turn a successful claim into a
+    # 500 — the owner met exactly that ("Failed to open title: 500" while
+    # the title was in fact locked and opened fine on refresh). Whatever
+    # fails here is logged WITH its traceback, so the real cause is one
+    # `cd /opt/poster && docker compose logs web --tail 100` away, and the
+    # worker still gets a payload that works.
+    payload = {
         "ok": True,
         "id": master_id,
         "title": t.title,
         "year": t.year,
         "content_type": t.content_type,
         "description": (t.description or "")[:600],
-        "tmdb_search": _source_search_url(db, search_text(t), t.content_type,
-                                          resolve_project(db, t.project_id),
-                                          kind=(t.description or "")),
-        **_project_ui(db, t.project_id),
-    })
+    }
+    try:
+        payload["tmdb_search"] = _source_search_url(
+            db, search_text(t), t.content_type,
+            resolve_project(db, t.project_id), kind=(t.description or ""))
+        payload.update(_project_ui(db, t.project_id))
+    except Exception:
+        import logging
+        logging.getLogger("worker").exception(
+            "lock_title decoration failed for title %s — the lock stands, "
+            "a degraded payload was served", master_id)
+        payload.setdefault("tmdb_search", "")
+        payload.setdefault("search_mode", "inpage")
+        payload.setdefault("images_per_title", 1)
+        payload.setdefault("item_noun", "image")
+        payload.setdefault("item_nouns", "images")
+        payload.setdefault("source_label", "the source")
+        payload.setdefault("has_year", False)
+        payload.setdefault("has_content_type", False)
+    return JSONResponse(payload)
 
 
 @router.post("/unlock")

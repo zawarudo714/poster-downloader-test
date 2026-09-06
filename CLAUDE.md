@@ -77,6 +77,7 @@ its work from scratch.
 | File | Answers |
 |---|---|
 | `ROADMAP.md` | Everything outstanding, in order, and why that order |
+| `MEGA_AUDIT.md` | The seven-question audit of 2026-09-06 — what was asked, found, fixed, and NOT covered |
 | `OPEN_ISSUES.md` | Individual defects not yet fixed, with what is known about each |
 | `PIPELINE.md` | Post-production: processing, uploading, the node |
 | `DEPLOY.md` | How to deploy |

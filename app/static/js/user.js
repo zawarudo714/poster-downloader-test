@@ -480,8 +480,40 @@
     } else {
       replaceBtn.addEventListener('click', () => replacePoster(p.id, replaceUrl));
     }
-    node.querySelector('[data-action="delete"]').addEventListener('click', () => deletePoster(p.id, { fromRevision: false }));
+    // The DELETE button's job depends on how the image was chosen.
+    //   URL projects: they can also REPLACE (paste a new address), so
+    //     DELETE stays the reasoned removal.
+    //   IN-PAGE (Brave grid) projects: there is no URL to paste, so the
+    //     grid IS the undo. One tap removes this pick and drops you back at
+    //     the results to choose another — no reason dialog, because this is
+    //     a workflow correction, not a quality rejection (owner's ask,
+    //     2026-09-06). The grid is still populated from the last search.
+    const delBtn = node.querySelector('[data-action="delete"]');
+    if (hasLink) {
+      delBtn.addEventListener('click', () => deletePoster(p.id, { fromRevision: false }));
+    } else {
+      delBtn.textContent = '↩ PICK ANOTHER';
+      delBtn.title = 'Remove this image and choose a different one from the search results';
+      delBtn.addEventListener('click', () => undoSavedPick(p.id));
+    }
     return node;
+  }
+
+  // Quick undo for a Brave-grid pick: delete without the reason dialog,
+  // then reveal the still-populated results so the worker can pick again.
+  async function undoSavedPick(posterId) {
+    const r = await postForm(`/poster/${posterId}/delete`,
+                             { note: 'Re-picking a different image',
+                               reason_source: 'undo' });
+    if (!r.ok) { alert('Could not undo: ' + (r.data && r.data.detail || r.status)); return; }
+    await refreshState();
+    const box = document.querySelector('[data-search-box]');
+    if (box) {
+      box.hidden = false;
+      const grid = box.querySelector('[data-search-grid]');
+      (grid && grid.children.length ? grid : box)
+        .scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
   }
 
   // ── Lightbox (90% screen) ────────────────────────────────────────────────

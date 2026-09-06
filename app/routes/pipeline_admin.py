@@ -709,7 +709,13 @@ def api_titles(
             "pending_count": pending,
             "in_pipeline_count": in_pipeline,
             # True when a greenlight click would do something on this row.
-            "actionable": pending > 0 and title.status == "complete",
+            # Selectable if there is ANYTHING to act on — greenlightable
+            # OR already in the pipeline so PULL BACK applies. Was only the
+            # greenlight case, which left uploaded rows un-tickable so you
+            # could only "select all matching" (owner's find, 2026-09-06).
+            # Both bulk endpoints filter server-side, so selecting an
+            # ineligible row is a safe no-op.
+            "actionable": len(posters) > 0,
             "posters": [
                 {"id": p.id, "filename": p.filename, "status": p.pipeline_status,
                  "attempts": p.process_attempts, "error": p.process_error}

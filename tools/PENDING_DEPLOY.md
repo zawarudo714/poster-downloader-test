@@ -1,35 +1,37 @@
 # Not yet deployed
 
-## v150 — the sidebar fix, and the skin sharpened
+## v151 — comfort and polish
 
-**v149 shipped with the sidebar broken, and the cause is worth writing
-down.** The top bar had `backdrop-filter: blur(...)` on it. A filter on an
-element makes it the CONTAINING BLOCK for any fixed-position child — and
-the sidebar lives inside the top bar — so the whole rail was squeezed into
-the bar's 48 pixels and rendered as a tiny scrollbox. The rule is now a
-comment on `.topbar` itself: no filter on that bar, ever. The pulse strip's
-blur went too, for the same family of reason.
+The owner's brief after seeing v150 live: graphite instead of black,
+nothing hard to read, more air, livelier stats, small visual delights.
 
-**And the owner's verdict on the first look — "still feels generic, less
-rounded" — is applied:**
-
-* Pills are gone. Buttons, tabs, inputs and nav rows are sharp 4px
-  rectangles with hairline borders; roundness survives only on the small
-  count badges, where a circle is the correct shape.
-* Every panel title now carries a short iris tick — the one recurring
-  signature mark.
-* The active sidebar row is a flat tint with a 2px iris edge, not a
-  gradient pill. Journey arrows faded to near-nothing.
+* **Palette lifted** in `config.py`: background `#16171d`, cards `#1d1f28`,
+  borders and secondary text both brightened. Raised surfaces (inputs,
+  toasts) sit clearly above their cards now.
+* **Contrast guarantee**: inputs, selects, textareas, options and labels
+  all explicitly take the text colour; placeholders take the subtext. The
+  dim "300" box on the Listing check settings was the specimen.
+* **Breathing room**: page padding 28px, panels 24px apart, taller table
+  rows, roomier panel bodies.
+* **Stats revamped**: tiles and pills are raised gradient cards with large
+  gradient-ink numbers (violet for counts, mint for good, coral for bad),
+  hover lift, and hairline-separated record rows.
+* **New-message toast**: when the chat unread count RISES while you are on
+  any other screen, a small violet toast appears under the top bar — "New
+  chat message — open" — and the chat badges do a little hop. Never fires
+  on the chat page itself. Works for admin and workers.
+* **Small delights**: thin violet scrollbars, buttons press down 1px on
+  click, journey cards lift on hover, the shared toast restyled to match.
 
 No schema change, no node copy.
 
-**Verified**: preflight green; the preview artifact was rebuilt from the
-fixed stylesheet. **NOT verified**: the rail has still never rendered on a
-real page — that is the first thing to look at after deploying.
+**Verified**: preflight green (including the new top-bar-filter check);
+`nav_badges.js` passes `node --check`; the preview artifact was rebuilt on
+the graphite palette. **NOT verified**: the chat toast has never fired for
+real — send a message from the worker account while sitting on the
+dashboard to see it.
 
 ---
-
-Nothing. Everything written is on the server.
 
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.

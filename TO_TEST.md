@@ -245,6 +245,28 @@ sidebar on desktop, pill buttons, rounded cards.
 
 ---
 
+## 11. COMFORT AND POLISH — v151
+
+**What to click**
+
+- General look: the background should now read as dark grey, not black,
+  and every input box should show its value clearly. Check the Listing
+  check settings boxes — they were the worst offender.
+- Open **Stats** for a worker. The numbers should be large gradient
+  figures on raised cards, not flat text.
+- **The chat toast**: sit on the dashboard as admin, send a chat message
+  from the worker account (or ask the worker to). Within ~12 seconds a
+  small violet notice should appear top-right — "New chat message — open"
+  — and the chat badge should hop. Clicking it opens Chat. It should NOT
+  appear while you are already on the chat page.
+
+**What failure looks like**
+
+- Any text you have to lean in to read — tell me the screen and the words.
+- A toast that never appears, or appears on the chat page itself.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

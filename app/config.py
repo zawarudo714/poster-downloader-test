@@ -14,7 +14,7 @@ from pathlib import Path
 # Bumped on every deploy. Templates append `?v={APP_VERSION}` to every
 # <script> and <link rel="stylesheet"> URL, so deploys force browsers to
 # refetch JS/CSS automatically — no Ctrl+Shift+R needed by users.
-APP_VERSION = "150"
+APP_VERSION = "151"
 
 
 # ── Paths ────────────────────────────────────────────────────────────────────
@@ -77,15 +77,18 @@ SESSION_MAX_AGE = 60 * 60 * 24 * 14
 # accent, from the owner's reference screenshot. ACCENT is the readable
 # lavender used on text and outlines; ACCENT2 the deeper violet used on
 # filled controls.
+# Lifted from near-black to graphite 2026-09-06 at the owner's request:
+# "dark but not too dark, easy on the eyes". Text sits at least three shades
+# above its background everywhere; nothing may be black-on-black.
 PALETTE = {
-    "BG":      "#0c0d13",
-    "CARD":    "#141620",
-    "BORDER":  "#262a3d",
+    "BG":      "#16171d",
+    "CARD":    "#1d1f28",
+    "BORDER":  "#31344a",
     "ACCENT":  "#a89bfa",
     "ACCENT2": "#7263e8",
-    "TEXT":    "#ecebf5",
-    "SUBTEXT": "#8d90a8",
-    "SUCCESS": "#47d99a",
+    "TEXT":    "#e9eaf2",
+    "SUBTEXT": "#a3a7bc",
+    "SUCCESS": "#4fdda1",
     "SKIP":    "#f0b45e",
     "ERROR":   "#f2726d",
 }

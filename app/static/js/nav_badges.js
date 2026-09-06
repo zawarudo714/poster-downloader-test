@@ -13,6 +13,25 @@
   // The People group button carries the chat count too, or the unread badge
   // would be invisible while the dropdown is closed — which is always.
   const groupBadge  = document.getElementById('nav-chat-badge-group');
+  let lastChatCount = null;
+  let chatToastTimer = null;
+
+  function showChatToast(fresh) {
+    let el = document.getElementById('chat-toast');
+    if (!el) {
+      el = document.createElement('a');
+      el.id = 'chat-toast';
+      el.className = 'chat-toast';
+      el.href = isAdmin ? '/admin/chat' : '/chat';
+      document.body.appendChild(el);
+    }
+    el.innerHTML = '<span class="chat-toast-dot"></span>'
+      + (fresh === 1 ? 'New chat message' : fresh + ' new chat messages')
+      + ' — open';
+    el.hidden = false;
+    clearTimeout(chatToastTimer);
+    chatToastTimer = setTimeout(() => { el.hidden = true; }, 8000);
+  }
   const isAdmin = !!document.querySelector('.role-badge.role-admin');
 
   function setBadge(el, n) {
@@ -47,6 +66,20 @@
         n = data.unread || 0;
       }
       if (n !== null) {
+        // A count that went UP means a message arrived while you were on
+        // some other screen — say so where the eye already is, once per
+        // rise, and never on the chat page itself (you are looking at it).
+        if (lastChatCount !== null && n > lastChatCount
+            && !location.pathname.endsWith('/chat')) {
+          showChatToast(n - lastChatCount);
+          [inlineBadge, toggleBadge, groupBadge].forEach((el) => {
+            if (!el) return;
+            el.classList.remove('bump');
+            void el.offsetWidth;            // restart the animation
+            el.classList.add('bump');
+          });
+        }
+        lastChatCount = n;
         setBadge(inlineBadge, n);
         setBadge(toggleBadge, n);
         setBadge(groupBadge, n);

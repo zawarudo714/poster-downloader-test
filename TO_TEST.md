@@ -220,6 +220,31 @@ The one Pipeline page is now three nav tabs: **Greenlight** (deciding),
 
 ---
 
+## 10. THE NEW SKIN — v149
+
+The whole site changes colour and shape: deep ink, violet accent, a left
+sidebar on desktop, pill buttons, rounded cards.
+
+**What to click**
+
+- Look at five screens on your monitor: Home, Worker Images, Approve
+  Artwork, Pipeline, and the master Dashboard. Anything unreadable, squashed
+  or ugly — tell me which screen.
+- Open the site on your **phone**. The sidebar should become the slide-out
+  menu, exactly as before, and tables should scroll sideways rather than
+  squeeze.
+- Press the **moon/sun button** to try light mode. It was re-derived for the
+  new palette and has never been looked at.
+- Log out and check the **login page** looks right with no sidebar.
+
+**What failure looks like**
+
+- Text sitting on a background of nearly the same colour.
+- Content hiding underneath the sidebar, or a page still styled in the old
+  gold.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

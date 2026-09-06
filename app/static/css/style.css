@@ -1,7 +1,8 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    Poster Downloader — Web stylesheet
    Palette is injected via CSS vars from base.html (mirrors main.py exactly).
-   Typography mirrors the desktop app: Georgia for headings, Courier New for UI.
+   Typography (since 2026-09-06): one clean sans for the whole interface;
+   monospace only where digits line up in columns (.mono).
    ═══════════════════════════════════════════════════════════════════════════ */
 
 * { box-sizing: border-box; }
@@ -10,8 +11,13 @@ html, body {
   margin: 0; padding: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: 'Courier New', ui-monospace, Menlo, Consolas, monospace;
+  /* Part 2 of the UI revamp (2026-09-06): the terminal look retired. The
+     sans carries the interface; the .mono class keeps monospace exactly
+     where digits line up in columns, which is where it earns its keep. */
+  font-family: 'Segoe UI Variable Text', 'Segoe UI', Inter, system-ui,
+               -apple-system, sans-serif;
   font-size: 14px;
+  letter-spacing: 0.005em;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -53,7 +59,7 @@ kbd {
 .topbar-brand { display: flex; align-items: baseline; gap: 6px; }
 .brand-mark { color: var(--accent); font-weight: bold; }
 .brand-name {
-  font-family: Georgia, serif;
+  font-family: inherit; font-weight: 650; letter-spacing: -0.01em;
   font-weight: bold;
   letter-spacing: 0.04em;
 }
@@ -213,7 +219,7 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
   margin-bottom: 4px;
 }
 .stat-value {
-  font-family: Georgia, serif;
+  font-family: inherit; font-weight: 650; letter-spacing: -0.01em;
   font-size: 28px;
   font-weight: bold;
   color: var(--accent);
@@ -236,7 +242,7 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
 }
 .login-brand { display: flex; align-items: baseline; gap: 6px; margin-bottom: 4px; }
-.login-sub { color: var(--subtext); margin: 0 0 24px; font-size: 12px; font-style: italic; font-family: Georgia, serif; }
+.login-sub { color: var(--subtext); margin: 0 0 24px; font-size: 12px; font-style: italic; font-family: inherit; font-weight: 650; letter-spacing: -0.01em; }
 .login-form { display: flex; flex-direction: column; gap: 14px; }
 .login-form label { display: flex; flex-direction: column; gap: 5px; font-size: 11px; color: var(--subtext); font-weight: bold; letter-spacing: 0.05em; }
 .login-form input { padding: 9px 12px; }
@@ -386,7 +392,7 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
-.data-table tbody tr:hover { background: rgba(232,184,75,0.04); }
+.data-table tbody tr:hover { background: rgba(168,155,250,0.05); }
 .data-table .title-cell { color: var(--accent); }
 .data-table .empty { color: var(--subtext); text-align: center; padding: 30px; }
 .data-table .resolved-row td { opacity: 0.6; }
@@ -506,7 +512,7 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
   display: flex; align-items: center; gap: 24px;
   width: 100%;
 }
-.brand { display: flex; align-items: baseline; gap: 6px; font-family: Georgia, serif; font-weight: bold; letter-spacing: 0.04em; }
+.brand { display: flex; align-items: baseline; gap: 6px; font-family: inherit; font-weight: 650; letter-spacing: -0.01em; font-weight: bold; letter-spacing: 0.04em; }
 .brand-large { font-size: 20px; }
 .topnav { display: flex; gap: 4px; flex: 1; flex-wrap: wrap; }
 .topnav .navlink {
@@ -522,7 +528,7 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 .topnav .navlink.active {
   color: var(--accent);
   border-color: var(--accent);
-  background: rgba(232, 184, 75, 0.06);
+  background: rgba(168,155,250,0.06);
 }
 .user-pill { display: flex; align-items: center; gap: 10px; }
 .role-badge {
@@ -542,7 +548,7 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
   border-radius: 50%;
   background: transparent;
   color: var(--subtext);
-  font-family: Georgia, serif;
+  font-family: inherit; font-weight: 650; letter-spacing: -0.01em;
   font-size: 10px;
   font-style: italic;
   font-weight: bold;
@@ -607,7 +613,7 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 .title-item:hover { background: var(--border); }
 .title-item.active {
   border-left-color: var(--accent);
-  background: rgba(232, 184, 75, 0.08);
+  background: rgba(168,155,250,0.08);
 }
 .title-item.status-in_progress { border-left-color: var(--accent); }
 .title-item.status-complete    {
@@ -636,7 +642,7 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 .stat-value { font-size: 26px; font-weight: bold; color: var(--accent); margin-top: 4px; }
 .stat-value.success { color: var(--success); }
 .stat-value.error   { color: var(--error); }
-.mono { font-family: 'Courier New', ui-monospace, Menlo, Consolas, monospace; }
+.mono { font-family: ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace; font-variant-numeric: tabular-nums; }
 .muted { color: var(--subtext); }
 .ok    { color: var(--success); }
 
@@ -687,7 +693,7 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 }
 .att-line1 { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .att-num   { color: var(--subtext); }
-.att-title { font-family: Georgia, serif; font-size: 18px; font-weight: bold; }
+.att-title { font-family: inherit; font-weight: 650; letter-spacing: -0.01em; font-size: 18px; font-weight: bold; }
 .att-year, .att-type { color: var(--subtext); }
 .att-desc  { margin-top: 8px; color: var(--subtext); font-size: 12px; line-height: 1.5; }
 .att-actions { display: flex; gap: 8px; margin-top: 10px; }
@@ -838,7 +844,7 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 .master-table th {
   color: var(--subtext); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
 }
-.master-table tbody tr.selected { background: rgba(232, 184, 75, 0.10); }
+.master-table tbody tr.selected { background: rgba(168,155,250,0.10); }
 .master-table tbody tr.row-claimed-other { opacity: 0.55; }
 .master-table tbody tr.status-complete    { background: rgba(78, 201, 138, 0.06); }
 .master-table tbody tr.status-skipped     { opacity: 0.65; }
@@ -922,7 +928,7 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 .rev-card { display: flex; gap: 12px; padding: 10px; border: 1px solid var(--border); border-left: 3px solid var(--error); background: var(--bg); border-radius: 2px; }
 .rev-card-thumb { width: 80px; height: 120px; object-fit: cover; border: 1px solid var(--border); }
 .rev-card-body  { flex: 1; min-width: 0; }
-.rev-card-title { font-family: Georgia, serif; font-size: 14px; font-weight: bold; }
+.rev-card-title { font-family: inherit; font-weight: 650; letter-spacing: -0.01em; font-size: 14px; font-weight: bold; }
 .rev-card-path  { font-size: 10px; color: var(--subtext); word-break: break-all; }
 .rev-card-comment { margin: 6px 0; font-size: 12px; }
 .rev-card-meta  { font-size: 10px; }
@@ -1473,16 +1479,16 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 
 /* ── Light mode (toggle on <html>) ──────────────────────────────────── */
 html.theme-light {
-  --bg:      #f5f3ee;
+  --bg:      #f2f2f7;
   --card:    #ffffff;
-  --border:  #d6d2c8;
-  --accent:  #b07a16;
-  --accent2: #8a5e10;
-  --text:    #1a1a1f;
-  --subtext: #6b6878;
-  --success: #1f8a4f;
-  --skip:    #b58416;
-  --error:   #c73d2f;
+  --border:  #d9d9e6;
+  --accent:  #6353d6;
+  --accent2: #5041c2;
+  --text:    #1b1b26;
+  --subtext: #676a80;
+  --success: #14805c;
+  --skip:    #a36d17;
+  --error:   #c2453d;
 }
 html.theme-light body { background: var(--bg); }
 html.theme-light .topbar {
@@ -1826,7 +1832,7 @@ html.theme-light .env-banner-name {
 .activity-card.act-pay .al-action-pill { background: rgba(220,180,80,0.22); color: #ffd060; font-weight: 700; }
 .activity-card.act-chat .al-action-pill { background: rgba(140,140,255,0.20); color: #a8a8ff; }
 .activity-card.act-claim .al-action-pill { background: rgba(140,140,140,0.18); color: var(--subtext); }
-.activity-card.act-admin .al-action-pill { background: rgba(255,200,80,0.18); color: #e8b850; }
+.activity-card.act-admin .al-action-pill { background: rgba(168,155,250,0.18); color: var(--accent); }
 
 /* Comment-bearing rows: amber stripe + dedicated comment line */
 .activity-card.has-comment {
@@ -2011,7 +2017,7 @@ html.theme-light .env-banner-name {
   color: var(--text);
 }
 .chat-thread-row:hover { background: rgba(255,255,255,0.03); }
-.chat-thread-row.active { background: rgba(255,200,80,0.10); border-left: 3px solid var(--accent); padding-left: 11px; }
+.chat-thread-row.active { background: rgba(168,155,250,0.10); border-left: 3px solid var(--accent); padding-left: 11px; }
 .chat-thread-name {
   font-weight: 600;
   display: flex;
@@ -2535,7 +2541,7 @@ html.theme-light .env-banner-name {
   }
   .topnav .navlink.active {
     border-left-color: var(--accent);
-    background: rgba(255, 200, 80, 0.08);
+    background: rgba(168,155,250,0.1);
   }
   .topnav .navlink:hover { background: rgba(255,255,255,0.04); }
 }
@@ -2616,7 +2622,7 @@ html.theme-light .env-banner-name {
 .history-day-dimmed { opacity: 0.35; }
 .history-day-dimmed:hover { opacity: 0.7; }
 .history-title-row.history-match {
-  background: rgba(255, 200, 80, 0.10) !important;
+  background: rgba(168,155,250,0.10) !important;
   border-left: 2px solid var(--accent);
   padding-left: 6px;
 }
@@ -2725,7 +2731,7 @@ html.theme-light .env-banner-name {
 }
 .stat-tile-link:hover {
   border-color: var(--accent);
-  background: rgba(255, 200, 80, 0.04);
+  background: rgba(168,155,250,0.04);
   transform: translateY(-1px);
 }
 .stat-tile-link:active { transform: translateY(0); }
@@ -2854,9 +2860,9 @@ html.theme-light .env-banner-name {
   font-size: 13px;
   transition: background 0.12s, border-color 0.12s;
 }
-.reason-preset-btn:hover { background: rgba(255, 200, 80, 0.06); border-color: var(--accent); }
+.reason-preset-btn:hover { background: rgba(168,155,250,0.06); border-color: var(--accent); }
 .reason-preset-btn.selected {
-  background: rgba(255, 200, 80, 0.14);
+  background: rgba(168,155,250,0.14);
   border-color: var(--accent);
   color: var(--accent);
   font-weight: 600;
@@ -3164,7 +3170,7 @@ body:has(#ib-bulk-bar:not([hidden])) { padding-bottom: 88px; }
 }
 .stats-admin-worker-row:hover { background: rgba(255,255,255,0.04); }
 .stats-admin-worker-row.active {
-  background: rgba(255, 200, 80, 0.08);
+  background: rgba(168,155,250,0.1);
   border-left-color: var(--accent, #f4b400);
   color: var(--accent, #f4b400);
 }
@@ -3732,7 +3738,7 @@ body:has(#ib-bulk-bar:not([hidden])) { padding-bottom: 88px; }
   text-align: left;
   transition: border-color .12s, background .12s;
 }
-.funnel-cell:hover { border-color: var(--accent); background: rgba(232,184,75,0.06); }
+.funnel-cell:hover { border-color: var(--accent); background: rgba(168,155,250,0.06); }
 .funnel-num   { font: 700 22px/1 inherit; color: var(--text); }
 .funnel-label { font-size: 10.5px; letter-spacing: .06em; color: var(--subtext); text-transform: uppercase; }
 .funnel-warn  .funnel-num { color: var(--skip); }
@@ -3834,8 +3840,8 @@ body:has(#ib-bulk-bar:not([hidden])) { padding-bottom: 88px; }
 .setting-badge {
   padding: 1px 5px;
   border-radius: 3px;
-  background: rgba(232,184,75,0.18);
-  border: 1px solid rgba(232,184,75,0.35);
+  background: rgba(168,155,250,0.18);
+  border: 1px solid rgba(168,155,250,0.35);
   color: var(--accent);
   font-size: 9px;
   font-weight: 700;
@@ -4144,8 +4150,8 @@ body:has(#ib-bulk-bar:not([hidden])) { padding-bottom: 88px; }
 /* One-time token reveal — deliberately loud, it can't be shown again. */
 .pipe-token-box {
   padding: 11px;
-  background: rgba(232,184,75,0.08);
-  border: 1px solid rgba(232,184,75,0.35);
+  background: rgba(168,155,250,0.08);
+  border: 1px solid rgba(168,155,250,0.35);
   border-radius: 4px;
   font-size: 12px;
 }
@@ -4241,10 +4247,10 @@ label.inline-check {
 .pipe-titles-table tbody tr[data-id] { cursor: pointer; user-select: none; }
 .pipe-titles-table tbody tr[data-id]:hover { background: rgba(255,255,255,0.035); }
 .pipe-titles-table tbody tr[data-id].selected {
-  background: rgba(232,184,75,0.13);
+  background: rgba(168,155,250,0.13);
   box-shadow: inset 3px 0 0 var(--accent);
 }
-.pipe-titles-table tbody tr[data-id].selected:hover { background: rgba(232,184,75,0.18); }
+.pipe-titles-table tbody tr[data-id].selected:hover { background: rgba(168,155,250,0.18); }
 /* Rows nothing can be done to — still readable, clearly not selectable. */
 .pipe-titles-table tbody tr.row-inert { cursor: default; opacity: 0.55; }
 .pipe-titles-table tbody tr.row-inert:hover { background: transparent; }
@@ -4310,7 +4316,7 @@ label.inline-check {
    visually so it's obviously not part of the section you're looking at. */
 .pipe-console-panel {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px rgba(232, 184, 75, 0.18);
+  box-shadow: 0 0 0 1px rgba(168,155,250,0.18);
 }
 .pipe-console-panel[hidden] { display: none; }
 
@@ -4347,7 +4353,7 @@ label.inline-check {
   display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
 }
 .project-card-name {
-  font-family: Georgia, serif; font-size: 16px; font-weight: bold;
+  font-family: inherit; font-weight: 650; letter-spacing: -0.01em; font-size: 16px; font-weight: bold;
   color: var(--accent); letter-spacing: 0.02em;
 }
 .project-card-site {
@@ -4748,7 +4754,7 @@ label.inline-check {
   display: flex; flex-wrap: wrap; align-items: center;
   justify-content: space-between; gap: 12px; margin-bottom: 14px;
 }
-.review-title { font-family: Georgia, serif; font-size: 20px; color: var(--accent); }
+.review-title { font-family: inherit; font-weight: 650; letter-spacing: -0.01em; font-size: 20px; color: var(--accent); }
 .review-nav { display: flex; align-items: center; gap: 8px; font-size: 11px; }
 
 /* ── The review pair: the worker's photo beside the finished poster ──────
@@ -4854,7 +4860,7 @@ label.inline-check {
 .nav-group.open .nav-group-menu { display: flex; flex-direction: column; gap: 2px; }
 .nav-group-menu .navlink { display: block; }
 /* A group holding the current page shows it even when closed. */
-.nav-group.has-active .nav-group-btn { color: var(--accent, #ffc850); }
+.nav-group.has-active .nav-group-btn { color: var(--accent); }
 
 @media (max-width: 700px) {
   /* In the drawer a dropdown would be a menu inside a menu. The group
@@ -4891,7 +4897,7 @@ label.inline-check {
 .pulse-row::-webkit-scrollbar { display: none; }
 .pulse-item { opacity: 0.85; flex: 0 0 auto; }
 .pulse-ok   { color: #4cd07d; }
-.pulse-warn { color: #ffc850; }
+.pulse-warn { color: var(--skip); }
 .pulse-bad  { color: #ff6b6b; font-weight: 600; }
 .pulse-alarms { display: flex; flex-direction: column; gap: 2px; padding: 2px 0 4px; }
 .pulse-alarm {
@@ -4915,7 +4921,7 @@ label.inline-check {
   text-decoration: none; color: inherit;
   opacity: 0.55;
 }
-.journey-step.has-some { opacity: 1; border-color: rgba(255,200,80,0.4); }
+.journey-step.has-some { opacity: 1; border-color: rgba(168,155,250,0.45); }
 .journey-step:hover { background: rgba(255,255,255,0.04); }
 .journey-n { font-size: 20px; }
 .journey-lbl { font-size: 10.5px; text-align: center; opacity: 0.8; }
@@ -4928,12 +4934,12 @@ label.inline-check {
 .needs-card {
   display: flex; flex-direction: column; gap: 2px;
   padding: 14px;
-  border: 1px solid rgba(255,200,80,0.45);
+  border: 1px solid rgba(168,155,250,0.5);
   border-radius: 10px;
   text-decoration: none; color: inherit;
-  background: rgba(255,200,80,0.05);
+  background: rgba(168,155,250,0.06);
 }
-.needs-card:hover { background: rgba(255,200,80,0.1); }
+.needs-card:hover { background: rgba(168,155,250,0.12); }
 .needs-n { font-size: 26px; }
 .needs-lbl { font-size: 13px; }
 .needs-hint { font-size: 11px; }
@@ -4958,3 +4964,228 @@ label.inline-check {
 /* A tab bar with exactly one tab is a heading pretending to be a choice —
    the Greenlight door hides it (the section's own panel head does the job). */
 .pipe-tabs-single { display: none; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   UI REVAMP PART 2 (2026-09-06) — the visual skin.
+   Deep ink, iris accent, a left rail on desktop, glow reserved for what is
+   LIVE: the active nav item, primary buttons, and the Home page numbers.
+   This layer sits last on purpose: it overrides the older component rules
+   by cascade order, so the old rules did not have to be rewritten in place.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --raised: #1a1c29;             /* a card sitting on a card */
+  --glow: 0 0 0 1px rgba(168,155,250,0.35), 0 4px 24px rgba(114,99,232,0.25);
+  --radius: 12px;
+  --radius-lg: 16px;
+}
+html.theme-light { --raised: #f7f7fc;
+  --glow: 0 0 0 1px rgba(99,83,214,0.35), 0 4px 20px rgba(99,83,214,0.18); }
+
+/* ── Surfaces ────────────────────────────────────────────────────────── */
+.panel, .stat-tile, .poster-card, .title-item, .revision-item,
+.rev-similar-card, .lightbox-card, .g-poster, .project-card,
+.journey-step, .needs-card, .pipe-modal {
+  border-radius: var(--radius);
+}
+.panel { border-color: rgba(150,155,200,0.12); }
+.panel-head {
+  font-size: 11.5px;
+  letter-spacing: 0.09em;
+  color: var(--subtext);
+  border-bottom: 1px solid rgba(150,155,200,0.09);
+  padding: 12px 16px;
+}
+.panel-body { padding: 16px; }
+
+/* ── Controls ────────────────────────────────────────────────────────── */
+.btn {
+  border-radius: 999px;             /* the reference's pill buttons */
+  font-family: inherit;
+  letter-spacing: 0.02em;
+  border: 1px solid rgba(150,155,200,0.18);
+  transition: box-shadow .15s ease, background .15s ease;
+}
+.btn-primary, .btn-success {
+  background: linear-gradient(180deg, #8577f2, #6a5ae0);
+  border-color: transparent;
+  color: #fff;
+}
+.btn-primary:hover, .btn-success:hover { box-shadow: var(--glow); }
+.btn-error { border-color: rgba(242,114,109,0.5); }
+.btn:focus-visible, a:focus-visible, .navlink:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+input[type=text], input[type=password], input[type=url], input[type=number],
+input[type=email], input[type=file], select, textarea {
+  border-radius: 8px;
+  background: var(--raised);
+  font-family: inherit;
+}
+input:focus, select:focus, textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(168,155,250,0.15);
+}
+
+/* Figures keep their tabular face. */
+.mono, .pc-num, .journey-n, .needs-n, .funnel-num {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.data-table th {
+  letter-spacing: 0.08em; font-size: 10.5px;
+  color: var(--subtext);
+  border-bottom: 1px solid rgba(150,155,200,0.14);
+}
+.data-table tbody tr:hover { background: rgba(168,155,250,0.05); }
+
+/* ── The top bar, slimmed ───────────────────────────────────────────── */
+.topbar {
+  background: rgba(12,13,19,0.85);
+  backdrop-filter: blur(10px);
+  border-left: none;
+  border-bottom: 1px solid rgba(150,155,200,0.1);
+}
+html.theme-light .topbar { background: rgba(255,255,255,0.85); }
+.brand-mark { color: var(--accent); }
+.user-pill { margin-left: auto; }
+.role-badge.role-admin {
+  background: rgba(168,155,250,0.16);
+  color: var(--accent);
+  border: 1px solid rgba(168,155,250,0.4);
+  border-radius: 999px;
+}
+
+/* ── The left rail (desktop). The phone drawer already renders the nav as
+      headed sections; the rail is the same idea, permanently open. ───── */
+@media (min-width: 701px) {
+  body.has-rail { --rail-w: 228px; }
+  body.has-rail .topnav {
+    position: fixed;
+    top: 48px; left: 0; bottom: 0;
+    width: var(--rail-w);
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+    padding: 14px 10px 18px;
+    overflow-y: auto;
+    background: var(--card);
+    border-right: 1px solid rgba(150,155,200,0.1);
+    z-index: 60;
+  }
+  body.has-rail .page,
+  body.has-rail .pulse-strip { margin-left: var(--rail-w); }
+  body.has-rail .page { max-width: calc(1240px + var(--rail-w)); }
+
+  body.has-rail .topnav .navlink {
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 12px;
+    border-radius: 9px;
+    font-size: 13px;
+    text-transform: none;
+    letter-spacing: 0.01em;
+  }
+  body.has-rail .topnav .navlink.active {
+    background: linear-gradient(180deg, rgba(133,119,242,0.22), rgba(106,90,224,0.16));
+    color: var(--text);
+    box-shadow: inset 0 0 0 1px rgba(168,155,250,0.35);
+  }
+  body.has-rail .navlink-exit {
+    margin-bottom: 8px;
+    color: var(--subtext);
+    font-size: 12px;
+  }
+  /* Groups become headed sections, exactly like the drawer. */
+  body.has-rail .nav-group { display: block; }
+  body.has-rail .nav-group-btn {
+    pointer-events: none;
+    width: 100%; text-align: left;
+    padding: 14px 12px 4px;
+    font-size: 10.5px; letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--subtext);
+  }
+  body.has-rail .nav-group-menu {
+    display: block !important;
+    position: static;
+    border: none; box-shadow: none; background: none;
+    padding: 0; min-width: 0;
+  }
+  /* The badge sits at the row's end, like the reference's counters. */
+  body.has-rail .navlink .nav-badge { margin-left: auto; }
+}
+
+.nav-badge {
+  border-radius: 999px;
+  background: rgba(168,155,250,0.2);
+  color: var(--accent);
+  border: 1px solid rgba(168,155,250,0.35);
+}
+.nav-badge-error {
+  background: rgba(242,114,109,0.18);
+  color: var(--error);
+  border-color: rgba(242,114,109,0.4);
+}
+
+/* ── The pulse strip joins the header family ────────────────────────── */
+.pulse-strip {
+  background: rgba(20,22,32,0.7);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(150,155,200,0.08);
+  padding: 5px 18px;
+}
+html.theme-light .pulse-strip { background: rgba(255,255,255,0.7); }
+.pulse-ok   { color: var(--success); }
+.pulse-bad  { color: var(--error); }
+
+/* ── Home page: the one loud moment ─────────────────────────────────── */
+.journey-step {
+  background: var(--card);
+  border-color: rgba(150,155,200,0.12);
+}
+.journey-step.has-some {
+  border-color: rgba(168,155,250,0.4);
+  background: linear-gradient(180deg, rgba(133,119,242,0.10), rgba(20,22,32,0));
+}
+.journey-n {
+  font-size: 22px; font-weight: 650;
+  background: linear-gradient(180deg, #d9d3ff, #8d7ff0);
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+}
+html.theme-light .journey-n {
+  background: linear-gradient(180deg, #5041c2, #7263e8);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.needs-card {
+  border-color: rgba(168,155,250,0.35);
+  background: linear-gradient(180deg, rgba(133,119,242,0.12), rgba(133,119,242,0.03));
+}
+.needs-card:hover { box-shadow: var(--glow); background: rgba(133,119,242,0.14); }
+
+/* Project cards on the master dashboard get the raised treatment. */
+.project-card {
+  background: linear-gradient(180deg, var(--raised), var(--card));
+  border: 1px solid rgba(150,155,200,0.14);
+}
+.project-card:hover { box-shadow: var(--glow); }
+
+/* Pipe tabs echo the reference's segmented pills. */
+.pipe-tab {
+  border-radius: 999px;
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+.pipe-tab.active {
+  background: linear-gradient(180deg, rgba(133,119,242,0.25), rgba(106,90,224,0.18));
+  box-shadow: inset 0 0 0 1px rgba(168,155,250,0.35);
+  color: var(--text);
+}
+
+/* Motion is answered, never ambient. */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}

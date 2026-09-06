@@ -15,6 +15,7 @@ cost far more to read, answer a different question, and on a mounted working
 copy `git status` cannot refresh its index — it reports stale answers with
 no warning.
 
+- **2026-09-06 14:51** · `[178.105.232.196]` · `e7857779` · v148 · deploy v148
 - **2026-09-06 14:36** · `[178.105.232.196]` · `cfedd397` · v147 · deploy v147
 - **2026-09-06 13:41** · `[178.105.232.196]` · `0f82f305` · v146 · deploy v146
 - **2026-09-06 12:55** · `[178.105.232.196]` · `1d3ac58f` · v145 · deploy v145
@@ -44,4 +45,3 @@ no warning.
 - **2026-08-25 18:09** · `eb18a279` · deploy v122
 - **2026-08-25 17:52** · `e29893df` · v122 — external_id repeats across projects; the legacy import was matching MUSIK
 - **2026-08-25 17:12** · `6c2f9afc` · v121 — legacy upload history, archive index, and the settings-drift warning
-- **2026-08-25 17:00** · `44676a70` · v121 — legacy upload history, archive index, and the settings-drift warning

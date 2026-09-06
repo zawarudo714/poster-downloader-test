@@ -1,66 +1,41 @@
 # Not yet deployed
 
-## v148 — UI Revamp Part 1: home page, pulse strip, nav groups, Pipeline split
+## v149 — UI Revamp Part 2: the visual skin
 
-### The Pipeline page is now THREE DOORS
+The look, from the owner's reference screenshot (2026-09-06): deep ink
+background, iris-violet accent, rounded surfaces, pill buttons — and the
+reference's signature move, a **left sidebar** on desktop.
 
-The old page mixed watching, deciding and configuring. The project nav now
-has:
+* **Palette**: one place, `config.py` PALETTE — ink `#0c0d13`, panel
+  `#141620`, iris `#a89bfa`/`#7263e8`, mint/amber/coral for good/warn/bad.
+  Light mode re-derived to cool paper with the same iris.
+* **Typography**: Georgia and Courier retired. One clean sans carries the
+  whole interface; monospace survives only on figures (`.mono`), where
+  digits lining up in columns is the point.
+* **The left rail**: at desktop widths the nav becomes a fixed 228px
+  sidebar with headed groups — the exact treatment the phone drawer already
+  used, promoted. The phone drawer itself is untouched. Signed-out pages
+  (login) get no rail.
+* **The glow is spent in one place**: the active nav item, primary buttons,
+  and the Home page's journey numbers. Everything else stays flat.
+* Every hardcoded gold tint in the stylesheet was converted to the iris at
+  the same opacity, so nothing still wears the old accent.
+* `prefers-reduced-motion` is honoured; focus outlines are visible.
 
-* **Greenlight** — its own tab, because it is a work queue like Worker
-  Images. Its badge shows how many posters are waiting for the word.
-* **Pipeline** — the live room only: Overview, Needs Attention, Nodes.
-* **Settings** — Image Search, Processing, Upload, Test & Debug.
+### Schema / node
 
-Under the hood it is still ONE template and ONE script — each door shows its
-own tab buttons, every section's markup renders everywhere, and a click that
-targets another door's section simply navigates there. A real three-file
-split was rejected as the most expensive class of edit this project knows,
-for zero extra behaviour. Old `/admin/pipeline#upload`-style links redirect
-to the right door, and the Diagnostics links were updated.
-
-### What is new on screen
-
-* **Opening a project now lands on a HOME page** (`/admin/home`): a journey
-  strip showing every stage of the pipeline with live counts (each number is
-  a link), and "waiting on you" cards that only appear when their count is
-  above zero. The old behaviour dropped you straight into Worker Images.
-* **A live status strip under the top bar, on every admin screen**: worker
-  machine on/off, what it is doing, quiet window, workers online — plus red
-  alarm lines from ANYWHERE (machine offline, paused accounts, failed
-  uploads, pipeline halted), each a link to the right screen.
-* **The master nav is five items instead of ten**: Dashboard · Money
-  (Payments, Earnings) · Marketplace (Listing check) · People (Chat, Users,
-  Activity Log) · System (Backups, All-Project Stats, Diagnostics). Dropdowns
-  on desktop; headed, always-open sections in the phone drawer. The chat
-  badge also shows on the People button so it is never hidden.
-* **Renames**: "Review Images" is now "Worker Images" (it judges what the
-  worker found; Approve Artwork judges what the machine painted); the master
-  "Stats" is "All-Project Stats".
-* **Nav badges**: Worker Images, Changes Requested, Approve Artwork and
-  Pipeline now carry live counts of what is waiting.
-* **One poll feeds all of it**: `/admin/api/pulse`, every 15 seconds per
-  tab. Anything new that wants live data should ride in it, not add a timer.
-* Mobile: wide tables scroll sideways instead of squeezing; tiny buttons are
-  thumb-sized on touch; the review screen's commit bar sticks to the bottom.
-* The Worker Images empty state now says what to do next; RETURN ALL asks a
-  question that names what it includes.
-
-### Schema
-
-None. No node change either — **no folder copy this time.**
+None. No folder copy.
 
 ### Verified
 
-* `preflight.py` green on every check; all new and touched JS passes
-  `node --check`; template tags balance; every touched Python file compiles.
-* **NOT verified — and this matters more than usual**: the new
-  `/admin/api/pulse` endpoint, the home page, and the three Pipeline doors
-  have NEVER RUN against a database. The queries follow the codebase's own scoping patterns
-  (`scope_titles`, `scalar_subquery`), but the first click after deploying
-  should be opening the Travel project and watching the home page fill in.
-  If the strip stays on "Loading…", the endpoint is failing — the browser's
-  console (F12) will show the error to send me.
+* preflight green on every check; `config.py` compiles; the CSS layer sits
+  LAST in the file so it wins by cascade order without rewriting old rules.
+* A static preview built from the REAL stylesheet was rendered as an
+  artifact for the owner to judge before deploying.
+* **NOT verified**: no real page has rendered with the new skin. The first
+  look after deploying IS the test — Part 2 is exactly the stage where a
+  wrong-looking screen is cheap to report and fix. Check the phone view and
+  the light-mode toggle as well as the desktop rail.
 
 ---
 

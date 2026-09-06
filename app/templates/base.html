@@ -28,7 +28,7 @@
     } catch (e) {}
   </script>
 </head>
-<body>
+<body class="{% if user is defined and user %}has-rail{% endif %}">
   <header class="topbar">
     <div class="topbar-inner">
       <button class="nav-toggle" id="nav-toggle" type="button"

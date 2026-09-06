@@ -14,7 +14,7 @@ from pathlib import Path
 # Bumped on every deploy. Templates append `?v={APP_VERSION}` to every
 # <script> and <link rel="stylesheet"> URL, so deploys force browsers to
 # refetch JS/CSS automatically — no Ctrl+Shift+R needed by users.
-APP_VERSION = "148"
+APP_VERSION = "149"
 
 
 # ── Paths ────────────────────────────────────────────────────────────────────
@@ -73,17 +73,21 @@ SESSION_COOKIE_NAME = "poster_session"
 SESSION_MAX_AGE = 60 * 60 * 24 * 14
 
 # ── Palette (matches original main.py exactly) ───────────────────────────────
+# Reworked 2026-09-06 for UI Revamp Part 2: deep ink with an iris-violet
+# accent, from the owner's reference screenshot. ACCENT is the readable
+# lavender used on text and outlines; ACCENT2 the deeper violet used on
+# filled controls.
 PALETTE = {
-    "BG":      "#0e0e14",
-    "CARD":    "#1c1c28",
-    "BORDER":  "#2a2a3d",
-    "ACCENT":  "#e8b84b",
-    "ACCENT2": "#c47f17",
-    "TEXT":    "#f0ede6",
-    "SUBTEXT": "#8a8799",
-    "SUCCESS": "#4ec98a",
-    "SKIP":    "#e8a84b",
-    "ERROR":   "#e8554b",
+    "BG":      "#0c0d13",
+    "CARD":    "#141620",
+    "BORDER":  "#262a3d",
+    "ACCENT":  "#a89bfa",
+    "ACCENT2": "#7263e8",
+    "TEXT":    "#ecebf5",
+    "SUBTEXT": "#8d90a8",
+    "SUCCESS": "#47d99a",
+    "SKIP":    "#f0b45e",
+    "ERROR":   "#f2726d",
 }
 
 # ── Image constraints ────────────────────────────────────────────────────────

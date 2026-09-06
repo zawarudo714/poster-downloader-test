@@ -2419,6 +2419,14 @@
       case 'titles-last': titlesGoto(titlesState.pages); break;
 
       case 'save-settings': saveGroup(btn.dataset.group); break;
+      case 'clear-search-cache':
+        if (!confirm('Forget every stored search result?\n\nThe next press '
+            + 'of any search button will ask Brave fresh, which counts '
+            + 'against the monthly quota.')) break;
+        postJSON(API + '/search_cache/clear', {})
+          .then((d) => toast(`Search cache cleared — ${d.cleared} stored result(s) forgotten.`))
+          .catch((e2) => toast('Could not clear the cache: ' + e2.message, 'error'));
+        break;
       case 'save-selectors': saveSelectors(); break;
       case 'save-timings': saveTimings(); break;
       case 'save-script': saveScript(); break;

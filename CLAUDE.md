@@ -582,13 +582,20 @@ Rules that matter:
 
 ## FineArtAmerica behaviour — `MEASURED` (do not re-derive these)
 
-**There are TWO upload forms live at the same time.** `updateartwork.html`
-and `updateartwork2025.html`, chosen per request, apparently at random. The
-selector `name:artworkname` exists on the old one and not the new one, so an
-upload fails whenever FAA happens to serve the 2025 page. Observed
-2026-08-17: the movie project failed three times in a row while MUSIK
-succeeded on the same account minutes later, which looked exactly like a
-per-project bug and was not.
+**There are THREE upload forms live at the same time** — `updateartwork
+.html`, `2025` and `2026` — chosen per request, apparently at random.
+`MEASURED 2026-09-06` from saved copies of 2025 and 2026, and the pattern
+across redesigns is now clear: **the FIELDS keep their names; the
+CONTAINERS around the buttons churn.** `artworkname`, `artworkkeywords`,
+`artworkdescription` are identical on all three. The submit ANCHOR is the
+same `a.buttonSubmit` on 2025 and 2026 — what 2026 removed was the
+`submittopdiv` wrapper our old selector reached the button THROUGH. Point
+selectors at the control's own name or class, never at the box it sits in.
+Since v158 a selector holds `||`-separated alternatives, and the shipped
+`submit_button` default covers all three forms. Observed 2026-08-17 (the
+original two-form incident): the movie project failed three times in a row
+while MUSIK succeeded on the same account minutes later, which looked
+exactly like a per-project bug and was not.
 
 Consequences:
 

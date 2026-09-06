@@ -727,6 +727,29 @@ def api_titles(
 #  SETTINGS  (processing + upload, incl. JSX and selectors)
 # ═══════════════════════════════════════════════════════════════════════════
 
+@router.post("/api/search_cache/clear")
+def api_clear_search_cache(
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Forget every stored search result (owner's request, 2026-09-06).
+
+    The cache exists to stop the same query spending the Brave quota twice,
+    but while the owner is EXPERIMENTING with wording he sometimes wants
+    the same button to genuinely re-ask. Editing a phrasing already misses
+    the cache (the key is the words); this is for re-running the SAME
+    words. All rows, all projects: the cache is cheap to refill and a
+    partial clear would need explaining on the screen.
+    """
+    from ..models import SearchCache
+    n = db.query(SearchCache).delete(synchronize_session=False)
+    log_activity(db, user=admin, action="search_cache_cleared",
+                 target_type="pipeline", target_id=None, details={"rows": n})
+    db.commit()
+    return JSONResponse({"ok": True, "cleared": n})
+
+
 @router.get("/api/settings")
 def api_get_settings(
     request: Request,

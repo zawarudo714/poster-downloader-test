@@ -3455,10 +3455,20 @@ def serve_review_preview(
     if processed is None:
         raise HTTPException(404, "No such image.")
     rel = processed.storage_path if full else (processed.preview_path or processed.storage_path)
+    cache = _review_cache_file(rel, "raw")
+    if cache.is_file():
+        return Response(content=cache.read_bytes(), media_type="image/jpeg",
+                        headers={"Cache-Control": "private, max-age=3600"})
     try:
         data = read_bytes(db, rel)
     except StorageError as e:
         raise HTTPException(404, str(e))
+    if not full:                      # print files are big; cache screens only
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            cache.write_bytes(data)
+        except OSError:
+            pass
     return Response(content=data, media_type="image/jpeg",
                     headers={"Cache-Control": "private, max-age=3600"})
 
@@ -3477,19 +3487,71 @@ def serve_review_master(
     the server does when flattening, so what you see is what you get — and it
     costs no round trip, so dragging a colour picker is instant.
 
-    Served at its generated size, around 1024px, not the 4000px print file.
+    Two costs were stacking up here (owner's find, 2026-09-06 — "this area
+    loads quite slow"):
+
+      * the transparent master went out at its FULL generated size, and a
+        full-art PNG is megabytes — reviewing needs eyes, not print pixels;
+      * every view re-fetched it from the Storage Box over SFTP, transport
+        handshake included.
+
+    So: the master is downscaled once to display size (1000px, alpha kept —
+    the live recolour and the eyedropper need the alpha, not the pixels),
+    and both the fetch and the downscale are cached on THIS server's disk.
+    The flatten-on-approve still uses the full master server-side; `full=1`
+    still serves it to the browser when you truly want to pore over one.
     """
     from ..storage_remote import read_bytes, StorageError
 
     processed = db.query(ProcessedImage).filter_by(id=processed_id).first()
     if processed is None or not processed.master_path:
         raise HTTPException(404, "No transparent original for this image.")
+
+    cache = _review_cache_file(processed.master_path,
+                               "full" if full else "disp")
+    if cache.is_file():
+        return Response(content=cache.read_bytes(), media_type="image/png",
+                        headers={"Cache-Control": "private, max-age=3600"})
     try:
         data = read_bytes(db, processed.master_path)
     except StorageError as e:
         raise HTTPException(404, str(e))
+
+    if not full:
+        try:
+            import io
+            from PIL import Image
+            with Image.open(io.BytesIO(data)) as img:
+                img.load()
+                if img.width > 1000 or img.height > 1000:
+                    img.thumbnail((1000, 1000), Image.LANCZOS)
+                out = io.BytesIO()
+                img.save(out, "PNG")
+                data = out.getvalue()
+        except Exception:
+            pass          # a failed downscale serves the original, never a 500
+
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        cache.write_bytes(data)
+    except OSError:
+        pass              # a full disk must not break the review
     return Response(content=data, media_type="image/png",
                     headers={"Cache-Control": "private, max-age=3600"})
+
+
+def _review_cache_file(rel_path: str, variant: str):
+    """
+    Where a review image's local copy lives.
+
+    A plain content-addressed file under the app's own folder: the Storage
+    Box stays the archive of record, this is only a window onto it. Safe to
+    delete wholesale at any time — the next view refills it.
+    """
+    import hashlib
+    from pathlib import Path as _P
+    key = hashlib.sha1(f"{variant}:{rel_path}".encode("utf-8")).hexdigest()
+    return _P("review_cache") / key[:2] / f"{key}.bin"
 
 
 def _reflatten(db: Session, processed, color: str, project) -> str:
@@ -3536,6 +3598,17 @@ def _reflatten(db: Session, processed, color: str, project) -> str:
                                         quality=quality)
         make_preview(out, prev)
         write_bytes(db, processed.storage_path, out.read_bytes(), project=project)
+        # The local review cache now holds a copy of the OLD preview under
+        # this same path — drop it, or the review screen would show the old
+        # colour for an hour after a re-flatten (same-path rewrite is the
+        # one case a content-addressed-by-PATH cache cannot see).
+        for variant in ("raw",):
+            for rel in (processed.storage_path, processed.preview_path):
+                if rel:
+                    c = _review_cache_file(rel, variant)
+                    if c.is_file():
+                        try: c.unlink()
+                        except OSError: pass
         if processed.preview_path:
             write_bytes(db, processed.preview_path, prev.read_bytes(),
                         project=project)

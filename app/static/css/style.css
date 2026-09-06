@@ -5383,3 +5383,19 @@ html.theme-light .stat-value, html.theme-light .stat-pill-num {
 .lightbox-arrow-prev { left: 10px; }
 .lightbox-arrow-next { right: 10px; }
 .lightbox-card { position: relative; }
+
+
+/* ── The worker's floating jump-back button (v154) ───────────────────── */
+.jump-to-work {
+  position: fixed;
+  right: 16px; bottom: 18px;
+  z-index: 250;
+  padding: 12px 18px;
+  font: inherit; font-size: 13px; font-weight: 600;
+  color: #fff;
+  background: linear-gradient(180deg, #8577f2, #6a5ae0);
+  border: none; border-radius: 4px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+  cursor: pointer;
+}
+.jump-to-work:hover { box-shadow: var(--glow); }

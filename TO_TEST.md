@@ -315,6 +315,12 @@ Each of these is one of your own findings; check it does what you asked.
   chat) — new imports can never store it again.
 - Home page: hovering "being processed" no longer overlaps the header.
 - The in-flight explainer mentions no Photoshop.
+- **Approve Artwork speed**: the second time you open the same range it
+  should be near-instant, and the first time noticeably lighter than
+  before. Recolour and eyedropper still work on the smaller preview.
+- **On your phone**: tap a title — the screen should go to the work panel
+  by itself. Scroll away: a floating "↓ TO THE TITLE" button appears; tap
+  it to come back. It hides when no title is open.
 
 ---
 

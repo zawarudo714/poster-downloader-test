@@ -363,6 +363,13 @@
 
 {% endblock %}
 
+{# One tap back to the open title's work area, from anywhere on the page.
+   Shown by user.js only while a title is open AND its panel is off-screen —
+   the DONE PICKING button's twin, pointing the other way. #}
+<button type="button" id="jump-to-work" class="jump-to-work" hidden>
+  <span aria-hidden="true">↓</span>&nbsp;TO&nbsp;THE&nbsp;TITLE
+</button>
+
 {% block scripts %}
 <script src="/static/js/user.js?v={{ app_version }}"></script>
 {% endblock %}

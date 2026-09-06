@@ -1107,6 +1107,7 @@
     const lockChanged = (newLockedId !== renderedLockedId);
     state = data;
     renderAll({ fullActive: lockChanged });
+    document.dispatchEvent(new Event('pd-state-refreshed'));
   }
 
   // ── Actions ──────────────────────────────────────────────────────────────
@@ -1133,7 +1134,54 @@
     }
     // We do NOT auto-open TMDB — user clicks the button when ready.
     await refreshState();
+    // On a phone the list and the work area are stacked, so opening a
+    // title used to leave you staring at the list you just clicked and
+    // scrolling by hand (owner's ask, 2026-09-06). Opening a title means
+    // "I am going to work on it now" — go there.
+    if (window.innerWidth <= 900) {
+      requestAnimationFrame(() => {
+        const panel = document.querySelector('[data-active-panel]');
+        if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }
   }
+
+  // ── The floating "back to the work" button ──────────────────────────
+  // Appears only while a title is open AND its panel is off the top or the
+  // bottom of the screen — the DONE PICKING button's twin, pointing the
+  // other way. One tap returns to the search/save area from anywhere.
+  (function () {
+    const jump = document.getElementById('jump-to-work');
+    if (!jump || !('IntersectionObserver' in window)) return;
+    let panelVisible = true;
+
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((en) => { panelVisible = en.isIntersecting; });
+      sync();
+    }, { threshold: 0.05 });
+
+    function sync() {
+      const hasOpen = !!(state && state.locked);
+      jump.hidden = panelVisible || !hasOpen;
+      if (!jump.hidden) {
+        const panel = document.querySelector('[data-active-panel]');
+        if (panel) {
+          const below = panel.getBoundingClientRect().top > window.innerHeight;
+          jump.querySelector('span').textContent = below ? '↓' : '↑';
+        }
+      }
+    }
+
+    const panel = document.querySelector('[data-active-panel]');
+    if (panel) io.observe(panel);
+    document.addEventListener('pd-state-refreshed', sync);
+    window.addEventListener('scroll', () => { if (!jump.hidden || (state && state.locked)) sync(); },
+                            { passive: true });
+    jump.addEventListener('click', () => {
+      const p2 = document.querySelector('[data-active-panel]');
+      if (p2) p2.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  })();
 
   async function unlock() {
     await postForm('/unlock');

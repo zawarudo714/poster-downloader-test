@@ -1,31 +1,32 @@
 # Not yet deployed
 
-## v156 — the empty poster pane (v155 broke it), the 500's true cause, select-all
+## v157 — invisible failures made visible, and the review pane truly light
 
-* **The painted image not showing was v155's own bug**: the master-image
-  route's body read a `full` flag that only its SIBLING route declared — a
-  NameError on every request, an empty pane on every poster. Fixed, and
-  the CLASS is now impossible to ship again:
-* **`check_undefined_names` rewrote from file-wide to PER-FUNCTION scope.**
-  The old version pooled every bound name in the file, so any function's
-  parameter vouched for the same name everywhere. Sabotage-tested with the
-  exact v155 bug: red with it, green without.
-* **The rewritten check immediately solved the owner's "Failed to open
-  title: 500"**: `search_text` was imported inside ONE function and used
-  bare in three others, `lock_title` among them — NameError on every title
-  open since v146. Imported properly now. It also caught a second live
-  NameError on the paste-a-URL allow-list path (`host` never bound) that
-  would have fired the first time `allowed_image_hosts` was filled in.
-* **Needs Attention has a select-all tick** in the header of each table,
-  scoped to its own table.
+* **"Failed processing with nothing anywhere saying why."** The Needs
+  Attention panel had buckets for `[auth]`/`[billing]`, `[rejected]`, and
+  "everything untagged" — but `[bad_request]`, a real kind the classifier
+  emits, matched NO bucket. Six failures showed as a badge of 6 and a
+  panel explaining none of them. The catch-all now excludes only the kinds
+  a bucket above already displays, so a kind nobody anticipated lands
+  there WITH its full error text instead of vanishing. (And the NULL-error
+  case is kept via `or_(IS NULL, …)` — three bare NOT-LIKEs would have
+  silently dropped every failure with no text, recreating the bug.)
+* **The review pane was STILL loading 4000×6000 for some rows** — any
+  processed image whose preview_path is empty fell back to the print
+  file. The route now refuses to send print pixels at all: anything big
+  is downscaled to 1200px on the way out, once, and cached. It no longer
+  matters why a preview is missing.
 
 No schema change, no node copy.
 
-**Verified**: preflight green including the new scoped checker across the
-whole codebase; the sabotage (re-inserting v155's bug) goes red and the
-restore goes green. **NOT verified**: nothing rendered, as ever — but the
-500 explanation fits the symptom exactly (title opened fine after refresh,
-because the lock committed before the crash).
+**Verified**: preflight green (including the per-function undefined-name
+checker). **NOT verified**: why those six generations failed — the error
+text will be readable on Needs Attention after this deploys, and the
+command in the chat reads it straight from the database right now.
+
+---
+
+Nothing. Everything written is on the server.
 
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.

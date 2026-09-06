@@ -39,7 +39,7 @@ from fastapi import (
     APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile,
 )
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
-from sqlalchemy import case, func, or_
+from sqlalchemy import and_, case, func, or_
 from sqlalchemy.orm import Session
 
 from .. import pipeline as P
@@ -2738,13 +2738,27 @@ def api_attention(
 
     # ── 4 · Ordinary exhausted failures ─────────────────────────────────
     max_process = int(P.get_setting(db, "process_max_attempts", project=project) or 3)
+    # THE CATCH-ALL, and it must stay one (owner's find, 2026-09-06).
+    # This bucket used to exclude EVERY bracket-tagged error, on the
+    # assumption the buckets above covered them all. They covered three of
+    # four: a "[bad_request]" failure — a real kind the classifier emits —
+    # fell through every filter, so six failed images showed a badge of 6
+    # and a panel explaining none of them. The filter now excludes ONLY the
+    # kinds a bucket above already displays, so a kind nobody anticipated
+    # lands HERE with its full error text instead of vanishing.
     proc_q = (
         db.query(SavedPoster, MasterTitle)
           .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
           .filter(SavedPoster.pipeline_status == "failed_processing",
                   SavedPoster.deleted_at.is_(None),
+                  # or_ with IS NULL, because in SQL `NOT LIKE` is
+                  # unknown for a NULL — three NOT-LIKEs alone would
+                  # silently drop every failure that has no error text,
+                  # recreating the exact invisibility being fixed.
                   or_(SavedPoster.process_error.is_(None),
-                      ~SavedPoster.process_error.like("[%")),
+                      and_(~SavedPoster.process_error.like("[auth]%"),
+                           ~SavedPoster.process_error.like("[billing]%"),
+                           ~SavedPoster.process_error.like("[rejected]%"))),
                   scope)
     )
     proc_count = proc_q.count()
@@ -3463,7 +3477,26 @@ def serve_review_preview(
         data = read_bytes(db, rel)
     except StorageError as e:
         raise HTTPException(404, str(e))
-    if not full:                      # print files are big; cache screens only
+    if not full:
+        # THE SCREEN NEVER GETS PRINT PIXELS, whatever the row says. A row
+        # with no preview_path used to fall back to the 4000×6000 print
+        # file — the owner watched it trickle in twice (2026-09-06). If
+        # what came back is big, it is downscaled to 1200px HERE, once,
+        # and the small version is what gets cached. Self-healing: it no
+        # longer matters why a preview is missing.
+        if len(data) > 400_000:
+            try:
+                import io
+                from PIL import Image
+                with Image.open(io.BytesIO(data)) as img:
+                    img.load()
+                    if img.width > 1200 or img.height > 1200:
+                        img.thumbnail((1200, 1200), Image.LANCZOS)
+                    out = io.BytesIO()
+                    img.convert("RGB").save(out, "JPEG", quality=85)
+                    data = out.getvalue()
+            except Exception:
+                pass          # serving big beats serving a 500
         cache.parent.mkdir(parents=True, exist_ok=True)
         try:
             cache.write_bytes(data)

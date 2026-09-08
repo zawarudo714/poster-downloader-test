@@ -215,7 +215,12 @@ def flatten_onto(src: Path, dest: Path, color: str | None) -> tuple[int, int]:
             img = img.convert("RGB")
 
         dest.parent.mkdir(parents=True, exist_ok=True)
-        img.save(dest, "JPEG", quality=95, subsampling=0)
+        # A .png destination means "keep this lossless" — it is an
+        # intermediate on the way to the upscale, not the delivered file.
+        if dest.suffix.lower() == ".png":
+            img.save(dest, "PNG")
+        else:
+            img.save(dest, "JPEG", quality=95, subsampling=0)
         return img.size
 
 
@@ -247,7 +252,7 @@ def has_transparency(path: Path) -> bool:
 
 
 def upscale_to_width(path: Path, *, width: int, sharpen: int = 0,
-                     quality: int = 92) -> tuple[int, int]:
+                     quality: int = 92, dest: "Path | None" = None) -> tuple[int, int]:
     """
     Resize an image to `width`, height following in proportion, in place.
 
@@ -278,7 +283,19 @@ def upscale_to_width(path: Path, *, width: int, sharpen: int = 0,
         img = img.filter(ImageFilter.UnsharpMask(
             radius=2, percent=int(sharpen), threshold=3))
 
-    img.save(path, "JPEG", quality=quality, optimize=True, progressive=True)
+    # ── QUALITY, TWO WAYS (2026-09-06) ───────────────────────────────────
+    # subsampling=0 keeps full colour resolution (4:4:4). The default 4:2:0
+    # throws away three quarters of the colour detail, and this artwork is
+    # flat blocks meeting at hard edges — exactly where that shows, as
+    # coloured fringing along every boundary.
+    #
+    # `dest` lets the caller enlarge FROM a lossless intermediate and write
+    # the JPEG once, instead of encoding, re-reading and re-encoding: JPEG
+    # ringing introduced at the small size would otherwise be magnified 4x
+    # into the print file.
+    target = dest or path
+    img.save(target, "JPEG", quality=quality, optimize=True,
+             progressive=True, subsampling=0)
     return width, height
 
 

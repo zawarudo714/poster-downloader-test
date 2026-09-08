@@ -167,14 +167,18 @@
     <div class="posters-grid"></div>
   </div>
 
+  {# ORDER MATTERS HERE. SKIP used to sit closest to the search area, so a
+     thumb reaching for SEARCH could land on it and throw the title away.
+     DONE is the common, safe ending and now takes that position; SKIP is
+     pushed to the far side (owner's ask, 2026-09-06). #}
   <div class="title-actions">
-    <div class="done-row">
-      <input type="text" class="done-comment" placeholder="(optional) note for the admin">
-      <button class="btn btn-success" data-action="complete">DONE {{ info("Marks this title finished. Add an optional note for the admin if anything is unusual.") }}</button>
-    </div>
     <div class="skip-row">
       <input type="text" class="skip-reason" placeholder="(optional) reason">
       <button class="btn btn-skip" data-action="skip">SKIP {{ info("Marks this title skipped. Use when nothing usable exists. Admin can review skipped titles and ask you to look again.") }}</button>
+    </div>
+    <div class="done-row">
+      <input type="text" class="done-comment" placeholder="(optional) note for the admin">
+      <button class="btn btn-success" data-action="complete">DONE {{ info("Marks this title finished. Add an optional note for the admin if anything is unusual.") }}</button>
     </div>
     <button class="btn btn-ghost" data-action="reopen" hidden>REOPEN</button>
   </div>

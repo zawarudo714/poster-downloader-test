@@ -241,7 +241,7 @@
       <div class="ti-line1">
         <span class="ti-num mono">${t.external_id ?? '–'}.</span>
         <span class="ti-title"></span>
-        ${t.year ? `<span class="ti-year mono">(${t.year})</span>` : ''}
+        ${realYear(t.year) ? `<span class="ti-year mono">(${realYear(t.year)})</span>` : ''}
         ${t.content_type ? `<span class="ti-type mono">${t.content_type}</span>` : ''}
       </div>
       <div class="ti-line2">
@@ -286,8 +286,8 @@
     // "(N/A)" beside every name trains the eye to skip that whole line.
     const yearEl = node.querySelector('.att-year');
     const typeEl = node.querySelector('.att-type');
-    if (t.has_year !== false && t.year) {
-      yearEl.textContent = '(' + t.year + ')';
+    if (t.has_year !== false && realYear(t.year)) {
+      yearEl.textContent = '(' + realYear(t.year) + ')';
       yearEl.hidden = false;
     } else {
       yearEl.textContent = '';
@@ -452,6 +452,16 @@
   // It used to be the title's search MODE, on the reasoning that a project
   // with a grid has nothing to paste. That stopped being true when travel
   // got both a Brave grid and a Google link.
+  // A YEAR IS FOUR DIGITS OR IT IS NOTHING.
+  // The importer no longer stores "N/A" (fixed 2026-09-06), but rows
+  // imported before that still carry the text, and "N/A" is truthy — which
+  // is exactly why it kept rendering beside every title on the phone. Guard
+  // at the point of DISPLAY as well as at the door.
+  function realYear(v) {
+    const m = String(v == null ? '' : v).match(/\b(1[0-9]{3}|2[0-9]{3})\b/);
+    return m ? m[0] : '';
+  }
+
   function buildPosterCard(p, hasLink) {
     const node = tplPoster.content.cloneNode(true);
     const img = node.querySelector('.poster-img');
@@ -463,6 +473,16 @@
       e.stopPropagation();
       openLightbox(fileUrl(p.id, p.size), p.filename);
     });
+    // LONG-PRESS OPENS THE BIG VIEW, not Chrome's "open image in new tab"
+    // menu. Asked for 2026-09-06 so a worker can check detail on a phone.
+    // contextmenu is what a long press fires on Android; suppressing it and
+    // opening our own viewer replaces the browser menu rather than fighting
+    // it. Desktop right-click gets the same, which is harmless.
+    img.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      openLightbox(fileUrl(p.id, p.size), p.filename);
+    });
+    img.style.webkitTouchCallout = 'none';
     node.querySelector('.poster-name').textContent = p.filename;
     node.querySelector('.poster-size').textContent = humanSize(p.size || 0);
     // REPLACE-BY-URL ONLY EXISTS WHERE THERE IS A URL TO PASTE.
@@ -501,6 +521,20 @@
 
   // Quick undo for a Brave-grid pick: delete without the reason dialog,
   // then reveal the still-populated results so the worker can pick again.
+  // Resolves once every saved thumbnail has finished loading (or failed),
+  // so the caller can stop showing a busy state at the right moment.
+  function waitForSavedThumbs() {
+    const imgs = [...document.querySelectorAll('.poster-img')];
+    const pending = imgs.filter((im) => !im.complete);
+    if (!pending.length) return Promise.resolve();
+    return Promise.all(pending.map((im) => new Promise((done) => {
+      im.addEventListener('load', done, { once: true });
+      im.addEventListener('error', done, { once: true });
+      // Never hang the button on a thumbnail that silently stalls.
+      setTimeout(done, 8000);
+    })));
+  }
+
   async function undoSavedPick(posterId) {
     const r = await postForm(`/poster/${posterId}/delete`,
                              { note: 'Re-picking a different image',
@@ -695,7 +729,7 @@
           return;
         }
         document.getElementById('catalog-title').textContent =
-          data.year ? `${data.title} (${data.year})` : data.title;
+          realYear(data.year) ? `${data.title} (${realYear(data.year)})` : data.title;
         document.getElementById('catalog-sub').textContent =
           `${data.posters.length} poster${data.posters.length === 1 ? '' : 's'} on this title · status: ${data.status.replace('_', ' ')}`;
         const grid = document.getElementById('catalog-grid');
@@ -789,7 +823,7 @@
 
     // "(N/A)" after every artist name is noise, and noise is what teaches
     // people to stop reading labels. Projects without a year show none.
-    const titleStr = r.year ? `${r.title} (${r.year})` : r.title;
+    const titleStr = realYear(r.year) ? `${r.title} (${realYear(r.year)})` : r.title;
     wrap.querySelector('.rev-title').textContent = titleStr;
     wrap.querySelector('.rev-file').textContent  = `/ ${r.title_folder} / ${r.filename}`;
 
@@ -903,6 +937,30 @@
           replaceBtn.remove();
         } else {
           replaceBtn.addEventListener('click', () => replacePoster(r.poster_id, urlInp));
+        }
+
+        // ── FIX IT FROM THE SEARCH GRID, NOT ONLY FROM A URL ─────────────
+        // A flagged image could previously only be replaced by pasting an
+        // address, which is useless for an in-page project where the worker
+        // never has a URL (owner's ask, 2026-09-06). This opens the title
+        // and drops them at the results; saving a new pick REPLACES the
+        // flagged one through the same replace path the grid uses.
+        if (r.search_mode === 'inpage') {
+          const findBtn = document.createElement('button');
+          findBtn.type = 'button';
+          findBtn.className = 'btn btn-accent btn-tiny';
+          findBtn.textContent = '🔍 FIND A REPLACEMENT';
+          findBtn.title = 'Open this title and search for a different image';
+          findBtn.addEventListener('click', async () => {
+            await goToTitle(r.master_id);
+            const box = document.querySelector('[data-search-box]');
+            if (box) {
+              box.hidden = false;
+              box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          });
+          (replaceBtn.parentNode || wrap.querySelector('.rev-actions'))
+            .insertBefore(findBtn, replaceBtn.nextSibling || null);
         }
         deleteBtn.addEventListener('click',  () => deletePoster(r.poster_id, { fromRevision: true }));
         resolveBtn.addEventListener('click', () => resolveRevision(r.revision_id));
@@ -1125,7 +1183,7 @@
         ${t.comment ? '<div class="pci-comment"></div>' : ''}
       `;
       row.querySelector('.pci-title').textContent =
-        t.year ? `${t.title} (${t.year})` : t.title;
+        realYear(t.year) ? `${t.title} (${realYear(t.year)})` : t.title;
       row.querySelector('.pci-meta').textContent = `submitted ${t.submitted_at}`;
       if (t.comment) row.querySelector('.pci-comment').textContent = `Your note: ${t.comment}`;
       list.appendChild(row);
@@ -1636,8 +1694,13 @@ function wireSearch(box, title) {
       // The words the SERVER used, never the words on the button. If those
       // two ever disagree — because the admin edited the list a moment ago —
       // the worker needs to see which one actually happened.
+      // Only the owner's OWN words, never the raw template. The server
+      // sends the phrasing with {title}/{kind} still in it; showing that to
+      // a worker is noise they cannot act on (owner's ask, 2026-09-06).
+      const shownPhrase = String(d.phrase_used || '')
+        .replace(/\{[a-z_]+\}/gi, ' ').replace(/\s{2,}/g, ' ').trim();
       status.textContent = `${results.length} result${results.length === 1 ? '' : 's'}`
-                         + (d.phrase_used ? ` · ${d.phrase_used}` : '')
+                         + (shownPhrase ? ` · ${shownPhrase}` : '')
                          + (d.cached ? ' · cached' : '');
       if (d.filtered_small) {
         note.hidden = false;
@@ -1677,18 +1740,36 @@ function wireSearch(box, title) {
     for (const url of urls) {
       btn.textContent = `SAVING ${saved + 1}/${urls.length}…`;
       try {
-        const fd = new FormData();
-        fd.append('url', url);
-        const r = await fetch(`/api/search_save/${title.id}`, { method: 'POST', body: fd });
-        const d = await r.json();
+        const send = async (replace) => {
+          const fd = new FormData();
+          fd.append('url', url);
+          if (replace) fd.append('replace', '1');
+          const r = await fetch(`/api/search_save/${title.id}`,
+                                { method: 'POST', body: fd });
+          return { r, d: await r.json() };
+        };
+        let { r, d } = await send(false);
+        // Already holding the maximum? Offer to SWAP rather than dead-end.
+        // Picking a better shot from the same grid is the normal case; the
+        // old flow refused and made you delete first.
+        if (!r.ok && d && d.reason === 'soft_limit' && d.can_replace) {
+          if (!confirm('You already saved an image for this title.\n\n'
+                     + 'Replace it with this one?')) { break; }
+          ({ r, d } = await send(true));
+        }
         if (!r.ok || !d.ok) { alert(d.message || 'Save failed.'); break; }
         saved += 1;
       } catch (e) { alert('Save failed: ' + e.message); break; }
     }
-    btn.disabled = false;
-    btn.textContent = 'SAVE SELECTED';
+    // Keep the button in its working state until the SAVED IMAGE IS
+    // ACTUALLY ON SCREEN. The fetch returns as soon as the server has the
+    // file, but the thumbnail still has to download — and in that gap the
+    // button looked idle, so workers pressed it again thinking nothing had
+    // happened (owner's find, 2026-09-06).
+    btn.textContent = saved ? 'LOADING IMAGE…' : 'SAVE SELECTED';
     selected.clear();
     await refreshState();
+    if (saved) await waitForSavedThumbs();
 
     // Saving is the end of the picking, so it ends by putting DONE and SKIP
     // in front of you. Without this you are left at the bottom of a long

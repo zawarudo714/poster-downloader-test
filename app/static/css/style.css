@@ -5412,3 +5412,59 @@ html.theme-light .stat-value, html.theme-light .stat-pill-num {
   width: 100%;
 }
 .review-canvas img { width: auto; max-width: 100%; max-height: 68vh; }
+
+/* ── v162: worker screen polish ─────────────────────────────────────── */
+
+/* ALSO TRY chips carry a faint green tint so they read as "another angle"
+   rather than as more of the same grey furniture (owner's ask). */
+.search-phrasings .btn {
+  background: rgba(79, 217, 161, 0.10);
+  border-color: rgba(79, 217, 161, 0.35);
+  color: #b9f3d9;
+}
+.search-phrasings .btn:hover {
+  background: rgba(79, 217, 161, 0.18);
+  border-color: rgba(79, 217, 161, 0.6);
+}
+html.theme-light .search-phrasings .btn {
+  background: rgba(20, 128, 92, 0.10);
+  border-color: rgba(20, 128, 92, 0.35);
+  color: #0f6a4b;
+}
+
+/* A saved thumbnail is long-pressable to enlarge, so the browser's own
+   image menu and text selection must stay out of the way. */
+.poster-img {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* The worker lightbox fills the width on a phone — the point is to SEE it. */
+@media (max-width: 700px) {
+  .worker-lightbox-card { width: 100vw; max-width: 100vw; padding: 0; }
+  .worker-lightbox-img { width: 100vw; max-width: 100vw; height: auto; }
+}
+
+/* ── v162: the chat alert must be visible ON the sidebar itself ──────── */
+/* The group heading in the rail is deliberately faded (it is a label, not
+   a link) — but its unread badge is the one thing that must NOT fade, or
+   the only way to learn about a message is to open Chat and find it. */
+body.has-rail .nav-group-btn { opacity: 1; }
+body.has-rail .nav-group-btn .nav-badge { opacity: 1; }
+
+/* An unread count pulses gently until it is read. Motion here is earning
+   its place: it answers "is anything waiting for me" from across the room,
+   which is the whole job of a sidebar badge. */
+@keyframes chat-badge-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(242,114,109,0.55); }
+  50%      { box-shadow: 0 0 0 5px rgba(242,114,109,0); }
+}
+#nav-chat-badge:not([hidden]),
+#nav-chat-badge-group:not([hidden]) {
+  animation: chat-badge-pulse 2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  #nav-chat-badge:not([hidden]),
+  #nav-chat-badge-group:not([hidden]) { animation: none; }
+}

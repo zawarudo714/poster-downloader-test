@@ -3688,6 +3688,12 @@ def api_review_decide(
                 P.ensure_upload_rows(db, poster=poster, title=title,
                                      processed=processed,
                                      project=P.project_for_title(db, title))
+            # The review cache exists to make revisiting fast; once an image
+            # is approved and heading for upload nobody reviews it again, so
+            # this is the right moment — and the ONLY moment — to let it go.
+            from ..review_cache import clear as _clear_review_cache
+            _clear_review_cache([processed.storage_path, processed.preview_path,
+                                 processed.master_path])
             counts["approved"] += 1
 
         elif action == "rerun":

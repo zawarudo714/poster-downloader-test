@@ -832,6 +832,7 @@ def api_search(
 def api_search_save(
     master_id: int,
     url: str = Form(...),
+    replace: int = Form(0),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -855,12 +856,52 @@ def api_search_save(
     soft_limit = int(project.images_per_title or SOFT_LIMIT_PER_TITLE)
     live = count_live_posters_for_master(db, t.id)
     if live >= soft_limit:
-        return JSONResponse(
-            {"ok": False, "reason": "soft_limit",
-             "message": f"You already have {live} of {soft_limit} images for this title.",
-             "current_count": live, "soft_limit": soft_limit},
-            status_code=409,
-        )
+        # ── CHANGING YOUR MIND IS NORMAL, SO LET IT REPLACE ──────────────
+        # Picking a better image from the same grid used to be refused with
+        # "you already have 1 of 1", which left DELETE-then-search as the
+        # only route (owner's ask, 2026-09-06). With replace=1 the images
+        # this title already holds are stood down and the new pick takes
+        # their place — one action instead of three.
+        #
+        # ONLY images the pipeline has not touched may be replaced. Once a
+        # poster is greenlit, processing or uploaded, money and a
+        # marketplace listing are attached to it; swapping it silently
+        # underneath would be a retraction, not a re-pick.
+        if replace:
+            existing = (
+                db.query(SavedPoster)
+                  .filter(SavedPoster.master_title_id == t.id,
+                          SavedPoster.deleted_at.is_(None))
+                  .all()
+            )
+            blocked = [sp for sp in existing
+                       if (sp.pipeline_status or "") not in ("", "skipped")]
+            if blocked:
+                return JSONResponse(
+                    {"ok": False, "reason": "in_pipeline",
+                     "message": ("That image has already gone into "
+                                 "processing, so it cannot be swapped here. "
+                                 "Ask the admin to rerun or drop it."),
+                     "current_count": live, "soft_limit": soft_limit},
+                    status_code=409,
+                )
+            for sp in existing:
+                saved_poster_path(sp).unlink(missing_ok=True)
+                sp.deleted_at = datetime.utcnow()
+                sp.delete_note = "Replaced by a different image from the search"
+                log_activity(db, user=user, action="poster_replaced",
+                             target_type="saved_poster", target_id=sp.id,
+                             details={"master_id": t.id, "via": "search_save"})
+            db.flush()
+            live = count_live_posters_for_master(db, t.id)
+        else:
+            return JSONResponse(
+                {"ok": False, "reason": "soft_limit",
+                 "message": f"You already have {live} of {soft_limit} images for this title.",
+                 "current_count": live, "soft_limit": soft_limit,
+                 "can_replace": True},
+                status_code=409,
+            )
 
     today = local_today()
     _ensure_first_save_metadata(t, today)

@@ -600,7 +600,7 @@ DEFAULTS: dict[str, Any] = {
     # sharpening artefacts are permanent and the review gate is the only
     # place they would be caught. Raise it once you have seen a real print.
     "upscale_sharpen":    0,
-    "upscale_jpeg_quality": 92,
+    "upscale_jpeg_quality": 95,
 
     # Spend guard. 'warn' posts a dashboard alert; 'pause' also stops
     # dispatching. Default warn — a hard stop on a bad estimate is worse than
@@ -1355,8 +1355,15 @@ _FAA_FOLD = {
 # deleted, so that name lists as "Blink182". Only this exact byte is safe,
 # which is why the MUSIK title template uses a typed "-" and nothing else.
 _MARKETPLACE_KEEP = set(
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -#"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -#,"
 )
+
+# THE COMMA SURVIVES — stated by the owner 2026-09-06 from his own listings,
+# and it matters now that the listing title IS the rich display title
+# ("Kyoto, Japan"). Stripping it would have made every stored title differ
+# from the live one and shown the reconciliation scanner thousands of false
+# mismatches. Re-read one saved listing after the next upload to confirm;
+# if FAA turns out to drop it, remove the comma here and nowhere else.
 
 # The ordinary hyphen and '#' both SURVIVE — confirmed by submitting them,
 # 2026-08-13. Neither was in the original character test, which covered the

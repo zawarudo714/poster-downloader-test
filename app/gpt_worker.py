@@ -197,12 +197,17 @@ def process_one(db: Session, poster, title, project) -> bool:
     # nothing for the resize to average the hidden colour into. The safe
     # order, and it costs nothing — see imagefetch.flatten_onto() for why the
     # measurement behind this is weaker than it first looked.
-    flatten_onto(raw, tmp, background)
+    # Flatten to a LOSSLESS intermediate, then enlarge straight into the
+    # final JPEG. Encoding once instead of twice keeps JPEG artefacts out of
+    # the picture that gets magnified to print size (2026-09-06).
+    flat = tmp.with_name(f"{poster.id}_flat.png")
+    flatten_onto(raw, flat, background)
 
     width = int(get_setting(db, "upscale_width_px", project=project) or 4000)
     sharpen = int(get_setting(db, "upscale_sharpen", project=project) or 0)
     quality = int(get_setting(db, "upscale_jpeg_quality", project=project) or 92)
-    out_w, out_h = upscale_to_width(tmp, width=width, sharpen=sharpen, quality=quality)
+    out_w, out_h = upscale_to_width(flat, width=width, sharpen=sharpen,
+                                    quality=quality, dest=tmp)
 
     preview_tmp = tmp.with_name(f"{poster.id}_preview.jpg")
     make_preview(tmp, preview_tmp)
@@ -239,6 +244,7 @@ def process_one(db: Session, poster, title, project) -> bool:
         return False
     finally:
         tmp.unlink(missing_ok=True)
+        flat.unlink(missing_ok=True)
         preview_tmp.unlink(missing_ok=True)
         raw.unlink(missing_ok=True)
 

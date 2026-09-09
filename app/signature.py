@@ -203,11 +203,3 @@ def paint(img, mark, place: dict):
     return img
 
 
-def default_x_pct(w_pct: float, margin_pct: float) -> float:
-    """
-    The centre that puts the mark's right edge on the margin.
-
-    Derived rather than stored as a second number, so the default cannot
-    drift out of step with the width and the margin it is made of.
-    """
-    return 100.0 - margin_pct - (w_pct / 2.0)

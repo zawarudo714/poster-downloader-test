@@ -553,8 +553,13 @@ def check_uploaded_without_processed(db: Session, scope: Scope) -> CheckResult:
     if scope.project_id:
         q = q.filter(UploadTracking.project_id == scope.project_id)
     total = q.count()
+    # Account NAMES, not ids — "poster #12 → Golden Reel" is readable and
+    # "poster #12 → account #3" is a number the owner has to translate.
+    # Fetched once, because a lookup per row is a query per row.
+    names = _account_names(db)
     rows = [
-        Finding(f"#{ut.saved_poster_id} → account #{ut.account_id}",
+        Finding(f"poster #{ut.saved_poster_id} → "
+                f"{names.get(ut.account_id, f'account #{ut.account_id}')}",
                 ut.remote_title or "", "/admin/pipeline",
                 project=scope.label(ut.project_id))
         for ut in q.limit(MAX_ROWS).all()
@@ -2096,6 +2101,67 @@ def check_recalled_poster_still_painted(db: Session, scope: Scope) -> CheckResul
     )
 
 
+def check_titles_collide_after_folding(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: no two titles in a project fold to the same marketplace name.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THE COMPARISON IS ON THE FOLDED FORM, NOT THE STORED TEXT
+    ════════════════════════════════════════════════════════════════════════
+    FineArtAmerica silently rewrites titles on save (measured 2026-08-13):
+    accents fold to ASCII, punctuation is deleted, length is capped. So
+    "Los Angeles" and "Los Ángeles" are DIFFERENT rows here and the SAME
+    title there — and a title the account already holds is not refused, it
+    is renumbered to "... #2" with no error (measured 2026-09-03). A
+    renumbered listing lives at an address we never computed, so every
+    listing-check sweep reads it as a 404 for as long as the pair exists.
+
+    The sheet was deduplicated on the RAW string before import. Nothing
+    anywhere has ever checked the FOLDED string, and an admin retitling a
+    held upload can also create a collision after import. This check is the
+    unattended watcher for both doors.
+
+    It reads every title in the project and folds each one in Python, which
+    on 88,970 rows costs a few seconds. Diagnostics runs on demand, never on
+    a page load, so that is an acceptable price for a question nothing else
+    asks.
+    """
+    from .pipeline import clean_for_marketplace, tidy_separators
+
+    q = db.query(MasterTitle.id, MasterTitle.external_id,
+                 MasterTitle.title, MasterTitle.marketplace_title)
+    q = q.filter(scope.titles)
+
+    groups: dict[str, list] = {}
+    for tid, ext, title, mkt in q.all():
+        name = (mkt or title or "").strip()
+        folded = tidy_separators(clean_for_marketplace(name))
+        if not folded:
+            continue          # empty folds are validate_marketplace_title's job
+        groups.setdefault(folded.lower(), []).append((ext, name))
+
+    clashes = {k: v for k, v in groups.items() if len(v) > 1}
+    rows = []
+    for folded, members in sorted(clashes.items())[:MAX_ROWS]:
+        listed = " · ".join(f"#{ext} {name!r}" for ext, name in members[:6])
+        rows.append(Finding(
+            f'all list as "{folded}"',
+            f"{len(members)} titles become the same name on the marketplace: {listed}",
+            "/admin/titles"))
+    return _result(
+        "titles_collide_after_folding",
+        f"{len(clashes)} marketplace name(s) are shared by more than one title"
+        if clashes else
+        "Every title still has its own name after the marketplace's rewriting",
+        "FineArtAmerica rewrites titles when they are saved, so two titles "
+        "that look different here can come out identical there. The second "
+        "one to upload gets '#2' stuck on its name with no error, and after "
+        "that the listing checker can never find it. Rename one of each "
+        "pair before these titles are released into the pipeline.",
+        "error" if clashes else "ok", rows, len(clashes),
+    )
+
+
 def check_year_is_a_year_or_nothing(db: Session, scope: Scope) -> CheckResult:
     """
     INVARIANT: a title's year is four digits, or there is no year at all.
@@ -2164,6 +2230,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_failure_evidence_is_pruned,
     check_recalled_poster_still_painted,
     check_year_is_a_year_or_nothing,
+    check_titles_collide_after_folding,
     check_missing_files,
     check_posters_without_title,
     check_orphan_files,

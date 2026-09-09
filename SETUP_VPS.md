@@ -233,7 +233,7 @@ Then build and initialise:
 
 ```bash
 docker compose up -d --build
-docker compose exec web python scripts/migrate_pipeline.py --schema-only
+# (no migration command — the app builds and adjusts its own tables at startup)
 docker compose exec web python scripts/create_admin.py
 ```
 
@@ -546,13 +546,11 @@ You said you'll wipe and redo this with the real data. At that point:
 
 - Point the node's `config.json` at the production server instead, or register
   a second node there.
-- Run the real import rather than `dev_setup.py`:
-  ```bash
-  docker compose exec web python scripts/migrate_pipeline.py --dry-run \
-    --tracking /data/faa_upload_tracking.json \
-    --processed-root "/data/Straight From Photoshop"
-  ```
-  See `PIPELINE.md` §5.2 for the full sequence.
+- Import the real titles rather than `dev_setup.py`'s demo ones: the plan
+  is the reset rehearsal in `ROADMAP.md` stage 6 — wipe with
+  `reset_workflow.py`, then import `IMPORT_titles.csv` from the dashboard.
+  (The old `migrate_pipeline.py` legacy import was deleted on 2026-09-01;
+  nothing from the movie era is coming back.)
 - Set the real marketplace password and enable the account.
 - Keep `PIPELINE_SECRET` stable from that point on.
 

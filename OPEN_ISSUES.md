@@ -159,31 +159,30 @@ until more payouts accumulate.
 
 ---
 
-## TWO DEAD CONTROLS FOUND WHILE COSTING THE SPEND REMOVAL
+## TWO DEAD CONTROLS FOUND WHILE COSTING THE SPEND REMOVAL — RESOLVED v172
 
 `TRACED 2026-09-09`, both the same shape as the `daily_limit` 0 bug — a
-control that looks like protection and is not.
+control that looks like protection and is not: `brave_daily_query_cap` was
+read by nothing, and Brave spend was never recorded at all.
 
-  * **`brave_daily_query_cap` is never read by anything.** It is declared in
-    `DEFAULTS`, it has a box on the Settings page describing it as "a safety
-    net against a bug looping", and no code anywhere consults it. A looping
-    bug would spend the Brave quota unchecked.
-  * **Brave spend is never recorded.** `record_spend()` is only ever called
-    with `service="openai"`. The "Brave $0.00" on the Spending panel is not
-    a measurement, it is an empty table.
-
-The OpenAI cap, by contrast, IS live: `gpt_worker.py` consults `cap_state()`
-inside the generation loop. Removing the spend counting removes that cap with
-it — say so before removing anything.
+**Resolved by v172**, which removed the whole spend meter at the owner's
+instruction — both dead controls went with it, and so did the live OpenAI
+cap (`cap_state()`), knowingly: the discrepancy was org-wide numbers we
+could not verify, and he watches spend on OpenAI's own dashboard. There is
+deliberately NO spend cap in the app now. If one is ever wanted again, build
+it on a number that can be checked from outside, per rule 5d.
 
 ---
 
 ## PARKED until after the UI revamp
 
-### The MUSIK master sheet is being changed
+### The MUSIK master sheet is being changed — CLOSED (MUSIK was deleted 2026-09-01)
 
-The owner intends to edit the MUSIK CSV. **Remind him about this after the
-UI revamp, before the sheet is re-imported anywhere.**
+MUSIK no longer exists, so there is no sheet to edit and nothing to remind
+him about. The lesson underneath — that `external_id` is the key for
+everything inside a project, so renumbering a sheet orphans the work keyed
+to it — is general, applies to the TRAVEL sheet exactly as much, and lives
+in CLAUDE.md. Kept here only as the original writeup:
 
 **The thing to say to him first, because it is not obvious from outside the
 code:** `external_id` is column 0 of that sheet, and inside a project it is
@@ -209,9 +208,13 @@ now. It would be very expensive after a few thousand uploads.
 
 ---
 
-## Migration plan — agreed 2026-08-27
+## Migration plan — agreed 2026-08-27 — SUPERSEDED 2026-09-09 by the FULL RESET
 
-Established this session, so a future one does not re-derive it:
+**Nothing below is the plan any more.** The owner chose a genuine fresh
+start (see "THE FULL RESET TO ZERO" at the top of this file): the production
+box is wiped, nothing is migrated, and the migration tool itself was deleted
+on 2026-09-01. What follows is kept only because it records which box is
+which and what was on them at the time:
 
   * **178.105.34.144 is LIVE and holds the only copy of the worker's
     posters.** It runs v14. The worker saves there.

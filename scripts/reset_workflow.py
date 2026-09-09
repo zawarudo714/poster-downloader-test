@@ -55,9 +55,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.config import BACKUPS_DIR, DB_PATH, WORKSPACE_DIR          # noqa: E402
 from app.db import SessionLocal                                      # noqa: E402
 from app.models import (                                             # noqa: E402
-    ActivityLog, ChatMessage, ChatReadState, ImportJob, MasterTitle,
-    PaymentRun, PipelineJob, ProcessedImage, Revision, SavedPoster,
+    ActivityLog, ChatMessage, ChatReadState, ImportJob, LedgerEntry,
+    ListingSweep, MarketplaceSnapshot, MasterTitle, PaymentRun, PipelineJob,
+    ProcessedImage, Revision, SavedPoster, SearchCache, TitleAlias,
     UploadTracking, User,
+)
+
+# ── EVERY table is either WIPED below or NAMED here, with its reason. ──────
+# `check_reset_covers_every_table` in tools/preflight.py compares this file
+# against models.py and fails the deploy if a table is in neither list —
+# because that is exactly how five tables (earnings, sweeps, aliases,
+# snapshots, the search cache) sat out the reset unnoticed: each was added
+# AFTER this script was written, and nothing asked whether the reset should
+# know about it (found in the 2026-09-09 audit).
+KEPT_ON_PURPOSE = (
+    "User",            # accounts and passwords survive a reset by contract
+    "UserProject",     # which worker may enter which project — configuration
+    "Project",         # the registry; recreated from code anyway, kept for ids
+    "AppSetting",      # every dashboard setting — the owner's tuning
+    "UploadAccount",   # marketplace accounts, passwords, artist names
+    "AccountProject",  # which account uploads for which project
+    "WorkerNode",      # node registration + token; a reset must not unpair the machine
 )
 
 # A database with more than this much finished work is assumed to be
@@ -154,6 +172,24 @@ def reset(db, *, wipe_titles: bool, dry_run: bool) -> None:
         ("chat read state",  ChatReadState),
         ("import jobs",      ImportJob),
         ("activity log",     ActivityLog),
+        # The five below were added to the app AFTER this script was written
+        # and sat out the reset until the 2026-09-09 audit. All five rebuild
+        # themselves or belong to work that is being wiped:
+        #   · money rows are re-read in full from the marketplace's own
+        #     Balance page on the next earnings read — nothing is lost;
+        #   · sweeps and snapshots describe listings and turns of work this
+        #     reset deletes;
+        #   · aliases point sale names at DESIGNS, which are being wiped;
+        #   · the search cache holds one claim's Brave results, and claims
+        #     are being wiped.
+        # Leaving them meant the fresh site would open with the TEST shop's
+        # money on the Earnings tab — a number that should read zero and
+        # would not.
+        ("earnings ledger rows",   LedgerEntry),
+        ("marketplace snapshots",  MarketplaceSnapshot),
+        ("listing sweeps",         ListingSweep),
+        ("sale-name aliases",      TitleAlias),
+        ("search cache",           SearchCache),
     ]
     for label, model in tables:
         n = db.query(model).count()

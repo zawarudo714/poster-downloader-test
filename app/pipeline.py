@@ -436,8 +436,6 @@ DEFAULTS: dict[str, Any] = {
     # heard of — the exact defect that once put a live film-database link
     # on a project about places.
     "source_search_url":  "",
-    # Hosts a worker may download from. Empty means unrestricted.
-    "allowed_download_hosts": "",
     # Below this width the admin gallery outlines an image in red, because a
     # print source under 800px prints badly. A project whose images are
     # REDRAWN and then upscaled sets this to 0 — otherwise the warning fires
@@ -3009,17 +3007,6 @@ def hand_over_account(
 def pause_account(db: Session, account: UploadAccount, *, minutes: int, reason: str) -> None:
     account.paused_until = datetime.utcnow() + timedelta(minutes=minutes)
     account.pause_reason = (reason or "")[:1000]
-
-
-def _has_upload_work(db: Session, account_id: int, project_id: Optional[int]) -> bool:
-    """
-    Is there anything queued for this (account, project) pair?
-
-    Asked before committing an account's turn to a project, so an account
-    serving two projects doesn't waste its turn on the empty one and leave
-    the busy one waiting for the next rotation.
-    """
-    return _oldest_upload_wait(db, account_id, project_id) is not None
 
 
 def _oldest_upload_wait(db: Session, account_id: int,

@@ -1,5 +1,13 @@
 # Post-Production Pipeline
 
+> **READ THE DATE ON EACH SECTION — 2026-09-09.** The DESIGN sections (2, 6,
+> 8) are current. The DATA sections (4, 5.2, and the copy step in 5.3) 
+> describe the MOVIE era: that catalogue was deleted from the marketplace,
+> `scripts/migrate_pipeline.py` was deleted on 2026-09-01, and the database
+> is being reset to zero. They are kept as history of what the mechanisms
+> did, not as anything to run. A new box today needs only `SETUP_VPS.md`,
+> `SETUP_WINDOWS_NODE.md` and `DEPLOY.md`.
+
 Automates everything after a worker finishes a title: Photoshop processing,
 permanent archiving, and marketplace uploading. Replaces the two local tools
 (`FAA_Real_Paint_FX.jsx` run by hand, `FAA_MovieSeries_Uploader_v2.py` Tkinter
@@ -49,7 +57,7 @@ marketplace. Lose the marketplace account and nothing else is affected.
 
 | Stage | Where | What happens |
 |---|---|---|
-| Save | Linux VPS | Worker pastes a TMDB URL; app downloads to the frozen folder path |
+| Save | Linux VPS | Worker saves an image the way the PROJECT declares (in-page Brave grid for travel; an external-site URL box for projects that search elsewhere); app downloads to the frozen folder path |
 | Greenlight | Linux VPS | Payment (or manual click) sets `greenlit_at`, posters → `greenlit` |
 | Process | Windows VPS | Downloads source, runs the JSX on **one image**, writes `_Painted.jpg` to the Storage Box, reports dimensions/size/duration |
 | Queue | Linux VPS | On a successful process, a `pending` upload row is created for **every enabled account** in the project |
@@ -173,7 +181,7 @@ reach admin functionality.
 
 ---
 
-## 4. Current data state
+## 4. Data state of the MOVIE era — history; today's state is ZERO (see CLAUDE.md)
 
 Measured against the live `poster.db` (2026-07-30) and the local legacy files.
 
@@ -273,16 +281,14 @@ import shutil, datetime
 shutil.copy('/app/poster.db', f'/app/backups/manual-{datetime.date.today()}__pre-pipeline.db')
 print('backed up')"
 
-# Add the pipeline columns and tables.
-docker compose exec web python scripts/migrate_pipeline.py --schema-only
-
 docker compose up -d --build
+# No migration command: the app adds and adjusts its own columns at startup.
 ```
 
 `cryptography` is needed for account-password encryption — confirm it's in
 `requirements.txt` before rebuilding.
 
-### 5.2 Import the legacy history
+### 5.2 Import the legacy history — DONE, AND THE TOOL IS GONE (history only)
 
 Copy `faa_upload_tracking.json` and the `Outputs/Straight From Photoshop` tree
 somewhere the container can read, then **dry run first**:
@@ -384,7 +390,7 @@ ones that predate a change.
 
 ## 7. Extending it
 
-### A second niche (celebrity — planned next)
+### A second niche (written when 'celebrity' was the plan — travel is what actually happened; the mechanics below still describe how any new niche is added)
 1. **Pipeline → Nodes** section has project creation via
    `POST /admin/pipeline/api/projects`; slug e.g. `celebrity`.
 2. Import that master list with its own columns → `master_titles` with
@@ -423,8 +429,10 @@ plumbing.
 - **`Base.metadata.create_all()` does not ALTER existing tables.** New columns
   go in `app/schema_migrations.NEW_COLUMNS`, which the app applies itself at
   startup — there is no deploy step to remember and no ordering to get wrong.
-  Only additive, idempotent changes belong there; data migrations and backfills
-  stay in `scripts/migrate_pipeline.py` where a human runs them deliberately.
+  Only additive, idempotent changes belong there (plus `RELAX_NOT_NULL` for
+  loosening a column); a data migration or backfill gets a one-off script a
+  human runs deliberately — the last such script, `migrate_pipeline.py`, was
+  deleted on 2026-09-01 when the data it carried left.
 - **`get_setting()` raises `KeyError` for unknown keys.** Intentional — it
   stops a dashboard typo from silently resolving to `None` at runtime. Add to
   `DEFAULTS` first.

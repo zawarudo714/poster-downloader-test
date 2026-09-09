@@ -81,6 +81,7 @@ its work from scratch.
 | `OPEN_ISSUES.md` | Individual defects not yet fixed, with what is known about each |
 | `PIPELINE.md` | Post-production: processing, uploading, the node |
 | `DEPLOY.md` | How to deploy |
+| `CLAUDE_CODE.md` | How the owner runs a session in Claude Code on his own machine, and what to type. **The split is: build in Cowork, VERIFY there** — the Cowork sandbox has no network and no SQLAlchemy, so it can never run this app or query a real database |
 | `SETUP_VPS.md` · `SETUP_WINDOWS_NODE.md` | Building a box from nothing |
 | `README.md` | What the app is, for someone who has never seen it |
 | `CHANGELOG.md` | Released changes, by version |
@@ -793,9 +794,9 @@ that it runs when the laptop is on.
 
 Read from a WaveSpeed blog post, NOT from OpenAI. Tagged LEAD rather than
 MEASURED on purpose: nothing here has been tested against the API by us. Two
-of its claims match what this repo already knows independently — the model
-ID, and the per-million-token prices in `gpt_images.PRICE_PER_MTOK` — which
-is why the rest is worth writing down at all. Confirm before acting.
+of its claims matched what this repo knew independently — the model ID, and
+the per-million-token prices the spend meter carried before v172 removed it —
+which is why the rest is worth writing down at all. Confirm before acting.
 
 * **`moderation` defaults to `auto`; the owner's playground uses `low`.** An
   omitted parameter is therefore NOT the same as the playground's setting.
@@ -901,7 +902,12 @@ non-ASCII characters from the celebrity database and reading back what saved:
   CATALOGUE, after FAA's folding, before anything is dispatched** — "Los
   Angeles" and "Los Ángeles" are the same title to FAA and must not both
   exist. Uniqueness is checked against the folded form, never the raw
-  string.
+  string. **Enforced since the third audit (v175):**
+  `check_titles_collide_after_folding` in Diagnostics watches the whole
+  catalogue unattended, and the retitle endpoint refuses a name the account
+  already lists — those two doors (the imported sheet, a hand-typed
+  replacement) are the only ways a duplicate can arrive. Before that, this
+  paragraph was an intention wearing the voice of a mechanism.
 
 Consequences that are not optional:
 
@@ -1039,9 +1045,25 @@ tool needs, add it to `REQUIRED_MODULES` in `dev_setup.py` too.
   or one of the `scope_titles` helpers. Now enforced by the GUARDED table in
   `preflight.py`, so a new one fails before deploy. Sorting by it is fine —
   it is equality lookups that pick a row.
-- **`Base.metadata.create_all()` does not ALTER existing tables.** New columns
-  need an explicit migration (see `migrate_pipeline.NEW_COLUMNS`). The README's
-  per-round notes are the precedent.
+- **`Base.metadata.create_all()` does not ALTER existing tables, and a wipe
+  that deletes ROWS keeps the old columns.** New columns need an explicit
+  migration in `schema_migrations.py` (`NEW_COLUMNS`). **So does a change to
+  an existing column** — and that one is easy to forget, because editing
+  `models.py` makes the change look done. It only takes effect on a table
+  built fresh AFTER the edit. On 2026-09-09 v174 made `year` nullable in the
+  model; every box built earlier kept `year VARCHAR(16) NOT NULL`, and
+  `reset_workflow.py` deletes rows rather than dropping the table, so the
+  planned reset-and-reimport would have died on its first batch with "NOT
+  NULL constraint failed" — the model said optional, the live column said
+  required. Relaxing a column lives in `RELAX_NOT_NULL`, which REBUILDS the
+  table (SQLite has no ALTER COLUMN); its rebuild matches the column's own
+  type token, so it relaxes a VARCHAR as readily as an INTEGER, and it raises
+  loudly rather than rebuild an identical table if it ever cannot. **The
+  general shape: a schema change is only real once a migration carries it to
+  tables that already exist. Editing the model is necessary and never
+  sufficient.** The detector is not preflight — "the live column is NOT NULL"
+  is a runtime fact this environment cannot see — it is the stage-6 reset
+  rehearsal on the test box, which must be run before production.
 - **Storage layout is `{site}/{project}/processed/{date}/{title_folder}/{filename}`**
   relative to `storage_root` (now `S:` rather than `S:/processed`). Project and
   site names are slugified through `pipeline._path_token()` before they touch a
@@ -1524,7 +1546,15 @@ them and fails on any the file that DEFINES them is missing. Sabotage-tested
 in both directions on 2026-09-09. The shape is bigger than colours: whenever
 one file names something another file must provide — a CSS class, an icon
 key, a settings key, a job kind — those are two lists and a script can
-compare them in a second.
+compare them in a second. The third audit (2026-09-09) added two more of
+these comparisons after finding both broken by hand: every TABLE in
+models.py must be either wiped by `reset_workflow.py` or named in its
+KEPT_ON_PURPOSE list (five tables were in neither, so a "reset to zero"
+kept the test shop's money), and every key in DEFAULTS must be READ by
+something (`allowed_download_hosts` was not — a control nobody consults,
+the `brave_daily_query_cap` shape again). Both are preflight checks now.
+When two things must stay in step, ask what script compares them — a rule
+in this file is the weakest rung.
 
 The same check also asserts that **every `/admin/` link in `base.html` sits
 inside a coloured band**, because a visual scheme only works if it covers
@@ -1993,8 +2023,10 @@ capabilities again (rule 3b), and only one of them was fenced.
 
 So: **anything imported that means "do this next" must arrive neutralised.**
 Not detected afterwards — a run that has already dispatched a job cannot be
-un-dispatched. Now impossible: `_park_runs()` ends every unfinished run on
-the way in, through `finish_run` so the pipeline hold is released with it.
+un-dispatched. The fix at the time was `_park_runs()`, which ended every
+unfinished run on the way in, releasing the pipeline hold with it. (That code
+was deleted with the migration tool on 2026-09-01; the rule outlives it and
+applies to ANY import, restore-from-backup included.)
 Note what is deliberately NOT undone — designs recorded as switched OFF keep
 that record, because they really are off on the marketplace and clearing it
 would look tidy while losing the only list of hidden live listings.
@@ -2160,9 +2192,11 @@ Two rules for using one, both learned immediately:
     invents findings out of a failed page load.
 
 And **the outside number needs its own watcher**, because it silently stops
-working if the site moves it: `check_count_check_is_running` reports turns
-that produced no reading at all. A cross-check that has quietly gone blind
-reports agreement for ever.
+working if the site moves it: TeePublic's `check_count_check_is_running`
+reported turns that produced no reading at all. (That check was deleted with
+TeePublic in v147 — the rule is what stays: a cross-check that has quietly
+gone blind reports agreement for ever, so give any new outside number its own
+watcher on day one.)
 
 So for anything that changes the outside world, ask: **what does the far
 side already tell us, for free, that we could be held to?**

@@ -889,6 +889,42 @@ are just `1. Santorini`. Folders already written keep their old names on
 purpose — a poster's folder is fixed the moment it is first saved, and
 renaming it would break the record pointing at it.
 
+## 33. THE THIRD AUDIT'S GUARDS, SEEN ONCE WITH YOUR OWN EYES — v175
+
+Three things from the audit only prove themselves on a real screen. All
+three are part of the stage-6 rehearsal on the test box, so this is one
+session, not three.
+
+**1. The reset now clears the Earnings tab, and a read fills it back.**
+
+1. Run the reset (`--dry-run` first — the printout should now list five new
+   lines: earnings ledger rows, marketplace snapshots, listing sweeps,
+   sale-name aliases, search cache).
+2. Open **Earnings**. Every figure should be zero. A number that is not
+   zero after a reset is a bug and I want to know.
+3. Press **READ NOW** on the account. After the machine finishes, the
+   history should be back, pulled from FAA's own Balance page. The money
+   was never ours to lose — their page is the record.
+
+**2. The folded-title check, on your real 88,970 places.**
+
+1. After importing the sheet, open **Diagnostics** and find "titles collide
+   after folding".
+2. What it is asking: do any two places become the SAME name once FAA
+   strips accents and punctuation? For example, "Los Ángeles" and
+   "Los Angeles" would.
+3. Whatever number it shows is real information about your sheet — the
+   sheet was only ever checked for duplicates on the exact spelling. If it
+   lists pairs, rename one of each pair before greenlighting them.
+
+**3. The duplicate-name refusal when you retype a title.**
+
+1. On a held upload (Needs Attention), try renaming it to a name the same
+   account already has queued or listed.
+2. It should refuse, and the message should tell you why in plain words.
+   If it lets the name through, that is a bug — FAA would silently rename
+   the listing "#2" and the listing checker could never find it again.
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

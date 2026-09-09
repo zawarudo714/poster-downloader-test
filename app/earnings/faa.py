@@ -282,22 +282,6 @@ def split_description(text: str) -> tuple[Optional[str], Optional[str]]:
 
 # ── The pages ───────────────────────────────────────────────────────────────
 
-def _snippet(html: str, limit: int = 220) -> str:
-    """
-    The visible text of a response, for an error message.
-
-    Marketplaces answer a refusal with a PAGE, not an HTTP error — and when
-    they do use an HTTP error the body still says which kind. Without this,
-    "403" is the whole diagnosis and the next step is guesswork.
-    """
-    try:
-        text = _soup(html).get_text(" ", strip=True)
-    except Exception:
-        text = re.sub(r"<[^>]+>", " ", html or "")
-    text = re.sub(r"\s+", " ", text).strip()
-    return (text[:limit] + "…") if len(text) > limit else (text or "(empty page)")
-
-
 def _soup(html: str):
     from bs4 import BeautifulSoup
     return BeautifulSoup(html, "html.parser")

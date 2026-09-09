@@ -39,6 +39,8 @@ A destructive step that runs itself on every boot is a very bad day.
 
 from __future__ import annotations
 
+import re
+
 from sqlalchemy import inspect, text
 
 from .db import engine
@@ -159,6 +161,14 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
 # account added from the Earnings tab has no project until you attach one.
 RELAX_NOT_NULL: list[tuple[str, str]] = [
     ("upload_accounts", "project_id"),
+    # `year` was NOT NULL with a client-side default of "N/A" until v174.
+    # The model is nullable now, but `create_all` never ALTERs a table that
+    # already exists, so every install built before v174 still has the old
+    # NOT NULL column. The re-import writes `year=None` for a travel place,
+    # which that column rejects — so the whole reset-and-reimport in ROADMAP
+    # stage 6 would have died with "NOT NULL constraint failed". Relaxing it
+    # here is what makes v174's model change real on an existing box.
+    ("master_titles", "year"),
 ]
 
 NEW_INDEXES: list[tuple[str, str, str]] = [
@@ -252,12 +262,33 @@ def migrate_schema(*, dry_run: bool = False) -> dict:
             # PRAGMA writable_schema is the surgical option, but editing the
             # schema text by hand is exactly the kind of clever that breaks
             # quietly. Rebuilding is slower and obviously correct.
+            #
+            # The column's TYPE is whatever SQLAlchemy emitted — INTEGER for
+            # `project_id`, VARCHAR(16) for `year`, and anything for the next
+            # one. The first version of this only knew how to strip NOT NULL
+            # from an INTEGER column, so adding `year` (a VARCHAR) to the list
+            # above would have rebuilt the table into an IDENTICAL still-NOT-
+            # NULL copy AND reported "(now nullable)" falsely, every boot. So
+            # match the column's own type token, whatever it is, and strip the
+            # NOT NULL that follows it.
             names = ", ".join(f'"{c}"' for c in cols)
-            ddl = _create_table_sql(conn, table).replace(
-                f"{column} INTEGER NOT NULL", f"{column} INTEGER"
-            ).replace(
-                f'"{column}" INTEGER NOT NULL', f'"{column}" INTEGER'
-            ).replace(f"{table}", f"{table}__new", 1)
+            source_ddl = _create_table_sql(conn, table)
+            pattern = re.compile(
+                r'("?' + re.escape(column) + r'"?\s+[A-Za-z0-9_()]+)\s+NOT NULL'
+            )
+            relaxed = pattern.sub(r"\1", source_ddl, count=1)
+            if relaxed == source_ddl:
+                # Nothing changed — the column has a shape this cannot relax
+                # (for example a DEFAULT clause sitting between type and NOT
+                # NULL). Fail loudly rather than rebuild an identical table
+                # for ever and lie that it became nullable.
+                raise RuntimeError(
+                    f"cannot relax NOT NULL on {table}.{column}: its column "
+                    f"definition does not match the expected "
+                    f"'<name> <type> NOT NULL' shape. Widen the pattern in "
+                    f"migrate_schema before shipping this."
+                )
+            ddl = relaxed.replace(table, f"{table}__new", 1)
 
             conn.execute(text("PRAGMA foreign_keys=OFF"))
             conn.execute(text(ddl))

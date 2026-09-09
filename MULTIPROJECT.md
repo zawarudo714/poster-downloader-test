@@ -2,10 +2,13 @@
 
 **Read this before writing any code in this repo.** It is short on purpose.
 
-This app runs several print-on-demand niches side by side. Today there are
-two — movie/series posters and MUSIK (music artists) — and there will be
-more. Almost every bug this project has had in its multi-project life came
-from code that quietly assumed there was only one.
+This app runs several print-on-demand niches side by side. Today there is
+ONE — travel — because the earlier two (movie/series posters and MUSIK) were
+deleted on 2026-09-01, and more are planned. One project is the DANGEROUS
+number: with two, a wrong assumption shows itself at once; with one, code
+that quietly assumes "the project" is always this one looks correct until
+the day it is not. Almost every bug this project has had in its
+multi-project life came from code that quietly assumed there was only one.
 
 ---
 

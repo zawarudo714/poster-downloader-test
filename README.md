@@ -144,6 +144,11 @@ Open <http://localhost:8000>.
 > The migration is idempotent — safe to re-run. It was verified against a copy
 > of the live 101,605-row database.
 >
+> **This note is HISTORY, not instructions.** The advice above was later
+> retracted (running the script before rebuilding caused 500s), and
+> `scripts/migrate_pipeline.py` was deleted on 2026-09-01. The app now runs
+> its own migrations at startup; there is nothing to run by hand.
+>
 > `cryptography` is a new dependency (marketplace password encryption).
 >
 > **Full documentation is in [`PIPELINE.md`](PIPELINE.md)** — architecture,

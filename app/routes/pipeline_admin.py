@@ -2979,6 +2979,27 @@ def api_attention_retitle(
     if problem:
         raise HTTPException(400, problem)
 
+    # ── Refuse a name this account already lists ────────────────────────────
+    # FAA does not refuse a duplicate title — it silently renumbers it to
+    # "... #2" (measured 2026-09-03), which puts the listing at an address we
+    # never computed, so the listing checker reads it as missing for ever.
+    # The catalogue was made unique at import; a hand-typed replacement is
+    # the one door a duplicate can still walk in through, so it is checked
+    # here, where the fix is free — he is already holding the keyboard.
+    # Compared case-insensitively on the FOLDED form, because that is the
+    # form the marketplace keeps.
+    clash = (db.query(UploadTracking)
+               .filter(UploadTracking.account_id == tracking.account_id,
+                       UploadTracking.id != tracking.id,
+                       func.lower(UploadTracking.remote_title) == cleaned.lower())
+               .first())
+    if clash is not None:
+        raise HTTPException(400,
+            f'This account already has a listing named "{cleaned}" '
+            f"(upload row #{clash.id}). FineArtAmerica would silently rename "
+            f'this one to "{cleaned} #2" and the listing checker could never '
+            f"find it again. Pick a different name.")
+
     tracking.remote_title = cleaned
     tracking.status = "pending"
     tracking.attempts = 0

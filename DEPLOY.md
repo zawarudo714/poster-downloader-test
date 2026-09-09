@@ -179,11 +179,14 @@ Then on the production box (`178.105.34.144`):
 
 ```bash
 cd /path/to/poster_downloader_web
-# Back up before any schema change.
-docker compose exec web python scripts/migrate_pipeline.py --schema-only
+# Back up poster.db before any schema change.
 git pull
 docker compose up -d --build
 ```
+
+There is no migration command to run. The app adds and adjusts its own
+columns at startup, before it serves a request — see the note under
+"Day-to-day" about why running a migration by hand was retracted.
 
 Same commits, already exercised on the test server.
 
@@ -479,8 +482,10 @@ app adds any new columns itself at startup, before it serves a request.
 > that didn't exist. Running it *after* the rebuild worked but left a window of
 > 500s in between. The app now handles it, so there is no order to get wrong.
 >
-> `scripts/migrate_pipeline.py` is still the tool for the **legacy data import**
-> — that one you run deliberately, after a backup, with `--dry-run` first.
+> `scripts/migrate_pipeline.py` itself was DELETED on 2026-09-01 with the
+> rest of the legacy import — the movie-era data it existed to carry is gone.
+> If any document still tells you to run it, that document is stale; the
+> startup migration is the only migration there is.
 
 Bump `APP_VERSION` in `app/config.py` whenever you change JS or CSS — it's the
 cache-buster on every static asset, and without it browsers keep serving the

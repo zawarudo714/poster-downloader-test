@@ -1693,7 +1693,7 @@ NOT_ON_THE_SETTINGS_FORMS = {
 # a job for the QoL stage or the Mega Audit.
 SETTINGS_WITH_NO_BOX_YET = {
     "pay_rate_kes", "soft_limit_per_title",
-    "allowed_image_hosts", "allowed_download_hosts", "review_min_width_px",
+    "allowed_image_hosts", "review_min_width_px",
     "earnings_sales_url", "earnings_balance_url", "earnings_retry_window_hours",
     "listing_check_alarm_ratio", "listing_check_max_attempts",
     "listing_check_min_sample",
@@ -2585,6 +2585,103 @@ def check_no_magic_absent_value() -> None:
     _absent_word_literals()
 
 
+# ── THE RESET MUST HAVE AN OPINION ON EVERY TABLE ──────────────────────────
+# `scripts/reset_workflow.py` wipes the work and keeps the configuration.
+# Five tables added after it was written (earnings rows, sweeps, snapshots,
+# aliases, the search cache) were in NEITHER list, so a "reset to zero"
+# would have opened with the test shop's money still on the Earnings tab
+# (found 2026-09-09). The defect is general: a wipe script and a schema
+# grow independently, and nothing asks the new table which side it is on.
+# So: every model class in models.py must appear in reset_workflow.py —
+# either wiped in its `tables` list or named in KEPT_ON_PURPOSE with a
+# reason. A table in neither fails the deploy and forces the decision.
+
+def check_reset_covers_every_table() -> None:
+    models_src = (APP / "models.py").read_text(encoding="utf-8")
+    model_names = {n.name for n in ast.parse(models_src).body
+                   if isinstance(n, ast.ClassDef)
+                   and any(getattr(b, "id", "") == "Base" for b in n.bases)}
+
+    reset = ROOT / "scripts" / "reset_workflow.py"
+    if not reset.is_file():
+        fail("scripts/reset_workflow.py is missing — the reset path is gone.")
+        return
+    src = reset.read_text(encoding="utf-8")
+    tree = ast.parse(src)
+
+    kept, wiped = set(), set()
+    for node in ast.walk(tree):
+        # KEPT_ON_PURPOSE = ("User", ...)
+        if (isinstance(node, ast.Assign)
+                and any(getattr(t, "id", "") == "KEPT_ON_PURPOSE" for t in node.targets)):
+            kept = {e.value for e in ast.walk(node.value)
+                    if isinstance(e, ast.Constant) and isinstance(e.value, str)}
+        # tables = [("label", Model), ...]  — take every bare Name in it
+        if (isinstance(node, ast.Assign)
+                and any(getattr(t, "id", "") == "tables" for t in node.targets)):
+            wiped |= {e.id for e in ast.walk(node.value) if isinstance(e, ast.Name)}
+    # MasterTitle is wiped/reset by its own dedicated block, not the list.
+    wiped.add("MasterTitle")
+
+    if not kept:
+        fail("reset_workflow.py has no KEPT_ON_PURPOSE list — the check "
+             "cannot tell a kept table from a forgotten one.")
+        return
+    for name in sorted(model_names - kept - wiped):
+        fail(f"models.py defines {name} but reset_workflow.py neither wipes "
+             f"it nor names it in KEPT_ON_PURPOSE. Decide which side of the "
+             f"reset it is on — a table in neither list survives every "
+             f"'reset to zero' unnoticed.")
+    for name in sorted((kept | wiped) - model_names):
+        if name in ("MasterTitle",): continue
+        warn(f"reset_workflow.py mentions {name}, which is not a model in "
+             f"models.py — probably a rename it missed.")
+
+
+# ── A SETTING NOBODY READS IS A CONTROL THAT PROTECTS NOTHING ──────────────
+# `brave_daily_query_cap` had a box describing it as a safety net, and no
+# code consulted it. `allowed_download_hosts` was declared beside the real
+# `allowed_image_hosts` and read by nothing (found 2026-09-09). Both looked
+# exactly like protection. A key is DEAD if its name appears nowhere in the
+# repo outside its own DEFAULTS line — no reader, no box, no help text.
+# (`check_settings_are_reachable` asks the opposite question: a key that is
+# read but cannot be edited. Both directions are one grep each.)
+
+def check_every_default_is_read() -> None:
+    src = (APP / "pipeline.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    keys: list[str] = []
+    for node in tree.body:
+        val = None
+        if isinstance(node, ast.AnnAssign) and getattr(node.target, "id", "") == "DEFAULTS":
+            val = node.value
+        elif isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "DEFAULTS" for t in node.targets):
+            val = node.value
+        if isinstance(val, ast.Dict):
+            keys = [k.value for k in val.keys if isinstance(k, ast.Constant)]
+    if not keys:
+        fail("could not find the DEFAULTS dict in app/pipeline.py")
+        return
+
+    blob = ""
+    for base in (APP, NODE, ROOT / "scripts"):
+        if not base.is_dir(): continue
+        for q in base.rglob("*.py"):
+            if "__pycache__" in str(q): continue
+            blob += q.read_text(encoding="utf-8", errors="replace")
+    for q in list(JS.glob("*.js")) + list(TPL.glob("*.html")):
+        blob += q.read_text(encoding="utf-8", errors="replace")
+
+    for k in keys:
+        # its DEFAULTS line is one occurrence; anything else is a reader,
+        # a box, or per-project override plumbing — all count as "alive".
+        if blob.count(f'"{k}"') + blob.count(f"'{k}'") <= 1:
+            fail(f"the setting {k!r} is declared in DEFAULTS and referenced "
+                 f"by NOTHING else in the repo — no code reads it and no "
+                 f"screen offers it. A control nobody consults reads as "
+                 f"protection and is not. Wire it up or delete it.")
+
+
 CHECKS = [
     ("python compiles",           check_python_compiles),
     ("no undefined names",        check_undefined_names),
@@ -2616,6 +2713,8 @@ CHECKS = [
      check_overlay_sits_in_its_measuring_layer),
     ("javascript helpers are in scope", check_js_helpers_are_in_scope),
     ("absence is NULL, never a magic word", check_no_magic_absent_value),
+    ("the reset has an opinion on every table", check_reset_covers_every_table),
+    ("every setting is read by something", check_every_default_is_read),
 ]
 
 

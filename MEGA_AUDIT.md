@@ -214,7 +214,7 @@ and was sabotage-tested with the exact shipped bug: red with it, green
 without. Rule 5e answered properly this time: what found it was the owner,
 twice; what finds it now is preflight, before deploy, every time.
 
-## What this audit did NOT do
+## What the FIRST audit did NOT do
 
 Say it plainly so nobody trusts it further than it goes: it did not re-walk
 every click-reachable UI state (stage 7 does); it did not re-derive any
@@ -222,3 +222,214 @@ marketplace behaviour (the measured sections stand); it read the payments
 eligibility internals only at the seams. Every fix above carries either a
 refusal, an invariant, or an instrument — no fix relies on somebody
 remembering this file.
+
+---
+
+# THE SECOND MEGA AUDIT — 2026-09-09 (v175)
+
+The owner said he was done tweaking and asked for a second full pass. The
+first audit (above) hardened the code as it stood on 2026-09-06. Everything
+from v155 to v174 was built AFTER it, and fresh code is where bugs live, so
+this pass walked the new mechanisms first: the upload gap, the failure-
+evidence pruning, the chosen-vs-painted colour, the generations picker, the
+recall button, and the whole "N/A" removal of v174.
+
+Same rule as always: nothing is a finding until it has been killed. Where
+this sandbox could not run the thing, that is said next to the claim rather
+than hidden.
+
+## THE ONE REAL BUG — the reset would have crashed on its first import
+
+`MEASURED 2026-09-09` — reproduced in sqlite, fixed, and the fix reproduced.
+
+**What would have happened.** The owner's next big step is ROADMAP stage 6:
+deploy, wipe the database, and re-import the 88,970 travel titles. That
+import would have died on its very first batch with "NOT NULL constraint
+failed: master_titles.year", and the reset would have looked broken.
+
+**Why.** v174 made the `year` column nullable in `models.py`, so a travel
+place with no year stores nothing. That was the right fix. But
+`create_all()` never ALTERs a table that already exists, and the reset
+deletes ROWS rather than dropping the table, so every box built before v174
+still carries the old `year VARCHAR(16) NOT NULL` column. The re-import
+writes `year=None`, and the old column refuses it. The model said one thing
+and the live table said another.
+
+**The second half, which is worse.** There is a `RELAX_NOT_NULL` mechanism
+in `schema_migrations.py` that rebuilds a table to drop a NOT NULL. But
+`year` was not listed in it — and even if it had been, its rebuild only
+knew how to strip NOT NULL from an `INTEGER` column. `year` is a `VARCHAR`,
+so it would have rebuilt the table into an IDENTICAL still-NOT-NULL copy and
+reported "(now nullable)" falsely, on every single boot, for ever.
+
+**The fix (v175).**
+- `("master_titles", "year")` added to `RELAX_NOT_NULL`.
+- The rebuild now matches the column's OWN type token, whatever it is, so it
+  relaxes a VARCHAR, an INTEGER or anything else. Proven in sqlite: the old
+  INTEGER case still works, the VARCHAR case now works, and a NULL year
+  inserts after the rebuild where it was refused before.
+- It now RAISES if it cannot actually change the definition, rather than
+  rebuilding an identical table and lying. A shape it cannot handle becomes
+  a loud boot failure, not a silent forever-loop.
+
+**5e — what would have caught this without him.** Nothing pure-source could:
+"the live table is still NOT NULL" is a fact about a running database, and
+this sandbox has neither the database nor SQLAlchemy. The real net already
+exists in the plan and had simply not been run yet — ROADMAP stage 6 says to
+rehearse the whole deploy-wipe-reimport on the TEST box before touching
+production. **Do that rehearsal.** It is the one thing that exercises this
+path end to end, and it is cheap on the box that does not matter.
+
+## THE SEVEN QUESTIONS ON THE NEW CODE — traced, no other bug found
+
+- `TRACED` **Q1 upload gap.** `upload_gap_state` is derived, off by default,
+  reads the clock and the last confirmed upload, and gates the CLAIM not each
+  design (so it cannot become one-upload-per-gap). It sits BESIDE the daily
+  cap and the quiet window — all three must pass — so switching it on can
+  only slow uploading, never speed it. A zero gap means off, the same
+  `daily_limit` lesson that a typed zero must be harmless. A never-uploaded
+  account is not parked. Clean.
+- `TRACED` **Q4 failure-evidence pruning.** Keeps the newest N per KIND
+  folder, and screenshots and page-dumps live in separate folders — so
+  keep=30 is 30 errors and 60 files, which is exactly what the owner asked
+  for ("30 as in 60 when paired up"). Runs after the file is safely written,
+  swallows its own errors so housekeeping can never fail an upload report,
+  and 0 means keep everything. Clean.
+- `TRACED` **Q7 money, the rebrand.** Previous-business rows (before
+  `earnings_start_date`) are imported and stored as ordinary `sale` rows and
+  still counted in gross, so FAA's Current Balance still reconciles — the
+  checksum in CLAUDE.md holds. They are excluded ONLY from per-design
+  attribution and from the unmatched work queue, which is the honest split:
+  the gap between gross and per-design IS the old business, shown rather than
+  hidden. The refund `classify()` tests "cancel" before "sale". Clean.
+- `TRACED` **Q4 silent registration.** Every one of the 36 Diagnostics
+  checks is wired into the `CHECKS` list, including the two added this week —
+  a check defined but never registered would run never and say nothing, and
+  none is. `check_year_is_a_year_or_nothing` was exercised against sqlite and
+  flags "N/A", "20xx" and five-digit junk while passing NULL, "" and a real
+  four-digit year.
+- `TRACED` **Q2/Q3 new columns and vocabulary.** Columns added since the
+  last audit — the signature fields, `background_chosen`, the upload-gap
+  settings, `earnings_start_date`, `failure_evidence_keep` — none names a
+  possibly-plural owner, and `background_chosen`/`background_color` and
+  `signature_json`/`signature_applied` are the deliberate "two facts because
+  something compares them" shape, not accidental duplication. No deleted-
+  project word (tmdb, movie, MUSIK, TeePublic) survives in executable code;
+  every remaining mention is a history note in a comment or docstring, which
+  CLAUDE.md wants kept.
+
+## STILL OPEN, deliberately — not bugs, owner's own backlog
+
+- Twelve settings still have no box on any screen (`pay_rate_kes`,
+  `allowed_image_hosts` and ten more). Preflight WARNS on them and FAILS on
+  any new one. This is the known 2026-09-03 backlog and it is UI-revamp work
+  the owner owns, not an audit fix.
+- Five query-in-loop warnings, all bounded by MAX_ROWS or the active-project
+  count. Unchanged from the first audit; the SLOWEST PAGES panel is the
+  tripwire.
+
+## What this SECOND pass did NOT do
+
+The same honest limits as the first, plus one that matters more now: this
+sandbox cannot run the app or a database, so every "clean" above is a claim
+about a CONSISTENT code path, never about a rendered screen or a real query.
+The first audit's own most valuable section was the owner's ten minutes of
+clicking, which found thirteen things code-reading missed. So the true test
+of everything here is stage 6 (the reset rehearsal on the test box) and
+stage 7 (the click-through on production). This pass found the schema bug
+that would have blocked stage 6 from even starting.
+
+# THE THIRD MEGA AUDIT — 2026-09-09 (rides in v175)
+
+The owner asked for a pass "from scratch, fixing inconsistencies". The
+second pass (above, same day) had walked the NEW code; this one walked the
+WHOLE system by machine wherever a machine could walk it, and by hand at the
+seams where old code meets new. Method first, findings after, because the
+method is what a fourth pass should reuse.
+
+## HOW IT WAS WALKED (reusable)
+
+- **Contract sweeps, two lists at a time.** Every endpoint the node calls vs
+  every route the server defines: 16/16, both directions, no orphan on
+  either side. Every job kind created vs every kind the node handles vs the
+  words the status strip can say: all match, and the strip spells out an
+  unknown kind rather than dropping it. Node imports vs
+  `requirements.txt` vs `REQUIRED_MODULES`: 3/3/3. Every fetch in the JS and
+  templates vs the 203 defined routes: all resolve.
+- **Dead-code sweep by syntax tree.** Every module-level function with zero
+  references anywhere in the repo.
+- **Docs read as instructions.** Every command a document tells a person to
+  run, checked against the files that exist today.
+
+## FOUND AND FIXED — code
+
+- **The reset script had no opinion on five tables** (`LedgerEntry`,
+  `MarketplaceSnapshot`, `ListingSweep`, `TitleAlias`, `SearchCache`), all
+  added after it was written. A "reset to zero" would have opened with the
+  TEST shop's money still on the Earnings tab. All five are wiped now, a
+  `KEPT_ON_PURPOSE` list names each surviving table with its reason, and
+  `check_reset_covers_every_table` in preflight fails the deploy for any
+  future table that joins neither list. Sabotage-tested both ways.
+- **Nothing ever enforced the folded-title uniqueness rule** that the FAA
+  section of CLAUDE.md calls "not optional". The sheet was deduplicated on
+  the RAW string; "Los Angeles" and "Los Ángeles" fold to one FAA title and
+  would be silently renumbered, stranding the listing at an address the
+  checker can never compute. Two doors, two guards now:
+  `check_titles_collide_after_folding` in Diagnostics (unattended, watches
+  the whole catalogue), and a refusal in the retitle endpoint (the one place
+  a duplicate can be typed in by hand after import). The fold grouping was
+  exercised against the shipped fold code, lifted from the file by syntax
+  tree — accent pairs collide, distinct names do not.
+- **`allowed_download_hosts` was a setting read by nothing**, sitting beside
+  the real `allowed_image_hosts` — the `brave_daily_query_cap` shape again.
+  Deleted, and `check_every_default_is_read` in preflight now fails on any
+  key referenced nowhere outside its own DEFAULTS line. Sabotage-tested by
+  putting the key back: two checks go red.
+- **Four dead functions.** `_has_upload_work` (superseded by the inline
+  condition at the claim site), `default_x_pct` (its docstring claimed the
+  default "cannot drift" while the default was in fact stored as literals
+  and this deriver was unreachable), `_snippet` in `faa.py` (a leftover of
+  the deleted server-side fetch path, in the very file whose header promises
+  none remains) — all three deleted by syntax tree, one cut at a time.
+  `_account_names` in diagnostics was the opposite case: a helper whose
+  intended consumer never called it, so `upload_no_processed` findings read
+  "account #3". It is now called, and that finding shows the account's name.
+
+## FOUND AND FIXED — documents that gave instructions the code cannot follow
+
+- `DEPLOY.md` §1e and `SETUP_VPS.md` both told the reader to run
+  `scripts/migrate_pipeline.py`, deleted 2026-09-01 — one of them in the
+  exact runbook the production promotion follows. Both now say the truth:
+  startup migrates, there is no command.
+- `PIPELINE.md` carried the movie era as if current (TMDB in the stage
+  table, the legacy import as a live procedure, "celebrity — planned
+  next"). A dated banner now says which sections are design (current) and
+  which are history, and the wrong instructions are corrected in place.
+- `MULTIPROJECT.md` opened with "today there are two — movie and MUSIK".
+  It now states the travel-only reality and why ONE project is the
+  dangerous number.
+- `CLAUDE.md` cited three deleted mechanisms in the present tense
+  (`check_count_check_is_running`, `_park_runs`/`finish_run`, the
+  `PRICE_PER_MTOK` table). Corrected to past tense with the rule kept.
+- `OPEN_ISSUES.md`: the 2026-08-27 migration plan marked SUPERSEDED by the
+  full reset; the MUSIK-sheet parked item CLOSED (MUSIK is gone); the two
+  dead spend controls marked RESOLVED by v172.
+
+## JUDGED AND LEFT ALONE
+
+- Recall deletes a poster's upload rows along with its paintings — the seam
+  I went in expecting to be broken, and it is handled.
+- The three upload gates (daily cap, quiet window, upload gap) — traced in
+  the second pass, unchanged.
+- Eleven settings still have no box (the known 2026-09-03 backlog), and the
+  four bounded query-in-loop warnings. Owner's backlog, warned by preflight.
+
+## WHAT THIS PASS DID NOT DO
+
+Same limit as ever, said plainly: no database and no SQLAlchemy in this
+environment, so the new Diagnostics check has had its LOGIC exercised but
+has never run against real rows, and every "clean" above is about code
+paths, not rendered screens. The proof of the reset work is still ROADMAP
+stage 6 — the deploy-wipe-reimport rehearsal on the test box — which now
+also proves the five newly wiped tables and prints the year-column
+relaxation line.

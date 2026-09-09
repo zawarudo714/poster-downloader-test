@@ -1644,20 +1644,37 @@ def _path_token(value: str) -> str:
 
 def storage_path_for(
     db: Session, title: MasterTitle, poster: SavedPoster,
-    *, project: Optional[Project] = None,
+    *, project: Optional[Project] = None, attempt: int = 1,
 ) -> tuple[str, str]:
     """
     Return (relative_path, filename) for a poster's processed derivative.
 
     Relative to the configured storage root — never absolute — so the archive
     can be remounted or moved between providers without rewriting the DB.
+
+    ════════════════════════════════════════════════════════════════════════
+    `attempt` IS IN THE FILENAME, AND THAT IS WHAT MAKES A RERUN NON-DESTRUCTIVE
+    ════════════════════════════════════════════════════════════════════════
+    Until 2026-09-09 this name was the same for every generation of a poster.
+    The database kept the old ProcessedImage row and set `is_current = 0`,
+    with a comment saying the rejected picture was "superseded, never
+    deleted" — but the row's `storage_path` pointed at a file the rerun had
+    just overwritten. So the ROW survived and the PICTURE did not, and the
+    only reason nobody noticed is that nothing ever tried to show an old one.
+    (It is also the whole reason `review_cache.clear()` had to exist.)
+
+    The owner asked to keep every generation and pick between them, which
+    that name cannot express. So attempt 2 onwards get `_v2`, `_v3` and so
+    on. Attempt 1 keeps the plain name deliberately: every image already in
+    the archive is an attempt 1, so nothing has to be renamed or migrated.
     """
     project = project or project_for_title(db, title)
     suffix = get_setting(db, "output_suffix", project=project)
     layout = get_setting(db, "storage_layout", project=project)
 
     stem, _ext = os.path.splitext(poster.filename or "image.jpg")
-    filename = f"{stem}{suffix}.jpg"
+    version = "" if (attempt or 1) <= 1 else f"_v{int(attempt)}"
+    filename = f"{stem}{suffix}{version}.jpg"
 
     rel = _render(layout, {
         "date":         (poster.original_save_date or local_today()).isoformat(),

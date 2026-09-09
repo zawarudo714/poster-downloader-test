@@ -171,7 +171,16 @@ def process_one(db: Session, poster, title, project) -> bool:
                    input_tokens=gen.input_tokens, output_tokens=gen.output_tokens)
     db.commit()
 
-    rel_path, filename = storage_path_for(db, title, poster, project=project)
+    # WHICH GENERATION THIS IS, DECIDED BEFORE THE FILENAME IS BUILT.
+    #
+    # It used to be counted afterwards, purely to fill in a column. Now the
+    # number is part of the path, so a rerun writes `..._v2.jpg` beside the
+    # first one instead of on top of it — see storage_path_for() for why the
+    # old behaviour quietly destroyed the picture it claimed to be keeping.
+    prior = db.query(ProcessedImage).filter_by(saved_poster_id=poster.id).count()
+    attempt = prior + 1
+    rel_path, filename = storage_path_for(db, title, poster, project=project,
+                                          attempt=attempt)
     full_rel = f"{rel_path}"
 
     # ── The model's own output, kept exactly as it arrived ───────────────
@@ -248,14 +257,15 @@ def process_one(db: Session, poster, title, project) -> bool:
         preview_tmp.unlink(missing_ok=True)
         raw.unlink(missing_ok=True)
 
-    # Supersede any previous generation rather than deleting it — a rerun must
-    # not destroy the evidence of what was rejected.
+    # The newest generation becomes the one the uploader would use. The older
+    # ones keep their rows AND, since 2026-09-09, their own files — so the
+    # review screen can offer them and the admin can go back to the third
+    # attempt after a fourth came out worse.
     db.query(ProcessedImage).filter(
         ProcessedImage.saved_poster_id == poster.id,
         ProcessedImage.is_current == 1,
     ).update({ProcessedImage.is_current: 0}, synchronize_session=False)
 
-    prior = db.query(ProcessedImage).filter_by(saved_poster_id=poster.id).count()
     # Read per image, not once at startup: turning the gate off should take
     # effect on the next image, not on the next restart of the server.
     from .pipeline import review_gate_enabled
@@ -273,7 +283,7 @@ def process_one(db: Session, poster, title, project) -> bool:
         processed_by="server",
         duration_ms=gen.duration_ms,
         is_current=1,
-        attempt=prior + 1,
+        attempt=attempt,
         preview_path=preview_rel,
         review_status="pending" if gate else None,
         master_path=master_rel,

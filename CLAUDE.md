@@ -1469,6 +1469,28 @@ ended up inside a `hidden` ancestor, because unhiding a child of a hidden
 parent does nothing and produces the perfect silent failure: a button that
 responds to every click by doing nothing at all.
 
+**A CHILD'S OWN STYLE CAN CANCEL WHAT THE PARENT WAS SET TO, AND NOTHING
+ANYWHERE IS WRONG.** The Approve Artwork screen shows a see-through poster
+on a plate whose colour the admin picks; the browser composites the two,
+which is the same arithmetic the server does when it flattens. The picture
+also carried `background: #111` from a rule written months earlier. A
+background on the child paints ON TOP of the plate, behind the see-through
+pixels — so the sky stayed near-black whatever colour was chosen, while the
+handler fired, the value was stored and the plate really did change. The
+zoom overlay had no such rule, so the owner reported it as "the colour
+preview only works when I zoom in" (2026-09-09).
+
+The general form: **when JavaScript sets a visual property on an element,
+list what is DRAWN on that element and confirm none of them sets the same
+property.** Nothing else can find this — the CSS is valid, every hook
+exists, and this environment cannot render a page. Now mechanical:
+`check_no_background_on_composited_img` in `preflight.py` finds the plates
+from the code, parses the markup to see which pictures sit on one, and
+fails on any rule that gives such a picture a background of its own. The
+FIRST version of that check compared selector TEXT against the plate's
+class and stayed green with the original bug put back, which is the sabotage
+rule earning its place twice in one afternoon.
+
 **When the owner reports "X does nothing", suspect the last structural edit to
 that page BEFORE suspecting X's logic.** The handler is usually fine. Check
 what shipped most recently against `tools/DEPLOY_LOG.md` and diff the region
@@ -1763,6 +1785,27 @@ sitting on TeePublic's inactive tab, and nothing internal disagreed with
 anything — because our single record of it said "done". The owner found it
 by opening the store in a browser.
 
+**THE SAME BLIND SPOT SITS BETWEEN A RECORD AND THE FILE IT POINTS AT.**
+Rerunning a poster kept the old `ProcessedImage` row and set
+`is_current = 0`, and two separate comments said the rejected picture was
+"superseded, never deleted". The filename had no generation number in it,
+so the rerun wrote the new picture straight over the old one. The ROW
+survived; the PICTURE did not. No invariant could see it, because the two
+rows were perfectly consistent with each other and both correct about a
+file that holds one image — and no screen ever asked for an old one, so
+nothing looked wrong for weeks. It surfaced only when the owner asked to
+CHOOSE between generations (2026-09-09), at which point picking v1 would
+have shown him v2.
+
+So: **keeping the record is not keeping the thing.** Whenever you write to
+a path built from a rule rather than from a unique key, ask what else in the
+database claims that same path. Fixed at the source — the generation number
+is in the filename now — and watched by `generations_share_a_file` in
+`diagnostics.py`, which compares rows against each other's PATHS rather than
+against their contents. The tell to remember: a deterministic filename plus
+a table that keeps history is a contradiction, and `review_cache.clear()`
+existing at all was the visible symptom of it nobody read.
+
 The fix is not a cleverer invariant. It is **one number from outside**, and
 there is usually one available for nothing:
 
@@ -2014,6 +2057,21 @@ node that dies cannot leave a total unreachable for ever. **Prefer a
 condition you can DERIVE over a number you have to MAINTAIN**; same reason
 the quiet window is a window rather than a switch, and `scan_incomplete` a
 query rather than a flag.
+
+**And the same preference decides where a SCREEN opens.** The Pipeline page
+saved the last section you looked at and restored it. That sounds harmless
+and was not: a red alarm in the status strip links to that page, clicking
+it put you on NEEDS ATTENTION, and from then on every visit to Pipeline
+opened Needs Attention for the rest of the browser session — whatever you
+had actually come to do. The owner: *"when I click it should not auto take
+me to Needs Attention. It keeps doing this when there is an alert. Just
+remove that mechanism."* Removed 2026-09-09.
+
+The shape, and it fires far beyond navigation: **remembered state cannot
+tell "I chose this" from "something put me here", so it repeats the second
+one for ever.** The derived version was already there and cost nothing —
+the address bar. A hash is set only by something the person did, it can be
+bookmarked, shared and gone back from, and it forgets by itself.
 
 **Creating all the work up front is what makes stopping impossible.** The
 five deactivation jobs — one per account — were queued together, so

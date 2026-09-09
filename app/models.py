@@ -939,10 +939,17 @@ class ProcessedImage(Base):
     # ── Admin review of AI output ────────────────────────────────────────
     # Only meaningful for projects with has_review_gate. Photoshop output is
     # deterministic and has always gone straight to upload.
-    #   NULL       — no gate, or not yet looked at
-    #   'pending'  — waiting for the admin
-    #   'approved' — released for upload
-    #   'rerun'    — rejected; a fresh generation is queued
+    #   NULL         — no gate, or not yet looked at
+    #   'pending'    — waiting for the admin
+    #   'approved'   — released for upload
+    #   'rerun'      — rejected; a fresh generation is queued
+    #   'unusable'   — this poster can never be used
+    #   'superseded' — another generation of the same poster was chosen.
+    #                  Added 2026-09-09 with the version picker. It exists so
+    #                  no row can be left on 'pending' with nobody waiting on
+    #                  it: the queue selects on 'pending', so a forgotten
+    #                  sibling would come back round as work that has already
+    #                  been decided.
     review_status   = Column(String(16), nullable=True, index=True)
     reviewed_at     = Column(DateTime, nullable=True)
 

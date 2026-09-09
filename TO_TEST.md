@@ -328,6 +328,110 @@ Each of these is one of your own findings; check it does what you asked.
 
 ---
 
+## 14. EVERY GENERATION IS KEPT, AND YOU CHOOSE — Approve Artwork · v163
+
+This is the big one. Until now a RERUN wrote the new picture straight over
+the old one, so the old picture was gone even though the record of it
+stayed. Each generation now has its own file.
+
+**What to click**
+
+- Open **Approve Artwork** on a poster you are happy to experiment with.
+  Press **RERUN**, then **SAVE & RELEASE** so the machine picks it up.
+- Wait for the new picture, then open Approve Artwork again. Under the
+  poster there should now be a row reading **generations · v1 · v2**.
+- Click **v1**. The older picture should appear, with its own colour.
+  Click **v2**. The newer one should come back. Press **1** and **2** on
+  the keyboard — they should do the same thing.
+- Settle on whichever you prefer and press **SAVE & RELEASE**. The one
+  showing on screen is the one that goes to FineArtAmerica.
+- Rerun a third time and check you can still reach v1.
+
+**What failure looks like**
+
+- Clicking **v1** shows the same picture as **v2**. That means the two
+  generations are sharing one file, which is exactly the bug this fixes.
+  Run a **Diagnostics** scan: a check called "Every generation has its own
+  file" should report nothing for anything made after today.
+- Old posters generated before today will show up in that Diagnostics
+  check. That reading is correct and cannot be undone — their earlier
+  pictures really were written over.
+
+**Worth knowing.** Every generation now costs archive space: roughly a
+4000-pixel print file plus its see-through original, per attempt. Nothing
+is deleted automatically, on purpose, so tell me if the Storage Box starts
+filling up faster than you want.
+
+---
+
+## 15. THE APPROVE ARTWORK REWORK — v163
+
+**What to click**
+
+- **The colour, without zooming.** Open a poster and drag the colour box on
+  the CARD, not in the big view. The see-through parts of the poster should
+  change colour as you drag. Until today they stayed near-black on the card
+  and only looked right after you clicked into the big view — that is the
+  thing being fixed, so this is the one to check first.
+- **The keys.** With a poster on screen press **R**. It should mark RERUN,
+  same as clicking the button. Press **R** again to unmark it. Then try
+  **K** for keep, **U** for unusable, **C** to unmark, **E** for the
+  eyedropper, **Z** for the big view.
+- **The big view.** Press **Z**. The colour box, the eyedropper and the
+  generation buttons should all be there, under the two pictures. Change
+  the colour without leaving the big view — it should change immediately.
+  Press **R** while still in the big view; the header should show RERUN.
+- The list of keys is written under the buttons, so nothing has to be
+  remembered.
+
+**What failure looks like**
+
+- A key that types into a box instead of acting — tell me which key and
+  what you were clicked into at the time.
+- The colour changing on the card but not in the big view, or the other way
+  round. Both read the same value now, so they should never disagree.
+
+---
+
+## 16. THE PIPELINE PAGE OPENS WHERE YOU EXPECT — v163
+
+**What to click**
+
+- Click a red alarm line in the strip under the top bar. It takes you to
+  the Pipeline page. Look at **Needs Attention**, then go somewhere else
+  and come back to Pipeline from the menu.
+- It should open on **OVERVIEW** every time. Before today it remembered the
+  last section you had open and kept putting you back on Needs Attention
+  for the rest of the day.
+- A bookmarked address ending in `#attention` should still open Needs
+  Attention directly, and the browser's Back button should still walk back
+  through the sections.
+
+---
+
+## 17. THE LISTING CHECK LOG — v163
+
+**What to click**
+
+- On **Listing check**, press the start button. A new panel called **WHAT
+  THE WORKER MACHINE IS DOING** should appear.
+- While it is waiting it should say so in words, and say that the Windows
+  machine does one job at a time. Once it starts it should show the
+  machine's name, the percentage, when it last said something, and its
+  actual log lines.
+- Leave it running and watch: a new line should appear roughly every 30
+  seconds.
+- **To see the stuck case on purpose**: stop the agent on the Windows
+  machine while a sweep is running. Within a few minutes the panel should
+  say it has heard nothing and explain what that usually means. Start the
+  agent again and it should pick up where it left off.
+
+**Where it runs.** The Windows worker machine, never the Linux server.
+FineArtAmerica refuses the server for these pages, even the public ones.
+That is now printed on the panel so nobody goes looking on the wrong box.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

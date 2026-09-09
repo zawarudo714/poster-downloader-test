@@ -84,6 +84,24 @@
         <span class="review-tally mono" data-review-tally></span>
       </div>
 
+      {# ── THE KEYS, WRITTEN DOWN WHERE THEY ARE USED ──────────────────
+         A shortcut nobody can see is a shortcut nobody presses. The owner
+         asked for a RERUN key on 2026-09-09; the rest are here because a
+         screen where one action has a key and the others do not is harder
+         to use than one where none of them do. #}
+      <p class="review-keys muted">
+        <span class="mono">K</span> keep ·
+        <span class="mono">R</span> rerun ·
+        <span class="mono">U</span> unusable ·
+        <span class="mono">C</span> unmark ·
+        <span class="mono">E</span> eyedropper ·
+        <span class="mono">1</span>-<span class="mono">9</span> or <span class="mono">V</span> pick a generation ·
+        <span class="mono">Z</span> big view ·
+        <span class="mono">&larr; &rarr;</span> move ·
+        <span class="mono">Esc</span> back.
+        Every one of these works in the big view too.
+      </p>
+
       <div class="review-commit">
         <button class="btn btn-accent" data-action="review-commit">SAVE&nbsp;&amp;&nbsp;RELEASE</button>
         <button class="btn btn-ghost" data-action="review-approve-all">RELEASE&nbsp;WITHOUT&nbsp;FINISHING&nbsp;THE&nbsp;SKIM</button>
@@ -96,13 +114,21 @@
 
 {# Full-screen compare: the worker's photograph and the finished poster side
    by side at reading size, arrow keys stepping through titles without
-   leaving the overlay. Click either image on the review card to open it. #}
+   leaving the overlay. Click either image on the review card to open it.
+
+   The colour controls and the generation picker are repeated HERE, filled in
+   by the script. Until 2026-09-09 they lived only on the card while the only
+   place the colour could actually be judged was this overlay, so changing a
+   colour meant closing the overlay, changing it, and opening it again. The
+   card now previews the colour correctly AND these controls exist in both
+   places, so neither view is the crippled one. #}
 <div class="review-zoom" data-review-zoom hidden>
   <div class="review-zoom-head">
     <span class="review-zoom-title" data-zoom-title></span>
     <span class="muted mono" data-zoom-pos></span>
+    <span class="review-img-state" data-zoom-state></span>
     <span style="margin-left:auto" class="filter-row">
-      <span class="muted">← → move between titles · Esc closes</span>
+      <span class="muted">K keep · R rerun · U unusable · 1-9 generation · ← → move · Esc closes</span>
       <button class="btn btn-ghost btn-tiny" data-action="zoom-close">CLOSE</button>
     </span>
   </div>
@@ -113,9 +139,10 @@
     </div>
     <div class="review-zoom-cell">
       <span class="zoom-label">THE FINISHED ARTWORK</span>
-      <span class="review-zoom-canvas" data-zoom-canvas><img data-zoom-poster alt=""></span>
+      <span class="review-zoom-canvas" data-zoom-canvas data-canvas><img data-zoom-poster data-poster-img crossorigin="anonymous" alt=""></span>
     </div>
   </div>
+  <div class="review-zoom-controls" data-zoom-controls></div>
 </div>
 {% endblock %}
 

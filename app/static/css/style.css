@@ -4807,10 +4807,27 @@ label.inline-check {
 .review-img.is-rerun    { border-color: var(--skip); }
 .review-img.is-unusable { border-color: var(--error); }
 
+/* ══════════════════════════════════════════════════════════════════════
+   NO BACKGROUND ON THE POSTER ITSELF. THIS ONE LINE WAS THE WHOLE BUG.
+   ══════════════════════════════════════════════════════════════════════
+   This rule used to end in `background: #111`. The poster is a TRANSPARENT
+   PNG sitting on `.review-canvas`, whose colour is the thing being chosen —
+   and a background on the picture paints on top of that plate, behind the
+   see-through pixels. So the sky always came out near-black however the
+   colour was set, and the plate colour only showed in the margins.
+   The zoom overlay never had this rule, which is exactly why the owner
+   reported that "the colour preview only works when I zoom in" (2026-09-09).
+   The general shape: a colour set on a parent is invisible if a child paints
+   its own. Now checked mechanically — see check_no_background_on_img in
+   tools/preflight.py. */
 .review-img img {
   width: 100%; height: auto; max-height: 55vh;
-  object-fit: contain; display: block; background: #111;
+  object-fit: contain; display: block;
 }
+/* The source photograph is an opaque JPEG, so its letterbox bars want a
+   neutral surround rather than the card colour. Scoped to the source on
+   purpose: it must never come back on the poster. */
+.review-img-source img { background: #111; }
 .review-img figcaption {
   display: flex; justify-content: space-between; gap: 8px;
   font-size: 11px; margin-top: 8px;
@@ -5468,3 +5485,45 @@ body.has-rail .nav-group-btn .nav-badge { opacity: 1; }
   #nav-chat-badge:not([hidden]),
   #nav-chat-badge-group:not([hidden]) { animation: none; }
 }
+
+/* ── v163: Approve Artwork — generations, keys, and colour in both views ──
+   The screen was called unintuitive, so the three things it was missing are
+   here: a row of generations to choose between, the keys written down where
+   they are used, and the colour controls repeated inside the big view. */
+
+/* One button per generation. Only drawn when there is more than one, so on
+   the normal single-generation poster this row does not exist at all. */
+.review-versions {
+  display: flex; align-items: center; gap: 6px;
+  flex-wrap: wrap; padding: 6px 0;
+}
+
+/* The key legend sits under the decision row, quiet but always readable. */
+.review-keys {
+  margin: 8px 0 0; font-size: 11.5px; line-height: 1.9;
+}
+.review-keys .mono {
+  padding: 1px 5px; border: 1px solid var(--border); border-radius: 3px;
+  background: var(--card);
+}
+
+/* The big view's own copy of the generation picker and the colour bar. It
+   is pinned under the two pictures so changing a colour never means leaving
+   the one place the poster is big enough to judge. */
+.review-zoom-controls {
+  display: flex; align-items: center; justify-content: center;
+  flex-wrap: wrap; gap: 14px;
+  padding-top: 10px; margin-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.review-zoom-controls .review-versions,
+.review-zoom-controls .review-color { padding: 0; }
+
+/* The plate inside the big view is the same kind of thing as the one on the
+   card, and must behave identically when the eyedropper is armed. */
+.review-zoom-canvas.is-picking { outline: 2px dashed var(--accent); cursor: crosshair; }
+.review-zoom-canvas.is-picking img { cursor: crosshair; }
+
+/* The decision showing in the big view's header, so pressing R there gives
+   the same visible answer as pressing it on the card. */
+.review-zoom-head .review-img-state { position: static; }

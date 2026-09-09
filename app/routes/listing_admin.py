@@ -109,6 +109,81 @@ def _sweep_payload(db: Session, sweep: ListingSweep) -> dict:
         # in rather than an hour in.
         "suspect": LC.artist_name_suspect(db, sweep),
         "working": bool(_live_jobs(db, sweep)),
+        "job": _job_payload(db, sweep),
+    }
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  "IS IT STUCK?" — ANSWERED FROM THE JOB'S OWN HEARTBEAT
+# ════════════════════════════════════════════════════════════════════════════
+
+def _sweep_jobs(db: Session, sweep: ListingSweep) -> list[PipelineJob]:
+    """Every job ever created for this sweep, newest first."""
+    import json
+
+    out = []
+    for job in (db.query(PipelineJob)
+                  .filter(PipelineJob.kind == JOB_KIND)
+                  .order_by(PipelineJob.id.desc()).limit(200).all()):
+        try:
+            payload = json.loads(job.payload_json or "{}")
+        except (TypeError, ValueError):
+            payload = {}
+        if payload.get("sweep_id") == sweep.id:
+            out.append(job)
+    return out
+
+
+def _job_payload(db: Session, sweep: ListingSweep) -> Optional[dict]:
+    """
+    What the worker machine is doing right now, in its own words.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS EXISTS
+    ════════════════════════════════════════════════════════════════════════
+    The owner watched a sweep sit at "0 of 15 in this sweep" and had no way
+    to tell the difference between four situations that look identical on
+    screen: the worker machine is switched off, it is busy with a Photoshop
+    job and has not reached this one, it is checking addresses and simply
+    has not reported yet, or it died mid-chunk. His words on 2026-09-09:
+    "how do I know if it's stuck? Need some sort of log."
+
+    So this hands back the job's own log lines and, more importantly, the
+    heartbeat: `last_report_at` is stamped on every line the machine writes.
+    "Is it alive" is a question about the last thing it SAID — never about
+    how long ago it started, which is the mistake that once cancelled a
+    perfectly healthy hour-long job at minute 45.
+
+    `quiet_for_s` is the raw number of seconds since it last spoke. The
+    screen decides what to call that; nothing here declares it stuck,
+    because a chunk legitimately reports only once every 25 addresses.
+    """
+    jobs = _sweep_jobs(db, sweep)
+    if not jobs:
+        return None
+    job = jobs[0]
+    last = job.last_report_at or job.started_at or job.created_at
+    quiet = (datetime.utcnow() - last).total_seconds() if last else None
+    lines = [ln for ln in (job.log_text or "").splitlines() if ln.strip()]
+    return {
+        "id": job.id,
+        "status": job.status,
+        "progress": job.progress or 0,
+        # WHICH MACHINE. The listing check is a Windows-node job, never the
+        # Linux server: FineArtAmerica answers 403 to the server for these
+        # pages, public ones included. Naming the machine on the screen is
+        # what stops "it is stuck" being investigated on the wrong box.
+        "machine": job.claimed_by or "",
+        "created_at": job.created_at.isoformat() if job.created_at else None,
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "last_report_at": job.last_report_at.isoformat() if job.last_report_at else None,
+        "quiet_for_s": int(quiet) if quiet is not None else None,
+        "error": (job.error or "")[:1000],
+        # The tail only. A full chunk writes a line every 25 addresses, so
+        # forty lines is several minutes of history and the whole log would
+        # be a large payload every five seconds for no extra meaning.
+        "log": lines[-40:],
+        "chunks": len(jobs),
     }
 
 

@@ -3371,6 +3371,46 @@ def api_review_queue(
                       MasterTitle.external_id.asc().nullslast(),
                       SavedPoster.id.asc()).all()
 
+    # ── EVERY GENERATION OF EACH POSTER, NOT ONLY THE NEWEST ────────────
+    #
+    # The queue still SELECTS on the current row — which poster needs a
+    # verdict is unchanged. What travels with it is the whole history, so
+    # the screen can offer "v1 · v2 · v3" and the admin can settle on the
+    # third attempt after a fourth came out worse (owner's ask 2026-09-09).
+    #
+    # One query for the lot rather than one per poster: a 500-title review
+    # would otherwise be 500 round trips before the first picture appeared.
+    poster_ids = [poster.id for _p, poster, _t in rows]
+    siblings: dict[int, list] = {}
+    if poster_ids:
+        for row in (db.query(ProcessedImage)
+                      .filter(ProcessedImage.saved_poster_id.in_(poster_ids))
+                      .order_by(ProcessedImage.saved_poster_id.asc(),
+                                ProcessedImage.attempt.asc(),
+                                ProcessedImage.id.asc()).all()):
+            siblings.setdefault(row.saved_poster_id, []).append(row)
+
+    def _version(p) -> dict:
+        return {
+            "processed_id": p.id,
+            "attempt": p.attempt or 1,
+            "filename": p.filename,
+            "width": p.output_width,
+            "height": p.output_height,
+            "is_current": bool(p.is_current),
+            "review_status": p.review_status or "",
+            "created_at": p.created_at.isoformat() if p.created_at else "",
+            "preview_url": f"/admin/pipeline/review/image/{p.id}",
+            # The colour already flattened in, and whether there is a
+            # transparent master to re-flatten from. No master means the
+            # generation was opaque and the colour control does nothing —
+            # so the screen hides it rather than offering a dead knob.
+            "background_color": p.background_color or "",
+            "can_recolor": bool(p.master_path),
+            "master_url": (f"/admin/pipeline/review/master/{p.id}"
+                           if p.master_path else ""),
+        }
+
     titles: dict = {}
     for processed, poster, title in rows:
         block = titles.setdefault(title.id, {
@@ -3380,23 +3420,12 @@ def api_review_queue(
             "date": poster.original_save_date.isoformat() if poster.original_save_date else "",
             "images": [],
         })
+        versions = [_version(p) for p in siblings.get(poster.id, [processed])]
         block["images"].append({
-            "processed_id": processed.id,
+            **_version(processed),
             "poster_id": poster.id,
-            "filename": processed.filename,
-            "attempt": processed.attempt,
-            "width": processed.output_width,
-            "height": processed.output_height,
-            "preview_url": f"/admin/pipeline/review/image/{processed.id}",
             "source_url": f"/admin/file/{poster.id}",
-            # The colour already flattened in, and whether there is a
-            # transparent master to re-flatten from. No master means the
-            # generation was opaque and the colour control does nothing —
-            # so the screen hides it rather than offering a dead knob.
-            "background_color": processed.background_color or "",
-            "can_recolor": bool(processed.master_path),
-            "master_url": (f"/admin/pipeline/review/master/{processed.id}"
-                           if processed.master_path else ""),
+            "versions": versions,
         })
 
     return JSONResponse({"titles": list(titles.values()),
@@ -3672,6 +3701,25 @@ def api_review_decide(
                              f"{processed.filename}: {e}")
                 processed.background_color = wanted
             processed.review_status = "approved"
+
+            # ── APPROVING AN OLDER GENERATION MAKES IT THE CURRENT ONE ───
+            #
+            # `is_current` is what the uploader reads, so choosing the third
+            # attempt has to move that mark or the fourth one would be sent
+            # to the marketplace instead. The losing generations are set
+            # aside rather than deleted: their rows and (since 2026-09-09)
+            # their files both stand, which is what the whole version picker
+            # rests on. They are marked 'superseded' so they can never come
+            # back round in the pending queue — a sibling left on 'pending'
+            # would reappear as work with no picture anybody was waiting on.
+            if poster is not None:
+                for other in (db.query(ProcessedImage)
+                                .filter(ProcessedImage.saved_poster_id == poster.id,
+                                        ProcessedImage.id != processed.id).all()):
+                    other.is_current = 0
+                    if (other.review_status or "") in ("pending", ""):
+                        other.review_status = "superseded"
+                processed.is_current = 1
             # RELEASING IS WHAT CREATES THE UPLOAD WORK.
             #
             # On the Photoshop path, report_processed() seeds an upload row
@@ -3698,10 +3746,21 @@ def api_review_decide(
 
         elif action == "rerun":
             processed.review_status = "rerun"
-            # The rejected generation is superseded, never deleted — you may
-            # want to compare it against what replaces it, and it is evidence
-            # of what the model does with this source.
+            # The rejected generation is set aside, never deleted — its row
+            # AND its file both stand, so the next review can offer it as
+            # "v2" and you can settle on it if the new one comes out worse.
             processed.is_current = 0
+            # No generation of this poster is the current one until the new
+            # one lands. Any sibling still reading 'pending' is closed off
+            # here: leaving one would put a picture nobody is waiting on
+            # back in the queue the moment the fresh attempt supersedes it.
+            if poster is not None:
+                for other in (db.query(ProcessedImage)
+                                .filter(ProcessedImage.saved_poster_id == poster.id,
+                                        ProcessedImage.id != processed.id).all()):
+                    other.is_current = 0
+                    if (other.review_status or "") == "pending":
+                        other.review_status = "superseded"
             if poster:
                 poster.pipeline_status = "greenlit"
                 poster.process_attempts = 0

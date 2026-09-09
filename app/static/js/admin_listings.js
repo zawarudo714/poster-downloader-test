@@ -61,6 +61,87 @@
            + (rest ? ' ' + rest + ' minutes' : '');
   }
 
+  // ── "IS IT STUCK?" ───────────────────────────────────────────────────
+  //
+  // Four situations look identical on a screen that only shows a count:
+  // the worker machine is off, it is busy with something else, it is
+  // working and simply has not reported yet, or it died mid-chunk. The
+  // owner watched "0 of 15" and could not tell which (2026-09-09).
+  //
+  // So this says which machine has the work, when it last spoke, and what
+  // it said. Nothing here declares a job dead — a chunk reports once every
+  // 25 addresses, so a minute of silence is normal. It states the facts and
+  // names the one number that matters.
+  function howLong(seconds) {
+    if (seconds == null) return 'never';
+    if (seconds < 90) return seconds + ' seconds ago';
+    var mins = Math.round(seconds / 60);
+    if (mins < 90) return mins + ' minute' + (mins === 1 ? '' : 's') + ' ago';
+    var hours = Math.round(mins / 60);
+    return hours + ' hour' + (hours === 1 ? '' : 's') + ' ago';
+  }
+
+  function renderJob(s) {
+    var j = s && s.job;
+    var el = q('[data-sweep-log]');
+    if (!el) return;
+
+    if (!j) {
+      el.innerHTML = '<p class="muted">No job has been created for this '
+        + 'sweep yet. If this does not change within a few seconds, the '
+        + 'sweep could not be handed to the worker machine at all.</p>';
+      return;
+    }
+
+    // WHAT EACH STATE MEANS, IN WORDS, WITH WHAT TO DO ABOUT IT.
+    var verdict;
+    if (j.status === 'queued') {
+      verdict = '<p><strong>Waiting for the worker machine to pick this up.</strong> '
+        + 'The machine runs one job at a time, so if it is part-way through '
+        + 'a Photoshop or upload job this waits its turn. Created '
+        + howLong(j.quiet_for_s) + '. If it has been waiting more than a few '
+        + 'minutes with nothing else running, the agent on that machine is '
+        + 'probably not running — check the Nodes panel on the Pipeline page.</p>';
+    } else if (j.status === 'running') {
+      var quiet = j.quiet_for_s;
+      // 25 addresses per report at roughly 1.4s each is about 35 seconds,
+      // so silence becomes interesting somewhere past two minutes. Said as
+      // a fact plus a suggestion, never as a diagnosis.
+      var worry = quiet != null && quiet > 180;
+      verdict = '<p><strong>Running on ' + esc(j.machine || 'the worker machine')
+        + '.</strong> ' + (j.progress || 0) + '% of this batch of addresses. '
+        + 'Last said something ' + howLong(quiet) + '.</p>'
+        + (worry
+            ? '<p class="quota-note">It normally speaks up every 30 seconds '
+              + 'or so. This long a silence usually means the machine was '
+              + 'rebooted or lost its network. Nothing is lost — every '
+              + 'address already checked is saved, and the sweep restarts '
+              + 'itself from where it got to. You can also press STOP and '
+              + 'start again.</p>'
+            : '');
+    } else if (j.status === 'error') {
+      verdict = '<p class="danger"><strong>The job failed.</strong> '
+        + esc(j.error || 'No reason was recorded.') + '</p>';
+    } else if (j.status === 'cancelled') {
+      verdict = '<p class="muted">This batch was cancelled.</p>';
+    } else {
+      verdict = '<p class="muted">This batch finished. '
+        + (s.status === 'running'
+            ? 'The next batch should be handed out within a few seconds.'
+            : '') + '</p>';
+    }
+
+    el.innerHTML = verdict
+      + '<p class="muted mono">job #' + j.id + ' · batch ' + j.chunks
+      + ' of this sweep · runs on the WINDOWS worker machine, not the Linux '
+      + 'server</p>'
+      + (j.log && j.log.length
+          // The same console styling the Pipeline page uses for a running
+          // job, so a log looks like a log wherever you meet one.
+          ? '<pre class="pipe-console">' + esc(j.log.join('\n')) + '</pre>'
+          : '<p class="muted">The machine has not written anything yet.</p>');
+  }
+
   // ── The sweep ────────────────────────────────────────────────────────
   function renderSweep(data) {
     var s = data.sweep, c = data.counts || {}, el = q('[data-sweep-panel]');
@@ -277,6 +358,10 @@
     }
 
     renderSweep(data);
+    // The log panel only exists while there is a sweep to talk about.
+    var logPanel = q('[data-sweep-log-panel]');
+    if (logPanel) logPanel.hidden = !data.sweep;
+    if (data.sweep) renderJob(data.sweep);
     renderAccounts(data.accounts || []);
     Object.keys(data.settings || {}).forEach(function (k) {
       var el = q('[data-set="' + k + '"]');

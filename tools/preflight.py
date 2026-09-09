@@ -1664,6 +1664,146 @@ def check_no_filter_on_fixed_element_ancestors() -> None:
                  "fixed sidebar inside the 48px bar (see v149). Remove it.")
 
 
+def _plated_image_classes() -> set[str]:
+    """
+    Every class name on, or above, a picture that sits on a colour plate.
+
+    A PLATE is any element whose `background-color` is set from JavaScript —
+    found from the code, never from a list here, because a list is one more
+    thing somebody has to remember to extend. The markup is read as MARKUP,
+    with a real parser and a real ancestor stack: the poster's own selector
+    is `.review-img img`, which does not mention the plate at all, so
+    matching selector TEXT against the plate's class proves nothing. (The
+    first version of this check did exactly that, and stayed green with the
+    original bug put back.)
+
+    Fragments live in two places — Jinja templates, and the template literals
+    inside the review script — so both are parsed. `${...}` holes are blanked
+    first, which leaves the literal class names intact.
+    """
+    from html.parser import HTMLParser
+
+    plates: set[str] = set()
+    js_files = sorted((APP / "static" / "js").glob("*.js"))
+    for js in js_files:
+        text = js.read_text(encoding="utf-8")
+        if not re.search(r"\.style\.backgroundColor\s*=", text):
+            continue
+        for hook in re.findall(r"\[data-([a-z0-9-]*canvas[a-z0-9-]*)\]", text):
+            plates.add("data-" + hook)
+    if not plates:
+        return set()
+
+    found: set[str] = set()
+
+    class Walk(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.stack: list[tuple[str, list[str], bool]] = []
+
+        def handle_starttag(self, tag, attrs):
+            names = {k for k, _v in attrs}
+            classes = []
+            for k, v in attrs:
+                if k == "class" and v:
+                    classes = v.split()
+            on_plate = bool(names & plates) or any(
+                s[2] for s in self.stack)
+            if tag == "img" and any(s[2] for s in self.stack):
+                for _t, cls, _p in self.stack:
+                    found.update(cls)
+                found.update(classes)
+            if tag not in ("img", "br", "input", "hr", "meta", "link"):
+                self.stack.append((tag, classes, on_plate))
+
+        def handle_startendtag(self, tag, attrs):
+            self.handle_starttag(tag, attrs)
+
+        def handle_endtag(self, tag):
+            for i in range(len(self.stack) - 1, -1, -1):
+                if self.stack[i][0] == tag:
+                    del self.stack[i:]
+                    return
+
+    def walk(fragment: str) -> None:
+        w = Walk()
+        try:
+            w.feed(fragment)
+        except Exception:      # noqa: BLE001 — a tolerant read, never fatal
+            pass
+
+    hole = re.compile(r"\$\{[^{}]*\}")
+    for tpl in sorted((APP / "templates").glob("*.html")):
+        walk(tpl.read_text(encoding="utf-8"))
+    for js in js_files:
+        text = js.read_text(encoding="utf-8")
+        for lit in re.findall(r"`([^`]*)`", text):
+            if "<" in lit:
+                walk(hole.sub(" ", lit))
+    return found
+
+
+def check_no_background_on_composited_img() -> None:
+    """
+    A picture that sits on a chosen colour must not paint its own.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE DEFECT THIS EXISTS FOR (2026-09-09)
+    ════════════════════════════════════════════════════════════════════════
+    The Approve Artwork screen shows a TRANSPARENT poster on a coloured
+    plate, and the browser composites the two — which is the same arithmetic
+    the server does when flattening, so the preview IS the finished poster.
+    `.review-img img` also carried `background: #111`. A background on the
+    picture paints on top of the plate, behind the see-through pixels, so
+    the sky came out near-black whatever colour was picked. The zoom overlay
+    had no such rule, which is why the owner reported that the colour
+    preview "only works when I zoom in".
+
+    Nothing could have found it. The CSS is valid, every hook exists, the
+    handler fires, and the colour really is applied — to an element you
+    cannot see. This environment cannot render a page, so only a person
+    looking at the screen would ever have noticed.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE RULE, STATED GENERALLY
+    ════════════════════════════════════════════════════════════════════════
+    Anything drawn on a plate must be see-through. A rule is flagged when
+    every class it names is one that really does sit on the path from a
+    plate down to a picture — so `.review-img-source img`, whose picture is
+    an opaque photograph outside any plate, is left alone.
+    """
+    plated = _plated_image_classes()
+    if not plated:
+        return
+
+    css = (APP / "static" / "css" / "style.css").read_text(encoding="utf-8")
+    # COMMENTS OUT FIRST. A rule's "selector" is everything back to the
+    # previous brace, which includes the paragraph of prose above it — and
+    # this file's prose is full of file names, so `.py` and `.js` were being
+    # read as class names and every rule looked like it named something
+    # unknown. That is what kept the first version of this check green with
+    # the original bug put back.
+    css = re.sub(r"/\*.*?\*/", " ", css, flags=re.S)
+    for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
+        sel, body = m.group(1), m.group(2)
+        if not re.search(r"\bbackground(-color)?\s*:", body):
+            continue
+        if re.search(r"background(-color)?\s*:\s*(none|transparent|inherit)",
+                     body):
+            continue
+        for part in sel.split(","):
+            part = part.strip()
+            if not re.search(r"(^|[\s>+~])img\s*$", part):
+                continue
+            names = re.findall(r"\.([A-Za-z0-9_-]+)", part)
+            if not names or not set(names) <= plated:
+                continue
+            fail(f"CSS rule '{part}' gives a background to a picture that "
+                 f"sits on a colour plate — it paints over the colour being "
+                 f"chosen and the preview goes wrong (see v163). "
+                 f"Remove the background.")
+
+
 CHECKS = [
     ("python compiles",           check_python_compiles),
     ("no undefined names",        check_undefined_names),
@@ -1686,6 +1826,7 @@ CHECKS = [
     ("every document is linked", check_no_orphan_documents),
     ("local imports come before use", check_local_imports_not_used_earlier),
     ("the top bar carries no filter", check_no_filter_on_fixed_element_ancestors),
+    ("no picture paints over its colour plate", check_no_background_on_composited_img),
 ]
 
 

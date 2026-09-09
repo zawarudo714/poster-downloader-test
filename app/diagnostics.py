@@ -1619,6 +1619,61 @@ def check_two_current_images(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def check_generations_share_a_file(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: two generations of one poster must not point at one file.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS IS NOT OBVIOUS
+    ════════════════════════════════════════════════════════════════════════
+    Rerunning a poster kept the old ProcessedImage ROW and set
+    `is_current = 0`, with a comment in two places saying the rejected
+    picture was "superseded, never deleted". The filename it pointed at had
+    no generation number in it, so the rerun wrote the new picture straight
+    over the old one. The row survived; the picture did not. Nothing
+    disagreed with anything, because our records only ever described
+    themselves — the two rows are perfectly consistent and both correct
+    about a file that holds one image.
+
+    It only became visible when the owner asked to CHOOSE between
+    generations (2026-09-09), at which point picking "v1" would have shown
+    him v2. Fixed at the source: `storage_path_for` now puts the generation
+    in the name, so v2 lands beside v1 instead of on top of it.
+
+    This is the net under that fix. It is stated about STATE — two rows, one
+    path — so it holds whatever future code writes an image, including code
+    nobody has thought of yet.
+
+    Rows already in the archive from before the fix will show up here, and
+    that reading is honest: those older pictures really are gone.
+    """
+    dup_q = (db.query(ProcessedImage.saved_poster_id,
+                      ProcessedImage.storage_path,
+                      func.count(ProcessedImage.id).label("n"))
+               .group_by(ProcessedImage.saved_poster_id,
+                         ProcessedImage.storage_path)
+               .having(func.count(ProcessedImage.id) > 1))
+    found = dup_q.limit(MAX_ROWS).all()
+    total = len(dup_q.all())
+
+    rows = [Finding(f"poster #{poster_id}",
+                    f"{n} generations all stored at {path}",
+                    "/admin/pipeline/review")
+            for poster_id, path, n in found]
+    return _result(
+        "generations_share_a_file",
+        f"{total} poster(s) have generations sharing one file"
+        if total else "Every generation has its own file",
+        "Each of these posters was generated more than once and every "
+        "attempt was written to the same place, so only the newest picture "
+        "still exists — the older rows point at it too. Anything from "
+        "before 2026-09-09 is history and cannot be recovered; a NEW one "
+        "means something started writing images without a generation "
+        "number again, which is supposed to be impossible.",
+        "warn" if total else "ok", rows, total,
+    )
+
+
 def _account_names(db: Session) -> dict[int, str]:
     """
     id -> name for every marketplace account, fetched once.
@@ -1632,6 +1687,7 @@ def _account_names(db: Session) -> dict[int, str]:
 
 
 CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
+    check_generations_share_a_file,
     check_missing_files,
     check_posters_without_title,
     check_orphan_files,

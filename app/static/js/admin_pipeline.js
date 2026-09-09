@@ -277,7 +277,7 @@
         toast(`Could not load ${name}: ${e.message}`, 'error');
       });
     }
-    try { sessionStorage.setItem(PIPE_SECTION_KEY, name); } catch (e) {}
+    // NOTHING IS REMEMBERED HERE. See the boot block for why (2026-09-09).
   }
 
   // Select-all in the Needs Attention tables (owner's ask, 2026-09-06).
@@ -2535,20 +2535,32 @@
   });
 
   // ── Boot ─────────────────────────────────────────────────────────────────
-  // The URL wins, then this DOOR's last-visited section, then the door's
-  // own default. Validation is against the TAB BUTTONS, not the panels:
-  // every panel exists behind every door, but only this door's tabs may be
-  // opened here — anything else redirects (see showSection).
-  const PIPE_SECTION_KEY = 'pipe-section:' + ((root && root.dataset.pageMode) || 'ops');
+  // The URL wins, then the door's own default. Validation is against the TAB
+  // BUTTONS, not the panels: every panel exists behind every door, but only
+  // this door's tabs may be opened here — anything else redirects (see
+  // showSection).
+  //
+  // ══════════════════════════════════════════════════════════════════════
+  // THE DOOR NO LONGER REMEMBERS WHERE YOU WERE. REMOVED 2026-09-09.
+  // ══════════════════════════════════════════════════════════════════════
+  // It used to save the last section you opened in sessionStorage and
+  // restore it. That sounds harmless and was not: an alert in the status
+  // strip links to /admin/pipeline, clicking it put you on NEEDS ATTENTION,
+  // and from then on EVERY visit to the Pipeline page opened Needs Attention
+  // instead of the overview — for the rest of the browser session, whatever
+  // you actually came to do. The owner's words: "when I click it should not
+  // auto take me to Needs Attention. It keeps doing this when there is an
+  // alert. Just remove that mechanism."
+  //
+  // The general shape, worth carrying past this bug: a screen that REMEMBERS
+  // a place you were sent to cannot tell "I chose this" from "something put
+  // me here", and it repeats the second one forever. The address bar already
+  // does the remembering — a hash can be bookmarked, shared and gone back
+  // from, and it is only ever set by something you did.
   let initial = (root && root.dataset.defaultSection) || 'overview';
   const fromHash = (location.hash || '').replace('#', '');
   if (fromHash && sectionOnThisPage(fromHash)) {
     initial = fromHash;
-  } else {
-    try {
-      const saved = sessionStorage.getItem(PIPE_SECTION_KEY);
-      if (saved && sectionOnThisPage(saved)) initial = saved;
-    } catch (e) {}
   }
 
   // A funnel click on the Pipeline door lands here carrying a filter.

@@ -160,7 +160,7 @@ def pipeline_settings_page(
 # as much a credential.
 SECRET_KEYS = {
     "storage_sftp_password",
-    "openai_api_key", "openai_admin_key",
+    "openai_api_key",
     "brave_api_key_free", "brave_api_key_paid",
 }
 
@@ -1879,12 +1879,12 @@ def api_test_gpt_process(
         return JSONResponse({"ok": False, "fatal": False,
                              "error": str(e), "log": lines}, status_code=200)
 
-    G.record_spend(db, service="openai", operation="test_image_edit",
-                   cost=gen.cost_usd(), project_id=project.id,
-                   saved_poster_id=poster.id,
-                   input_tokens=gen.input_tokens, output_tokens=gen.output_tokens)
+    # Spend metering removed in v172. The token counts are still reported,
+    # because they say something about the SIZE of the picture the model
+    # chose, which is worth seeing on a test even without a price attached.
     db.commit()
-    emit(f"generated in {gen.duration_ms} ms, ${gen.cost_usd():.4f}")
+    emit(f"generated in {gen.duration_ms} ms, "
+         f"{gen.input_tokens} in / {gen.output_tokens} out tokens")
 
     tmp = WORKSPACE_DIR / "_gpt_tmp" / f"test_{poster.id}.jpg"
     tmp.parent.mkdir(parents=True, exist_ok=True)
@@ -1923,9 +1923,9 @@ def api_test_gpt_process(
         "bytes": len(gen.image_bytes),
         "duration_ms": gen.duration_ms,
         "total_ms": int((datetime.utcnow() - started).total_seconds() * 1000),
-        # float(), not the Decimal itself — cost is carried as Decimal so the
-        # spend ledger stays exact, but JSON has no Decimal.
-        "cost_usd": round(float(gen.cost_usd()), 4),
+        # No cost figure any more — the spend metering was removed in v172.
+        # The token counts stay, because they say how big a picture the model
+        # chose to make, which is worth seeing on a test.
         "input_tokens": gen.input_tokens, "output_tokens": gen.output_tokens,
         "preview_path": preview_rel if stored else None,
         "log": lines,
@@ -2261,10 +2261,8 @@ def api_gpt_state(
     db: Session = Depends(get_db),
 ):
     """Everything the PROCESSING tab needs for a GPT project in one call."""
-    from ..gpt_images import cap_state, month_to_date_usd
     project = _project(request, admin, db)
     style = str(P.get_setting(db, "openai_style_image", project=project) or "")
-    state = cap_state(db, project=project)
     return JSONResponse({
         "prompt": P.get_setting(db, "openai_prompt", project=project),
         "style_image": style,
@@ -2275,14 +2273,6 @@ def api_gpt_state(
                           f"?v={int(datetime.utcnow().timestamp())}"
                           if str(P.get_setting(db, "signature_image",
                                                project=project) or "") else ""),
-        "spend": {
-            "month_to_date": str(state["spent"]),
-            "cap": str(state["cap"]),
-            "over": state["over"],
-            "action": state["action"],
-            "openai": str(month_to_date_usd(db, "openai")),
-            "brave": str(month_to_date_usd(db, "brave")),
-        },
     })
 
 
@@ -2444,100 +2434,6 @@ def serve_style_image(
     return FileResponse(path)
 
 
-@router.get("/api/spend")
-def api_spend(
-    request: Request,
-    days: int = Query(30, ge=1, le=365),
-    admin: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    """
-    Day-by-day spend, newest first, with today's figure first in the list.
-
-    Computed from our own metering — for OpenAI that is real token usage the
-    API reported, for Brave it is query count x the configured rate and is
-    flagged as estimated.
-    """
-    from .. import gpt_images as G
-    from .. import openai_costs as OC
-    from ..models import ApiSpend
-
-    project = _project(request, admin, db)
-
-    since = datetime.utcnow().date() - timedelta(days=days - 1)
-    rows = (
-        db.query(ApiSpend)
-          .filter(ApiSpend.created_at >= datetime.combine(since, datetime.min.time()),
-                  # Scoped like everything else on this page. Unscoped, MUSIK
-                  # would be shown the movie project's bill.
-                  ApiSpend.project_id == project.id)
-          .all()
-    )
-    by_day: dict[str, dict] = {}
-    for r in rows:
-        key = r.created_at.date().isoformat()
-        bucket = by_day.setdefault(key, {"date": key, "openai": 0.0,
-                                         "brave": 0.0, "total": 0.0, "calls": 0})
-        try:
-            amount = float(r.cost_usd or 0)
-        except ValueError:
-            amount = 0.0
-        bucket[r.service] = round(bucket.get(r.service, 0.0) + amount, 6)
-        bucket["total"] = round(bucket["total"] + amount, 6)
-        bucket["calls"] += 1
-
-    days_out = sorted(by_day.values(), key=lambda d: d["date"], reverse=True)
-
-    # ── Month to date, against the cap ───────────────────────────────────
-    cap = G.cap_state(db, project=project)
-    month_start = datetime.utcnow().date().replace(day=1)
-
-    # Cost PER IMAGE is the number that actually predicts the bill: the
-    # backlog is counted in images, not dollars, and "$0.02 each" answers
-    # "what will the remaining 3,000 cost" in a way a monthly total cannot.
-    images_this_month = (
-        db.query(func.count(ProcessedImage.id))
-          .filter(ProcessedImage.project_id == project.id,
-                  ProcessedImage.created_at >= datetime.combine(
-                      month_start, datetime.min.time()))
-          .scalar() or 0
-    )
-    spent_month = float(cap["spent"])
-    per_image = round(spent_month / images_this_month, 4) if images_this_month else None
-
-    remaining_backlog = (
-        db.query(func.count(SavedPoster.id))
-          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
-          .filter(SavedPoster.pipeline_status.in_(("greenlit", "processing")),
-                  SavedPoster.deleted_at.is_(None),
-                  _title_scope(db, project))
-          .scalar() or 0
-    )
-
-    return JSONResponse({
-        "ok": True,
-        "project": {"id": project.id, "name": project.name},
-        "month": {
-            "spent": round(spent_month, 4),
-            "cap": float(cap["cap"]),
-            "over": cap["over"],
-            "action": cap["action"],
-            "images": images_this_month,
-            "per_image": per_image,
-            # What finishing the queue would cost at the rate seen so far.
-            # An estimate, and labelled as one — the model's price varies
-            # with the size it picks for each source photo.
-            "backlog": remaining_backlog,
-            "backlog_cost": (round(per_image * remaining_backlog, 2)
-                             if per_image and remaining_backlog else None),
-        },
-        # OpenAI's own figure, when an admin key is configured. Reported
-        # beside ours rather than replacing it — see openai_costs.py for why
-        # both numbers are worth keeping.
-        "reconcile": OC.last_result(db),
-        "days": days_out,
-        "today": days_out[0] if days_out else None,
-    })
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  NEEDS ATTENTION
@@ -2607,24 +2503,6 @@ def api_attention(
     # Checked FIRST and reported as one line, not N. When the spend cap trips
     # or a key is wrong, every image fails for the same reason; a per-image
     # list buries the single fact that matters.
-    if project.processor == "gpt":
-        from .. import gpt_images as G
-        try:
-            cap = G.cap_state(db, project=project)
-        except Exception:
-            cap = None
-        if cap and cap.get("over"):
-            findings.append(_attention_finding(
-                "spend_capped",
-                f"Image generation is {'paused' if cap['action'] == 'pause' else 'over budget'}",
-                f"${cap['spent']} spent this month against a ${cap['cap']} cap. "
-                + ("Nothing is being generated until the cap is raised or the "
-                   "month rolls over." if cap["action"] == "pause"
-                   else "Generation is continuing; this is a warning only."),
-                "Raise or clear the cap under Processing → Spending.",
-                severity="stop" if cap["action"] == "pause" else "warn",
-                items=[{"kind": "note", "spent": cap["spent"], "cap": cap["cap"]}],
-            ))
 
     # ── Is the stage that does the work actually running? ───────────────
     # Checked BEFORE the per-image failures, because when the answer is no,
@@ -2733,26 +2611,6 @@ def api_attention(
     # is somewhere you go when you are already thinking about money, and
     # this is something you need told rather than something you go looking
     # for. The consequence is that the cap stops meaning anything.
-    if project.processor == "gpt":
-        from .. import openai_costs as OC
-
-        rec = OC.last_result(db)
-        if rec and rec.get("significant"):
-            findings.append(_attention_finding(
-                "spend_mismatch",
-                "Our cost figures disagree with OpenAI's billing",
-                "We calculate spend from the token counts each call reports, "
-                "multiplied by prices written into the code. OpenAI's own "
-                "billing says something different — usually because they "
-                "changed their prices, which makes the per-image cost and the "
-                "monthly cap wrong until those rates are updated.",
-                "Compare against OpenAI's billing page. If their prices have "
-                "changed, the rates in gpt_images.py need updating.",
-                severity="warn",
-                items=[{"kind": "note", "spent": rec.get("ours"),
-                        "cap": rec.get("theirs")}],
-                note=f"Last checked {rec.get('checked_at', '')}.",
-            ))
 
     # A configuration failure repeats identically on every image. Group by the
     # error text so a wrong API key reads as one problem with a count, rather

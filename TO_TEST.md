@@ -777,6 +777,45 @@ both ways.
 
 ---
 
+## 30. THE SIX CHANGES IN v172
+
+**Diagnostics — the false alarm is gone.** Run a defect check. "Files on disk
+with no database record" should no longer list `_style/travel.png`,
+`_signature/travel.png` or anything under `_pipeline_artifacts`. Those are
+your reference picture, your signature and the failure evidence, and the
+panel used to invite you to delete them.
+
+**Earnings — the two mystery rows.** After the next earnings read, the 9/4
+Gladiator row and the 8/25 Highlander row should show as **refund** rather
+than **other**, and the note about rows we cannot name should be gone.
+
+**Earnings — your start date.** There is a new box, MY SALES START ON, under
+the two times. Set it to the day you rebranded. The old film sales should
+drop off the "could not match" list, while your balance, your next payout and
+the "our figures reconcile with theirs exactly" line all stay the same. That
+last part is the one to check — if the balance changes, tell me, because it
+should not.
+
+**The status strip.** Start a listing check and watch the strip at the top.
+It should say "checking listings" instead of "nothing". The same goes for an
+earnings read.
+
+**Failure evidence.** Nothing to press. Once you have had more than 30 upload
+failures, the Failure Evidence panel should stop growing and hold the newest
+30 pictures. You can change the number under Settings → Signature, in the box
+called "Failure reports to keep".
+
+**The spending panel is gone.** Processing should have no SPENDING section at
+all, and Needs Attention should never mention a cap or a billing mismatch
+again. The generation test still shows the token counts, without a price.
+
+> **The one thing you have lost, so you are not surprised by it:** there is no
+> monthly spend cap any more. Nothing on the server stops a night of painting
+> costing whatever it costs. If you want a ceiling, set a spend limit on the
+> OpenAI account itself.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

@@ -257,20 +257,13 @@ def _scheduler_loop():
             now = local_now()
             today_local = local_today()
 
-            # ── Does OpenAI agree with our own metering? ─────────────────
-            # Once a day, guarded by its own date marker. Wrapped so a
-            # failure here cannot stop the backup below — an unreachable
-            # billing API must never cost you a backup.
-            try:
-                from .db import SessionLocal
-                from .openai_costs import run_daily
-                _db = SessionLocal()
-                try:
-                    run_daily(_db)
-                finally:
-                    _db.close()
-            except Exception:
-                log.exception("OpenAI cost reconciliation failed")
+            # The nightly OpenAI cost reconciliation used to run here. It was
+            # REMOVED in v172 at the owner's instruction, along with all the
+            # spend metering — see `openai_costs.py` being gone entirely.
+            # The reason: OpenAI's costs endpoint reports the whole ACCOUNT,
+            # so the comparison flagged his unrelated usage as a discrepancy
+            # every single month and blamed a price change that had not
+            # happened.
 
             # ── What did the marketplaces earn? ──────────────────────────
             # Once per local day, first tick after midnight. Its own try for

@@ -524,19 +524,17 @@ DEFAULTS: dict[str, Any] = {
     "google_query": "{title} {kind}",
     "brave_min_dimension": 300,
     "brave_results_per_query": 50,
-    # Off by default — turn it on only if a bug starts looping.
-    "brave_daily_query_cap": 0,
+    # `brave_daily_query_cap` lived here until v172 and was NEVER READ BY
+    # ANYTHING. It had a box on the Settings page describing itself as a
+    # safety net against a looping bug, and no code anywhere consulted it —
+    # so a loop would have spent the Brave quota unchecked while the screen
+    # said it was protected. Removed rather than wired up, because the owner
+    # was removing the spend feature it belonged to. If a real guard against
+    # a search loop is ever wanted, build it deliberately and TEST that it
+    # fires; that is the whole lesson of a defence that never fired.
 
     # ── OpenAI image generation ──────────────────────────────────────────
     "openai_api_key":     "",
-    # Separate, higher-privilege credential. Only the nightly cost
-    # reconciliation uses it; image generation never does.
-    "openai_admin_key":   "",
-    # Written by the nightly reconciler, never by a human. They live in
-    # DEFAULTS because set_setting() validates every key against it — a
-    # value written by the app still has to be declared here.
-    "openai_reconcile_result": "",
-    "openai_reconcile_date":   "",
     "openai_model":       "gpt-image-2",
     "openai_size":        "auto",
     "openai_quality":     "low",
@@ -598,6 +596,39 @@ DEFAULTS: dict[str, Any] = {
     # aiming a slider at.
     "signature_key_left":   ",",
     "signature_key_right":  ".",
+
+    # HOW MANY FAILURE SCREENSHOTS TO KEEP, per kind.
+    #
+    # Asked for by the owner 2026-09-09: "there should be a max amount of
+    # reports before they start self deleting... by 30 errors i would have
+    # fixed it surely." Before this, nothing anywhere deleted them and the
+    # Failure Evidence panel grew for ever.
+    #
+    # 30 of EACH KIND, so 30 pictures and 30 page dumps — his "30 as in 60
+    # when paired up". Counted per folder rather than per failure on purpose:
+    # the two files of one failure are written by two separate requests and
+    # can land a second apart, so pairing them would rest on their timestamps
+    # matching, which is not guaranteed.
+    "failure_evidence_keep": 30,
+
+    # WHERE OUR OWN TRADING STARTS on the marketplace, as YYYY-MM-DD.
+    #
+    # Asked for on 2026-09-09. The owner is reusing a FineArtAmerica account
+    # that carried a different catalogue, rebranded for travel, and its sales
+    # history cannot be deleted. Sales before this date are PREVIOUS
+    # BUSINESS: still imported, still counted in every total, never shown on
+    # the unmatched list and never matched to a design.
+    #
+    # THEY ARE NOT DROPPED, AND THAT IS THE WHOLE DESIGN. FineArtAmerica
+    # prints a Current Balance which our gross minus our payouts has to land
+    # on — it is the only outside number that can tell us we have missed a
+    # row. Importing a SUBSET would break that checksum for ever, and would
+    # also break `due_next`, which is their balance minus everything credited
+    # since the last payout. Keeping every row and merely declining to NAME
+    # the old ones costs nothing and keeps both.
+    #
+    # Blank means no cutoff, which is right for a fresh account.
+    "earnings_start_date": "",
     # WHETHER THE REFERENCE IMAGE IS SENT AT ALL.
     #
     # Whether a style reference is wanted is a property of the PROMPT, not of
@@ -648,11 +679,12 @@ DEFAULTS: dict[str, Any] = {
     "upscale_sharpen":    0,
     "upscale_jpeg_quality": 95,
 
-    # Spend guard. 'warn' posts a dashboard alert; 'pause' also stops
-    # dispatching. Default warn — a hard stop on a bad estimate is worse than
-    # a message you can act on.
-    "spend_cap_usd_month": 0,
-    "spend_cap_action":   "warn",
+    # The monthly spend cap and its warn/pause action lived here until v172.
+    # Removed with the rest of the spend metering at the owner's instruction.
+    # THIS IS THE ONE REAL PROTECTION THAT WENT WITH IT: the painting loop
+    # used to consult the cap before claiming each image. Nothing on this
+    # server now limits what a night of generation can cost, so the ceiling
+    # is whatever spend limit his OpenAI account itself carries.
 
     # ── The optional GPT review gate ─────────────────────────────────────
     # On by default. When off, newly processed images go straight to upload —

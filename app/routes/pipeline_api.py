@@ -890,9 +890,58 @@ async def upload_artifact(
     target = folder / f"{stamp}_{node.name}_{safe_name}"
     target.write_bytes(body)
 
+    _prune_artifacts(db, folder)
+
     rel = f"_pipeline_artifacts/{kind}/{target.name}"
     db.commit()
     return JSONResponse({"ok": True, "path": rel})
+
+
+def _prune_artifacts(db: Session, folder) -> None:
+    """
+    Keep only the newest `failure_evidence_keep` files in one evidence folder.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS EXISTS (owner, 2026-09-09)
+    ════════════════════════════════════════════════════════════════════════
+    Nothing anywhere deleted these. Every failed upload wrote a picture and a
+    page dump, for ever, and the Failure Evidence panel grew a little longer
+    every time. His words: by thirty errors he would have fixed the fault.
+
+    ════════════════════════════════════════════════════════════════════════
+    IT MUST NEVER COST US THE EVIDENCE IT IS TIDYING
+    ════════════════════════════════════════════════════════════════════════
+    Pruning runs AFTER the new file is safely written, and any failure in it
+    is swallowed with a log line. Housekeeping must not be able to fail an
+    upload report — a lost screenshot is an inconvenience, while a failed
+    report strands the poster and nothing ever says why (rule 8).
+
+    Nothing downstream breaks when a file goes. The Failure Evidence panel
+    lists the FOLDER rather than looking rows up, so a pruned file simply
+    stops appearing, and `/api/artifact` already answers a missing file with
+    a plain 404. The only loose end is `UploadTracking.last_screenshot` on an
+    old row pointing at a picture that is gone, which shows as a missing
+    image on the Failures list and is the honest thing to show.
+    """
+    import logging
+
+    try:
+        keep = int(P.get_setting(db, "failure_evidence_keep") or 0)
+    except (TypeError, ValueError):
+        keep = 0
+    if keep <= 0:
+        return                      # 0 means keep everything, on purpose
+    try:
+        files = [f for f in folder.iterdir() if f.is_file()]
+        if len(files) <= keep:
+            return
+        # Oldest first, so everything past the cap is what gets removed.
+        files.sort(key=lambda f: f.stat().st_mtime)
+        for old in files[:len(files) - keep]:
+            old.unlink(missing_ok=True)
+    except Exception as e:          # noqa: BLE001 — see the note above
+        logging.getLogger("uvicorn.error").warning(
+            "Could not prune failure evidence in %s: %s", folder, e)
 
 
 @router.post("/listings/progress")

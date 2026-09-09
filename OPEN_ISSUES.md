@@ -2,6 +2,182 @@
 
 ---
 
+## THE FULL RESET TO ZERO — agreed 2026-09-09, to be done LAST
+
+The owner's plan, in his words: the production address is reset to absolute
+zero, no admin account, created from SSH. He is still tweaking the site, so
+**this is the last step, after the tweaking and after the Mega Audit.**
+
+What he stated, and what it changes:
+
+  * **The S: drive must be EMPTY.** So the Storage Box archive is wiped too,
+    not only the database. That removes the usual worry about a database
+    that no longer indexes a full archive — there will be no archive.
+  * **Everything from the earlier projects goes to zero.** No counts carried
+    over, no leftovers to explain away.
+  * **The FineArtAmerica test account is NOT the one he will use.** So the
+    `Test Account 25 (avvesomedia@gmail.com)` row is disposable, and the
+    "never reported any money" finding against it is expected rather than a
+    defect. Do not spend time on that row.
+
+The reset itself is `docker compose down`, `rm -rf data`, `up -d --build`,
+then `scripts/create_admin.py` — the server and the IP are not touched, and
+must not be, because deleting the server releases the address.
+
+**Save `.env` first.** `PIPELINE_SECRET` is the only thing that can decrypt a
+database backup, and `rm -rf data` also deletes the local backups folder.
+
+**Before pressing anything, check nothing is live on FineArtAmerica.** A
+wiped database no longer knows what was uploaded, and re-greenlighting the
+same places gets them silently renamed to "Title #2" at an address nothing
+computed — see the title rules in `CLAUDE.md`. He says the account is a test
+account, so this is expected to be a non-issue; confirm rather than assume.
+
+---
+
+## FOUR THINGS RAISED 2026-09-09, ANALYSED, NOT YET BUILT
+
+**1. The OpenAI reconcile alarm fires on the normal case.** `TRACED
+2026-09-09`. `fetch_month_to_date()` sends only `start_time`, `bucket_width`
+and `limit` to `/v1/organization/costs` — no project or key filter — and the
+module's own docstring already says the endpoint "covers the whole
+ORGANISATION". The owner's usage page shows 3,053 Responses/Chat requests and
+15.4M input tokens against 34 images, plus a Codex Plugins tab, so the $68
+gap is his other OpenAI usage. The panel currently blames "a price change on
+their side", which is wrong and sent him hunting. Cheapest honest fix is the
+WORDING plus a link telling him to filter the usage page by this app's key.
+The real fix is filtering the request, which needs OpenAI's parameter names
+READ FROM THEIR DOCS, never guessed (rule 3c-bis).
+
+**2. Failure evidence is never pruned.** `TRACED 2026-09-09`. `POST
+/artifact` in `pipeline_api.py` writes into
+`workspace/_pipeline_artifacts/{kind}/` and nothing anywhere deletes. The
+owner asked for a cap of 30. Note two things when building it: one failure
+writes TWO files (a `.png` and a `.html`), and `UploadTracking.last_screenshot`
+points at the png — so pruning must leave the Failures list able to cope with
+a picture that is gone.
+
+**3. `check_orphan_files` reports the signature and the reference image as
+orphans, and tells him to delete them.** `TRACED 2026-09-09` — this is a live
+FALSE ALARM, not a wish. The known-file set is built ONLY from `SavedPoster`
+rows via `saved_poster_path()`. Files referenced by a SETTING
+(`signature_image`, `openai_style_image`) or by a COLUMN
+(`UploadTracking.last_screenshot`) are invisible to it, so all 8 findings on
+his screen were wrong and the advice text reads "the app has no idea they
+exist". Acting on it would delete his signature and stop the poster builder.
+The shape is the one this repo keeps hitting: a check that knows ONE way a
+file can be claimed, in a system with three.
+
+**4. The status strip knows two of the machine's eight jobs.** `TRACED
+2026-09-09`. `pulse.js` builds "doing now" from `n.processing` and
+`n.uploading` only, which are counts of image ROWS in a state. The node's loop
+dispatches eight kinds: `process`, `upload`, `listing_check`, `earnings_read`,
+`profile_cleanup`, `test_download`, `test_process`, `test_upload`. So a
+listing check or an earnings read runs for an hour while the strip says
+"nothing". The fix is to read the live `PipelineJob` rows, which already carry
+the kind, rather than adding a counter per job type — derive it, do not
+maintain it.
+
+---
+
+## REUSING AN EARNING FAA ACCOUNT FOR TRAVEL — decided 2026-09-09
+
+The owner is rebranding an existing FineArtAmerica account rather than buying
+a second premium membership. The old designs are deleted; the sales history
+is not, and cannot be.
+
+`TRACED 2026-09-09`, so a future session does not re-derive it:
+
+  * **Old sales will NOT be mis-credited.** `matching.py` has four exact
+    tiers and no similarity scoring, and anything left over stays UNMATCHED
+    on purpose. The cost is NOISE on the Earnings page, not wrong data.
+  * **A hard cutoff that DROPS pre-date rows breaks two things**, and both
+    are worth more than the noise. `Current Balance` is FineArtAmerica's own
+    figure and is the checksum on our arithmetic — gross minus payouts must
+    land on it, and it never will again if our ledger is a subset of theirs.
+    And `due_next` in `service.py` is `owed - (gross - back)`, which goes
+    wrong the moment our gross is short; `_payout_rule_holds()` would then
+    stop holding and the next-payout figure would disappear.
+  * **So PARK the old rows, do not drop them.** Import everything, mark rows
+    before the date as pre-travel, and have the MATCHER skip them. The money
+    arithmetic stays whole, the checksum still catches a missed row, and the
+    unmatched list only ever shows travel. This is the same shape as
+    `listing_ack_status`: store WHAT you silenced, not the silence.
+  * **The cutoff must exist BEFORE the first earnings read.** After the
+    reset our database has no ledger, and the first read pulls FAA's entire
+    history in one go.
+
+**The artist name is the dangerous part of the rebrand, not the earnings.**
+A listing's address is `{title-slug}-{artist-slug}`. Change the shop name
+after anything is uploaded and every listing check 404s — which the sweep
+correctly reads as "our address is wrong", but only after spending the
+requests. Order: rebrand on FAA, then update `artist_name` on the account,
+then upload. Never the other way round.
+
+---
+
+## THE TWO 'other' LEDGER ROWS — ANSWERED AND FIXED 2026-09-09
+
+The word was **"Canceled Item"**, read off the owner's Balance page. Verified
+against their own running balance rather than assumed: each row moves the
+balance down by exactly its amount, so it reverses a sale. `classify()` now
+maps anything containing "cancel" to `refund`, and asks that BEFORE the sale
+test so a hypothetical "Canceled Sale" can never be filed as income.
+
+Kept below because the reasoning is the record of how it was found.
+
+---
+
+## THE TWO 'other' LEDGER ROWS — the original trace
+
+`TRACED 2026-09-09`. Nothing is lost: the reconcile passes exactly, and the
+totals sum credit minus debit across every row, so the money is in the
+balance. What is missing is a LABEL, which is why the rows are absent from
+REFUNDED and from WHAT SOLD.
+
+`classify()` in `earnings/faa.py` knows six words — sale, payment, payout,
+refund, return, credit — and maps anything else to `other`.
+
+The two rows, both DEBITS (they render in the payout column, not the sales
+column):
+
+  * 8/25/2026 · $6.00 · this is the SAME ROW already measured on 2026-08-27
+    and written into `CLAUDE.md` — "Highlander - 1986 A - T-Shirt - Navy -
+    Medium". The fix was identified then as one word and never done.
+  * 9/4/2026 · $5.00 · "Gladiator - 2000 B - Jigsaw Puzzle - 20x28"
+
+**Do not guess the word** (rule 3c-bis). The owner has been asked to read the
+Type column on FAA's Balance page for those two dates. Almost certainly a
+return or a refund under a word FAA uses that we do not know. One line in
+`classify()` fixes both and every future one — and `raw_type` is already
+stored for exactly this.
+
+**Also worth saying to him:** the payout rule now holds on 1 observation, not
+7. The old account's history is gone, so "$10.50 lands on the 15th" rests on
+a single payout. The panel is honest about the count; the figure is just thin
+until more payouts accumulate.
+
+---
+
+## TWO DEAD CONTROLS FOUND WHILE COSTING THE SPEND REMOVAL
+
+`TRACED 2026-09-09`, both the same shape as the `daily_limit` 0 bug — a
+control that looks like protection and is not.
+
+  * **`brave_daily_query_cap` is never read by anything.** It is declared in
+    `DEFAULTS`, it has a box on the Settings page describing it as "a safety
+    net against a bug looping", and no code anywhere consults it. A looping
+    bug would spend the Brave quota unchecked.
+  * **Brave spend is never recorded.** `record_spend()` is only ever called
+    with `service="openai"`. The "Brave $0.00" on the Spending panel is not
+    a measurement, it is an empty table.
+
+The OpenAI cap, by contrast, IS live: `gpt_worker.py` consults `cap_state()`
+inside the generation loop. Removing the spend counting removes that cap with
+it — say so before removing anything.
+
+---
+
 ## PARKED until after the UI revamp
 
 ### The MUSIK master sheet is being changed

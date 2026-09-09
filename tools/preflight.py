@@ -1659,8 +1659,6 @@ def check_endpoints_have_buttons() -> None:
 #
 NOT_ON_THE_SETTINGS_FORMS = {
     # Written by the app itself. A human editing one of these would be a bug.
-    "openai_reconcile_result":       "written by the nightly cost check",
-    "openai_reconcile_date":         "written by the nightly cost check",
     "earnings_last_run_at":          "written by the nightly earnings read",
     "earnings_last_run_day":         "written by the nightly earnings read",
     "earnings_daily_run_started_at": "written by the nightly earnings read",

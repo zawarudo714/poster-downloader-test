@@ -50,7 +50,6 @@ import mimetypes
 import re
 import time
 from dataclasses import dataclass
-from decimal import Decimal
 from pathlib import Path
 from typing import Optional
 
@@ -61,16 +60,6 @@ log = logging.getLogger("uvicorn.error")
 
 API_URL = "https://api.openai.com/v1/images/edits"
 TIMEOUT_S = 600
-
-# Published per-million-token rates for gpt-image-2. Kept here rather than in
-# DEFAULTS because they are OpenAI's numbers, not a preference — if they
-# change, this is the one place to correct, and the nightly reconciliation
-# against the Costs API is what will tell you they have.
-PRICE_PER_MTOK = {
-    "image_input":  Decimal("8.00"),
-    "image_output": Decimal("30.00"),
-    "text_input":   Decimal("5.00"),
-}
 
 MAX_RETRIES = 4
 BASE_BACKOFF = 4.0
@@ -103,13 +92,6 @@ class Generation:
     output_tokens: int = 0
     text_tokens: int = 0
     duration_ms: int = 0
-
-    def cost_usd(self) -> Decimal:
-        return (
-            PRICE_PER_MTOK["image_input"] * Decimal(self.input_tokens) / Decimal(1_000_000)
-            + PRICE_PER_MTOK["image_output"] * Decimal(self.output_tokens) / Decimal(1_000_000)
-            + PRICE_PER_MTOK["text_input"] * Decimal(self.text_tokens) / Decimal(1_000_000)
-        )
 
 
 # ── Failure classification ──────────────────────────────────────────────────
@@ -332,64 +314,3 @@ def generate(db: Session, *, source: Path, style: Path, project=None,
         duration_ms=int((time.time() - started) * 1000),
     )
 
-
-# ── Spend ───────────────────────────────────────────────────────────────────
-
-def record_spend(db: Session, *, service: str, operation: str, cost: Decimal,
-                 project_id=None, saved_poster_id=None, units: int = 1,
-                 input_tokens: int = 0, output_tokens: int = 0,
-                 estimated: bool = False) -> None:
-    """Append one metered call. Never raises — a bookkeeping failure must not
-    lose the work that was actually done."""
-    from .models import ApiSpend
-    try:
-        db.add(ApiSpend(
-            service=service, operation=operation,
-            project_id=project_id, saved_poster_id=saved_poster_id,
-            units=units, input_tokens=input_tokens or None,
-            output_tokens=output_tokens or None,
-            cost_usd=str(cost), estimated=1 if estimated else 0,
-        ))
-    except Exception as e:
-        log.error("Could not record API spend: %s", e)
-
-
-def month_to_date_usd(db: Session, service: Optional[str] = None) -> Decimal:
-    """Spend since the 1st, for the cap and the dashboard."""
-    from datetime import datetime
-    from .models import ApiSpend
-
-    start = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    q = db.query(ApiSpend.cost_usd).filter(ApiSpend.created_at >= start)
-    if service:
-        q = q.filter(ApiSpend.service == service)
-    total = Decimal("0")
-    for (value,) in q.all():
-        try:
-            total += Decimal(value or "0")
-        except Exception:
-            continue
-    return total
-
-
-def cap_state(db: Session, project=None) -> dict:
-    """
-    Where this month's spend stands against the cap.
-
-    Returns {'cap': Decimal, 'spent': Decimal, 'over': bool, 'action': str}.
-    `cap` of 0 means no cap, which is the default — a hard stop based on a
-    figure nobody set is worse than a message you can act on.
-    """
-    from .pipeline import get_setting
-    try:
-        cap = Decimal(str(get_setting(db, "spend_cap_usd_month", project=project) or 0))
-    except Exception:
-        cap = Decimal("0")
-    action = str(get_setting(db, "spend_cap_action", project=project) or "warn")
-    spent = month_to_date_usd(db)
-    return {
-        "cap": cap,
-        "spent": spent,
-        "over": bool(cap > 0 and spent >= cap),
-        "action": action,
-    }

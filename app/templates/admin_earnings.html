@@ -59,6 +59,31 @@
         So a check needs the Windows box switched on — if it is off, the job
         waits in the queue rather than failing.
       </p>
+
+      {# ── Where our own trading starts ──────────────────────────────────
+         For a REUSED account. The old catalogue's sales cannot be deleted
+         from the marketplace, so they arrive here and match nothing. This
+         says which of them are somebody else's business.
+
+         Placed on this page rather than in Pipeline settings because this is
+         the screen that shows the sales it governs — the same reason the two
+         times above are repeated here. #}
+      <div class="filter-row" style="gap:8px; flex-wrap:wrap; margin-top:12px;
+                                     border-top:1px solid rgba(255,255,255,.06);
+                                     padding-top:12px">
+        <label>MY&nbsp;SALES&nbsp;START&nbsp;ON
+          <input type="date" data-earnings-start>
+        </label>
+        <button class="btn btn-accent btn-tiny" data-action="save-start" type="button">SAVE</button>
+        <span class="muted" data-start-status></span>
+      </div>
+      <p class="muted" style="margin-top:6px">
+        Only needed if this marketplace account sold something else before
+        you rebranded it. Sales before this date are still counted in your
+        balance and your next payout — nothing is thrown away — but they are
+        left off the "could not match" list, because they were never your
+        posters. Leave it blank if the account has only ever sold your work.
+      </p>
     </div>
 
     <div class="panel-body">

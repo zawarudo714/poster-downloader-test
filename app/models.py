@@ -390,46 +390,14 @@ class SearchCache(Base):
     )
 
 
-class ApiSpend(Base):
-    """
-    One row per paid external API call.
-
-    ════════════════════════════════════════════════════════════════════════
-    WHY WE METER OURSELVES
-    ════════════════════════════════════════════════════════════════════════
-    OpenAI's image endpoint returns the ACTUAL token usage for the call, so
-    the cost here is arithmetic on measured data, not an estimate. That gives
-    an instant per-image figure, drives the monthly cap, and answers "what did
-    today cost" without leaving the dashboard.
-
-    It is reconciled nightly against OpenAI's own Costs API when an admin key
-    is configured. The two can differ slightly — rounding, promotional
-    credits, and anything spent outside this pipeline — so the reconciliation
-    reports the gap rather than overwriting either number.
-
-    Brave returns no usage data, so its rows are query-count x configured rate.
-    That IS an estimate and is labelled as one.
-    """
-    __tablename__ = "api_spend"
-
-    id           = Column(Integer, primary_key=True)
-    service      = Column(String(24), nullable=False, index=True)   # 'openai' | 'brave'
-    operation    = Column(String(48), nullable=True)                # 'image_edit' | 'search'
-    project_id   = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
-    # What it was for, so a cost can be traced back to a specific image.
-    saved_poster_id = Column(Integer, ForeignKey("saved_posters.id"), nullable=True, index=True)
-
-    units        = Column(Integer, nullable=False, default=1)       # queries, or 1 image
-    input_tokens  = Column(Integer, nullable=True)
-    output_tokens = Column(Integer, nullable=True)
-    # Stored as a string to avoid float drift on money.
-    cost_usd     = Column(String(24), nullable=False, default="0")
-    estimated    = Column(Integer, nullable=False, default=0)       # 1 = not from real usage
-    created_at   = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
-
-    __table_args__ = (
-        Index("ix_spend_service_day", "service", "created_at"),
-    )
+# The ApiSpend table was REMOVED in v172, with all the spend metering.
+# OpenAI's own usage page is where the owner reads what generation costs;
+# our copy only ever duplicated it less accurately, and the nightly
+# comparison against their Costs API reported the whole ACCOUNT rather
+# than this app, so it flagged his unrelated usage as a discrepancy every
+# month. On an existing install the `api_spend` table stays behind
+# unused — create_all() never drops anything — and a fresh database
+# simply never makes it.
 
 
 # ── Import jobs (background CSV/XLSX import) ─────────────────────────────────
@@ -1290,9 +1258,8 @@ class LedgerEntry(Base):
     ════════════════════════════════════════════════════════════════════════
     MONEY IS TEXT
     ════════════════════════════════════════════════════════════════════════
-    Amounts are stored as strings and converted to Decimal when summed, the
-    same rule ApiSpend follows. Floats accumulate error, and this table
-    exists precisely to be totalled.
+    Amounts are stored as strings and converted to Decimal when summed.
+    Floats accumulate error, and this table exists precisely to be totalled.
     """
     __tablename__ = "ledger_entries"
 

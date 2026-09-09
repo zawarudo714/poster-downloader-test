@@ -202,6 +202,51 @@ def api_pulse(request: Request, admin: User = Depends(require_admin),
     run = P.run_mode_state(db, proj)
     quiet = run.get("quiet") or {}
 
+    def _running_job_kinds(db):
+        """
+        What the worker machine is running right now, by kind, in plain words.
+
+        ════════════════════════════════════════════════════════════════════
+        WHY THIS IS DERIVED RATHER THAN COUNTED
+        ════════════════════════════════════════════════════════════════════
+        The strip used to build "doing now" from two numbers — pictures being
+        painted and pictures being uploaded. Those are counts of IMAGES in a
+        state, so they can only ever describe two of the machine's eight
+        jobs. A listing check or an earnings read has no picture attached, so
+        the strip read "nothing" while one ran for an hour.
+
+        The jobs table already stores the kind of every job, so this asks the
+        table instead of keeping a counter per kind. Adding a ninth kind then
+        costs nothing — it shows up because it is in the table, which is the
+        same reason `scan_incomplete` is a query rather than a flag.
+
+        The words are for the owner, not for the code. `earnings_read` is a
+        key in a database; "reading the money" is what he would call it.
+        """
+        from ..models import PipelineJob
+
+        # PAINTING AND UPLOADING ARE LEFT OUT ON PURPOSE. They already have
+        # their own counts above, said in images rather than in jobs, which
+        # is the more useful number — "3 painting" beats "1 paint job".
+        SAY = {
+            "listing_check":   "checking listings",
+            "earnings_read":   "reading the money",
+            "profile_cleanup": "tidying a browser profile",
+            "test_download":   "running a download test",
+            "test_process":    "running a paint test",
+            "test_upload":     "running an upload test",
+        }
+        try:
+            kinds = [k for (k,) in db.query(PipelineJob.kind)
+                     .filter(PipelineJob.status == "running").distinct().all()]
+        except Exception:      # noqa: BLE001 — the strip must never 500
+            return []
+        # An unknown kind is SHOWN, spelled out from its own name, rather
+        # than dropped. A job the strip cannot name is still a job running,
+        # and silence about it is the fault this whole change is fixing.
+        return [SAY.get(k, (k or "").replace("_", " ")) for k in sorted(kinds)
+                if k not in ("process", "upload")]
+
     workers_online = (db.query(func.count(User.id))
                         .filter(User.role == "worker", User.is_deleted == 0,
                                 User.last_seen_at > now - timedelta(minutes=5))
@@ -330,6 +375,18 @@ def api_pulse(request: Request, admin: User = Depends(require_admin),
             "uploading": uploading_now,
             "to_process": process_waiting,
             "to_upload": upload_waiting,
+            # EVERY OTHER JOB THE MACHINE DOES. The two counts above are
+            # PICTURES in a state, so they can only ever describe painting
+            # and uploading. The machine also runs the listing check, the
+            # earnings read and the browser-profile cleanup, and those have
+            # no picture attached — so the strip said "doing nothing" through
+            # an hour-long listing check (owner, 2026-09-09).
+            #
+            # DERIVED from the jobs table rather than counted per kind. The
+            # table already records the kind of every job, so a ninth kind
+            # added next year appears here on its own instead of waiting for
+            # somebody to remember a ninth counter.
+            "jobs": _running_job_kinds(db),
         },
         "run": {"running": bool(run.get("running")),
                 "reason": run.get("reason") or ""},

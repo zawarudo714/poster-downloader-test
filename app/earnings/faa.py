@@ -188,8 +188,41 @@ def parse_datetime(date_text: str, time_text: str = "") -> datetime:
 
 
 def classify(type_text: str) -> str:
-    """Their Type column to ours. Unknown stays 'other' rather than guessing."""
+    """
+    Their Type column to ours. Unknown stays 'other' rather than guessing.
+
+    ════════════════════════════════════════════════════════════════════════
+    "CANCELED ITEM" IS A REFUND, AND IT IS CHECKED FIRST
+    ════════════════════════════════════════════════════════════════════════
+    `MEASURED 2026-09-09` from the owner's own Balance page. FineArtAmerica
+    writes **"Canceled Item"** in the Type column when a buyer's order is
+    cancelled, as a DEBIT against the artwork it was for:
+
+        09/04  Canceled Item  Gladiator - 2000 B - Jigsaw Puzzle  -$5.00
+        08/25  Canceled Item  Highlander - 1986 A - T-Shirt       -$6.00
+
+    Verified against their running balance rather than assumed: each one
+    moves the balance down by exactly its own amount, so it reverses a sale.
+    That is a refund in everything but their choice of word.
+
+    None of "refund", "return" or "credit" appears in it, so both rows sat as
+    'other' — counted correctly in the balance, but absent from REFUNDED and
+    from WHAT SOLD. The first of the two had been sitting there unlabelled
+    since 2026-08-27, when the shape was measured and the fix identified as
+    one word and then not done.
+
+    **The cancel test runs BEFORE the sale test on purpose.** If FAA ever
+    writes "Canceled Sale", "sale" would match first and a debit would be
+    filed as income — wrong on the screen while the balance still added up,
+    which is the quietest kind of wrong. A cancellation is never a sale
+    whatever else the phrase contains, so it is asked first.
+
+    Matched on "cancel" rather than "canceled", because that catches their
+    American spelling and the British one without a second entry.
+    """
     t = _clean(type_text).lower()
+    if "cancel" in t:
+        return "refund"
     if "sale" in t:
         return "sale"
     if "payment" in t or "payout" in t:

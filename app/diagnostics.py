@@ -334,6 +334,27 @@ def check_orphan_files(db: Session, scope: Scope) -> CheckResult:
         if candidate.is_dir():
             root = candidate
 
+    # ── A FILE CAN BE CLAIMED THREE WAYS, AND THIS KNEW ONE ──────────────
+    #
+    # Until 2026-09-09 the known set above was the whole answer, so this
+    # check told the owner his SIGNATURE and his REFERENCE PICTURE were
+    # unknown files taking up space — under a heading saying the app "has no
+    # idea they exist". Acting on that would have deleted the signature and
+    # stopped the poster builder, because a signature switched on with no
+    # file is a hard refusal. It listed the failure screenshots too.
+    #
+    # The three ways, and the general shape is bigger than this screen:
+    #
+    #   1. A ROW points at it        — every SavedPoster, handled above.
+    #   2. A SETTING names it        — signature_image, openai_style_image.
+    #   3. A COLUMN elsewhere holds it — UploadTracking.last_screenshot.
+    #
+    # **Before a check calls something unowned, enumerate every way it could
+    # be owned.** One-of-three is not coverage, it is a confident wrong
+    # answer — and this one pointed at a delete button.
+    known |= _claimed_by_settings(db)
+    known |= _claimed_by_columns(db)
+
     orphans: list[Finding] = []
     total = 0
     if root.is_dir():
@@ -354,9 +375,68 @@ def check_orphan_files(db: Session, scope: Scope) -> CheckResult:
         "orphan_files", "Files on disk with no database record",
         "These take up space and will never be processed, paid for or "
         "uploaded — the app has no idea they exist. Common after a restore "
-        "from backup where the database is older than the workspace.",
+        "from backup where the database is older than the workspace. Your "
+        "signature, your reference picture and the failure screenshots are "
+        "NOT counted here, because something does point at those.",
         "warn", orphans, total,
     )
+
+
+def _claimed_by_settings(db: Session) -> set[str]:
+    """
+    Workspace files that a SETTING names — the signature and the style image.
+
+    Read from `pipeline.DEFAULTS` rather than from a list here, so a future
+    setting that names a file is covered the day it is added. The rule that
+    decides which keys count is "the default is a path-shaped string and the
+    key ends in _image", which is derived from the shape of the setting
+    rather than being an exceptions list somebody has to extend.
+    """
+    out: set[str] = set()
+    try:
+        from .pipeline import DEFAULTS, get_setting
+        from .models import Project
+        keys = [k for k, v in DEFAULTS.items()
+                if k.endswith("_image") and isinstance(v, str)]
+        if not keys:
+            return out
+        # Per project as well as globally: these settings are per-project, so
+        # reading only the global value would miss every real one.
+        projects = [None] + list(db.query(Project).all())
+        for proj in projects:
+            for key in keys:
+                rel = str(get_setting(db, key, project=proj) or "").strip()
+                if rel:
+                    out.add((WORKSPACE_DIR / rel).resolve().as_posix())
+    except Exception:      # noqa: BLE001 — a blind spot must not break the page
+        pass
+    return out
+
+
+def _claimed_by_columns(db: Session) -> set[str]:
+    """
+    Workspace files a COLUMN points at — today, the failure screenshots and
+    page dumps recorded on `UploadTracking.last_screenshot`.
+
+    The whole `_pipeline_artifacts` folder is claimed rather than only the
+    paths currently on rows. The Failure Evidence panel lists that folder
+    DIRECTLY, so a file whose row has since been pruned is still something
+    the screen offers to open — which is the opposite of unknown.
+    """
+    out: set[str] = set()
+    try:
+        artifacts = (WORKSPACE_DIR / "_pipeline_artifacts").resolve()
+        if artifacts.is_dir():
+            for path in artifacts.rglob("*"):
+                if path.is_file():
+                    out.add(path.resolve().as_posix())
+        for (shot,) in db.query(UploadTracking.last_screenshot).filter(
+                UploadTracking.last_screenshot.isnot(None)).all():
+            if shot:
+                out.add((WORKSPACE_DIR / shot).resolve().as_posix())
+    except Exception:      # noqa: BLE001
+        pass
+    return out
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1777,6 +1857,59 @@ def check_current_image_was_discarded(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def check_failure_evidence_is_pruned(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: the evidence folders never hold more than the cap.
+
+    Pruning happens when a NEW failure arrives, which is the cheapest place
+    for it and the reason it needs watching: if the prune ever stops working
+    — a permission problem on the folder, a setting read that throws — the
+    folders simply grow again and the only symptom is the page getting
+    longer, which is exactly the thing the owner asked to stop.
+
+    Deliberately allows a small overshoot. A prune runs after the newest file
+    is written, so the count sits at the cap and never above it; a couple over
+    would mean a race rather than a fault, and a check that fires on a race
+    trains you to ignore it.
+    """
+    from .pipeline import get_setting
+
+    try:
+        keep = int(get_setting(db, "failure_evidence_keep") or 0)
+    except Exception:      # noqa: BLE001
+        keep = 0
+
+    rows, total = [], 0
+    base = (WORKSPACE_DIR / "_pipeline_artifacts")
+    if keep > 0 and base.is_dir():
+        for kind_dir in base.iterdir():
+            if not kind_dir.is_dir():
+                continue
+            try:
+                n = sum(1 for f in kind_dir.iterdir() if f.is_file())
+            except OSError:
+                continue
+            if n > keep + 2:
+                total += 1
+                rows.append(Finding(
+                    f"{kind_dir.name}: {n} files",
+                    f"the cap is {keep}, so the oldest should have been "
+                    f"deleted when the newest arrived",
+                    "/admin/pipeline#attention"))
+
+    return _result(
+        "failure_evidence_pruned",
+        f"{total} evidence folder(s) are over the cap"
+        if total else "Failure evidence is being tidied up",
+        "Old failure screenshots are supposed to delete themselves when a "
+        "new one arrives, so the Failure Evidence panel stops growing. These "
+        "folders are over the limit, which means the tidying has stopped "
+        "working — most likely the server cannot delete in that folder. "
+        "Nothing is broken by it; the page just gets longer for ever.",
+        "warn", rows, total,
+    )
+
+
 def check_chosen_colour_was_painted(db: Session, scope: Scope) -> CheckResult:
     """
     INVARIANT: once released, the colour CHOSEN is the colour PAINTED.
@@ -1901,6 +2034,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_current_image_was_discarded,
     check_generations_share_a_file,
     check_chosen_colour_was_painted,
+    check_failure_evidence_is_pruned,
     check_recalled_poster_still_painted,
     check_missing_files,
     check_posters_without_title,

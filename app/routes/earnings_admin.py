@@ -196,6 +196,9 @@ def api_schedule(admin: User = Depends(require_admin),
         "quiet_from": get_setting(db, "earnings_quiet_from"),
         "last_run_at": get_setting(db, "earnings_last_run_at"),
         "max_pages": get_setting(db, "earnings_max_pages_per_run"),
+        # Where our own trading starts, for a reused marketplace account.
+        # Sent with the schedule because both are read by the same panel.
+        "start_date": get_setting(db, "earnings_start_date"),
     })
 
 

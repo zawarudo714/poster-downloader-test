@@ -559,7 +559,8 @@
       // Only refill a box you are not currently typing into. This line
       // refreshes every 3 seconds, and overwriting a half-typed time would
       // make the field unusable.
-      [['[data-quiet-from]', d.quiet_from], ['[data-run-at]', d.run_at]]
+      [['[data-quiet-from]', d.quiet_from], ['[data-run-at]', d.run_at],
+       ['[data-earnings-start]', d.start_date]]
         .forEach(function (pair) {
           var el = q(pair[0]);
           if (el && document.activeElement !== el) el.value = pair[1] || '';
@@ -647,6 +648,25 @@
         status.textContent = 'Saved.';
         loadSchedule();
       }).catch(function (e) { status.textContent = 'Failed: ' + e.message; });
+      return;
+    }
+    if (t.dataset.action === 'save-start') {
+      var sstat = q('[data-start-status]');
+      sstat.textContent = 'Saving…';
+      // The SAME endpoint the two times above use, for the same reason: the
+      // key is validated in one place and there is one stored value behind
+      // every screen that shows it.
+      postJSON('/admin/pipeline/api/settings', {
+        scope: 'global',
+        settings: { earnings_start_date: q('[data-earnings-start]').value.trim() }
+      }).then(function () {
+        sstat.textContent = 'Saved. Sales before this date are now treated as '
+          + 'previous business.';
+        loadSchedule();
+        // The unmatched list is the thing this changes, so redraw it rather
+        // than leaving the old one on screen looking like nothing happened.
+        loadUnmatched();
+      }).catch(function (e) { sstat.textContent = 'Failed: ' + e.message; });
       return;
     }
     if (t.dataset.action === 'rearm') {

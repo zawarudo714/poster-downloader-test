@@ -120,6 +120,8 @@
        'Press this on the Approve Artwork screen to send the mark as far left as the gap allows. One character. A comma by default.'],
       ['signature_key_right', 'text', 'Key that throws it fully right',
        'Press this to send the mark as far right as the gap allows. One character. A full stop by default.'],
+      ['failure_evidence_keep', 'number', 'Failure reports to keep',
+       'How many failure screenshots to keep, and the same number of page dumps beside them. 30 means the Failure Evidence panel holds the newest 30 of each and quietly deletes anything older, so the page stops growing for ever. 0 keeps everything.'],
     ],
     upscale: [
       ['upscale_width_px',  'number', 'Output width (px)', 'The processed image is resized to this width; height scales in proportion, so 1000x2000 becomes 4000x8000. Lanczos resampling.'],
@@ -133,12 +135,6 @@
       ['brave_api_key_free', 'password','Brave key — free plan', 'Used for NORMAL searches. 1 request/second, 2,000 a month.'],
       ['brave_api_key_paid', 'password','Brave key — paid plan', 'Used for DEEP searches, which fire two queries at once and would trip the free key\'s 1/second limit. Also the fallback when the free quota runs out.'],
       ['openai_api_key',     'password','OpenAI key',            'Generates the images.'],
-      ['openai_admin_key',   'password','OpenAI admin key',      "Optional, and a DIFFERENT key from the one above — an admin key (sk-admin-...). Used once a night to compare OpenAI's own billing against what we calculated, and nothing else; image generation never touches it. Leave blank and the cross-check is simply skipped."],
-    ],
-    spend: [
-      ['spend_cap_usd_month','number','Monthly cap (USD)', '0 disables the cap. Counted from the token usage each API call reports.'],
-      ['spend_cap_action',   'select','When the cap is hit','warn posts a dashboard alert. pause also stops dispatching new work.', ['warn', 'pause']],
-      ['brave_daily_query_cap','number','Brave daily query cap', '0 is off. A safety net against a bug looping, not a budget — Brave costs about half a cent a query.'],
     ],
     upload: [
       ['upload_batch_size',   'number', 'Batch size',        'Images per upload run, capped by the account\'s remaining daily quota.'],
@@ -223,7 +219,7 @@
     // fetches these eagerly, because the settings feed four sections at once.
     // Kept so the map stays a complete description of each section, and so
     // that reaching this section by any other route still works.
-    processing: async () => { await loadSettings(); await loadSpend(); },
+    processing: async () => { await loadSettings(); },
     upload:     loadUploadSection,
     test:       loadTestSection,
     attention:  loadAttention,
@@ -1842,131 +1838,6 @@
     }
   }
 
-  // ── Spending ─────────────────────────────────────────────────────────────
-  //
-  // The headline is COST PER IMAGE, not the monthly total. The backlog is
-  // counted in images, so "$0.021 each · 3,161 left · about $66" answers the
-  // question actually being asked. A month-to-date figure on its own tells
-  // you what has happened, not what is about to.
-
-  // Every number is coerced. The panel reads values from an endpoint that
-  // can legitimately return null (no cap set, no images yet, so no per-image
-  // figure), and calling .toFixed on one of those throws mid-template — which
-  // left the box showing "Loading…" for ever with nothing logged anywhere.
-  // A panel that lies about its own state is worse than one that says it
-  // failed.
-  const num = (v) => (typeof v === 'number' && isFinite(v) ? v : 0);
-
-  // OpenAI's own figure next to ours.
-  //
-  // Shown as a cross-check, never as a correction. Their number covers the
-  // whole organisation and lags; ours is per-image and immediate. They
-  // answer different questions — the only interesting event is them
-  // DISAGREEING, which usually means our hardcoded per-token prices have
-  // gone stale after a price change.
-  function renderReconcile(r) {
-    if (!r) {
-      return '<p class="muted">No admin key set, so OpenAI\'s own billing is not '
-           + 'being cross-checked. Optional — add one under API KEYS if you want '
-           + 'the monthly cap verified against their figures.</p>';
-    }
-    const ours = num(parseFloat(r.ours));
-    const theirs = num(parseFloat(r.theirs));
-    const gap = num(parseFloat(r.gap));
-    const when = esc((r.checked_at || '').replace('T', ' '));
-    if (!r.significant) {
-      return `<p class="muted">OpenAI's own billing agrees: they report `
-           + `$${theirs.toFixed(2)} this month against our $${ours.toFixed(2)}. `
-           + `Checked ${when}.</p>`;
-    }
-    return `<p class="error-text"><strong>Our figure and OpenAI's disagree.</strong> `
-         + `We metered $${ours.toFixed(2)}; OpenAI reports $${theirs.toFixed(2)} `
-         + `(${gap > 0 ? '+' : ''}$${gap.toFixed(2)}). The usual cause is a price `
-         + `change on their side, which makes our per-image cost — and therefore `
-         + `the monthly cap — wrong until the rates in the code are updated. `
-         + `Checked ${when}.</p>`;
-  }
-
-  async function loadSpend() {
-    const box = q('[data-spend-summary]');
-    if (!box) return;                       // not a project that spends money
-
-    try {
-      await renderSpend(box);
-    } catch (e) {
-      box.innerHTML = `<p class="muted">Could not load spending: ${esc(e.message)}</p>`;
-      console.error('spend panel:', e);
-    }
-  }
-
-  async function renderSpend(box) {
-    const d = await getJSON(withProject(`${API}/spend`));
-    const m = d.month || {};
-    const spent   = num(m.spent);
-    const cap     = num(m.cap);
-    const images  = num(m.images);
-    const backlog = num(m.backlog);
-    const capped  = cap > 0;
-    const pct     = capped ? Math.min(100, (spent / cap) * 100) : 0;
-
-    box.innerHTML = `
-      <div class="spend-figures">
-        <div class="spend-fig">
-          <span class="spend-num">$${spent.toFixed(2)}</span>
-          <span class="spend-lbl">this month</span>
-        </div>
-        <div class="spend-fig">
-          <span class="spend-num">${m.per_image != null ? '$' + num(m.per_image).toFixed(4) : '—'}</span>
-          <span class="spend-lbl">per image</span>
-        </div>
-        <div class="spend-fig">
-          <span class="spend-num">${images.toLocaleString()}</span>
-          <span class="spend-lbl">images this month</span>
-        </div>
-        <div class="spend-fig">
-          <span class="spend-num">${m.backlog_cost != null ? '$' + num(m.backlog_cost).toFixed(2) : '—'}</span>
-          <span class="spend-lbl">to finish ${backlog.toLocaleString()} queued</span>
-        </div>
-      </div>
-      ${capped ? `
-        <div class="spend-bar" title="${spent.toFixed(2)} of ${cap.toFixed(2)}">
-          <span style="width:${pct.toFixed(1)}%"
-                class="${m.over ? 'is-over' : ''}"></span>
-        </div>
-        <p class="muted">
-          $${spent.toFixed(2)} of the $${cap.toFixed(2)} monthly cap
-          ${m.over
-            ? (m.action === 'pause'
-                ? '— <strong class="error-text">reached, so generation is paused</strong>'
-                : '— <strong class="error-text">reached; generation continues because the action is set to warn</strong>')
-            : ''}
-        </p>`
-        : '<p class="muted">No monthly cap set. Generation will keep running whatever it costs.</p>'}
-      ${m.per_image != null
-        ? '<p class="muted">Cost per image is measured from the token usage each call reports, '
-          + 'and the finish-the-queue figure assumes the same rate holds — the model picks a size '
-          + 'per photo, so treat it as a guide.</p>'
-        : ''}
-      ${renderReconcile(d.reconcile)}`;
-
-    const daysEl = q('[data-spend-days]');
-    if (!daysEl) return;
-    const days = (d.days || []).filter((x) => x.total > 0);
-    daysEl.innerHTML = !days.length
-      ? '<p class="muted" style="margin-top:14px">Nothing spent in this period.</p>'
-      : `<table class="data-table" style="margin-top:14px">
-          <thead><tr><th>DAY</th><th>OPENAI</th><th>BRAVE</th><th>TOTAL</th><th>CALLS</th></tr></thead>
-          <tbody>${days.map((x) => `
-            <tr>
-              <td class="mono">${esc(x.date)}</td>
-              <td class="mono">$${num(x.openai).toFixed(4)}</td>
-              <td class="mono">$${num(x.brave).toFixed(4)}</td>
-              <td class="mono">$${num(x.total).toFixed(4)}</td>
-              <td class="mono">${num(x.calls)}</td>
-            </tr>`).join('')}
-          </tbody></table>`;
-  }
-
   // ── Generation test ──────────────────────────────────────────────────────
   //
   // Runs inline rather than through the job queue, because the stage itself
@@ -2019,8 +1890,7 @@
         <div class="filter-row" style="gap:14px;margin-bottom:10px">
           <span class="mono">${d.width}×${d.height}</span>
           <span class="mono">${(d.bytes / 1024 / 1024).toFixed(2)} MB</span>
-          <span class="mono">$${d.cost_usd}</span>
-          <span class="muted mono">${d.input_tokens || 0} in / ${d.output_tokens || 0} out</span>
+          <span class="muted mono">${d.input_tokens || 0} in / ${d.output_tokens || 0} out tokens</span>
           ${d.stored ? '' : '<span class="status-pill status-error">NOT STORED</span>'}
         </div>
         ${d.preview_path
@@ -2065,9 +1935,7 @@
     stalled:       ['release'],
     unusable:      ['return_to_pipeline'],
     short_titles:  [],
-    spend_capped:  [],
     generation_stopped: [],
-    spend_mismatch:     [],
     node_offline:       [],
   };
 
@@ -2135,16 +2003,6 @@
 
   function renderAttentionItems(f) {
     if (!f.items.length) return '';
-
-    if (f.key === 'spend_capped') {
-      const i = f.items[0];
-      return `<p class="mono">$${esc(i.spent)} spent · $${esc(i.cap)} cap</p>`;
-    }
-
-    if (f.key === 'spend_mismatch') {
-      const i = f.items[0] || {};
-      return `<p class="mono">we metered $${esc(i.spent)} · OpenAI reports $${esc(i.cap)}</p>`;
-    }
 
     // The generation worker's own state. There is nothing to tick or act on
     // here — the useful content is WHY it is stopped and whether it keeps
@@ -2703,12 +2561,6 @@
   Promise.all([
     loadOverview().catch((e) => toast('Overview: ' + e.message, 'error')),
     loadSettings().catch((e) => { loaded.processing = false; }),
-    // Loaded here for the same reason as the settings, and because of the
-    // line above: `loaded.processing = true` means LOADERS.processing is
-    // NEVER invoked. Anything the Processing tab needs has to be fetched
-    // right here — putting it in the loader map looks correct and silently
-    // does nothing, which is exactly how the spend panel sat on "Loading…".
-    loadSpend(),
   ]).then(() => {
     showSection(initial, { silent: true });
   });
@@ -2747,7 +2599,7 @@
 
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   GPT PROJECTS — prompt, style reference, spend
+   GPT PROJECTS — prompt, style reference, signature
    Only present when the project declares processor='gpt'; every lookup here
    bails on a missing element, so a Photoshop project runs none of it.
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -2795,16 +2647,7 @@
           sigPlate.hidden = true;
           sigEmpty.hidden = false;
         }
-      }
-      const s = d.spend || {};
-      const el = document.querySelector('[data-settings-status="spend"]');
-      if (el) {
-        el.textContent = `month to date $${Number(s.month_to_date || 0).toFixed(2)}`
-          + ` (OpenAI $${Number(s.openai || 0).toFixed(2)}`
-          + ` · Brave $${Number(s.brave || 0).toFixed(2)})`
-          + (s.over ? ' — CAP REACHED' : '');
-      }
-    } catch (e) { /* the tab still works without it */ }
+      }    } catch (e) { /* the tab still works without it */ }
   }
 
   document.addEventListener('click', async (e) => {

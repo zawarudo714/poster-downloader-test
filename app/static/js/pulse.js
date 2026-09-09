@@ -73,14 +73,21 @@
     }
 
     // ── WHAT IT IS DOING RIGHT NOW ────────────────────────────────────
+    // Painting and uploading are counted in IMAGES, because that is the
+    // number worth knowing. Everything else the machine does is a JOB with
+    // no picture attached — the listing check, the earnings read, a profile
+    // cleanup, the test jobs — and those used to be invisible here, so the
+    // strip read "nothing" through an hour-long listing check.
     var doing = [];
     if (n.processing) doing.push(n.processing + ' painting');
     if (n.uploading) doing.push(n.uploading + ' uploading');
+    (n.jobs || []).forEach(function (word) { doing.push(word); });
     bits.push(chip(doing.length ? 'busy' : 'idle', 'doing now',
       doing.length ? doing.join(' · ') : 'nothing',
-      { title: 'Images being painted by the machine, and images being sent '
-               + 'to the marketplace, right this second. Counted across '
-               + 'every project, because the machine is shared.' }));
+      { title: 'Everything the worker machine is doing right this second — '
+               + 'painting, uploading, checking listings, reading the money, '
+               + 'or a test. Counted across every project, because the '
+               + 'machine is shared and does one thing at a time.' }));
 
     // ── WHAT IS QUEUED BEHIND IT ──────────────────────────────────────
     //

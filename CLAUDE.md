@@ -856,6 +856,38 @@ non-ASCII characters from the celebrity database and reading back what saved:
   the owner, `MEASURED 2026-09-03`: send "Los Angeles" twice and the second
   one lists as **"Los Angeles #2"**. Not refused — renamed, with no error.
 
+- **DELETING A LISTING DOES NOT GIVE THE TITLE BACK.** Stated by the owner,
+  `MEASURED 2026-09-09`. Deleting turns the listing into `Example #A #1` —
+  FAA appends a number rather than releasing the name — and uploading the
+  same title again then lands as `#2`. **A title is spent for the life of
+  the account the first time it is used.**
+
+  This matters because the owner is REUSING an account that carried the
+  movie catalogue, rebranded for travel (see `OPEN_ISSUES.md`). Every film
+  title ever listed on it is permanently taken, deletions included.
+
+  **A COLLISION BETWEEN THE OLD FILMS AND THE NEW PLACES IS NOT POSSIBLE,
+  and I claimed it was.** `TRACED 2026-09-09`, after the owner pushed back.
+  The film titles were built from `"{title} {letter}"` with a year, so they
+  list as `Dunkirk - 2017 A`. Travel's template is `"{title}"` and
+  `images_per_title` is 1, so a travel listing is the bare place name —
+  `Dunkirk`. Those are different strings, so FAA cannot renumber one because
+  of the other. Deletion pushes them further apart still, because the old one
+  becomes `Dunkirk - 2017 A #1`.
+
+  **The error is worth keeping, because it is the exact shape rule 3b warns
+  about.** I noticed that films are often named after cities, invented a
+  collision from it, and reported it as a risk without ever reading the title
+  template — which was one grep away in the file I had open. A pattern that
+  LOOKS like a defect is a reason to look, never a reason to report.
+
+  **The owner then closed the question completely: the old films AND series
+  both followed that naming rule, hand-made ones included.** So there is no
+  residual case at all, and no mechanism is needed. `matching.py` still warns
+  that the oldest listings "follow no rule we control" — that is about the
+  MATCHING of sales to designs, which is a different question from whether
+  two titles can collide.
+
   **This makes a title half of a primary key, not a label.** Everything
   downstream derives the listing address from `{title-slug}-{artist-slug}`,
   so a renumbered listing lives at an address we never computed, and
@@ -1458,6 +1490,25 @@ browser globals is needed. Two lessons from building it, both general:
     and strict about what counts as "private", because both directions make
     a check quieter and neither can invent a false alarm.**
 
+**BEFORE A CHECK CALLS SOMETHING UNOWNED, ENUMERATE EVERY WAY IT COULD BE
+OWNED.** `check_orphan_files` built its list of known files from `SavedPoster`
+rows and nothing else, then reported everything left over as unknown — under
+a heading reading "the app has no idea they exist". On the owner's screen
+that included his SIGNATURE and his REFERENCE PICTURE. Deleting them on that
+advice would have stopped the poster builder dead, because a signature
+switched on with no file is a hard refusal.
+
+A file in this system can be claimed three ways: a ROW points at it, a
+SETTING names it, or a COLUMN somewhere else holds its path. The check knew
+one. **One-of-three is not coverage, it is a confident wrong answer** — and
+this one was attached to a delete button, which is the worst place for one.
+
+The general shape, and it is not about files: whenever a check reports
+"nothing refers to this", the check is only as good as its list of the ways
+something can be referred to. Write that list down and ask what is missing
+BEFORE trusting the finding. Same family as the hook check that knew `q` and
+`querySelector` but not `querySelectorAll`.
+
 **A NAME CHOSEN IN ONE FILE AND DEFINED IN ANOTHER FAILS SILENTLY, SO
 COMPARE THE TWO LISTS.** The sidebar marks each section
 `data-nav-tint="money"` and the status strip asks for `chip('warn', …)`;
@@ -1527,6 +1578,24 @@ suspicious number, suspect the test before the code**, and prefer a
 DIFFERENCE against a known-good run over an absolute reading of the result —
 the same reasoning as comparing a change rather than a total when checking
 ourselves against a marketplace (5d).
+
+**CUT BY THE SYNTAX TREE, NEVER BY LINE NUMBERS YOU READ OFF A SCREEN.** On
+2026-09-09, removing the spend feature meant deleting one endpoint and two
+blocks from `pipeline_admin.py`. The line numbers were read from `sed` output
+and three ranges were deleted in one go. Two of the three were wrong: the
+endpoint actually ended at 2540 rather than the 2572 that had been eyeballed,
+so the cut ran through the middle of two other functions and left the file
+unparseable. It was restored from git and redone by asking `ast` for each
+node's `lineno` and `end_lineno`, one cut at a time, **parsing before every
+write rather than after**.
+
+Three things worth carrying:
+
+  * **A function's end is a fact the parser knows and you are guessing.**
+    Never derive it from "the next `def` I can see".
+  * **Batching deletions hides which one broke it.** One cut, one parse.
+  * **Parse BEFORE writing.** Writing first and checking after means the
+    broken file is what exists while you work out what happened.
 
 **A hole is normally at the edge of the pattern you wrote, so enumerate the
 variants.** Every way this codebase asks for a hook. Every way a caller

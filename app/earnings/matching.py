@@ -47,8 +47,10 @@ than against the individual sale.
 from __future__ import annotations
 
 import re
+from datetime import date
 from typing import Optional
 
+from sqlalchemy import true as sa_true
 from sqlalchemy.orm import Session
 
 from ..models import (
@@ -114,6 +116,26 @@ class MatchIndex:
 
     def __init__(self, db: Session, marketplace: str):
         self.marketplace = marketplace
+
+        # ── WHERE OUR BUSINESS STARTS ────────────────────────────────────
+        #
+        # The owner is reusing a FineArtAmerica account that carried a
+        # different catalogue, rebranded for travel (2026-09-09). Its sales
+        # history cannot be deleted, so every old sale would arrive here,
+        # match nothing, and sit on the unmatched list for ever.
+        #
+        # Rows dated BEFORE this are previous business: they are still
+        # imported, still counted in every total, and simply never looked at
+        # by the matcher. Blank means no cutoff, which is right for a fresh
+        # account and is the default.
+        #
+        # IT LIVES ON THE INDEX ON PURPOSE. `match_entry` is called in a
+        # loop, so reading the setting per row would be a query per row. The
+        # index is already built once and threaded through every path that
+        # matches anything, so putting it here means no caller can forget to
+        # pass it — the shape that let the AUTOMATIC tickbox be read by three
+        # buttons and dropped by a fourth.
+        self.starts_on = _start_date(db)
 
         # Corrections you made. Keyed on the RAW name, because an alias is a
         # decision about a specific string rather than a derivation.
@@ -206,12 +228,53 @@ class MatchIndex:
         return None, None
 
 
+def _start_date(db: Session):
+    """
+    The day our own trading begins on this marketplace, or None for all of it.
+
+    Read here rather than in each caller so there is one place that decides
+    what a blank or an unreadable value means: no cutoff at all, which never
+    hides anything and is the safe direction to be wrong in.
+    """
+    from ..pipeline import get_setting
+    raw = str(get_setting(db, "earnings_start_date") or "").strip()
+    if not raw:
+        return None
+    try:
+        return date.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def is_previous_business(entry: LedgerEntry, starts_on) -> bool:
+    """
+    Is this row from before we started, and therefore not ours to name?
+
+    Kept as a named function rather than an inline comparison because THREE
+    places need the same answer — the matcher, the unmatched list, and the
+    Earnings screen — and a rule written three times is a rule that drifts.
+
+    A row with no date is NEVER previous business. Refusing to classify
+    something we cannot date is the same instinct as the matcher refusing to
+    guess: an unmatched row is visible and fixable, while one wrongly filed
+    as history is invisible.
+    """
+    if starts_on is None or entry.occurred_at is None:
+        return False
+    when = entry.occurred_at
+    return (when.date() if hasattr(when, "date") else when) < starts_on
+
+
 def match_entry(db: Session, entry: LedgerEntry,
                 index: Optional[MatchIndex] = None) -> bool:
     """Attribute one ledger row. True if it now points at a design."""
     if entry.entry_type not in ("sale", "refund") or not entry.artwork_name:
         return False
     idx = index or MatchIndex(db, entry.marketplace)
+    # Previous business is imported and counted, never matched. See the note
+    # on MatchIndex.starts_on for why the date rides on the index.
+    if is_previous_business(entry, idx.starts_on):
+        return False
     title_id, how = idx.lookup(entry.artwork_name)
     if not title_id:
         return False
@@ -287,6 +350,12 @@ def unmatched_summary(db: Session, limit: int = 200) -> list[dict]:
     """
     from sqlalchemy import func
 
+    # PREVIOUS BUSINESS IS NOT WORK. Sales from before our start date can
+    # never match a design we own, so listing them would fill this queue with
+    # decisions nobody can make — and a queue you cannot finish is one that
+    # stops being read, which is how a real unmatched sale would go unnoticed.
+    starts_on = _start_date(db)
+
     rows = (
         db.query(
             LedgerEntry.marketplace,
@@ -297,6 +366,8 @@ def unmatched_summary(db: Session, limit: int = 200) -> list[dict]:
         .filter(LedgerEntry.master_title_id.is_(None),
                 LedgerEntry.entry_type == "sale",
                 LedgerEntry.artwork_name.isnot(None))
+        .filter(LedgerEntry.occurred_at >= starts_on
+                if starts_on else sa_true())
         .group_by(LedgerEntry.marketplace, LedgerEntry.artwork_name)
         .order_by(func.count(LedgerEntry.id).desc())
         .limit(limit)

@@ -163,12 +163,10 @@ def process_one(db: Session, poster, title, project) -> bool:
         log.warning("GPT transient failure on poster %s: %s", poster.id, e)
         return False
 
-    # Cost is recorded whether or not the rest succeeds — the money is spent
-    # the moment OpenAI answers.
-    G.record_spend(db, service="openai", operation="image_edit",
-                   cost=gen.cost_usd(), project_id=project.id,
-                   saved_poster_id=poster.id,
-                   input_tokens=gen.input_tokens, output_tokens=gen.output_tokens)
+    # Spend metering was REMOVED in v172 at the owner's instruction. OpenAI's
+    # own usage page is where he reads what this costs, and our figure only
+    # ever duplicated it less accurately. The token counts OpenAI returns are
+    # still on `gen` if anything ever wants them again.
     db.commit()
 
     # WHICH GENERATION THIS IS, DECIDED BEFORE THE FILENAME IS BUILT.
@@ -426,12 +424,13 @@ def _cycle() -> bool:
             if not intake_open(db, project):
                 continue
 
-            state = G.cap_state(db, project=project)
-            if state["over"] and state["action"] == "pause":
-                log.warning("GPT stage paused: month-to-date spend $%s has reached "
-                            "the $%s cap", state["spent"], state["cap"])
-                continue
-
+            # THE MONTHLY SPEND CAP WAS REMOVED HERE IN v172, and this is the
+            # one place where that removal takes a real protection away. It
+            # used to stop the painting loop once the month's metered spend
+            # reached a ceiling. The owner had the cap set to 0 (off) and
+            # asked for the whole spend feature to go, so nothing on this
+            # server now limits what a night of painting can cost. His
+            # OpenAI account's own spend limit is what governs it.
             poster, title = _claim_next(db, project)
             if poster is None:
                 continue

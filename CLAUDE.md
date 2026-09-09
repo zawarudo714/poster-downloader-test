@@ -1394,6 +1394,23 @@ searched the JS and found its own query. **The sabotage is what found it —
 without it this would have shipped as a protection that could not fire,
 guarding a bug that had just cost an evening.**
 
+**A NAME CHOSEN IN ONE FILE AND DEFINED IN ANOTHER FAILS SILENTLY, SO
+COMPARE THE TWO LISTS.** The sidebar marks each section
+`data-nav-tint="money"` and the status strip asks for `chip('warn', …)`;
+both look the colour up in the stylesheet. A name with no rule behind it
+breaks in the quietest way there is — an undefined variable inside `rgba()`
+makes the whole declaration invalid, so the border, the wash and the marker
+are simply never drawn, and a red "machine OFFLINE" chip renders grey.
+Nothing else can see it: the template is valid, the JavaScript parses, every
+hook exists, and this environment cannot render a page.
+
+`check_colour_names_have_rules` reads the names out of the file that CHOOSES
+them and fails on any the file that DEFINES them is missing. Sabotage-tested
+in both directions on 2026-09-09. The shape is bigger than colours: whenever
+one file names something another file must provide — a CSS class, an icon
+key, a settings key, a job kind — those are two lists and a script can
+compare them in a second.
+
 **A hole is normally at the edge of the pattern you wrote, so enumerate the
 variants.** Every way this codebase asks for a hook. Every way a caller
 writes a URL parameter — `${id}`, `{{ u.id }}`, `' + id + '`. A regex that
@@ -2355,6 +2372,14 @@ So, before shipping any figure or label:
   the last 24 hours", "across all accounts".
 * **A mechanism should announce what it is doing**, in its own words —
   "waiting to try again at 23:44", not "retry_at set".
+* **A STATUS THAT IS TRUE AND ANSWERS NOTHING IS STILL A DEFECT.** The
+  status strip read "machine on · idle". Both words were correct and the
+  owner still could not tell a finished day from a jam, because idle with a
+  hundred images queued and idle with nothing queued look identical. A
+  status needs the thing it is being compared against: it now says what the
+  machine is doing AND what is queued behind it, so "doing nothing" beside
+  "47 to paint" reads as the fault it is. Before shipping a state word, ask
+  what a person would ask NEXT — and put that on the screen beside it.
 * **Numbers on a button must be the numbers that will happen.** A button
   saying 627 that then does 1,543 is worse than a button with no number.
 * **A WARNING THAT FIRES ON THE NORMAL CASE IS NOT A WARNING, IT IS A

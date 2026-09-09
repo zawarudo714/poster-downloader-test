@@ -520,6 +520,65 @@ clearing.
 
 ---
 
+## 22. THE COLOURED SIDEBAR — v165
+
+**What to click**
+
+- Look at the master menu on a monitor. **Money** should be gold,
+  **Marketplace** sky blue, **People** rose, **System** mint, and
+  **Dashboard** violet with a small dot. Each section should have a faint
+  line of its own colour running down its links.
+- Hover a few links. The row should tint in its section's colour.
+- Open a page in each section. The bar marking where you are should be that
+  section's colour, not violet.
+- Go into the Travel project. The links there should be grouped by colour
+  too — gold for finding pictures, rose for your decisions, blue for the
+  machinery, mint for Stats and Peek.
+- Open the site on your **phone** and pull out the menu. Same colours.
+- Press the **moon/sun** button for light mode and look again.
+
+**What failure looks like**
+
+- A section with no colour at all, or grey where a colour should be. Tell me
+  which one — that means a name and its colour got out of step, and there is
+  now a check that should have stopped it.
+- Any label you have to lean in to read. These colours are meant to be quiet
+  behind the text, never competing with it.
+
+---
+
+## 23. THE NEW STATUS STRIP — v165
+
+The thin bar under the top of every admin screen.
+
+**What to look at**
+
+- It should now read as small bordered chips rather than plain text, with a
+  quiet label and a bold figure in each.
+- With nothing happening it should say **worker machine · on**, **doing
+  now · nothing**, and **workers online · 1**. There should be a time in the
+  far right corner.
+- Greenlight some work. A **waiting** chip should appear in blue saying how
+  many are queued to paint or upload, and **doing now** should start
+  counting while the machine works.
+- Hover any chip. A tooltip should explain in plain words what that figure
+  means and where it is counted from.
+- Every chip except the last two is a link. Clicking should land you on the
+  screen that deals with it.
+
+**The one that matters.** If the machine ever says **doing now · nothing**
+while the **waiting** chip shows a number that does not move, something is
+stuck. That pairing is the whole reason the strip changed — before this it
+only said "idle", which looks the same on a finished day and on a jam.
+
+**What failure looks like**
+
+- The time in the corner stopping while the page is open. That means the
+  strip has stopped asking, so every figure on it is stale.
+- A chip that should be red showing grey.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

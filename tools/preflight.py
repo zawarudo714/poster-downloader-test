@@ -1804,6 +1804,61 @@ def check_no_background_on_composited_img() -> None:
                  f"Remove the background.")
 
 
+def check_colour_names_have_rules() -> None:
+    """
+    A colour chosen in one file must be DEFINED in another. Both directions.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE SHAPE THIS CATCHES (2026-09-09, v165)
+    ════════════════════════════════════════════════════════════════════════
+    Two things now pick a colour by NAME rather than by value. The sidebar
+    marks each group `data-nav-tint="money"`, and the status strip asks for
+    `chip('warn', ...)`. In both cases the name is looked up in the
+    stylesheet, and in both cases a name with no rule behind it fails
+    SILENTLY — the nav tint drops the whole declaration (an undefined
+    variable inside `rgba()` is invalid CSS, so the border simply is not
+    drawn), and the strip's chip quietly falls back to grey. A red "machine
+    OFFLINE" chip rendering grey is the version of this that costs money.
+
+    Nothing else could find it: the template is valid, the JavaScript parses,
+    every hook exists, and this environment cannot render a page. So the
+    only honest check is to read the names out of the source that CHOOSES
+    them and confirm the source that DEFINES them has each one.
+
+    Generalises past colours: whenever one file names something another file
+    must provide — a CSS class, an icon key, a settings key — the two lists
+    can be compared mechanically, and a name that means nothing is exactly
+    the kind of mistake nobody notices by reading.
+    """
+    css = (APP / "static" / "css" / "style.css").read_text(encoding="utf-8")
+
+    # ── The sidebar tints ────────────────────────────────────────────────
+    wanted = set()
+    for tpl in sorted((APP / "templates").glob("*.html")):
+        text = tpl.read_text(encoding="utf-8")
+        wanted.update(re.findall(r'data-nav-tint="([a-z0-9_-]+)"', text))
+    defined = set(re.findall(r'\[data-nav-tint="([a-z0-9_-]+)"\]', css))
+    for name in sorted(wanted - defined):
+        fail(f"the sidebar uses data-nav-tint=\"{name}\" but style.css has no "
+             f"[data-nav-tint=\"{name}\"] rule — the whole group would draw "
+             f"with no colour at all")
+    for name in sorted(defined - wanted):
+        warn(f"style.css defines the sidebar tint '{name}' and nothing uses "
+             f"it — delete it rather than leaving a colour nobody can reach")
+
+    # ── The status strip's chip tones ────────────────────────────────────
+    js = (APP / "static" / "js" / "pulse.js")
+    if not js.is_file():
+        return
+    text = js.read_text(encoding="utf-8")
+    tones = set(re.findall(r"chip\(\s*'([a-z0-9_-]+)'", text))
+    have = set(re.findall(r"\.pulse-([a-z0-9_-]+)\s*\{[^}]*--chip-tint", css))
+    for tone in sorted(tones - have):
+        fail(f"the status strip asks for chip('{tone}', ...) but style.css "
+             f"has no .pulse-{tone} rule setting --chip-tint — that chip "
+             f"would render grey whatever it is trying to say")
+
+
 CHECKS = [
     ("python compiles",           check_python_compiles),
     ("no undefined names",        check_undefined_names),
@@ -1827,6 +1882,7 @@ CHECKS = [
     ("local imports come before use", check_local_imports_not_used_earlier),
     ("the top bar carries no filter", check_no_filter_on_fixed_element_ancestors),
     ("no picture paints over its colour plate", check_no_background_on_composited_img),
+    ("every colour name has a rule", check_colour_names_have_rules),
 ]
 
 

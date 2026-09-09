@@ -4915,15 +4915,10 @@ label.inline-check {
   scrollbar-width: none;
 }
 .pulse-row::-webkit-scrollbar { display: none; }
-.pulse-item { opacity: 0.85; flex: 0 0 auto; }
-.pulse-ok   { color: #4cd07d; }
-.pulse-warn { color: var(--skip); }
-.pulse-bad  { color: #ff6b6b; font-weight: 600; }
-.pulse-alarms { display: flex; flex-direction: column; gap: 2px; padding: 2px 0 4px; }
-.pulse-alarm {
-  color: #ff8f8f; text-decoration: none; font-size: 12px;
-}
-.pulse-alarm:hover { text-decoration: underline; }
+/* `.pulse-item` and its colour rules lived here until v165. The strip is
+   chips now; the old classes are gone rather than left disabled, because a
+   dead selector is the next session reasoning about styling that cannot
+   apply. The replacements are at the end of this file. */
 
 /* ── Project home: the journey strip ─────────────────────────────────── */
 .journey {
@@ -5163,14 +5158,6 @@ input:focus, select:focus, textarea:focus {
   border-color: rgba(242,114,109,0.4);
 }
 
-/* ── The pulse strip joins the header family ────────────────────────── */
-.pulse-strip {
-  background: var(--bg);
-  border-bottom: 1px solid rgba(150,155,200,0.08);
-  padding: 5px 18px;
-}
-.pulse-ok   { color: var(--success); }
-.pulse-bad  { color: var(--error); }
 
 /* ── Home page: the one loud moment ─────────────────────────────────── */
 .journey-step {
@@ -5586,4 +5573,215 @@ body.has-rail .nav-group-btn .nav-badge { opacity: 1; }
 @media (max-width: 700px) {
   .subject-strip { margin: 16px 0 14px; }
   .subject-icon svg { width: 22px; height: 22px; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   v165 — A COLOUR PER PART OF THE SIDEBAR
+   ══════════════════════════════════════════════════════════════════════
+   The owner's words (2026-09-09): "have the side bar have different shades
+   of subtle color... this is so i can better click things, right now its a
+   bit hard on the eyes to locate what i want to click."
+
+   Fifteen links in one violet down one edge means you read every label
+   every time. A colour gets your eye to the right THIRD of the list before
+   you have read a word, and after a week the colour is the memory rather
+   than the position.
+
+   THE COLOURS ARE MUTED ON PURPOSE. They live behind text that must stay
+   readable, so each one is a pastel used at low opacity for backgrounds and
+   at full strength only for a 2px marker and the section heading. Nothing
+   here is allowed to become a second accent competing with the violet.
+
+   The tint is ONE custom property per group, set here and used by every
+   rule below. Adding a group is one line, not a new block of CSS. */
+/* A SAFE GREY FIRST, so a tint nobody defined still draws. Without this,
+   `rgba(var(--nav-tint), 0.28)` with an undefined variable is an INVALID
+   declaration and the browser drops the whole rule — the border, the wash
+   and the marker all vanish silently, which looks like a styling choice
+   rather than a mistake. Preflight also fails on an undefined tint, so the
+   fallback keeps the screen usable and the check makes it noticed. */
+[data-nav-tint]           { --nav-tint: 150 155 200; }
+[data-nav-tint="home"]    { --nav-tint: 168 155 250; }   /* violet — where you land */
+[data-nav-tint="money"]   { --nav-tint: 229 193 104; }   /* gold — money in and out */
+[data-nav-tint="market"]  { --nav-tint: 121 192 242; }   /* sky — the far side */
+[data-nav-tint="people"]  { --nav-tint: 240 154 200; }   /* rose — the team */
+[data-nav-tint="system"]  { --nav-tint: 119 219 178; }   /* mint — the machinery */
+[data-nav-tint="sourcing"]{ --nav-tint: 229 193 104; }   /* gold — finding pictures */
+[data-nav-tint="judging"] { --nav-tint: 240 154 200; }   /* rose — your decisions */
+[data-nav-tint="machine"] { --nav-tint: 121 192 242; }   /* sky — the machinery */
+[data-nav-tint="looking"] { --nav-tint: 119 219 178; }   /* mint — just looking */
+
+@media (min-width: 701px) {
+  /* THE SECTION HEADING carries the colour at full strength. It is the
+     thing the eye lands on when scanning, and it is not a link, so there is
+     no readability cost. */
+  body.has-rail .nav-group[data-nav-tint] .nav-group-btn {
+    color: rgb(var(--nav-tint));
+    opacity: 0.9;
+  }
+
+  /* A LINE DOWN THE GROUP, faint, so the section reads as one block rather
+     than as three unrelated rows. */
+  body.has-rail .nav-group[data-nav-tint] .nav-group-menu {
+    border-left: 2px solid rgba(var(--nav-tint), 0.28);
+    margin-left: 12px;
+    padding-left: 6px;
+  }
+
+  /* HOVER tints the row in its own colour, so the thing under the pointer
+     is obviously part of the section you were aiming at. */
+  body.has-rail .topnav .navlink[data-nav-tint]:hover,
+  body.has-rail .nav-group[data-nav-tint] .nav-group-menu .navlink:hover {
+    background: rgba(var(--nav-tint), 0.12);
+    color: var(--text);
+  }
+
+  /* THE OPEN PAGE keeps the violet bar it has always had, but in its own
+     colour — so "where am I" and "what colour is this section" are the same
+     answer instead of two. */
+  body.has-rail .topnav .navlink[data-nav-tint].active,
+  body.has-rail .nav-group[data-nav-tint] .nav-group-menu .navlink.active {
+    background: rgba(var(--nav-tint), 0.16);
+    box-shadow: inset 2px 0 0 rgb(var(--nav-tint));
+  }
+
+  /* A top-level link with no group of its own — Dashboard, Home — gets a
+     dot rather than a line, because there is no section for a line to run
+     down and an orphan line reads as a broken group. */
+  body.has-rail .topnav > .navlink[data-nav-tint]::before {
+    content: "";
+    width: 6px; height: 6px; border-radius: 50%;
+    background: rgb(var(--nav-tint));
+    opacity: 0.75;
+    flex: 0 0 auto;
+  }
+}
+
+/* THE PHONE DRAWER gets the same colours. It is the same list with the same
+   problem, and two different colour schemes for one menu would be worse
+   than none. */
+@media (max-width: 700px) {
+  .nav-group[data-nav-tint] .nav-group-btn { color: rgb(var(--nav-tint)); }
+  .nav-group[data-nav-tint] .nav-group-menu {
+    border-left: 2px solid rgba(var(--nav-tint), 0.3);
+    padding-left: 8px;
+  }
+  .navlink[data-nav-tint].active {
+    background: rgba(var(--nav-tint), 0.16);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   v165 — THE STATUS STRIP, REBUILT AS CHIPS
+   ══════════════════════════════════════════════════════════════════════
+   The owner (2026-09-09): "the area where there is machine on, 1 worker
+   online — the visual there is really barebones and doesnt match the site."
+
+   It was three runs of plain text on a bare bar. Everything else on this
+   site is a bordered card on a slightly lifted background, so the one strip
+   that is on EVERY screen was the one thing that looked unfinished.
+
+   Each item is now a chip: a quiet label saying what the figure means, the
+   figure itself in the reading colour, and a border in the colour of what
+   it is telling you. The label matters as much as the colour — "idle" alone
+   needed you to know what was idle. */
+.pulse-strip {
+  background: var(--bg);
+  border-bottom: 1px solid rgba(150,155,200,0.1);
+  padding: 7px 18px;
+  font-size: 12px;
+}
+.pulse-row {
+  display: flex; align-items: center; gap: 8px;
+  overflow-x: auto;                /* phones: scroll, never wrap into a wall */
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+.pulse-row::-webkit-scrollbar { display: none; }
+
+.pulse-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid rgba(var(--chip-tint, 150 155 200), 0.28);
+  background: rgba(var(--chip-tint, 150 155 200), 0.08);
+  text-decoration: none;
+  line-height: 1.5;
+  transition: background .12s linear, border-color .12s linear;
+}
+a.pulse-chip:hover {
+  background: rgba(var(--chip-tint, 150 155 200), 0.16);
+  border-color: rgba(var(--chip-tint, 150 155 200), 0.5);
+}
+/* The quiet half says WHAT, the loud half says HOW MANY. Reading the strip
+   at a glance should give you the numbers; reading it properly gives you
+   what they are. */
+.pulse-label {
+  color: var(--subtext);
+  font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+}
+.pulse-value {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.pulse-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: rgb(var(--chip-tint, 150 155 200));
+  flex: 0 0 auto;
+}
+
+/* One tint per kind of news. Written as raw numbers so the same value can
+   be a border, a wash and a dot without three colour definitions. */
+.pulse-ok    { --chip-tint: 79 221 161; }   /* green  — the machine is up */
+.pulse-busy  { --chip-tint: 168 155 250; }  /* violet — work in progress */
+.pulse-queue { --chip-tint: 121 192 242; }  /* sky    — work waiting */
+.pulse-warn  { --chip-tint: 240 180 94; }   /* amber  — deliberately stopped */
+.pulse-bad   { --chip-tint: 242 114 109; }  /* red    — something is wrong */
+.pulse-you   { --chip-tint: 240 154 200; }  /* rose   — waiting on the owner */
+.pulse-idle  { --chip-tint: 150 155 200; }  /* grey   — nothing to report */
+
+/* The machine being OFF is the one thing on this strip worth a heartbeat.
+   Everything else stays still, so the movement means something. */
+.pulse-bad .pulse-dot { animation: pulse-beat 1.6s ease-in-out infinite; }
+@keyframes pulse-beat {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(242,114,109,0.6); }
+  50%      { box-shadow: 0 0 0 5px rgba(242,114,109,0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pulse-bad .pulse-dot { animation: none; }
+}
+
+/* When the answers were last refreshed. Pushed to the far end, quiet, and
+   there for one reason: a strip frozen by a dead connection looks exactly
+   like a strip reporting a calm system. */
+.pulse-stamp {
+  margin-left: auto; padding-left: 12px;
+  color: var(--subtext); opacity: 0.55; font-size: 10.5px;
+  flex: 0 0 auto;
+}
+
+/* The alarm line keeps its own shape — it is a sentence, not a figure. */
+.pulse-alarms { display: flex; flex-direction: column; gap: 3px; padding: 5px 0 2px; }
+.pulse-alarm {
+  display: inline-flex; align-items: center; gap: 8px;
+  color: var(--error); text-decoration: none; font-size: 12px;
+}
+.pulse-alarm-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 15px; border-radius: 50%;
+  background: rgba(242,114,109,0.18);
+  border: 1px solid rgba(242,114,109,0.45);
+  font-size: 10px; font-weight: 700;
+  flex: 0 0 auto;
+}
+.pulse-alarm:hover { text-decoration: underline; }
+
+@media (max-width: 700px) {
+  /* On a phone the labels are what get dropped, never the numbers. */
+  .pulse-strip { padding: 6px 12px; }
+  .pulse-chip { padding: 3px 8px; gap: 5px; }
+  .pulse-label { font-size: 9.5px; letter-spacing: 0.05em; }
+  .pulse-stamp { display: none; }
 }

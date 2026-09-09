@@ -181,6 +181,24 @@ def api_pulse(request: Request, admin: User = Depends(require_admin),
                        .filter(UploadTracking.status == "uploading")
                        .scalar() or 0)
 
+    # ── WHAT IS QUEUED BEHIND THE MACHINE ───────────────────────────────
+    #
+    # "Machine on, idle" was true and told the owner nothing: idle with a
+    # hundred images waiting is a fault, and idle with nothing waiting is a
+    # finished day. The strip could not tell those apart, so these two
+    # counts are what turn it into an answer (owner's ask 2026-09-09).
+    #
+    # Counted across EVERY project on purpose, exactly like the two counts
+    # above. The machine is shared, so a number about the machine that only
+    # covered the project you happen to be standing in would be the very
+    # defect rule 3b is about.
+    process_waiting = (db.query(func.count(SavedPoster.id))
+                         .filter(SavedPoster.pipeline_status == "greenlit",
+                                 SavedPoster.deleted_at.is_(None)).scalar() or 0)
+    upload_waiting = (db.query(func.count(UploadTracking.id))
+                        .filter(UploadTracking.status == "pending")
+                        .scalar() or 0)
+
     run = P.run_mode_state(db, proj)
     quiet = run.get("quiet") or {}
 
@@ -298,15 +316,32 @@ def api_pulse(request: Request, admin: User = Depends(require_admin),
         "scope": "project" if proj is not None else "master",
         "project": ({"id": proj.id, "name": proj.name, "slug": proj.slug}
                     if proj is not None else None),
-        "node": {"total": len(nodes), "offline": offline,
-                 "busy": (f"{processing_now} processing · "
-                          f"{uploading_now} uploading"
-                          if (processing_now or uploading_now) else "idle")},
+        # THE NUMBERS RAW, THE SENTENCE BUILT ON THE SCREEN.
+        #
+        # `busy` used to be a pre-baked string and the strip printed it. That
+        # meant the wording lived in Python, where nobody looking at the
+        # screen would think to go and change it, and the strip could not
+        # colour one part of it differently from another. The screen gets
+        # the figures and decides how to say them.
+        "node": {
+            "total": len(nodes),
+            "offline": offline,
+            "processing": processing_now,
+            "uploading": uploading_now,
+            "to_process": process_waiting,
+            "to_upload": upload_waiting,
+        },
         "run": {"running": bool(run.get("running")),
                 "reason": run.get("reason") or ""},
         "quiet": {"blocking": bool(quiet.get("blocking")),
                   "starts_at": quiet.get("starts_at") or ""},
         "workers_online": workers_online,
+        # How many things are sitting waiting for a DECISION from the owner,
+        # in the project he is standing in. Summed from the same badges the
+        # nav shows, so the strip and the badges can never disagree — a
+        # second query counting "roughly the same thing" is how two numbers
+        # on one screen drift apart.
+        "needs_you": sum(badges.values()) if badges else 0,
         "alarms": alarms,
         "badges": badges,
         "strip": strip,

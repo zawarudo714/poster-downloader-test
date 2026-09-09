@@ -1,60 +1,54 @@
 # Not yet deployed
 
-## v173 — a gap between upload batches, switched OFF
+## v174 — "N/A" is made impossible, not cleaned up
 
-**Server only. The Windows machine is unchanged, so nothing needs copying.**
-No new column, so no backup needed.
+The owner reported (2026-09-09) that "(N/A)" was still showing beside titles
+on the Activity Log, and asked whether resetting the site would remove it
+everywhere or whether the letters were written into the code.
 
-The owner: *"the FAA upload limit is not exactly 24 hours."* The existing cap
-counts uploads on a CALENDAR day and resets at local midnight, which is the
-wrong shape if FineArtAmerica's own allowance turns over some interval after
-your last upload instead.
+**They were written into the code, in four places.** A reset on its own
+would have brought all four straight back. This release removes them and
+adds two mechanical checks so they cannot come back quietly.
 
-`upload_gap_enabled` (off) and `upload_gap_hours` (12), under Upload Settings.
+What changed:
 
-Three decisions worth reading, because they are not obvious from the request:
+- `app/models.py` — the `year` column was `nullable=False, default="N/A"`.
+  That single default is where the letters came from. The column is now
+  nullable with no default, so a title with no year holds nothing.
+- `app/routes/worker.py` — the folder builder was handed `t.year or "N/A"`,
+  which wrote `1. Santorini (N/A)` as a folder name on disk. Folder paths
+  never change once written, so this one was permanent. It now passes
+  nothing.
+- `app/parsing.py` — `folder_name_for` only adds the brackets when there is
+  a year. Two dead functions that returned "N/A" were deleted; nothing
+  called either of them.
+- `scripts/dev_setup.py` and `tools/test_sheet_columns_check.py` — the local
+  seed data used "N/A", so local testing reproduced the bug.
+- `app/static/js/admin.js` and `app/static/js/admin_pipeline.js` — two
+  screens drew the year with no guard at all, so even with perfect data they
+  would have printed an empty `()`. Both are guarded now.
 
-  * **It gates the CLAIM of a batch, not each design.** Read literally,
-    "wait N hours after the last design" means ONE design every twelve
-    hours, because every upload restarts the clock. The check is asked once,
-    in `claim_upload_batch`, and a batch already claimed runs to the end.
-  * **It sits BESIDE the daily cap, not instead of it.** Both must pass, so
-    switching it on can only ever slow an account down. Wrong in the cheap
-    direction, because the expensive direction is a closed account. If it
-    should REPLACE the cap, that is one line and a deliberate decision.
-  * **It is derived, never stored.** Nothing is written down and nothing is
-    toggled; the clock and the last upload are read fresh each time, exactly
-    like the quiet window. A stored "waiting until" is a second edge somebody
-    has to clear, and a lost edge leaves uploading dead looking fine.
+New mechanical checks:
 
-**BOTH account panels say why.** An account in its gap shows a WAITING pill
-with the time it resumes, and a note explaining that it is deliberate. There
-are two separate account renderers in `admin_pipeline.js` fed by two separate
-endpoints, and both were changed — a gap visible on one screen and invisible
-on the other is the same account looking broken on one of them.
+- `preflight.py` · **absence is NULL, never a magic word** — fails on a NOT
+  NULL column defaulting to one of these words, and on any code that falls
+  back to one. Sabotage-tested three ways: the column default, the folder
+  fallback, and a seed row. All three go red.
+- `diagnostics.py` · **year_is_a_year_or_nothing** — reports any title whose
+  year is not four digits. Preflight is about the code; this one is about
+  the data, so it holds whatever an import does later.
 
-New invariant: `check_upload_gap_is_holding` groups an account's uploads into
-runs (more than half an hour of silence starts a new one) and reports
-consecutive runs closer together than the gap. It compares BATCHES rather
-than designs, because uploads inside one batch are seconds apart by design.
-It declines to look at all when the gap is under an hour, rather than
-inventing findings from its own grouping window.
+**Deploy this.** The Windows node did NOT change, so there is nothing to
+copy and `AGENT_VERSION` stays where it is.
 
-**Verified:** 11 behaviour cases on the gap arithmetic, run against the
-function LIFTED OUT OF THE SHIPPED FILE — off, waiting, exactly at the
-boundary, one second short, never-uploaded, zero hours, unreadable hours,
-fractional hours. Preflight clean. Sabotage: removing the settings box goes
-red, and the gate was confirmed to be called inside an `if` that skips the
-account rather than merely mentioned.
+**On the live server the DATA still has to be cleaned.** The code change
+stops new "N/A" values; it does not rewrite rows that already hold the
+letters. That happens for free in the reset to zero. If you want to see
+whether your current rows carry it, run:
 
-**NOT verified:** anything against a real database or a real upload run. The
-owner has said he will test this much later, and until he does, twelve hours
-is his guess rather than a measurement — which is exactly why it ships off.
+    cd /opt/poster && docker compose exec web python -c "from app.db import SessionLocal; from app.models import MasterTitle; from sqlalchemy import func; db=SessionLocal(); print(db.query(MasterTitle.year, func.count()).group_by(MasterTitle.year).all())"
 
 ---
-
-Whoever changes code writes here what is waiting and why; the deploy tool
-empties this file once the server is confirmed to be running it.
 
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.

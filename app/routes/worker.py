@@ -1498,7 +1498,10 @@ def _ensure_first_save_metadata(t: MasterTitle, today: date_type) -> None:
         t.original_save_date = today
     if not t.title_folder_path:
         num_str = str(t.external_id) if t.external_id is not None else ""
-        t.title_folder_path = folder_name_for(num_str, t.title, t.year or "N/A")
+        # No "N/A" fallback. A project without years gets a folder named
+        # "1. Santorini" rather than "1. Santorini (N/A)" — see
+        # folder_name_for() for why that literal was worth removing.
+        t.title_folder_path = folder_name_for(num_str, t.title, t.year or "")
     if t.started_at is None:
         t.started_at = datetime.utcnow()
 

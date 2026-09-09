@@ -68,7 +68,7 @@ def load(db, total: int, with_search: int, with_listing: int) -> None:
         db.add(MasterTitle(
             external_id=i + 1,
             title=f"Place {i}",
-            year="N/A",
+            year=None,          # a travel place has no year, and NULL is how we say so
             project_id=1,
             status="pending",
             search_query=(f"Place {i} Kenya" if i < with_search else None),

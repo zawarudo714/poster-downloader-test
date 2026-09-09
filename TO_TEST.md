@@ -850,6 +850,45 @@ later, so it is off and twelve hours is a guess rather than a measurement.
 
 ---
 
+## 32. THE "(N/A)" IS GONE FOR GOOD — v174
+
+You said you could still see "(N/A)" beside titles on the Activity Log, and
+you asked whether a reset would clear it everywhere or whether it was written
+into the code. **It was written into the code, in four separate places**, so
+a reset alone would have brought it straight back. All four are removed now.
+
+**What to click, on the live site after this deploys**
+
+1. Open **Activity Log**. Look at the title names in the rows.
+2. Open **Title List** and **Pipeline**. Look at the titles there too.
+
+**What you should see, and this is the part that needs explaining**
+
+- **Any title created from now on has no year at all**, so nothing is drawn
+  beside its name. That is the fix working.
+- **Rows that are already in the database still hold the letters "N/A"**, and
+  they will still show. The code change stops NEW ones; it does not go back
+  and rewrite old rows. Those disappear when you reset everything to zero,
+  which is the plan anyway.
+
+So if you still see "(N/A)" on an OLD title after this deploy, that is
+expected and not a bug. If you see it on a title created AFTER the deploy,
+that is a real fault and I want to know.
+
+**If you want to see what your live database is holding right now**, paste
+this whole line into SSH:
+
+    cd /opt/poster && docker compose exec web python -c "from app.db import SessionLocal; from app.models import MasterTitle; from sqlalchemy import func; db=SessionLocal(); print(db.query(MasterTitle.year, func.count()).group_by(MasterTitle.year).all())"
+
+It prints each year and how many titles hold it. `[(None, 88970)]` means
+clean. Anything showing `'N/A'` is the old rows.
+
+**One more thing worth knowing.** The folder names on disk were affected too.
+A travel title used to get a folder called `1. Santorini (N/A)`. New folders
+are just `1. Santorini`. Folders already written keep their old names on
+purpose — a poster's folder is fixed the moment it is first saved, and
+renaming it would break the record pointing at it.
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

@@ -1007,7 +1007,7 @@
         <td class="col-cb"><input type="checkbox" ${titlesState.selected.has(t.id) ? 'checked' : ''}
               ${t.actionable ? '' : 'disabled'}></td>
         <td class="mono">${t.external_id == null ? '—' : t.external_id}</td>
-        <td>${esc(t.title)} <span class="muted">(${esc(t.year)})</span> ${hint}</td>
+        <td>${esc(t.title)}${t.year ? ` <span class="muted">(${esc(t.year)})</span>` : ''} ${hint}</td>
         <td class="mono">${esc(t.save_date || '—')}</td>
         <td>${stage}</td>
         <td class="mono">${t.poster_count}${t.uploaded_count ? ` · ${t.uploaded_count} up` : ''}</td>

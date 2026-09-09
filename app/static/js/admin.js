@@ -861,7 +861,11 @@ async function openTimeline(posterId) {
   let html =
     '<div class="tl-head">' +
       '<div class="tl-head-name mono">' + esc(p.filename) + '</div>' +
-      '<div class="tl-head-sub muted">' + esc(t.name) + ' (' + esc(t.year) + ')' +
+      // Guarded like every other year on the site. Unguarded, a project with
+      // no year rendered "(N/A)" from the old column default and would render
+      // an empty "()" once that is NULL — noise either way.
+      '<div class="tl-head-sub muted">' + esc(t.name)
+        + (t.year ? ' (' + esc(t.year) + ')' : '') +
         (t.external_id != null ? ' · #' + esc(t.external_id) : '') + '</div>' +
       '<div class="tl-head-facts">' +
         '<span>worker <b class="mono">' + esc(p.worker) + '</b></span>' +

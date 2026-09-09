@@ -101,7 +101,24 @@ class MasterTitle(Base):
     id            = Column(Integer, primary_key=True)
     external_id   = Column(Integer, nullable=True, index=True)   # the "0" column from upstream CSV
     title         = Column(String(512), nullable=False)
-    year          = Column(String(16), nullable=False, default="N/A")
+    # ── NO YEAR IS NULL. THERE IS NO MAGIC STRING. ──────────────────────
+    #
+    # This column used to be `nullable=False, default="N/A"`, and that one
+    # default poisoned 88,970 travel titles at the door: the text "N/A" is
+    # TRUTHY, so every screen's `year ? ... : ...` guard passed and rendered
+    # "Cape Verde (N/A)". The importer was corrected on 2026-09-06 to pass
+    # None — but the column default was left, so the fix rested on a
+    # question nobody had answered: does SQLAlchemy apply a Python-side
+    # default when the attribute is explicitly None?
+    #
+    # Rather than answer it, the default is gone. Now there is nothing to
+    # apply. A project with no year stores NULL, every guard works, and the
+    # whole class of bug is impossible instead of merely fixed.
+    #
+    # `create_all()` never ALTERs, so an existing database keeps the old
+    # NOT NULL column until it is rebuilt. That is fine — this lands with
+    # the reset to zero.
+    year          = Column(String(16), nullable=True)
     content_type  = Column(String(32), nullable=True)            # 'movie' | 'tvSeries' | None
     votes         = Column(Integer, nullable=True)
     rating        = Column(Float, nullable=True)

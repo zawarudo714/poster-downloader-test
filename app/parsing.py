@@ -5,8 +5,6 @@ app (main.py). Behaviour MUST match exactly — the spec calls these out as
 
     - sanitize()
     - _extract_num()
-    - _extract_year()
-    - parse_clipboard_data()
 
 Plus a small image-extension helper.
 """
@@ -29,78 +27,33 @@ def _extract_num(s: str) -> str:
     return m.group() if m else ''
 
 
-def _extract_year(s: str) -> str:
-    s = s.strip()
-    m = re.search(r'\d{4}', s)
-    if m:
-        return m.group()
-    # -1, 0, blank, or any non-4-digit value → treat as unknown
-    return "N/A"
-
-
-def parse_clipboard_data(raw: str):
+def folder_name_for(num: str, title: str, year: str = "") -> str:
     """
-    Handles all paste formats from Excel.
+    Build the per-title folder name:
+        "{num}. {Title} ({Year})"  — when the project has years
+        "{num}. {Title}"           — when it does not
 
-    Pass 1: delimited lines (tab / comma / semicolon / pipe). Uses re.search so
-            stray \\r, BOM, decimals like 134.0, extra trailing tabs, etc.
-            cannot cause false negatives. Entries with missing/invalid year
-            (e.g. -1, blank) are accepted with year='N/A' rather than dropped.
+    ════════════════════════════════════════════════════════════════════════
+    WHY THE PARENTHESES ARE CONDITIONAL
+    ════════════════════════════════════════════════════════════════════════
+    This used to be given `t.year or "N/A"`, so a travel folder was written
+    to disk as `1. Santorini (N/A)`. That is the same poisoned "N/A" as the
+    database column, except baked into a FOLDER PATH — and folder paths are
+    immutable here by design, so it would have been permanent for every
+    title created.
 
-    Pass 2: fully concatenated blob (no delimiters at all). The 19xx/20xx
-            anchor prevents entry numbers from being read as years.
+    A missing year now means no brackets at all, which is what a project
+    with `has_year = 0` should have had from the start.
 
-    Returns: list of (num, title, year) tuples.
+    **This changes the name of folders created from now on.** Existing
+    folders are untouched and still resolve, because a poster's path is
+    stored at first save and never recomputed. The change lands with the
+    reset to zero, so in practice nothing is straddling two conventions.
     """
-    rows = []
-
-    # Pass 1 – delimited
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        parts = None
-        for sep in ('\t', ',', ';', '|'):
-            p = line.split(sep)
-            if len(p) >= 3:
-                parts = p
-                break
-        if not parts:
-            continue
-        num   = _extract_num(parts[0])
-        title = parts[1].strip()
-        year  = _extract_year(parts[2])
-        if num and title:
-            rows.append((num, title, year))
-
-    if rows:
-        return rows
-
-    # Pass 2 – concatenated blob
-    blob = re.sub(r'[\r\n\s]+', ' ', raw).strip()
-    pat = re.compile(
-        r'(\d{1,5})'
-        r'([A-Za-z][^0-9]*)'
-        r'((19|20)\d{2})'
-        r'(?=\d|$)'
-    )
-    for m in pat.finditer(blob):
-        num   = m.group(1).strip()
-        title = m.group(2).strip()
-        year  = m.group(3).strip()
-        if title:
-            rows.append((num, title, year))
-
-    return rows
-
-
-def folder_name_for(num: str, title: str, year: str) -> str:
-    """
-    Build the per-title folder name exactly like the original:
-        "{num}. {Title} ({Year})"
-    sanitized for filesystem.
-    """
-    return sanitize(f"{num}. {title} ({year})")
+    stem = f"{num}. {title}"
+    if str(year or "").strip():
+        stem = f"{stem} ({year})"
+    return sanitize(stem)
 
 
 def filename_for(title: str, count: int, src_url: str) -> str:

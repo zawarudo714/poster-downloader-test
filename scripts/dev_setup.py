@@ -135,34 +135,36 @@ def make_placeholder_png(width: int, height: int, seed: int) -> bytes:
 # and DELETES others outright, so a seed list of plain English words would let
 # a title-rendering bug through untouched.
 #
-# The year is "N/A" and the type is blank because a location has neither. That
-# is what the importer produces for a sheet without those columns, so the demo
-# data has the same shape as the real thing rather than a tidier one.
+# The year and the type are BOTH None, because a location has neither. They
+# used to be the text "N/A", which is what the importer wrote before
+# 2026-09-09 — and that string is truthy, so every screen's `year ? ... : ...`
+# guard passed and "(N/A)" was drawn beside every travel title. Seed data must
+# have the shape the fixed importer produces, not the shape of the old bug.
 _DEMO_TITLES = [
-    ("Santorini", "N/A", None, "White-washed cliff villages above the caldera of a drowned volcano."),
-    ("Reykjavík", "N/A", None, "Iceland's harbour capital, painted roofs under a low northern sun."),
-    ("Machu Picchu", "N/A", None, "An Inca citadel on a saddle of rock between two Andean peaks."),
-    ("Côte d'Azur", "N/A", None, "The French Mediterranean coast, pine, limestone and very blue water."),
-    ("Kyoto: Fushimi Inari", "N/A", None, "Thousands of vermilion gates climbing a wooded hillside shrine."),
-    ("São Paulo", "N/A", None, "Brazil's restless megacity, concrete horizon in every direction."),
-    ("Þingvellir", "N/A", None, "The rift valley where two continental plates pull slowly apart."),
-    ("Cinque Terre", "N/A", None, "Five Ligurian fishing villages stacked on terraced cliffs."),
-    ("Banff National Park", "N/A", None, "Glacial lakes the colour of turquoise beneath the Canadian Rockies."),
-    ("Kraków", "N/A", None, "A medieval market square and the largest brick Gothic altarpiece in Europe."),
-    ("Isle of Skye", "N/A", None, "Black ridges, sea lochs and weather that changes its mind hourly."),
-    ("Ha Long Bay", "N/A", None, "Limestone karsts rising out of jade water in the Gulf of Tonkin."),
-    ("Zürich", "N/A", None, "A lake, an old town, and the Alps on a clear day."),
-    ("Petra", "N/A", None, "A city carved into rose sandstone at the end of a narrow gorge."),
-    ("Torres del Paine", "N/A", None, "Granite towers over Patagonian steppe and wind that never stops."),
-    ("Cappadocia", "N/A", None, "Soft volcanic rock eroded into valleys of cones and cave dwellings."),
-    ("Lofoten Islands", "N/A", None, "Red fishing cabins under steep Arctic peaks above the sea."),
-    ("Québec City", "N/A", None, "The only walled city north of Mexico, French to its foundations."),
-    ("Serengeti", "N/A", None, "Open grassland crossed twice a year by more than a million wildebeest."),
-    ("Malmö", "N/A", None, "A southern Swedish port facing Copenhagen across the sound."),
-    ("Angkor Wat", "N/A", None, "The largest religious monument on earth, reflected in its own moat."),
-    ("Bora Bora", "N/A", None, "A drowned volcano ringed by a lagoon and a necklace of islets."),
-    ("Amalfi Coast", "N/A", None, "Lemon terraces and pastel towns pinned to a near-vertical shoreline."),
-    ("Mount Kilimanjaro", "N/A", None, "A free-standing volcano with snow on the equator, for now."),
+    ("Santorini", None, None, "White-washed cliff villages above the caldera of a drowned volcano."),
+    ("Reykjavík", None, None, "Iceland's harbour capital, painted roofs under a low northern sun."),
+    ("Machu Picchu", None, None, "An Inca citadel on a saddle of rock between two Andean peaks."),
+    ("Côte d'Azur", None, None, "The French Mediterranean coast, pine, limestone and very blue water."),
+    ("Kyoto: Fushimi Inari", None, None, "Thousands of vermilion gates climbing a wooded hillside shrine."),
+    ("São Paulo", None, None, "Brazil's restless megacity, concrete horizon in every direction."),
+    ("Þingvellir", None, None, "The rift valley where two continental plates pull slowly apart."),
+    ("Cinque Terre", None, None, "Five Ligurian fishing villages stacked on terraced cliffs."),
+    ("Banff National Park", None, None, "Glacial lakes the colour of turquoise beneath the Canadian Rockies."),
+    ("Kraków", None, None, "A medieval market square and the largest brick Gothic altarpiece in Europe."),
+    ("Isle of Skye", None, None, "Black ridges, sea lochs and weather that changes its mind hourly."),
+    ("Ha Long Bay", None, None, "Limestone karsts rising out of jade water in the Gulf of Tonkin."),
+    ("Zürich", None, None, "A lake, an old town, and the Alps on a clear day."),
+    ("Petra", None, None, "A city carved into rose sandstone at the end of a narrow gorge."),
+    ("Torres del Paine", None, None, "Granite towers over Patagonian steppe and wind that never stops."),
+    ("Cappadocia", None, None, "Soft volcanic rock eroded into valleys of cones and cave dwellings."),
+    ("Lofoten Islands", None, None, "Red fishing cabins under steep Arctic peaks above the sea."),
+    ("Québec City", None, None, "The only walled city north of Mexico, French to its foundations."),
+    ("Serengeti", None, None, "Open grassland crossed twice a year by more than a million wildebeest."),
+    ("Malmö", None, None, "A southern Swedish port facing Copenhagen across the sound."),
+    ("Angkor Wat", None, None, "The largest religious monument on earth, reflected in its own moat."),
+    ("Bora Bora", None, None, "A drowned volcano ringed by a lagoon and a necklace of islets."),
+    ("Amalfi Coast", None, None, "Lemon terraces and pastel towns pinned to a near-vertical shoreline."),
+    ("Mount Kilimanjaro", None, None, "A free-standing volcano with snow on the equator, for now."),
 ]
 
 

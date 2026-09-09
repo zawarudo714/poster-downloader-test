@@ -2476,6 +2476,115 @@ def check_js_helpers_are_in_scope() -> None:
                      f"on `window`, the way toast.js does.")
 
 
+# ── A MAGIC WORD MEANING "WE DO NOT KNOW" IS NOT AN ABSENT VALUE ───────────
+# Every one of these strings is TRUTHY, so a screen guarding with
+# `year ? draw(year) : nothing` draws it. On 2026-09-09 the owner reported
+# "(N/A)" beside travel titles that have no year at all. The trail ran back to
+# ONE column default — `year = Column(String(16), nullable=False,
+# default="N/A")` — plus four other places that typed the same two letters:
+# the folder-name builder, which baked `(N/A)` into permanent folder PATHS on
+# disk, a dead parser, and the local seed data.
+#
+# The shape generalises past years. Whenever "unknown" is spelt as a WORD
+# rather than as NULL, every emptiness test downstream silently passes, and
+# nothing anywhere is broken enough to notice. The honest way to say a value
+# is absent is to have no value.
+# The list is deliberately SHORT. It holds only strings that are jargon for
+# "null" and are never a sentence a person would choose to write. "unknown",
+# "-" and "?" are left out on purpose: those are ordinary English and ordinary
+# typography, so flagging them would fire on every healthy log line, and a
+# check that fires on the normal case is a keystroke rather than a guard.
+ABSENT_WORDS = {"N/A", "n/a", "N/a", "NA", "TBD"}
+
+# Where saying one of these words is the POINT rather than a stored value:
+# a screen may legitimately print a marketplace's own wording back out, as
+# long as nothing writes it into the database.
+ABSENT_WORD_EXEMPT_FILES = {
+    "app/earnings/faa.py",       # prints FAA's own wording back to the screen
+}
+
+
+def _absent_word_columns() -> None:
+    """models.py: a NOT NULL column may not default to a magic word."""
+    src = (APP / "models.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "Column"):
+            continue
+        default = nullable = None
+        for kw in node.keywords:
+            if kw.arg == "default":
+                default = kw.value
+            elif kw.arg == "nullable":
+                nullable = kw.value
+        if not isinstance(default, ast.Constant):
+            continue
+        if not isinstance(default.value, str):
+            continue
+        if default.value not in ABSENT_WORDS:
+            continue
+        not_null = isinstance(nullable, ast.Constant) and nullable.value is False
+        where = f"models.py line {node.lineno}"
+        if not_null:
+            fail(f"{where}: a NOT NULL column defaults to {default.value!r}, "
+                 f"which is a word meaning 'unknown'. That word is TRUTHY, so "
+                 f"every `value ? ... : ...` guard downstream passes and the "
+                 f"word gets drawn on the screen. Make the column nullable "
+                 f"and let absence be NULL.")
+        else:
+            fail(f"{where}: column defaults to {default.value!r}. Absence "
+                 f"should be NULL, never a word.")
+
+
+def _absent_word_literals() -> None:
+    """Nothing anywhere may hand a magic 'unknown' word to code as a value."""
+    for path in py_files():
+        rel = path.relative_to(ROOT).as_posix()
+        if rel in ABSENT_WORD_EXEMPT_FILES or rel.startswith("tools/"):
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue                      # check_python_compiles reports this
+        # A fallback used INSIDE a message is a different thing: it is text
+        # for a person to read, written at the display end, which is exactly
+        # where an absence is supposed to be turned into words. Only a value
+        # travelling onward as data is the defect.
+        in_message = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.JoinedStr):
+                for sub in ast.walk(node):
+                    in_message.add(id(sub))
+
+        for node in ast.walk(tree):
+            if id(node) in in_message:
+                continue
+            # `x or "N/A"` — the exact shape that put (N/A) into folder paths.
+            if (isinstance(node, ast.BoolOp)
+                    and isinstance(node.op, ast.Or)
+                    and isinstance(node.values[-1], ast.Constant)
+                    and node.values[-1].value in ABSENT_WORDS):
+                fail(f"{rel} line {node.lineno}: falls back to "
+                     f"{node.values[-1].value!r} when a value is missing. "
+                     f"Pass nothing instead, and let the screen decide how to "
+                     f"show an absence.")
+            # `year="N/A"` handed to anything at all.
+            if isinstance(node, ast.Call):
+                for kw in node.keywords:
+                    if (isinstance(kw.value, ast.Constant)
+                            and kw.value.value in ABSENT_WORDS):
+                        fail(f"{rel} line {node.lineno}: passes "
+                             f"{kw.arg}={kw.value.value!r}. That is a word "
+                             f"meaning 'unknown'; use None.")
+
+
+def check_no_magic_absent_value() -> None:
+    _absent_word_columns()
+    _absent_word_literals()
+
+
 CHECKS = [
     ("python compiles",           check_python_compiles),
     ("no undefined names",        check_undefined_names),
@@ -2506,6 +2615,7 @@ CHECKS = [
     ("overlays sit in the box they are measured against",
      check_overlay_sits_in_its_measuring_layer),
     ("javascript helpers are in scope", check_js_helpers_are_in_scope),
+    ("absence is NULL, never a magic word", check_no_magic_absent_value),
 ]
 
 

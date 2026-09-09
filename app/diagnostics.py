@@ -2096,6 +2096,53 @@ def check_recalled_poster_still_painted(db: Session, scope: Scope) -> CheckResul
     )
 
 
+def check_year_is_a_year_or_nothing(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: a title's year is four digits, or there is no year at all.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHAT THIS WATCHES, AND WHY IT NEEDS WATCHING
+    ════════════════════════════════════════════════════════════════════════
+    The `year` column used to be NOT NULL with a default of the text "N/A",
+    so every travel title arrived carrying two letters instead of nothing.
+    That string is TRUTHY, which is the whole problem: every screen guards
+    with `year ? draw(year) : draw(nothing)`, and every one of those guards
+    passed. The owner saw "(N/A)" beside titles that have no year and never
+    could have one (2026-09-09).
+
+    The column is nullable now and nothing writes a word into it, and
+    preflight fails on any source line that tries. Both of those are
+    statements about TODAY'S CODE. This check is a statement about the DATA,
+    so it holds whatever an import, a hand edit or tomorrow's code does.
+
+    It deliberately says nothing about which years are plausible. A year is
+    four digits or it is absent; anything else is a word that will be drawn
+    on a screen as though it were a fact.
+    """
+    rows_q = (db.query(MasterTitle)
+                .filter(MasterTitle.year.isnot(None),
+                        MasterTitle.year != "",
+                        scope.titles,
+                        ~MasterTitle.year.op("GLOB")("[0-9][0-9][0-9][0-9]")))
+    found = rows_q.limit(MAX_ROWS).all()
+    total = rows_q.count()
+
+    rows = [Finding(f"title #{t.external_id}",
+                    f"{t.title} has the year {t.year!r}, which is not a year",
+                    "/admin/titles")
+            for t in found]
+    return _result(
+        "year_is_a_year_or_nothing",
+        f"{total} title(s) hold a word in the year column"
+        if total else "Every title either has a real year or none at all",
+        "A year has to be four digits. Anything else is a word standing in "
+        "for 'we do not know', and every screen draws it beside the title "
+        "because a word counts as an answer. The fix is to empty those "
+        "years rather than to tidy up what is shown.",
+        "error" if total else "ok", rows, total,
+    )
+
+
 def _account_names(db: Session) -> dict[int, str]:
     """
     id -> name for every marketplace account, fetched once.
@@ -2116,6 +2163,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_upload_gap_is_holding,
     check_failure_evidence_is_pruned,
     check_recalled_poster_still_painted,
+    check_year_is_a_year_or_nothing,
     check_missing_files,
     check_posters_without_title,
     check_orphan_files,

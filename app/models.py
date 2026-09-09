@@ -990,6 +990,24 @@ class ProcessedImage(Base):
     # Which generation this was, for an image that has been rerun.
     attempt         = Column(Integer, nullable=False, default=1)
 
+    # ── THIS POSTER'S OWN SIGNATURE ADJUSTMENTS ─────────────────────────
+    #
+    # JSON, not four columns, and for the same reason PipelineJob.payload_json
+    # is free-form: the second thing anybody wants to adjust — a rotation, a
+    # second mark, a per-account signature — should be a new key rather than
+    # a migration. NULL means "use the project's defaults", which is the
+    # normal state for almost every poster.
+    #
+    # Keys are listed in app/signature.py, which is the only place that reads
+    # them, so the shape cannot drift between the writer and the reader.
+    signature_json  = Column(Text, nullable=True)
+    # WHAT WAS ACTUALLY PAINTED, so a second approval of an unchanged poster
+    # does not rebuild several megabytes for nothing. Same shape as
+    # `background_color`: the record of a decision already carried out,
+    # never a request for one. Comparing it with what the settings say NOW
+    # is how the rebuild decides whether it has anything to do.
+    signature_applied = Column(Text, nullable=True)
+
     saved_poster = relationship("SavedPoster")
 
     __table_args__ = (

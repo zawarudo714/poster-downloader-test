@@ -1421,6 +1421,23 @@ menu stay outside without anybody having to maintain an exceptions list.
 **A rule that carries its own exceptions is one somebody must remember to
 extend; derive the scope instead.**
 
+**A TEST CAN MEASURE THE WRONG THING AND STILL GO GREEN — AND A GREEN
+NUMBER IS MORE CONVINCING THAN A GREEN TICK.** The signature had to land 20
+pixels from the edge of a 4000-wide poster. The first test built the print
+file, thresholded on brightness, and read off where the bright pixels
+stopped. It printed "0px from the edge", which looked like a bug in the
+placement and was a bug in the TEST: the flattened poster was itself bright,
+so the threshold was measuring the background. A mark painted anywhere at
+all would have produced the same reading.
+
+The version that works builds the file TWICE, with and without the mark, and
+looks at where they DIFFER. That measures the thing the change is
+responsible for and nothing else. Generally: **when a test reports a
+suspicious number, suspect the test before the code**, and prefer a
+DIFFERENCE against a known-good run over an absolute reading of the result —
+the same reasoning as comparing a change rather than a total when checking
+ourselves against a marketplace (5d).
+
 **A hole is normally at the edge of the pattern you wrote, so enumerate the
 variants.** Every way this codebase asks for a hook. Every way a caller
 writes a URL parameter — `${id}`, `{{ u.id }}`, `' + id + '`. A regex that
@@ -1840,6 +1857,16 @@ nothing looked wrong for weeks. It surfaced only when the owner asked to
 CHOOSE between generations (2026-09-09), at which point picking v1 would
 have shown him v2.
 
+The reverse of that mistake is worth stating too, because the fix used it.
+When the print file moved to approval time (2026-09-09) there was a choice
+between a flag saying "not built yet" and simply leaving `storage_path`
+EMPTY until a file exists. The empty path won: **a path is a promise that
+something is there, so the absence of one is the honest way to say nothing
+is.** A flag beside a path is two records of one fact, which is this very
+rule wearing its usual clothes — and the emptiness is also what the rebuild
+reads to decide whether it has work to do, so there is one thing to keep
+correct rather than two.
+
 So: **keeping the record is not keeping the thing.** Whenever you write to
 a path built from a rule rather than from a unique key, ask what else in the
 database claims that same path. Fixed at the source — the generation number
@@ -2219,6 +2246,19 @@ Two rules came out of it, and both generalise past this button:
     so that is where the spinner belongs. A control that renames itself
     mid-press is a control the person can no longer identify, and the owner
     called it "finicky" for exactly that reason (2026-09-09).
+
+**AN EARLY EXIT WRITTEN FOR THE OLD JOB WILL SILENTLY SKIP THE NEW ONE.**
+`upscale_to_width` began with "if it is already wide enough, return" — right,
+when its only job was enlarging. Adding the signature gave the same function
+a SECOND job, and that exit would have returned before painting: a poster
+that happened to arrive at print size already would have shipped unsigned,
+with nothing anywhere saying so.
+
+So whenever a function gains a responsibility, **read its early returns
+again and ask what each one now skips.** The condition that made a shortcut
+free is a statement about the old job, not the new one. Same family as
+moving a call out of a shared function (3c) — the code that did not change
+is where this hides.
 
 Concretely: **an exception must never be able to escape past the point where
 the work was claimed.** If setup can fail, either claim after it, or catch it

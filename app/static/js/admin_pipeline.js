@@ -101,6 +101,20 @@
        'On, the style reference is sent as the FIRST image and the worker\'s photo as the second — so the prompt can say things like "the style of the first image". Off, only the worker\'s photo is sent and the prompt has to describe the look in words. Match this to the prompt you have written: if the prompt talks about two images, this must be on.'],
       ['gpt_review_required', 'bool', 'Review images before upload', 'On, every generated image waits for you on the Review Images tab. Off, they go straight to the upload queue. Turning it OFF does not release what is already waiting — those still need approving, so nothing is ever listed that you never looked at.'],
     ],
+    // The DEFAULT placement. Any one poster is nudged on the Approve
+    // Artwork screen; these are what a brand new poster starts from.
+    signature: [
+      ['signature_enabled', 'bool', 'Paint the signature',
+       'Off, nothing is painted and every poster is left plain. The file stays uploaded, so switching this back on needs no re-upload.'],
+      ['signature_width_pct', 'number', 'Width (% of the poster)',
+       'How wide the mark is, as a percentage of the poster width. 16.8 is your Photoshop placement — 672 pixels on a 4000-wide poster. A percentage rather than a pixel count, so it looks the same if you ever change the output size.'],
+      ['signature_margin_pct', 'number', 'Gap from the edge (%)',
+       'How far the mark sits from the bottom and from whichever side it is on. 0.5 is your 20 pixels on a 4000-wide poster. The mark can never be dragged closer to an edge than this.'],
+      ['signature_opacity', 'number', 'Opacity (0-100)',
+       'How solid the mark is. 35 is what you set in Photoshop. 100 would be fully solid.'],
+      ['signature_x_pct', 'number', 'Position across the poster (%)',
+       'Where the MIDDLE of the mark sits, left to right. 91.1 puts its right edge exactly on the gap above, which is your default. 8.9 would put it on the left. You will normally leave this alone and drag it on the Approve Artwork screen for the odd poster that needs it.'],
+    ],
     upscale: [
       ['upscale_width_px',  'number', 'Output width (px)', 'The processed image is resized to this width; height scales in proportion, so 1000x2000 becomes 4000x8000. Lanczos resampling.'],
       ['upscale_sharpen',   'number', 'Sharpening (0-100)','Applied after the upscale. 0 is off. Raise it slowly and judge on a real print — sharpening artefacts are baked in and the review gate is your only chance to catch them.'],
@@ -2512,6 +2526,61 @@
 
       case 'attention-load': loadAttention(); break;
 
+      // ── SEND WORK BACK TO THE START (testing tool) ─────────────────
+      // COUNT is deliberately a separate press. This throws work away, and
+      // seeing the number BEFORE typing the confirmation is the difference
+      // between "12 posters" and "1,400 posters" being noticed in time.
+      case 'recall-preview': {
+        const el = q('[data-recall-count]');
+        el.textContent = 'counting…';
+        try {
+          const d = await postJSON(API + '/recall/preview', {
+            scope: q('[data-recall-scope]').value,
+            ids: q('[data-recall-ids]').value,
+          });
+          el.textContent = d.posters
+            ? `${d.posters} picture(s) across ${d.titles} title(s), `
+              + `${d.images} painted version(s) would be deleted`
+            : 'nothing matches that';
+        } catch (err) { el.textContent = err.message; }
+        break;
+      }
+      case 'recall-run': {
+        const el = q('[data-recall-count]');
+        const scope = q('[data-recall-scope]').value;
+        const ids = q('[data-recall-ids]').value;
+        let n = null;
+        try {
+          n = await postJSON(API + '/recall/preview', { scope, ids });
+        } catch (err) { el.textContent = err.message; break; }
+        if (!n.posters) { el.textContent = 'nothing matches that'; break; }
+        // The typed confirmation is the guard the server also insists on.
+        // Asking here as well means the number and the words appear in the
+        // same box, which is the only moment it can still be stopped.
+        const typed = prompt(
+          `This will DELETE ${n.images} painted version(s) for ${n.posters} `
+          + `picture(s) across ${n.titles} title(s), forget any upload, and `
+          + `put them back in Greenlight.\n\n`
+          + `The worker's original photographs are NOT touched.\n`
+          + `Anything genuinely live on FineArtAmerica must be deleted there `
+          + `first, or you will get a duplicate listing renamed "#2".\n\n`
+          + `Type SEND BACK to go ahead.`);
+        if ((typed || '').trim().toUpperCase() !== 'SEND BACK') {
+          el.textContent = 'cancelled';
+          break;
+        }
+        el.textContent = 'working…';
+        try {
+          const d = await postJSON(API + '/recall', {
+            scope, ids, confirm: 'SEND BACK' });
+          el.textContent = `done — ${d.posters} picture(s) across ${d.titles} `
+            + `title(s) are back in Greenlight · ${d.images} version(s) and `
+            + `${d.files} file(s) deleted · ${d.uploads} upload record(s) cleared`;
+          await loadOverview();
+        } catch (err) { el.textContent = err.message; }
+        break;
+      }
+
       case 'shot-close': q('[data-shot-lightbox]').hidden = true; break;
     }
   });
@@ -2656,6 +2725,9 @@
   const styleEmpty   = $('[data-gpt-style-empty]');
   const styleFile    = $('[data-gpt-style-file]');
   const styleStatus  = $('[data-gpt-style-status]');
+  const sigPlate     = $('[data-sig-plate]');
+  const sigImg       = $('[data-sig-preview]');
+  const sigEmpty     = $('[data-sig-empty]');
 
   async function load() {
     try {
@@ -2670,6 +2742,20 @@
       } else {
         styleImg.hidden = true;
         styleEmpty.hidden = false;
+      }
+      // The signature is white strokes on transparency, so it is shown on a
+      // dark plate. On the page's own background it would be invisible, and
+      // "I uploaded it and nothing appeared" is the wrong first impression
+      // of a feature that is working perfectly.
+      if (sigPlate && sigImg && sigEmpty) {
+        if (d.signature_url) {
+          sigImg.src = d.signature_url;
+          sigPlate.hidden = false;
+          sigEmpty.hidden = true;
+        } else {
+          sigPlate.hidden = true;
+          sigEmpty.hidden = false;
+        }
       }
       const s = d.spend || {};
       const el = document.querySelector('[data-settings-status="spend"]');
@@ -2719,6 +2805,26 @@
       } catch (err) {
         el.textContent = 'Test failed: ' + err.message;
         el.className = 'error mono';
+      }
+      return;
+    }
+
+    if (action === 'upload-signature') {
+      const sigFile = q('[data-sig-file]');
+      const sigStatus = q('[data-sig-status]');
+      if (!sigFile.files || !sigFile.files[0]) {
+        sigStatus.textContent = 'pick a file first';
+        return;
+      }
+      sigStatus.textContent = 'uploading…';
+      const fd = new FormData();
+      fd.append('file', sigFile.files[0]);
+      const r = await fetch(`${API}/gpt/signature`, { method: 'POST', body: fd });
+      if (r.ok) { sigStatus.textContent = 'uploaded'; await load(); }
+      else {
+        let msg = 'failed';
+        try { const d = await r.json(); msg = d.detail || msg; } catch (err) {}
+        sigStatus.textContent = msg;
       }
       return;
     }

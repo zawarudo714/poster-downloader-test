@@ -215,11 +215,57 @@ def process_one(db: Session, poster, title, project) -> bool:
     width = int(get_setting(db, "upscale_width_px", project=project) or 4000)
     sharpen = int(get_setting(db, "upscale_sharpen", project=project) or 0)
     quality = int(get_setting(db, "upscale_jpeg_quality", project=project) or 92)
-    out_w, out_h = upscale_to_width(flat, width=width, sharpen=sharpen,
-                                    quality=quality, dest=tmp)
+
+    # ════════════════════════════════════════════════════════════════════
+    #  THE PRINT FILE IS BUILT WHEN IT IS APPROVED, NOT HERE (2026-09-09)
+    # ════════════════════════════════════════════════════════════════════
+    # The 4000px file used to be made right here, and then made AGAIN on
+    # approval whenever the admin changed the background colour. Adding the
+    # signature would have made that second rebuild happen every single
+    # time, so the work would be done twice for every poster.
+    #
+    # Building it once, at approval, with the colour AND the signature
+    # together, is strictly LESS work than today and keeps the single JPEG
+    # encode the quality rules ask for.
+    #
+    # DEFERRING IS ONLY SAFE WHEN BOTH HALVES ARE TRUE, and the condition
+    # says exactly that rather than assuming this project's shape:
+    #
+    #   · there is a MASTER to rebuild from. An opaque generation has none,
+    #     so there would be nothing to build later.
+    #   · there is a REVIEW GATE, which is the later moment. Without one
+    #     nothing ever approves, so nothing would ever build the file and
+    #     the uploader would be handed a path with no file behind it.
+    #
+    # Get either wrong and the failure is silent, which is why it is one
+    # expression read once rather than two checks in different places.
+    from .pipeline import review_gate_enabled
+    gate = review_gate_enabled(db, project)
+    defer_print_file = bool(transparent and gate)
+
+    if defer_print_file:
+        # The preview comes from the FLATTENED picture rather than from the
+        # print file, because the print file does not exist yet. Same
+        # picture, same colour — just not enlarged first, which the preview
+        # was only ever throwing away anyway.
+        # The finished size is arithmetic, not a measurement of a file that
+        # does not exist yet: the enlargement keeps the shape, so the height
+        # follows from the width. Reading the header of the flattened file
+        # costs nothing and means the review screen can still say how big
+        # the print will be before it has been made.
+        from PIL import Image as _Image
+        with _Image.open(flat) as _probe:
+            src_w, src_h = _probe.size
+        out_w = width
+        out_h = max(1, round(src_h * (width / src_w)))
+        preview_source = flat
+    else:
+        out_w, out_h = upscale_to_width(flat, width=width, sharpen=sharpen,
+                                        quality=quality, dest=tmp)
+        preview_source = tmp
 
     preview_tmp = tmp.with_name(f"{poster.id}_preview.jpg")
-    make_preview(tmp, preview_tmp)
+    make_preview(preview_source, preview_tmp)
 
     preview_rel = full_rel.rsplit("/", 1)
     preview_rel = (preview_rel[0] + "/previews/" + preview_rel[1]) if len(preview_rel) == 2 \
@@ -230,7 +276,8 @@ def process_one(db: Session, poster, title, project) -> bool:
     master_rel = (full_rel.rsplit(".", 1)[0] + "_master.png") if transparent else None
 
     try:
-        write_bytes(db, full_rel, tmp.read_bytes(), project=project)
+        if not defer_print_file:
+            write_bytes(db, full_rel, tmp.read_bytes(), project=project)
         write_bytes(db, preview_rel, preview_tmp.read_bytes(), project=project)
         if master_rel:
             write_bytes(db, master_rel, raw.read_bytes(), project=project)
@@ -266,15 +313,15 @@ def process_one(db: Session, poster, title, project) -> bool:
         ProcessedImage.is_current == 1,
     ).update({ProcessedImage.is_current: 0}, synchronize_session=False)
 
-    # Read per image, not once at startup: turning the gate off should take
-    # effect on the next image, not on the next restart of the server.
-    from .pipeline import review_gate_enabled
-    gate = review_gate_enabled(db, project)
-
     processed = ProcessedImage(
         saved_poster_id=poster.id,
         project_id=project.id,
-        storage_path=full_rel,
+        # EMPTY UNTIL THE FILE EXISTS. A path is a promise that something
+        # is there, and while the print file is deferred nothing is. That
+        # emptiness is also how the approval knows it has to build rather
+        # than merely recolour — one fact, read from one place, instead of
+        # a second flag that could disagree with the disc.
+        storage_path=("" if defer_print_file else full_rel),
         filename=filename,
         file_size=len(gen.image_bytes),
         output_width=out_w,

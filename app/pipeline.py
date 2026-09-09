@@ -566,6 +566,28 @@ DEFAULTS: dict[str, Any] = {
     # workspace. Changing it does NOT retroactively affect already-processed
     # images — each ProcessedImage records the script/style version it used.
     "openai_style_image": "",
+
+    # ── The owner's signature on the finished poster ─────────────────────
+    #
+    # MEASURED 2026-09-09 from his own Photoshop placement: on a 4000 x 6000
+    # canvas the mark was 672 wide, 20px from the right, 20px from the
+    # bottom, at 35% opacity. Every one is stored as a PERCENTAGE of the
+    # canvas, because `upscale_width_px` is a setting he can change and a
+    # margin pinned in pixels would silently become a different-looking
+    # margin the day he changes the output size.
+    #
+    #     672 / 4000 = 16.8   the width
+    #      20 / 4000 =  0.5   the margin
+    #
+    # `signature_x_pct` is the CENTRE of the mark across the width, which is
+    # what makes dragging it feel the same whatever size it is set to. The
+    # default puts its right edge exactly on the margin.
+    "signature_image":      "",
+    "signature_enabled":    1,
+    "signature_width_pct":  16.8,
+    "signature_margin_pct": 0.5,
+    "signature_opacity":    35,
+    "signature_x_pct":      91.1,
     # WHETHER THE REFERENCE IMAGE IS SENT AT ALL.
     #
     # Whether a style reference is wanted is a property of the PROMPT, not of

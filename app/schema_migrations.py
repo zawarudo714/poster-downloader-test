@@ -139,6 +139,11 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     # records, which is exactly why it can catch us being wrong.
     ("upload_accounts",  "inactive_count",      "INTEGER"),
     ("upload_accounts",  "inactive_checked_at", "DATETIME"),
+    # ── The owner's signature on the finished poster (2026-09-09) ───────
+    # Where this one poster's mark sits, as JSON. NULL means "use the
+    # project's defaults", which is the normal state for nearly every row.
+    ("processed_images", "signature_json", "TEXT"),
+    ("processed_images", "signature_applied", "TEXT"),
 ]
 
 # ════════════════════════════════════════════════════════════════════════════

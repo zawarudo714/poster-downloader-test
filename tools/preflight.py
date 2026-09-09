@@ -1495,6 +1495,7 @@ NOT_ON_THE_SETTINGS_FORMS = {
     "process_script":     "the JSX editor",
     "openai_prompt":      "the PROMPT panel, with its own save and reset",
     "openai_style_image": "the STYLE REFERENCE panel, which uploads a file",
+    "signature_image":    "the SIGNATURE panel, which uploads a file",
     "selectors":          "the selectors grid",
     "timings":            "the timings grid",
 }

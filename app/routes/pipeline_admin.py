@@ -31,6 +31,7 @@ one project; the day there are three, none of these handlers change.
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -2268,6 +2269,12 @@ def api_gpt_state(
         "prompt": P.get_setting(db, "openai_prompt", project=project),
         "style_image": style,
         "style_url": f"/admin/pipeline/style_image?v={int(datetime.utcnow().timestamp())}" if style else "",
+        # The cache-buster matters: the file keeps ONE name per project, so
+        # without it the browser shows the picture you replaced.
+        "signature_url": (f"/admin/pipeline/signature_image"
+                          f"?v={int(datetime.utcnow().timestamp())}"
+                          if str(P.get_setting(db, "signature_image",
+                                               project=project) or "") else ""),
         "spend": {
             "month_to_date": str(state["spent"]),
             "cap": str(state["cap"]),
@@ -2339,6 +2346,85 @@ async def api_upload_style(
                           "bytes": len(raw)})
     db.commit()
     return JSONResponse({"ok": True, "path": rel})
+
+
+@router.post("/api/gpt/signature")
+async def api_upload_signature(
+    request: Request,
+    file: UploadFile = File(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Replace the signature painted onto every approved print file.
+
+    Stored under the workspace beside the style reference, and for the same
+    reason: it is opened on every build, so a local file avoids an SFTP
+    round trip per poster and it is far too small for backups to care.
+
+    Kept as PNG whatever arrives, because the transparency is the whole
+    point — a JPEG signature would paint its own white box onto the poster.
+    """
+    from ..imagefetch import sniff_format
+    from ..config import WORKSPACE_DIR
+
+    project = _project(request, admin, db)
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "Empty file.")
+    if sniff_format(raw[:16]) is None:
+        raise HTTPException(400, "That file is not an image.")
+
+    # REFUSED IF IT IS NOT SEE-THROUGH, and refusing is the kind answer. A
+    # signature with a solid background paints a rectangle over the corner
+    # of every poster, and the first time anybody would notice is on the
+    # marketplace. The check is cheap and the message says what to do.
+    from PIL import Image
+    import io
+    try:
+        probe = Image.open(io.BytesIO(raw))
+        probe.load()
+    except Exception as e:              # noqa: BLE001
+        raise HTTPException(400, f"That image could not be read: {e}")
+    if probe.mode not in ("RGBA", "LA", "PA") and "transparency" not in probe.info:
+        raise HTTPException(
+            400, "That picture has no see-through background, so it would "
+                 "paint a solid rectangle over the corner of every poster. "
+                 "Save it as a PNG with transparency and upload it again.")
+
+    out = io.BytesIO()
+    probe.convert("RGBA").save(out, "PNG")
+
+    rel = f"_signature/{project.slug}.png"
+    target = WORKSPACE_DIR / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(out.getvalue())
+
+    P.set_setting(db, "signature_image", rel, project=project, by=admin.username)
+    log_activity(db, user=admin, action="pipeline_setting", target_type="pipeline",
+                 details={"key": "signature_image", "project": project.slug,
+                          "bytes": len(raw),
+                          "size": f"{probe.width}x{probe.height}"})
+    db.commit()
+    return JSONResponse({"ok": True, "path": rel,
+                         "width": probe.width, "height": probe.height})
+
+
+@router.get("/signature_image")
+def serve_signature_image(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    from ..config import WORKSPACE_DIR
+    project = _project(request, admin, db)
+    rel = str(P.get_setting(db, "signature_image", project=project) or "")
+    if not rel:
+        raise HTTPException(404, "No signature set.")
+    path = WORKSPACE_DIR / rel
+    if not path.is_file():
+        raise HTTPException(404, "The signature file is missing.")
+    return FileResponse(path)
 
 
 @router.get("/style_image")
@@ -3390,6 +3476,21 @@ def api_review_queue(
                                 ProcessedImage.id.asc()).all()):
             siblings.setdefault(row.saved_poster_id, []).append(row)
 
+    def _signature_for_screen(db_, project_, row):
+        """What the screen should draw, or None when nothing is painted."""
+        from .. import signature as SIG
+        place = SIG.placement(db_, project_, row)
+        if place is None:
+            return None
+        return {
+            "x_pct": place["x_pct"],
+            "w_pct": place["w_pct"],
+            "opacity": place["opacity"],
+            "margin_pct": place["margin_pct"],
+            "dark": bool(place["dark"]),
+            "url": "/admin/pipeline/signature_image",
+        }
+
     def _version(p) -> dict:
         return {
             "processed_id": p.id,
@@ -3411,6 +3512,11 @@ def api_review_queue(
             # generation was opaque and the colour control does nothing —
             # so the screen hides it rather than offering a dead knob.
             "background_color": p.background_color or "",
+            # Where this poster's signature sits. The project's defaults with
+            # the poster's own nudges over the top, worked out server-side so
+            # the screen and the builder can never disagree about it — two
+            # copies of one rule is two chances to drift.
+            "signature": _signature_for_screen(db, project, p),
             "can_recolor": bool(p.master_path),
             "master_url": (f"/admin/pipeline/review/master/{p.id}"
                            if p.master_path else ""),
@@ -3593,64 +3699,302 @@ def _review_cache_file(rel_path: str, variant: str):
     return cache_file(rel_path, variant)
 
 
-def _reflatten(db: Session, processed, color: str, project) -> str:
+def _build_print_file(db: Session, processed, color: str, project,
+                      title=None) -> str:
     """
-    Rebuild the print file on a different background colour, from the master.
+    Make the finished print file: the colour and the signature, one encode.
 
     ════════════════════════════════════════════════════════════════════════
-    WHY THIS IS CHEAP AND WHY THAT MATTERS
+    THIS IS THE ONLY PLACE A PRINT FILE IS MADE FOR A GATED PROJECT
     ════════════════════════════════════════════════════════════════════════
-    Nothing here talks to OpenAI. The transparent original was kept at
-    generation time precisely so that changing your mind about the colour is
-    a local re-render — a second or two of Pillow — instead of paying for the
-    picture again.
+    It used to be called `_reflatten` and it only ever RE-made a file that
+    the generator had already built, when the admin changed the colour.
+    Since 2026-09-09 the generator does not build that file at all for a
+    project with a review gate — see gpt_worker.process_one() — so this both
+    builds it the first time and rebuilds it when something changes.
 
-    Runs only when the colour ACTUALLY differs. Nineteen approvals in twenty
-    keep the default, and re-rendering those would turn a batch of a hundred
-    into several minutes of pointless work.
+    Nothing here talks to OpenAI. The see-through original was kept at
+    generation time precisely so that the colour, and now the signature, are
+    a local re-render instead of paying for the picture again.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHEN IT DOES NOTHING, AND WHY THAT LIST IS EXPLICIT
+    ════════════════════════════════════════════════════════════════════════
+    Work this expensive must be skipped whenever it would change nothing, so
+    the three reasons to DO it are named rather than implied:
+
+      · the file does not exist yet (`storage_path` is empty)
+      · the colour is different from the one baked in
+      · the signature that would be painted differs from the one already on
+
+    The last is why `signature_applied` is written onto the row. Without a
+    record of what was painted, every approval would have to rebuild just in
+    case, and a second approval of the same unchanged poster would redo
+    several megabytes of work for nothing.
 
     Returns a note for the log, or "" if nothing needed doing.
     """
+    import json as _json
+
     from ..imagefetch import flatten_onto, make_preview, upscale_to_width
     from ..storage_remote import read_bytes, write_bytes
     from ..config import WORKSPACE_DIR
+    from .. import signature as SIG
 
     if not processed.master_path:
-        return ""                       # opaque generation; nothing to redo
-    if (processed.background_color or "").lower() == (color or "").lower():
-        return ""                       # already this colour
+        # An opaque generation has no see-through original, so its print
+        # file was built at generation time and cannot be rebuilt here.
+        return ""
+
+    place = SIG.placement(db, project, processed)
+    mark = SIG.load_mark(WORKSPACE_DIR, place["image"]) if place else None
+    if place and mark is None:
+        # A signature was asked for and the file is not there. Refusing is
+        # the honest answer: silently shipping an unsigned poster is the
+        # kind of quiet wrong outcome that is only noticed on the
+        # marketplace, weeks later.
+        raise RuntimeError(
+            "A signature is switched on but its file is missing. Upload it "
+            "again on the Settings page, or switch the signature off.")
+
+    wanted_sig = _json.dumps(
+        {k: place[k] for k in ("x_pct", "w_pct", "opacity", "dark")},
+        sort_keys=True) if place else ""
+
+    needs_file = not (processed.storage_path or "").strip()
+    needs_colour = (processed.background_color or "").lower() != (color or "").lower()
+    needs_sig = (processed.signature_applied or "") != wanted_sig
+    if not (needs_file or needs_colour or needs_sig):
+        return ""
+
+    rel = (processed.storage_path or "").strip()
+    if not rel and title is not None and processed.saved_poster is not None:
+        rel, _name = P.storage_path_for(db, title, processed.saved_poster,
+                                        project=project,
+                                        attempt=processed.attempt or 1)
+    if not rel:
+        raise RuntimeError("Cannot work out where this print file should go.")
 
     tmpdir = WORKSPACE_DIR / "_recolor"
     tmpdir.mkdir(parents=True, exist_ok=True)
     raw = tmpdir / f"{processed.id}_master.png"
+    flat = tmpdir / f"{processed.id}_flat.png"
     out = tmpdir / f"{processed.id}.jpg"
     prev = tmpdir / f"{processed.id}_preview.jpg"
     try:
         raw.write_bytes(read_bytes(db, processed.master_path))
         # Flatten THEN enlarge, the same order as generation. Doing it the
-        # other way drags dark fringes along every soft edge.
-        flatten_onto(raw, out, color)
+        # other way drags dark fringes along every soft edge. The signature
+        # goes on AFTER the enlargement — see imagefetch.upscale_to_width().
+        flatten_onto(raw, flat, color)
         w = int(P.get_setting(db, "upscale_width_px", project=project) or 4000)
         sharpen = int(P.get_setting(db, "upscale_sharpen", project=project) or 0)
         quality = int(P.get_setting(db, "upscale_jpeg_quality", project=project) or 92)
-        out_w, out_h = upscale_to_width(out, width=w, sharpen=sharpen,
-                                        quality=quality)
+        overlay = (lambda im: SIG.paint(im, mark, place)) if place else None
+        out_w, out_h = upscale_to_width(flat, width=w, sharpen=sharpen,
+                                        quality=quality, dest=out,
+                                        overlay=overlay)
         make_preview(out, prev)
-        write_bytes(db, processed.storage_path, out.read_bytes(), project=project)
-        # Drop the stale cached copies for these paths, or the review screen
-        # would keep showing the old colour after a re-flatten.
+
+        preview_rel = processed.preview_path
+        if not preview_rel:
+            bits = rel.rsplit("/", 1)
+            preview_rel = (bits[0] + "/previews/" + bits[1]) if len(bits) == 2 \
+                else f"previews/{rel}"
+
+        write_bytes(db, rel, out.read_bytes(), project=project)
+        write_bytes(db, preview_rel, prev.read_bytes(), project=project)
+        # Drop the stale cached copies, or the review screen keeps showing
+        # the old picture after a rebuild.
         from ..review_cache import clear as _clear_review_cache
-        _clear_review_cache([processed.storage_path, processed.preview_path,
-                             processed.master_path])
-        if processed.preview_path:
-            write_bytes(db, processed.preview_path, prev.read_bytes(),
-                        project=project)
+        _clear_review_cache([rel, preview_rel, processed.master_path])
+
+        processed.storage_path = rel
+        processed.preview_path = preview_rel
         processed.output_width, processed.output_height = out_w, out_h
         processed.file_size = out.stat().st_size
-        return f"recoloured to {color}"
+        processed.signature_applied = wanted_sig
+        what = []
+        if needs_file: what.append("built")
+        if needs_colour: what.append(f"colour {color}")
+        if needs_sig and place: what.append("signature")
+        return " · ".join(what)
     finally:
-        for f in (raw, out, prev):
+        for f in (raw, flat, out, prev):
             f.unlink(missing_ok=True)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  SEND WORK BACK TO THE START — a testing tool, and destructive
+# ════════════════════════════════════════════════════════════════════════════
+
+def _recall_targets(db: Session, project, scope: str, ids: str):
+    """
+    Which posters a recall would touch. Read-only, so COUNT can use it too.
+
+    The preview and the run ask the SAME function, which is what stops the
+    count on the button being a different number from what the button does.
+    """
+    from ..models import MasterTitle, SavedPoster
+
+    title_ids = P.project_scope(
+        db.query(MasterTitle.id), project.id,
+        default_project_id=P._default_project_id(db)).scalar_subquery()
+
+    q = (db.query(SavedPoster)
+           .filter(SavedPoster.deleted_at.is_(None),
+                   SavedPoster.master_title_id.in_(title_ids)))
+
+    if scope == "ids":
+        wanted = [int(n) for n in re.findall(r"\d+", ids or "")]
+        if not wanted:
+            return []
+        # external_id is the sheet's own number, which is what the owner
+        # reads off the screen — and it is unique only INSIDE a project, so
+        # it is scoped through the subquery above like every other lookup.
+        inner = (db.query(MasterTitle.id)
+                   .filter(MasterTitle.id.in_(title_ids),
+                           MasterTitle.external_id.in_(wanted))
+                   .scalar_subquery())
+        q = q.filter(SavedPoster.master_title_id.in_(inner))
+    elif scope == "uploaded":
+        q = q.filter(SavedPoster.pipeline_status == "uploaded")
+    elif scope == "processed":
+        q = q.filter(SavedPoster.pipeline_status == "processed")
+    elif scope == "all":
+        q = q.filter(SavedPoster.pipeline_status.in_(
+            ("processed", "uploaded", "uploading", "failed_upload")))
+    else:
+        return []
+    return q.all()
+
+
+@router.post("/api/recall")
+def api_recall(
+    request: Request,
+    payload: dict = Body(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Forget that these posters were painted, and put them back in Greenlight.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHAT THIS IS FOR, AND WHY IT IS ALLOWED TO BE DESTRUCTIVE
+    ════════════════════════════════════════════════════════════════════════
+    Asked for on 2026-09-09. While the owner is testing a change to the
+    painting, the alternative is claiming a title as a worker, finding an
+    image, saving it, approving it and greenlighting it — for every single
+    picture, every time. This puts the same posters back at the painting
+    step in one press.
+
+    ════════════════════════════════════════════════════════════════════════
+    IT DELETES, AND THAT IS THE POINT — SO IT SAYS SO AND ASKS
+    ════════════════════════════════════════════════════════════════════════
+    The house rule is soft deletes and an audit trail that survives. This
+    breaks it deliberately, because a recall that LEFT the old generations
+    and upload rows behind would not be a recall: the poster would come back
+    carrying its old pictures, the version picker would offer them, and the
+    uploader would find a pending row and send the same title again.
+
+    So the guards are at the door instead of in the data:
+
+      · the caller must send `confirm` exactly, typed by a person
+      · nothing outside the ACTIVE project can be reached, ever
+      · every recall is written to the activity log with its counts
+      · the worker's own saved photograph is never touched, so nothing
+        anybody was paid for is destroyed
+
+    The one thing it cannot undo is on the marketplace. That warning lives
+    on the panel, where it is read, rather than only here.
+    """
+    from ..models import MasterTitle, SavedPoster, UploadTracking
+
+    if (payload.get("confirm") or "").strip().upper() != "SEND BACK":
+        raise HTTPException(400, 'Type SEND BACK to confirm.')
+
+    project = _project(request, admin, db)
+    scope = str(payload.get("scope") or "ids")
+    posters = _recall_targets(db, project, scope, str(payload.get("ids") or ""))
+    if not posters:
+        return JSONResponse({"ok": True, "posters": 0, "images": 0,
+                             "uploads": 0, "files": 0})
+
+    ids = [p.id for p in posters]
+    rows = (db.query(ProcessedImage)
+              .filter(ProcessedImage.saved_poster_id.in_(ids)).all())
+
+    doomed = []
+    for r in rows:
+        doomed += [r.storage_path, r.preview_path, r.master_path]
+    files = 0
+    if doomed:
+        from ..storage_remote import delete_paths
+        from ..review_cache import clear as _clear_cache
+        files = delete_paths(db, doomed, project=project)
+        _clear_cache(doomed)
+
+    uploads = (db.query(UploadTracking)
+                 .filter(UploadTracking.saved_poster_id.in_(ids)).delete(
+                     synchronize_session=False))
+    images = (db.query(ProcessedImage)
+                .filter(ProcessedImage.saved_poster_id.in_(ids)).delete(
+                    synchronize_session=False))
+
+    touched_titles = set()
+    for poster in posters:
+        # CLEARED TO NOTHING, not to 'greenlit'. greenlight_titles() refuses
+        # anything already in the pipeline, so a poster left on a pipeline
+        # status would be silently skipped by the very button this tool
+        # exists to feed.
+        poster.pipeline_status = None
+        poster.process_attempts = 0
+        poster.process_error = None
+        poster.claimed_at = None
+        poster.claimed_by = None
+        poster.unusable_reason = None
+        poster.unusable_at = None
+        poster.unusable_by = None
+        touched_titles.add(poster.master_title_id)
+
+    for tid in touched_titles:
+        t = db.query(MasterTitle).filter_by(id=tid).first()
+        if t is not None:
+            t.pipeline_status = None
+            t.greenlit_at = None
+            t.greenlit_by = None
+            t.greenlit_source = None
+            P.recompute_title_status(db, t)
+
+    log_activity(db, user=admin, action="pipeline_recall", target_type="pipeline",
+                 details={"project": project.slug, "scope": scope,
+                          "posters": len(posters), "titles": len(touched_titles),
+                          "images": images, "uploads": uploads,
+                          "files_removed": files})
+    db.commit()
+    return JSONResponse({"ok": True, "posters": len(posters),
+                         "titles": len(touched_titles), "images": images,
+                         "uploads": uploads, "files": files})
+
+
+@router.post("/api/recall/preview")
+def api_recall_preview(
+    request: Request,
+    payload: dict = Body(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """How many this would touch. Same query as the real thing, no writes."""
+    project = _project(request, admin, db)
+    posters = _recall_targets(db, project, str(payload.get("scope") or "ids"),
+                              str(payload.get("ids") or ""))
+    ids = [p.id for p in posters]
+    images = (db.query(func.count(ProcessedImage.id))
+                .filter(ProcessedImage.saved_poster_id.in_(ids)).scalar() or 0) \
+        if ids else 0
+    return JSONResponse({"ok": True, "posters": len(posters),
+                         "titles": len({p.master_title_id for p in posters}),
+                         "images": images})
 
 
 @router.post("/api/review/decide")
@@ -3675,7 +4019,8 @@ def api_review_decide(
         raise HTTPException(400, "decisions is required.")
 
     now = datetime.utcnow()
-    counts = {"approved": 0, "rerun": 0, "unusable": 0}
+    counts = {"approved": 0, "rerun": 0, "unusable": 0, "files_removed": 0}
+    batch_doomed: list = []
 
     for item in decisions:
         processed = db.query(ProcessedImage).filter_by(id=item.get("processed_id")).first()
@@ -3692,6 +4037,21 @@ def api_review_decide(
             # last moment anybody looks at it. Recording the colour at the
             # same instant means an approved image can never be sitting in
             # the upload queue with nobody having decided what is behind it.
+            # ── THE SIGNATURE PLACEMENT, RECORDED BEFORE THE BUILD ───────
+            #
+            # Written onto the row first, because `_build_print_file` reads
+            # it back through `signature.placement()`. Doing it that way
+            # means the builder has ONE source for where the mark goes,
+            # whether it was called from here or from anywhere later —
+            # rather than a placement passed in by one caller and read from
+            # the row by another, which is two paths to one fact.
+            sig = item.get("signature")
+            if isinstance(sig, dict):
+                keep = {k: sig[k] for k in ("x_pct", "w_pct", "opacity")
+                        if isinstance(sig.get(k), (int, float))}
+                keep["dark"] = bool(sig.get("dark"))
+                processed.signature_json = json.dumps(keep, sort_keys=True)
+
             wanted = (item.get("background_color") or "").strip()
             if processed.master_path:
                 if not wanted:
@@ -3700,14 +4060,20 @@ def api_review_decide(
                         project=P.project_for_title(db, title) if title else None)
                         or "#000000")
                 try:
-                    _reflatten(db, processed, wanted,
-                               P.project_for_title(db, title) if title else None)
+                    _build_print_file(
+                        db, processed, wanted,
+                        P.project_for_title(db, title) if title else None,
+                        title=title)
                 except Exception as e:          # noqa: BLE001
-                    # The picture is already stored on its old colour, so
-                    # nothing is lost — but the request must NOT report a
-                    # success it did not achieve.
+                    # THE APPROVAL MUST FAIL, LOUDLY. Since 2026-09-09 this
+                    # is not a cosmetic recolour of a file that already
+                    # exists — for a gated project it is where the print
+                    # file is MADE. Swallowing this would mark the poster
+                    # approved, create its upload rows, and hand the
+                    # marketplace a path with nothing behind it.
+                    db.rollback()
                     raise HTTPException(
-                        500, f"Could not apply the background colour to "
+                        500, f"Could not build the print file for "
                              f"{processed.filename}: {e}")
                 processed.background_color = wanted
             processed.review_status = "approved"
@@ -3753,15 +4119,14 @@ def api_review_decide(
                 # `delete_paths`, which swallows everything and reports a
                 # count. Anything it leaves behind shows up in Diagnostics
                 # as an orphan file, so the net is already there.
-                doomed = []
                 for other in losers:
                     # A row already emptied on an earlier approval is skipped,
                     # so pressing approve twice does not count the same files
                     # again and does not have to reach the Storage Box at all.
                     if (other.review_status or "") == "discarded":
                         continue
-                    doomed += [other.storage_path, other.preview_path,
-                               other.master_path]
+                    batch_doomed += [other.storage_path, other.preview_path,
+                                     other.master_path]
                     # 'discarded' rather than 'superseded' ON PURPOSE. The two
                     # look alike and mean different things: superseded is "set
                     # aside, the picture is still there", discarded is "the
@@ -3770,14 +4135,11 @@ def api_review_decide(
                     # would offer a version whose file is gone — which is the
                     # exact family of bug that started this work.
                     other.review_status = "discarded"
-                if doomed:
-                    from ..storage_remote import delete_paths
-                    from ..review_cache import clear as _clear_cache
-                    gone = delete_paths(
-                        db, doomed,
-                        project=P.project_for_title(db, title) if title else None)
-                    _clear_cache(doomed)
-                    counts["files_removed"] = counts.get("files_removed", 0) + gone
+                # COLLECTED, NOT DELETED YET. Every file operation opens its
+                # own connection to the Storage Box, so deleting inside this
+                # loop meant one extra sign-in per approved poster on top of
+                # the download and two uploads the rebuild already costs.
+                # The whole batch goes in one call after the loop.
             # RELEASING IS WHAT CREATES THE UPLOAD WORK.
             #
             # On the Photoshop path, report_processed() seeds an upload row
@@ -3843,6 +4205,18 @@ def api_review_decide(
         processed.reviewed_by = admin.username
         if title:
             P.recompute_title_status(db, title)
+
+    # ── THE TIDY-UP, ONCE, AT THE END ────────────────────────────────────
+    #
+    # One connection for the batch instead of one per poster. It runs after
+    # every decision is recorded, so a Storage Box having a moment cannot
+    # cost the owner an approval he had already made — the files simply
+    # stay, and `check_orphan_files` in diagnostics.py reports them.
+    if batch_doomed:
+        from ..storage_remote import delete_paths
+        from ..review_cache import clear as _clear_cache
+        counts["files_removed"] = delete_paths(db, batch_doomed)
+        _clear_cache(batch_doomed)
 
     log_activity(db, user=admin, action="pipeline_review", target_type="pipeline",
                  details=counts)

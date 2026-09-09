@@ -1650,6 +1650,12 @@ def check_generations_share_a_file(db: Session, scope: Scope) -> CheckResult:
     dup_q = (db.query(ProcessedImage.saved_poster_id,
                       ProcessedImage.storage_path,
                       func.count(ProcessedImage.id).label("n"))
+               # Rows whose print file has not been BUILT yet all carry an
+               # empty path, and empty is not a collision — it is the absence
+               # of one. Without this every poster waiting for approval would
+               # be reported as sharing a file with its own siblings.
+               .filter(ProcessedImage.storage_path.isnot(None),
+                       ProcessedImage.storage_path != "")
                .group_by(ProcessedImage.saved_poster_id,
                          ProcessedImage.storage_path)
                .having(func.count(ProcessedImage.id) > 1))
@@ -1671,6 +1677,54 @@ def check_generations_share_a_file(db: Session, scope: Scope) -> CheckResult:
         "means something started writing images without a generation "
         "number again, which is supposed to be impossible.",
         "warn" if total else "ok", rows, total,
+    )
+
+
+def check_approved_without_a_print_file(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: an APPROVED image must have a print file to upload.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS BECAME POSSIBLE, AND WHY IT IS THE EXPENSIVE ONE
+    ════════════════════════════════════════════════════════════════════════
+    Until 2026-09-09 the 4000-pixel print file was made the moment a poster
+    was painted, so an approved row always had one. Now, for a project with
+    a review gate, it is built at APPROVAL — with the colour and the
+    signature in a single encode, which is less total work and better
+    quality (see `_build_print_file`).
+
+    The cost of that trade is a state that could not exist before: a row
+    marked approved, with upload work created for it, and `storage_path`
+    still empty because the build failed. The uploader would then hand
+    FineArtAmerica a path with nothing behind it.
+
+    The approval endpoint refuses loudly and rolls back if the build fails,
+    so this should be impossible. That is a statement about today's code;
+    this check holds whatever tomorrow's does, needs no idea of how the
+    failure happens, and fires the moment the state exists rather than when
+    an upload goes wrong.
+    """
+    rows_q = (db.query(ProcessedImage)
+                .filter(ProcessedImage.review_status == "approved",
+                        or_(ProcessedImage.storage_path.is_(None),
+                            ProcessedImage.storage_path == "")))
+    found = rows_q.limit(MAX_ROWS).all()
+    total = len(rows_q.all())
+
+    rows = [Finding(f"poster #{p.saved_poster_id}",
+                    f"generation {p.attempt or 1} is approved with no print "
+                    f"file recorded", "/admin/pipeline/review")
+            for p in found]
+    return _result(
+        "approved_without_print_file",
+        f"{total} approved image(s) have no print file"
+        if total else "Every approved image has a print file",
+        "These were released for upload but the big file was never built, so "
+        "the uploader has nothing to send. Approve them again on the Approve "
+        "Artwork screen — that is what builds the file — and tell me if it "
+        "fails, because approving is supposed to refuse rather than leave "
+        "this behind.",
+        "error" if total else "ok", rows, total,
     )
 
 
@@ -1736,6 +1790,7 @@ def _account_names(db: Session) -> dict[int, str]:
 
 
 CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
+    check_approved_without_a_print_file,
     check_current_image_was_discarded,
     check_generations_share_a_file,
     check_missing_files,

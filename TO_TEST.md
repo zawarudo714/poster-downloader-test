@@ -588,6 +588,125 @@ only said "idle", which looks the same on a finished day and on a jam.
 
 ---
 
+## 24. THE SIGNATURE — v167
+
+**Do this first, before anything else on this list.** Nothing is painted
+until the file is uploaded.
+
+**Setting it up**
+
+- Go to **Pipeline → Settings → Processing**. There is a new **SIGNATURE**
+  panel. Upload your transparent PNG. It should appear on a dark square, so
+  you can see white strokes.
+- Try uploading a JPEG on purpose. It should refuse and tell you why — a
+  picture with no transparency would paint a solid box on every poster.
+- The five boxes under it are the DEFAULTS: 16.8% wide, 0.5% gap, 35%
+  opacity, position 91.1. Leave them.
+
+**Judging it**
+
+- Approve one poster and open the finished file from the Storage Box.
+- On a 4000 × 6000 poster the mark should be **672 pixels wide, 20 from the
+  right, 20 from the bottom**. I measured that here by building the same
+  file with and without the mark and comparing them, so the numbers should
+  land exactly — but I have never seen it on a real poster, and whether it
+  LOOKS right is yours.
+
+**Moving it**
+
+- On **Approve Artwork**, drag the mark left and right with the mouse. It
+  should move smoothly and refuse to go closer than the gap to either edge.
+- Use the three sliders: across, size, solid.
+- Press **B**, or the WHITE/BLACK button. On a pale poster the black version
+  should be the readable one.
+- Press **RESET**. It should go back to the defaults from the Settings page.
+- Press **Z** for the big view. The mark and its sliders should be there too.
+- Save, then open the file and check what you dragged is what got painted.
+
+**What failure looks like**
+
+- The mark in a different place in the file from where you dragged it. That
+  would mean the preview and the builder disagree, which is the one thing
+  the design is meant to make impossible — tell me straight away.
+- A solid rectangle instead of your strokes. That means a picture with no
+  transparency got through the check.
+
+---
+
+## 25. THE PRINT FILE IS BUILT LATER NOW — v167
+
+This is the biggest change under the surface, and it is worth understanding
+before you test it.
+
+The machine used to make the 4000-pixel file the moment it painted a poster.
+It does not any more. It saves the see-through original and the small
+preview, and the big file is built when you press SAVE & RELEASE — with your
+colour and your signature together, in one go.
+
+**What to check**
+
+- Let the machine paint something. Painting should feel a little quicker.
+- On **Approve Artwork** the poster should look exactly as it always did.
+  The preview comes from the flattened picture now rather than from the big
+  file, which should make no visible difference.
+- Approve it. Then look on the Storage Box: the 4000-pixel file should
+  appear only at that point.
+- Run a **Diagnostics** scan. A new check called "Every approved image has a
+  print file" should report nothing.
+
+**What failure looks like**
+
+- That Diagnostics check reporting anything. Stop and tell me — it would
+  mean something was released for upload with no file behind it.
+- An error when you approve. That is the intended behaviour if the build
+  fails, and it is meant to refuse rather than half-succeed. Send me the
+  message.
+
+---
+
+## 26. SENDING WORK BACK TO THE START — v167
+
+The testing tool you asked for. **Greenlight tab, top panel.**
+
+**What to click**
+
+- Type a few title numbers and press **COUNT THEM FIRST**. It should say how
+  many pictures and how many painted versions would be deleted, and change
+  nothing.
+- Press **SEND BACK TO GREENLIGHT**. It shows the same numbers, warns about
+  duplicate listings, and asks you to type `SEND BACK`. Type something else
+  and it should cancel.
+- Type it properly. Those titles should reappear in the Greenlight queue,
+  with no painted versions and no upload record. Their worker photographs
+  should be untouched.
+- Greenlight them again and let the machine repaint them.
+
+**Read this before using it on anything real.** If a title is genuinely live
+on FineArtAmerica, delete it there first. Uploading the same title twice does
+not fail — the marketplace quietly renames the second one to "Title #2", at
+an address we never computed, and the listing check then reports the first
+one as missing.
+
+---
+
+## 27. THE APPROVE SCREEN'S COUNTS AND SPEED — v167
+
+**What to check**
+
+- Mark three posters with **KEEP** and one with **RERUN**, then hover
+  RELEASE WITHOUT FINISHING THE SKIM. It should say one fewer will be
+  released, not four fewer. That number was wrong whenever KEEP was used.
+- Press **SAVE & RELEASE** on a batch. It should now count out loud —
+  "saving 5 of 40", "saving 10 of 40" — instead of sitting still.
+- When it finishes it should say how many were released and, if any old
+  generations were cleared, how many files were deleted from the archive.
+
+**On KEEP, since you asked.** It does the same thing as not touching the
+poster at all. It is a way to mark "I have looked at this one" while
+skimming, and pressing it again unmarks it. Nothing else.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

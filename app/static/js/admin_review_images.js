@@ -145,6 +145,197 @@
     return (img.versions && img.versions.length) ? img.versions : [img];
   }
 
+  // ══════════════════════════════════════════════════════════════════════
+  //  THE SIGNATURE
+  // ══════════════════════════════════════════════════════════════════════
+  //
+  // Held in memory like the colour, and for the same reason: dragging it
+  // must cost no requests, and you must be able to change your mind about a
+  // poster three titles back. Nothing is sent until SAVE.
+  //
+  // THE PREVIEW IS THE REAL ARITHMETIC, not a picture of it. The mark is an
+  // ordinary <img> positioned by percentage over the poster, at the same
+  // opacity and the same colour the server will use — so what you drag is
+  // what gets painted. Drawing it any other way would be a second copy of
+  // the placement rule, and the two would drift.
+  const sigs = new Map();          // processed_id -> {x_pct, w_pct, opacity, dark}
+
+  function sigFor(v) {
+    if (!v.signature) return null;
+    return sigs.get(v.processed_id) || {
+      x_pct: v.signature.x_pct,
+      w_pct: v.signature.w_pct,
+      opacity: v.signature.opacity,
+      dark: !!v.signature.dark,
+    };
+  }
+
+  function setSig(pid, patch) {
+    const t = current();
+    if (!t) return;
+    let v = null;
+    t.images.forEach((img) => versionsOf(img).forEach((cand) => {
+      if (cand.processed_id === pid) v = cand;
+    }));
+    if (!v || !v.signature) return;
+    const now = Object.assign({}, sigFor(v), patch);
+    // The margin is a promise, not a suggestion — the same clamp the server
+    // applies, so the preview can never show a position the file will not
+    // have. Written once here and once there is unavoidable (one is
+    // JavaScript and one is Python); keeping the numbers identical is what
+    // the shared `margin_pct` is for.
+    const m = v.signature.margin_pct;
+    const half = now.w_pct / 2;
+    now.x_pct = Math.max(m + half, Math.min(100 - m - half, now.x_pct));
+    now.w_pct = Math.max(2, Math.min(60, now.w_pct));
+    now.opacity = Math.max(0, Math.min(100, now.opacity));
+    sigs.set(pid, now);
+    paintSig(pid);
+  }
+
+  // Repaint in place rather than re-render, so dragging stays smooth and
+  // the poster image is not refetched on every mouse move.
+  function paintSig(pid) {
+    const t = current();
+    if (!t) return;
+    let v = null;
+    t.images.forEach((img) => versionsOf(img).forEach((cand) => {
+      if (cand.processed_id === pid) v = cand;
+    }));
+    if (!v || !v.signature) return;
+    const s = sigFor(v);
+    document.querySelectorAll(`[data-sig-mark][data-pid="${pid}"]`).forEach((el) => {
+      el.style.width = s.w_pct + '%';
+      el.style.left = s.x_pct + '%';
+      el.style.bottom = v.signature.margin_pct + '%';
+      el.style.opacity = String(s.opacity / 100);
+      // The file is white strokes. `invert` is how the same file becomes the
+      // black version, which is exactly what the server does by rebuilding
+      // the colour from the file's transparency.
+      el.style.filter = s.dark ? 'invert(1)' : 'none';
+    });
+    document.querySelectorAll(`[data-sig-x][data-pid="${pid}"]`).forEach(
+      (el) => { el.value = String(Math.round(s.x_pct * 10) / 10); });
+    document.querySelectorAll(`[data-sig-w][data-pid="${pid}"]`).forEach(
+      (el) => { el.value = String(Math.round(s.w_pct * 10) / 10); });
+    document.querySelectorAll(`[data-sig-o][data-pid="${pid}"]`).forEach(
+      (el) => { el.value = String(Math.round(s.opacity)); });
+    document.querySelectorAll(`[data-sig-readout][data-pid="${pid}"]`).forEach(
+      (el) => {
+        el.textContent = `${Math.round(s.w_pct * 10) / 10}% wide · `
+          + `${Math.round(s.opacity)}% solid · ${s.dark ? 'black' : 'white'}`;
+      });
+  }
+
+  function flipSignature(pid) {
+    const t = current();
+    if (!t) return;
+    let v = null;
+    t.images.forEach((img) => versionsOf(img).forEach((cand) => {
+      if (cand.processed_id === pid) v = cand;
+    }));
+    if (!v || !v.signature) return;
+    setSig(pid, { dark: !sigFor(v).dark });
+    render();                    // the button's own word has to change too
+  }
+
+  // Back to the project's defaults for THIS poster. Read from what the
+  // server sent rather than from numbers repeated here, so changing the
+  // default on the Settings page changes what RESET means.
+  function resetSignature(pid) {
+    const t = current();
+    if (!t) return;
+    let v = null;
+    t.images.forEach((img) => versionsOf(img).forEach((cand) => {
+      if (cand.processed_id === pid) v = cand;
+    }));
+    if (!v || !v.signature) return;
+    sigs.delete(pid);
+    render();
+  }
+
+  function sigMarkHtml(v) {
+    if (!v.signature) return '';
+    const s = sigFor(v);
+    return `<img class="sig-mark" data-sig-mark data-pid="${v.processed_id}"
+                 src="${esc(v.signature.url)}" alt="" draggable="false"
+                 style="width:${s.w_pct}%;left:${s.x_pct}%;`
+         + `bottom:${v.signature.margin_pct}%;opacity:${s.opacity / 100};`
+         + `filter:${s.dark ? 'invert(1)' : 'none'}">`;
+  }
+
+  function sigBarHtml(v, where) {
+    if (!v.signature) return '';
+    const s = sigFor(v);
+    return `
+      <div class="review-sig" data-pid="${v.processed_id}" data-where="${where}">
+        <span class="muted mono">signature</span>
+        <label class="sig-field">across
+          <input type="range" min="0" max="100" step="0.1"
+                 data-sig-x data-pid="${v.processed_id}" value="${s.x_pct}"></label>
+        <label class="sig-field">size
+          <input type="range" min="2" max="60" step="0.1"
+                 data-sig-w data-pid="${v.processed_id}" value="${s.w_pct}"></label>
+        <label class="sig-field">solid
+          <input type="range" min="0" max="100" step="1"
+                 data-sig-o data-pid="${v.processed_id}" value="${s.opacity}"></label>
+        <button class="btn btn-ghost btn-tiny" data-img-action="sig-flip"
+                data-pid="${v.processed_id}"
+                title="White reads on a dark poster, black on a pale one">
+          ${s.dark ? 'BLACK' : 'WHITE'} <span class="mono">(B)</span></button>
+        <button class="btn btn-ghost btn-tiny" data-img-action="sig-reset"
+                data-pid="${v.processed_id}">RESET</button>
+        <span class="mono muted" data-sig-readout data-pid="${v.processed_id}"></span>
+      </div>`;
+  }
+
+  // DRAG ALONG THE X AXIS ONLY. The owner asked for exactly that: the bottom
+  // margin is a fixed promise and the only thing that ever needs moving is
+  // which side of the poster the mark sits on.
+  (function wireDrag() {
+    let dragging = null;
+    function xPctFrom(ev, plate) {
+      const r = plate.getBoundingClientRect();
+      const clientX = ev.touches ? ev.touches[0].clientX : ev.clientX;
+      return ((clientX - r.left) / r.width) * 100;
+    }
+    function start(e) {
+      const mark = e.target.closest('[data-sig-mark]');
+      if (!mark) return;
+      const plate = mark.closest('[data-canvas]');
+      if (!plate) return;
+      dragging = { pid: Number(mark.dataset.pid), plate: plate };
+      mark.classList.add('is-dragging');
+      e.preventDefault();
+    }
+    function move(e) {
+      if (!dragging) return;
+      setSig(dragging.pid, { x_pct: xPctFrom(e, dragging.plate) });
+      e.preventDefault();
+    }
+    function end() {
+      if (!dragging) return;
+      document.querySelectorAll('.sig-mark.is-dragging').forEach(
+        (el) => el.classList.remove('is-dragging'));
+      dragging = null;
+    }
+    document.addEventListener('mousedown', start);
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', end);
+    document.addEventListener('touchstart', start, { passive: false });
+    document.addEventListener('touchmove', move, { passive: false });
+    document.addEventListener('touchend', end);
+  })();
+
+  document.addEventListener('input', (e) => {
+    const t = e.target;
+    if (!t.dataset || !t.dataset.pid) return;
+    const pid = Number(t.dataset.pid);
+    if (t.hasAttribute('data-sig-x')) setSig(pid, { x_pct: Number(t.value) });
+    else if (t.hasAttribute('data-sig-w')) setSig(pid, { w_pct: Number(t.value) });
+    else if (t.hasAttribute('data-sig-o')) setSig(pid, { opacity: Number(t.value) });
+  });
+
   // ── The colour chosen per generation, held here until you commit ────────
   //
   // Keyed on processed_id, because each generation has its own picture and
@@ -270,6 +461,7 @@
                   style="background-color:${esc(bg)}">
               <img loading="lazy" src="${shown}" alt="" data-poster-img
                    data-pid="${v.processed_id}" crossorigin="anonymous">
+              ${sigMarkHtml(v)}
             </span>
           <figcaption>
             <span class="mono">${esc(v.filename)}</span>
@@ -278,6 +470,7 @@
           </figcaption>
           ${versionBarHtml(img)}
           ${colorBarHtml(v, 'card')}
+          ${sigBarHtml(v, 'card')}
           <div class="review-img-actions">
             <button class="btn btn-success btn-tiny" data-img-action="approve"  data-poster="${img.poster_id}">KEEP <span class="mono">(K)</span></button>
             <button class="btn btn-skip btn-tiny"    data-img-action="rerun"    data-poster="${img.poster_id}">RERUN <span class="mono">(R)</span></button>
@@ -288,6 +481,13 @@
     }).join('');
 
     probeTransparency();
+    // The sliders and the readout are filled in AFTER the markup exists.
+    // Setting them from the template string would mean writing the same
+    // numbers twice, and one of the two copies always goes stale.
+    t.images.forEach((img) => {
+      const v = shownVersion(img);
+      if (v.signature) paintSig(v.processed_id);
+    });
     updateTally();
     if (zoomOpen) syncZoom();
   }
@@ -356,13 +556,27 @@
     return titles.reduce((n, t) => n + t.images.length, 0);
   }
 
+  // HOW MANY WILL ACTUALLY BE RELEASED. Not `totalImages() - decisions.size`,
+  // which is what it used to be: KEEP records a decision of 'approve', so
+  // every KEEP was being subtracted from the number about to be released.
+  // Press KEEP on three and RERUN on one and the button said four fewer when
+  // the true answer was one. Counted from what the decisions SAY rather than
+  // from how many there are.
+  function releasedCount() {
+    let out = totalImages();
+    decisions.forEach((d) => {
+      if (d.action === 'rerun' || d.action === 'unusable') out -= 1;
+    });
+    return out;
+  }
+
   function updateTally() {
     const marked = { rerun: 0, unusable: 0, approve: 0 };
     decisions.forEach((d) => { marked[d.action] = (marked[d.action] || 0) + 1; });
     // Everything not explicitly marked is approved on commit. Spelling that
     // out is the whole safety of an approve-by-default screen: you should be
     // able to read what is about to happen before you press the button.
-    const approving = totalImages() - marked.rerun - marked.unusable;
+    const approving = releasedCount();
     $('[data-review-tally]').textContent =
       `${approving} will be released · ${marked.rerun} rerun · ${marked.unusable} retired`;
   }
@@ -468,10 +682,25 @@
     const canvas = $('[data-zoom-canvas]');
     canvas.dataset.pid = v.processed_id;
     canvas.style.backgroundColor = colorFor(v);
+    // The big view carries the mark as well, because judging whether a
+    // signature sits well is exactly what a bigger picture is for.
+    const zoomMark = $('[data-zoom-sig]');
+    if (zoomMark) {
+      if (v.signature) {
+        zoomMark.hidden = false;
+        zoomMark.src = v.signature.url;
+        zoomMark.dataset.pid = String(v.processed_id);
+        zoomMark.setAttribute('data-sig-mark', '');
+      } else {
+        zoomMark.hidden = true;
+        zoomMark.removeAttribute('data-sig-mark');
+      }
+    }
     const d = decisions.get(img.poster_id);
     $('[data-zoom-state]').textContent = d ? d.action.toUpperCase() : '';
     $('[data-zoom-controls]').innerHTML =
-      versionBarHtml(img) + colorBarHtml(v, 'zoom');
+      versionBarHtml(img) + colorBarHtml(v, 'zoom') + sigBarHtml(v, 'zoom');
+    if (v.signature) paintSig(v.processed_id);
     box.hidden = false;
     zoomOpen = true;
   }
@@ -565,6 +794,14 @@
         setColor(parseInt(el.dataset.pid, 10), defaultBackground);
         return;
       }
+      if (imgAction === 'sig-flip') {
+        flipSignature(parseInt(el.dataset.pid, 10));
+        return;
+      }
+      if (imgAction === 'sig-reset') {
+        resetSignature(parseInt(el.dataset.pid, 10));
+        return;
+      }
       toggleDecision(parseInt(el.dataset.poster, 10), imgAction);
       return;
     }
@@ -591,7 +828,7 @@
       case 'review-approve-all':
         if (!confirm(
             `Release everything in this range that you have not marked?\n\n`
-            + `${totalImages() - decisions.size} images will go to the upload queue.`)) return;
+            + `${releasedCount()} images will go to the upload queue.`)) return;
         await commit();
         break;
       case 'review-exit':
@@ -643,6 +880,10 @@
         if (zoomOpen) closeZoom(); else syncZoom();
         e.preventDefault();
         break;
+      case 'b':
+        if (t && t.images.length) flipSignature(shownVersion(t.images[0]).processed_id);
+        e.preventDefault();
+        break;
       case 'e':
         if (t && t.images.length) {
           const v = shownVersion(t.images[0]);
@@ -679,19 +920,59 @@
         // poster still needs a colour recorded, and "the one showing on
         // screen" is exactly what you just approved by not changing it.
         background_color: v.can_recolor ? colorFor(v) : '',
+        // Where this poster's mark goes. Sent on every image for the same
+        // reason the colour is: an untouched poster still needs a placement
+        // recorded, and "the one on screen" is what you approved by not
+        // moving it.
+        signature: v.signature ? sigFor(v) : null,
       });
     }));
 
+    // ── SENT IN CHUNKS, SO THE PROGRESS IS REAL ────────────────────────
+    //
+    // Approving is not instant and now it is honest about why: for a gated
+    // project this is where the 4000-pixel print file is BUILT, with the
+    // colour and the signature in one encode, and then uploaded to the
+    // Storage Box. That is a second or two of work plus an upload, per
+    // poster (MEASURED 2026-09-09: 1.5s of image work on this machine).
+    //
+    // The counter is the browser's own — it knows how many it has sent and
+    // had answered — rather than a guess at a percentage. A progress bar
+    // that is not counting anything real is the thing the owner explicitly
+    // did not want.
+    const CHUNK = 5;
+    const all = payload.decisions;
+    const tally = { approved: 0, rerun: 0, unusable: 0, files_removed: 0 };
     try {
-      const r = await fetch(`${API}/review/decide`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const d = await r.json();
-      if (!r.ok) { status.textContent = d.detail || 'failed'; return; }
+      for (let i = 0; i < all.length; i += CHUNK) {
+        const part = all.slice(i, i + CHUNK);
+        status.textContent =
+          `saving ${Math.min(i + part.length, all.length)} of ${all.length}…`;
+        const r = await fetch(`${API}/review/decide`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ decisions: part }),
+        });
+        const d = await r.json();
+        if (!r.ok) {
+          // STOPS HERE, AND SAYS WHERE. Everything before this chunk is
+          // already saved on the server, so telling you how far it got is
+          // the difference between "try again" and "try again from where".
+          status.textContent =
+            `stopped after ${i} of ${all.length} — ${d.detail || 'failed'}`;
+          await loadDates();
+          return;
+        }
+        tally.approved += d.approved || 0;
+        tally.rerun += d.rerun || 0;
+        tally.unusable += d.unusable || 0;
+        tally.files_removed += d.files_removed || 0;
+      }
+      const d = tally;
       status.textContent =
-        `saved — ${d.approved} released, ${d.rerun} queued to regenerate, ${d.unusable} retired`;
+        `saved — ${d.approved} released, ${d.rerun} queued to regenerate, ${d.unusable} retired`
+        + (d.files_removed
+            ? ` · ${d.files_removed} old file(s) deleted from the archive` : '');
       decisions = new Map();
       chosen = new Map();
       closeZoom();

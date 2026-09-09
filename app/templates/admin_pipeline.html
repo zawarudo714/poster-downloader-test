@@ -165,6 +165,57 @@
   {# ═══════════════════════════════════════════════════════════════ #}
   <div class="pipe-section" data-section-panel="greenlight" {% if default_section == 'greenlight' %}{% else %}hidden{% endif %}>
 
+    {# ── SEND WORK BACK TO THE START ──────────────────────────────────────
+       A TESTING tool, asked for on 2026-09-09 so the owner can try a change
+       to the painting without going through the whole worker flow again for
+       every picture. It is destructive and it is deliberately awkward: a
+       typed confirmation, a plain list of what will happen, and the warning
+       about duplicate listings right on the panel rather than buried. #}
+    <section class="panel">
+      <div class="panel-head">
+        <span>SEND TITLES BACK TO THE START
+          {{ info("For testing. This forgets that these titles were ever painted or uploaded and puts them back in the greenlight queue, so the machine paints them again from the worker's original photograph. The worker is not involved and nothing they saved is touched. Read the warning on the panel before using it on anything that is really live on the marketplace.") }}
+        </span>
+        <span class="muted mono" data-recall-status></span>
+      </div>
+      <div class="panel-body">
+        <p class="quota-note">
+          <strong>This throws away work and cannot be undone.</strong>
+          Every generated picture for these titles is deleted, the record of
+          any upload is removed, and the money already spent at OpenAI to
+          paint them is spent. Only the worker's original photograph
+          survives, which is what the machine paints from again.
+          <br><br>
+          <strong>If a title is genuinely live on FineArtAmerica, do not use
+          this.</strong> Uploading the same title twice does not fail — the
+          marketplace silently renames the second one to "Title #2", which
+          lives at an address we never computed, so the listing check then
+          reports the first one as missing. Delete the listing there first.
+        </p>
+        <div class="filter-row">
+          <label>WHICH
+            <select data-recall-scope>
+              <option value="ids">Only the numbers I type</option>
+              <option value="uploaded">Everything marked uploaded</option>
+              <option value="processed">Everything painted but not yet uploaded</option>
+              <option value="all">Everything that has been painted at all</option>
+            </select>
+          </label>
+          <label>NUMBERS
+            <input type="text" data-recall-ids placeholder="e.g. 12, 34, 88"
+                   style="width:16rem">
+          </label>
+        </div>
+        <div class="filter-row" style="margin-top:10px">
+          <button type="button" class="btn btn-ghost btn-tiny"
+                  data-action="recall-preview">COUNT&nbsp;THEM&nbsp;FIRST</button>
+          <button type="button" class="btn btn-error btn-tiny"
+                  data-action="recall-run">SEND&nbsp;BACK&nbsp;TO&nbsp;GREENLIGHT</button>
+          <span class="muted mono" data-recall-count></span>
+        </div>
+      </div>
+    </section>
+
     <section class="panel">
       <div class="panel-head">
         <span>GREENLIGHT MODE
@@ -425,6 +476,36 @@
             <button type="button" class="btn btn-accent btn-tiny" data-action="upload-gpt-style">UPLOAD</button>
             <span class="muted mono" data-gpt-style-status></span>
           </div>
+        </div>
+      </div>
+    </section>
+
+    {# ── THE SIGNATURE ────────────────────────────────────────────────
+       The file and the DEFAULT placement live here. Where any ONE poster's
+       signature sits is decided on the Approve Artwork screen, because that
+       is where you can see the picture it has to sit on. #}
+    <section class="panel">
+      <div class="panel-head">
+        <span>SIGNATURE
+          {{ info("Your mark, painted onto the bottom of every print file when you approve it. Upload a PNG with a see-through background; the strokes are recoloured white or black, so what colour the file itself is does not matter. The numbers below are the DEFAULT placement, measured from your own Photoshop placement: 16.8% of the width, half a percent from the edge, 35% opacity. They are percentages rather than pixels so the poster looks the same whatever output size you set. Any single poster can be nudged on the Approve Artwork screen without changing these.") }}
+        </span>
+      </div>
+      <div class="panel-body">
+        <div class="gpt-style-row">
+          <span class="sig-preview-plate" data-sig-plate hidden>
+            <img data-sig-preview alt="Current signature" class="gpt-style-img">
+          </span>
+          <div>
+            <p class="muted" data-sig-empty>No signature uploaded yet. Until one is, nothing is painted onto any poster.</p>
+            <input type="file" accept="image/png,image/*" data-sig-file>
+            <button type="button" class="btn btn-accent btn-tiny" data-action="upload-signature">UPLOAD</button>
+            <span class="muted mono" data-sig-status></span>
+          </div>
+        </div>
+        <div class="settings-grid" data-settings-group="signature" style="margin-top:12px"></div>
+        <div class="filter-row" style="margin-top:12px">
+          <button type="button" class="btn btn-accent" data-action="save-settings" data-group="signature">SAVE SIGNATURE SETTINGS</button>
+          <span class="muted mono" data-settings-status="signature"></span>
         </div>
       </div>
     </section>

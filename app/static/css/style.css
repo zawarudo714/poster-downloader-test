@@ -5883,3 +5883,60 @@ a.pulse-chip:hover {
   .pulse-label { font-size: 9.5px; letter-spacing: 0.05em; }
   .pulse-stamp { display: none; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   v167 — THE SIGNATURE ON THE APPROVE ARTWORK SCREEN
+   ══════════════════════════════════════════════════════════════════════
+   The mark is positioned by PERCENTAGE over the poster, at the same opacity
+   and the same colour the server will paint it with. That is deliberate: the
+   preview is the real arithmetic rather than a picture of it, so what you
+   drag is what ends up in the print file. Any other way of drawing it would
+   be a second copy of the placement rule, and two copies drift. */
+.review-canvas,
+.review-zoom-canvas { position: relative; }
+
+.sig-mark {
+  position: absolute;
+  /* `left` is the CENTRE of the mark, which is why it is pulled back by half
+     its own width. Positioning by centre is what makes dragging feel right
+     whatever size the mark is set to. */
+  transform: translateX(-50%);
+  height: auto;
+  pointer-events: auto;
+  cursor: ew-resize;          /* it only moves left and right, and says so */
+  user-select: none;
+  -webkit-user-drag: none;
+  z-index: 3;
+}
+.sig-mark[hidden] { display: none; }
+/* A faint outline while you are moving it, so you can see the box you are
+   holding against a busy poster. */
+.sig-mark.is-dragging { outline: 1px dashed rgba(255,255,255,0.55); }
+
+.review-sig {
+  display: flex; align-items: center; gap: 10px;
+  flex-wrap: wrap;
+  padding: 6px 0;
+}
+.sig-field {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--subtext);
+}
+.sig-field input[type="range"] { width: 110px; accent-color: var(--accent); }
+
+/* The uploaded signature is white strokes on transparency. Shown on the
+   page's own background it would be invisible, and "I uploaded it and
+   nothing appeared" is the wrong first impression of a working feature. */
+.sig-preview-plate {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: #1a1c24;
+}
+.sig-preview-plate[hidden] { display: none; }
+
+@media (max-width: 700px) {
+  .sig-field input[type="range"] { width: 84px; }
+}

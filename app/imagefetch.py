@@ -252,7 +252,8 @@ def has_transparency(path: Path) -> bool:
 
 
 def upscale_to_width(path: Path, *, width: int, sharpen: int = 0,
-                     quality: int = 92, dest: "Path | None" = None) -> tuple[int, int]:
+                     quality: int = 92, dest: "Path | None" = None,
+                     overlay=None) -> tuple[int, int]:
     """
     Resize an image to `width`, height following in proportion, in place.
 
@@ -264,14 +265,30 @@ def upscale_to_width(path: Path, *, width: int, sharpen: int = 0,
     because sharpening artefacts are permanent and the review gate is the
     only place they would ever be caught.
 
-    Returns the final (width, height). A no-op if the image is already at
-    least that wide — we never downscale a print file.
+    `overlay` is a callable given the finished full-size image, returning the
+    image to save. It exists so the SIGNATURE can be painted at print
+    resolution and still be encoded ONCE — putting it on before the
+    enlargement would blow its thin strokes up four times and soften them,
+    and encoding a second time to add it afterwards is exactly the
+    double-encode the 2026-09-06 quality work removed.
+
+    Returns the final (width, height). The enlargement is skipped when the
+    image is already at least that wide — we never downscale a print file —
+    but the overlay and the save still happen, because "already big enough"
+    must not silently mean "no signature".
     """
     from PIL import Image, ImageFilter
 
     img = Image.open(path)
     img.load()
     if img.width >= width:
+        if overlay is None and dest is None:
+            return img.width, img.height
+        img = img.convert("RGB")
+        if overlay is not None:
+            img = overlay(img)
+        img.save(dest or path, "JPEG", quality=quality, optimize=True,
+                 progressive=True, subsampling=0)
         return img.width, img.height
 
     height = max(1, round(img.height * (width / img.width)))
@@ -293,10 +310,14 @@ def upscale_to_width(path: Path, *, width: int, sharpen: int = 0,
     # the JPEG once, instead of encoding, re-reading and re-encoding: JPEG
     # ringing introduced at the small size would otherwise be magnified 4x
     # into the print file.
+    # LAST, at full print resolution, and immediately before the ONE encode.
+    if overlay is not None:
+        img = overlay(img)
+
     target = dest or path
     img.save(target, "JPEG", quality=quality, optimize=True,
              progressive=True, subsampling=0)
-    return width, height
+    return img.width, img.height
 
 
 def make_preview(src: Path, dest: Path, *, width: int = 1200, quality: int = 82) -> None:

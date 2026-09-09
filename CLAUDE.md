@@ -1411,6 +1411,16 @@ one file names something another file must provide — a CSS class, an icon
 key, a settings key, a job kind — those are two lists and a script can
 compare them in a second.
 
+The same check also asserts that **every `/admin/` link in `base.html` sits
+inside a coloured band**, because a visual scheme only works if it covers
+everything: a link added later and left outside would render as a plain grey
+row between coloured blocks, which does not break and does not look
+deliberate either. Note how the scope is decided — by the HREF, not by a
+list of exempt links — so the "All Projects" exit link and the whole worker
+menu stay outside without anybody having to maintain an exceptions list.
+**A rule that carries its own exceptions is one somebody must remember to
+extend; derive the scope instead.**
+
 **A hole is normally at the edge of the pattern you wrote, so enumerate the
 variants.** Every way this codebase asks for a hook. Every way a caller
 writes a URL parameter — `${id}`, `{{ u.id }}`, `' + id + '`. A regex that

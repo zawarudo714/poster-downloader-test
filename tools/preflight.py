@@ -1858,6 +1858,60 @@ def check_colour_names_have_rules() -> None:
              f"has no .pulse-{tone} rule setting --chip-tint — that chip "
              f"would render grey whatever it is trying to say")
 
+    # ── AND EVERY ADMIN LINK MUST LIVE IN A COLOURED BAND ────────────────
+    #
+    # The sidebar's colour only works if it covers everything. A link added
+    # later and left outside a band renders as a plain grey row in the
+    # middle of coloured blocks — it does not break, it just looks like a
+    # mistake, and nobody would think to check for it.
+    #
+    # Scoped to `/admin/` sub-pages on purpose: the "All Projects" exit link
+    # and the whole worker menu are deliberately outside the bands, and a
+    # rule that has to list its own exceptions is one somebody must remember
+    # to extend. The href says which is which.
+    from html.parser import HTMLParser
+
+    base = (APP / "templates" / "base.html")
+    if not base.is_file():
+        return
+    markup = base.read_text(encoding="utf-8")
+    markup = re.sub(r"\{[%#].*?[%#]\}", " ", markup, flags=re.S)
+    markup = re.sub(r"\{\{.*?\}\}", "X", markup, flags=re.S)
+
+    stray: list[str] = []
+
+    class Walk(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.depth: list[bool] = []          # is this ancestor a band?
+
+        def handle_starttag(self, tag, attrs):
+            a = dict(attrs)
+            cls = a.get("class", "") or ""
+            if tag == "a" and "navlink" in cls:
+                href = a.get("href", "")
+                if href.startswith("/admin/") and not any(self.depth):
+                    stray.append(href)
+                return
+            if tag in ("div", "nav", "span", "section", "button"):
+                banded = ("nav-band" in cls or "nav-group-menu" in cls)
+                self.depth.append(banded)
+
+        def handle_endtag(self, tag):
+            if tag in ("div", "nav", "span", "section", "button") and self.depth:
+                self.depth.pop()
+
+    w = Walk()
+    try:
+        w.feed(markup)
+    except Exception:                     # noqa: BLE001 — a tolerant read
+        return
+    for href in sorted(set(stray)):
+        fail(f"the admin link {href} is not inside a coloured band — it "
+             f"would draw as a plain grey row between coloured ones. Put it "
+             f"in a <div class=\"nav-band\" data-nav-tint=\"...\"> in "
+             f"base.html")
+
 
 CHECKS = [
     ("python compiles",           check_python_compiles),

@@ -67,34 +67,64 @@
           {% if user.role == 'admin' and scope == 'project' and proj %}
             {# ── Inside a project ─────────────────────────────────────── #}
             <a href="/admin" class="navlink navlink-exit">&larr;&nbsp;All&nbsp;Projects</a>
-            <a href="/admin/home"      class="navlink {% if active_tab == 'home' %}active{% endif %}" data-nav-tint="home">Home</a>
+            {# ── THE COLOURED BANDS ─────────────────────────────────────
+               Each band is one JOB, on a wash of its own colour. The owner
+               drew this himself on 2026-09-09 after the first attempt only
+               tinted the hover and the marker: he wanted the whole block
+               shaded, so a section is one shape rather than four rows that
+               happen to share a hue.
+
+               The wrapper exists because CSS cannot round the top of the
+               first link in a run and the bottom of the last without being
+               told where the run starts and ends. Saying it in the markup
+               is one div per section and no guessing. #}
+            <div class="nav-band" data-nav-tint="home">
+              <a href="/admin/home"      class="navlink {% if active_tab == 'home' %}active{% endif %}">Home</a>
+            </div>
+
             {# "Worker Images", not "Review Images": this tab judges what the
                WORKER found; Approve Artwork judges what the machine painted.
                Two tabs both starting with "Review" needed the code read to
                tell apart — renamed 2026-09-06 with the owner's approval. #}
-            <a href="/admin/browse"    class="navlink {% if active_tab == 'browse' %}active{% endif %}" data-nav-tint="sourcing">Worker&nbsp;{{ Nouns | default('Posters', true) }}<span class="nav-badge" data-nav-badge="browse" hidden>0</span></a>
-            <a href="/admin/master"    class="navlink {% if active_tab == 'master' %}active{% endif %}" data-nav-tint="sourcing">Title&nbsp;List</a>
-            <a href="/admin/revisions" class="navlink {% if active_tab == 'revisions' %}active{% endif %}" data-nav-tint="sourcing">Changes&nbsp;Requested<span class="nav-badge" data-nav-badge="revisions" hidden>0</span></a>
-            <a href="/admin/skipped"   class="navlink {% if active_tab == 'skipped' %}active{% endif %}" data-nav-tint="sourcing">Skipped</a>
-            {# Only projects whose output needs judging get this. Photoshop is
-               deterministic; GPT is not. #}
-            {# NOT "Review Images". The tab above renders "Review " plus the
+            <div class="nav-band" data-nav-tint="sourcing">
+              <span class="nav-band-head">FINDING PICTURES</span>
+              <a href="/admin/browse"    class="navlink {% if active_tab == 'browse' %}active{% endif %}">Worker&nbsp;{{ Nouns | default('Posters', true) }}<span class="nav-badge" data-nav-badge="browse" hidden>0</span></a>
+              <a href="/admin/master"    class="navlink {% if active_tab == 'master' %}active{% endif %}">Title&nbsp;List</a>
+              <a href="/admin/revisions" class="navlink {% if active_tab == 'revisions' %}active{% endif %}">Changes&nbsp;Requested<span class="nav-badge" data-nav-badge="revisions" hidden>0</span></a>
+              <a href="/admin/skipped"   class="navlink {% if active_tab == 'skipped' %}active{% endif %}">Skipped</a>
+            </div>
+
+            {# NOT "Review Images". The tab below renders "Review " plus the
                project's own plural noun, and travel's noun IS "images" — so
                both tabs read REVIEW IMAGES and nothing on screen says which
                is which. They are different jobs on different things: that
                one judges the photograph the WORKER found, this one judges
                the artwork GPT MADE from it. A label that needs you to know
-               the code is the wrong label. #}
-            {% if pctx.get('review_gate') %}
-              <a href="/admin/pipeline/review" class="navlink {% if active_tab == 'review' %}active{% endif %}" data-nav-tint="judging">Approve&nbsp;Artwork<span class="nav-badge" data-nav-badge="review" hidden>0</span></a>
-            {% endif %}
-            {# Greenlight is a WORK QUEUE — you go there to decide, like
-               Worker Images — so it is a tab, not a corner of Pipeline. #}
-            <a href="/admin/pipeline/greenlight" class="navlink {% if active_tab == 'greenlight' %}active{% endif %}" data-nav-tint="judging">Greenlight<span class="nav-badge" data-nav-badge="greenlight" hidden>0</span></a>
-            <a href="/admin/pipeline"  class="navlink {% if active_tab == 'pipeline' %}active{% endif %}" data-nav-tint="machine">Pipeline<span class="nav-badge nav-badge-error" data-nav-badge="attention" hidden>0</span></a>
-            <a href="/admin/pipeline/settings" class="navlink {% if active_tab == 'pipe_settings' %}active{% endif %}" data-nav-tint="machine">Settings</a>
-            <a href="/admin/stats"     class="navlink {% if active_tab == 'stats' %}active{% endif %}" data-nav-tint="looking">Stats</a>
-            <a href="/admin/peek"      class="navlink {% if active_tab == 'peek' %}active{% endif %}" data-nav-tint="looking">Peek</a>
+               the code is the wrong label.
+
+               Greenlight is a WORK QUEUE — you go there to decide, like
+               Worker Images — so it belongs in this band rather than inside
+               Pipeline. Approve Artwork appears only for projects whose
+               output needs judging: Photoshop is deterministic, GPT is not. #}
+            <div class="nav-band" data-nav-tint="judging">
+              <span class="nav-band-head">YOUR DECISIONS</span>
+              {% if pctx.get('review_gate') %}
+              <a href="/admin/pipeline/review" class="navlink {% if active_tab == 'review' %}active{% endif %}">Approve&nbsp;Artwork<span class="nav-badge" data-nav-badge="review" hidden>0</span></a>
+              {% endif %}
+              <a href="/admin/pipeline/greenlight" class="navlink {% if active_tab == 'greenlight' %}active{% endif %}">Greenlight<span class="nav-badge" data-nav-badge="greenlight" hidden>0</span></a>
+            </div>
+
+            <div class="nav-band" data-nav-tint="machine">
+              <span class="nav-band-head">THE MACHINERY</span>
+              <a href="/admin/pipeline"  class="navlink {% if active_tab == 'pipeline' %}active{% endif %}">Pipeline<span class="nav-badge nav-badge-error" data-nav-badge="attention" hidden>0</span></a>
+              <a href="/admin/pipeline/settings" class="navlink {% if active_tab == 'pipe_settings' %}active{% endif %}">Settings</a>
+            </div>
+
+            <div class="nav-band" data-nav-tint="looking">
+              <span class="nav-band-head">JUST LOOKING</span>
+              <a href="/admin/stats"     class="navlink {% if active_tab == 'stats' %}active{% endif %}">Stats</a>
+              <a href="/admin/peek"      class="navlink {% if active_tab == 'peek' %}active{% endif %}">Peek</a>
+            </div>
           {% elif user.role == 'admin' %}
             {# ── Master level ─────────────────────────────────────────── #}
             {# Ten flat tabs became five items on 2026-09-06, at the owner's
@@ -107,7 +137,12 @@
                  System       — the machinery watching itself
                On desktop each group is a small dropdown; in the phone drawer
                the same markup renders as a headed section, always open. #}
-            <a href="/admin"           class="navlink {% if active_tab == 'dashboard' %}active{% endif %}" data-nav-tint="home">Dashboard</a>
+            {# A band of one, so the master nav and the project nav are the
+               same shape. Dashboard is where you land, so it takes the same
+               violet as the project's Home. #}
+            <div class="nav-band" data-nav-tint="home">
+              <a href="/admin"           class="navlink {% if active_tab == 'dashboard' %}active{% endif %}">Dashboard</a>
+            </div>
             {% set money_active = active_tab in ('payments', 'earnings') %}
             <div class="nav-group {% if money_active %}has-active{% endif %}" data-nav-group data-nav-tint="money">
               <button type="button" class="navlink nav-group-btn {% if money_active %}active{% endif %}" aria-expanded="false">Money&nbsp;▾</button>

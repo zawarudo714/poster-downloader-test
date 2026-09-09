@@ -520,30 +520,39 @@ clearing.
 
 ---
 
-## 22. THE COLOURED SIDEBAR — v165
+## 22. THE COLOURED SIDEBAR — v166 (replaces the v165 version)
+
+Each job is now a shaded BAND, the way you drew it, rather than a colour
+that only showed up when you hovered.
 
 **What to click**
 
-- Look at the master menu on a monitor. **Money** should be gold,
-  **Marketplace** sky blue, **People** rose, **System** mint, and
-  **Dashboard** violet with a small dot. Each section should have a faint
-  line of its own colour running down its links.
-- Hover a few links. The row should tint in its section's colour.
-- Open a page in each section. The bar marking where you are should be that
-  section's colour, not violet.
-- Go into the Travel project. The links there should be grouped by colour
-  too — gold for finding pictures, rose for your decisions, blue for the
-  machinery, mint for Stats and Peek.
-- Open the site on your **phone** and pull out the menu. Same colours.
-- Press the **moon/sun** button for light mode and look again.
+- Look at the menu inside the Travel project on a monitor. There should be
+  four shaded blocks with small headings: **FINDING PICTURES** in gold,
+  **YOUR DECISIONS** in rose, **THE MACHINERY** in blue, **JUST LOOKING**
+  in mint. Home sits on its own violet block above them.
+- Each block should have a coloured line down its left edge and a small dot
+  beside every link.
+- Open a page. That row should fill with its band's colour and its dot
+  should light up. The band's heading should brighten too.
+- Go out to the master menu. **Money** gold, **Marketplace** blue,
+  **People** rose, **System** mint, **Dashboard** violet — same blocks,
+  same shape.
+- Open the site on your **phone** and pull out the menu. Same bands, with a
+  little space at the sides.
+- Press the **moon/sun** button for light mode and look again. This is the
+  one I am least sure about, because I cannot see a rendered page.
 
 **What failure looks like**
 
-- A section with no colour at all, or grey where a colour should be. Tell me
-  which one — that means a name and its colour got out of step, and there is
-  now a check that should have stopped it.
-- Any label you have to lean in to read. These colours are meant to be quiet
-  behind the text, never competing with it.
+- A band that is too dark or too heavy to read the labels through. Tell me
+  which colour and I will take the wash down — every one is under a tenth
+  opacity now, and it is easy to go lower.
+- A grey row sitting between two coloured blocks. That means a link was
+  left out of a band, and there is now a check that fails the deploy for
+  exactly that, so it should be impossible.
+- Bands that look like stripes rather than blocks. That would mean the
+  spacing between them is too tight.
 
 ---
 

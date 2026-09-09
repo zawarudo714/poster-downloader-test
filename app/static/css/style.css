@@ -5576,30 +5576,26 @@ body.has-rail .nav-group-btn .nav-badge { opacity: 1; }
 }
 
 /* ══════════════════════════════════════════════════════════════════════
-   v165 — A COLOUR PER PART OF THE SIDEBAR
+   v166 — THE SIDEBAR AS COLOURED BANDS
    ══════════════════════════════════════════════════════════════════════
-   The owner's words (2026-09-09): "have the side bar have different shades
-   of subtle color... this is so i can better click things, right now its a
-   bit hard on the eyes to locate what i want to click."
+   The owner asked for colour on 2026-09-09 so he could find a link without
+   reading every label. The first attempt (v165) only tinted the hover and
+   the marker, which meant the colour appeared once you were already
+   pointing at the thing you were looking for — exactly no help. He drew
+   what he meant: the WHOLE BLOCK shaded, so a section is one shape.
 
-   Fifteen links in one violet down one edge means you read every label
-   every time. A colour gets your eye to the right THIRD of the list before
-   you have read a word, and after a week the colour is the memory rather
-   than the position.
+   So each job gets a band — a soft wash of its own colour, a spine down its
+   left edge, and a quiet heading. Your eye lands on the right band before
+   you have read a word, and the label only confirms it.
 
-   THE COLOURS ARE MUTED ON PURPOSE. They live behind text that must stay
-   readable, so each one is a pastel used at low opacity for backgrounds and
-   at full strength only for a 2px marker and the section heading. Nothing
-   here is allowed to become a second accent competing with the violet.
+   THE COLOURS STAY OUT OF THE WAY. Every wash is under a tenth opacity and
+   every tint is a pastel, because this sits behind text that has to stay
+   readable at a glance. The full-strength colour appears in three small
+   places only: the heading, the dot, and the spine.
 
-   The tint is ONE custom property per group, set here and used by every
-   rule below. Adding a group is one line, not a new block of CSS. */
-/* A SAFE GREY FIRST, so a tint nobody defined still draws. Without this,
-   `rgba(var(--nav-tint), 0.28)` with an undefined variable is an INVALID
-   declaration and the browser drops the whole rule — the border, the wash
-   and the marker all vanish silently, which looks like a styling choice
-   rather than a mistake. Preflight also fails on an undefined tint, so the
-   fallback keeps the screen usable and the check makes it noticed. */
+   One custom property per band, so a new section is one line rather than a
+   block of rules. A tint with no rule falls back to grey AND fails
+   preflight — see check_colour_names_have_rules. */
 [data-nav-tint]           { --nav-tint: 150 155 200; }
 [data-nav-tint="home"]    { --nav-tint: 168 155 250; }   /* violet — where you land */
 [data-nav-tint="money"]   { --nav-tint: 229 193 104; }   /* gold — money in and out */
@@ -5611,64 +5607,166 @@ body.has-rail .nav-group-btn .nav-badge { opacity: 1; }
 [data-nav-tint="machine"] { --nav-tint: 121 192 242; }   /* sky — the machinery */
 [data-nav-tint="looking"] { --nav-tint: 119 219 178; }   /* mint — just looking */
 
+/* ── THE BAND ─────────────────────────────────────────────────────────
+   Shared by the rail and the phone drawer, because it is the same list
+   with the same problem and two colour schemes for one menu would be
+   worse than none. `.nav-group` (master) and `.nav-band` (project) are
+   the same thing wearing two names for historical reasons — the group
+   carries a button that opens a dropdown on a narrow desktop window. */
+.nav-band { display: block; }
+
 @media (min-width: 701px) {
-  /* THE SECTION HEADING carries the colour at full strength. It is the
-     thing the eye lands on when scanning, and it is not a link, so there is
-     no readability cost. */
+  body.has-rail .nav-band,
+  body.has-rail .nav-group[data-nav-tint] {
+    position: relative;
+    margin: 0 0 7px;
+    padding: 4px 0 5px;
+    border-radius: 9px;
+    /* A GRADIENT, NOT A FLAT SLAB. A single opacity across the whole block
+       reads as a grey box someone tinted; fading it down the band gives it
+       depth and stops four bands stacking into stripes. */
+    background: linear-gradient(
+      180deg,
+      rgba(var(--nav-tint), 0.11),
+      rgba(var(--nav-tint), 0.045));
+    border: 1px solid rgba(var(--nav-tint), 0.14);
+    /* The spine. Full-strength colour, 2px, the one edge you see from the
+       corner of your eye while reading the page. */
+    box-shadow: inset 3px 0 0 rgba(var(--nav-tint), 0.55);
+  }
+
+  /* THE HEADING names the job. The colours group the links; the words say
+     what the group IS, which a colour can never do on its own. */
+  body.has-rail .nav-band-head,
   body.has-rail .nav-group[data-nav-tint] .nav-group-btn {
+    display: block;
+    pointer-events: none;
+    width: 100%;
+    text-align: left;
+    padding: 4px 12px 5px 15px;
+    font-size: 9.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
     color: rgb(var(--nav-tint));
-    opacity: 0.9;
+    opacity: 0.72;
+    background: none;
+    border: none;
   }
 
-  /* A LINE DOWN THE GROUP, faint, so the section reads as one block rather
-     than as three unrelated rows. */
-  body.has-rail .nav-group[data-nav-tint] .nav-group-menu {
-    border-left: 2px solid rgba(var(--nav-tint), 0.28);
-    margin-left: 12px;
-    padding-left: 6px;
+  /* A band of one — Dashboard, Home — has no heading, so its single link
+     needs the padding the heading would have given it. */
+  body.has-rail .nav-band > .navlink:first-child { margin-top: 1px; }
+
+  body.has-rail .nav-band .navlink,
+  body.has-rail .nav-group[data-nav-tint] .nav-group-menu .navlink {
+    margin: 1px 5px;
+    padding: 7px 10px 7px 11px;
+    border-radius: 6px;
   }
 
-  /* HOVER tints the row in its own colour, so the thing under the pointer
-     is obviously part of the section you were aiming at. */
-  body.has-rail .topnav .navlink[data-nav-tint]:hover,
+  /* THE DOT. Small, in the band's colour, and the thing that keeps a row
+     legible as part of its section once you are reading rather than
+     scanning. */
+  body.has-rail .nav-band .navlink::before,
+  body.has-rail .nav-group[data-nav-tint] .nav-group-menu .navlink::before {
+    content: "";
+    width: 5px; height: 5px; border-radius: 50%;
+    background: rgb(var(--nav-tint));
+    opacity: 0.7;
+    flex: 0 0 auto;
+    transition: opacity .12s linear, box-shadow .12s linear;
+  }
+
+  body.has-rail .nav-band .navlink:hover,
   body.has-rail .nav-group[data-nav-tint] .nav-group-menu .navlink:hover {
-    background: rgba(var(--nav-tint), 0.12);
+    background: rgba(var(--nav-tint), 0.16);
     color: var(--text);
   }
 
-  /* THE OPEN PAGE keeps the violet bar it has always had, but in its own
-     colour — so "where am I" and "what colour is this section" are the same
-     answer instead of two. */
-  body.has-rail .topnav .navlink[data-nav-tint].active,
+  /* THE PAGE YOU ARE ON. Filled in its own colour with a bright left bar,
+     so "where am I" and "which section is this" are one answer rather than
+     two. The dot lights up as well, which is what makes the active row
+     read as lit rather than merely shaded. */
+  body.has-rail .nav-band .navlink.active,
   body.has-rail .nav-group[data-nav-tint] .nav-group-menu .navlink.active {
-    background: rgba(var(--nav-tint), 0.16);
+    background: rgba(var(--nav-tint), 0.24);
+    color: var(--text);
     box-shadow: inset 2px 0 0 rgb(var(--nav-tint));
   }
-
-  /* A top-level link with no group of its own — Dashboard, Home — gets a
-     dot rather than a line, because there is no section for a line to run
-     down and an orphan line reads as a broken group. */
-  body.has-rail .topnav > .navlink[data-nav-tint]::before {
-    content: "";
-    width: 6px; height: 6px; border-radius: 50%;
-    background: rgb(var(--nav-tint));
-    opacity: 0.75;
-    flex: 0 0 auto;
+  body.has-rail .nav-band .navlink.active::before,
+  body.has-rail .nav-group[data-nav-tint] .nav-group-menu .navlink.active::before {
+    opacity: 1;
+    box-shadow: 0 0 6px rgba(var(--nav-tint), 0.9);
   }
+  /* The heading brightens with its section, so the whole band reads as the
+     open one. */
+  body.has-rail .nav-band:has(.navlink.active) .nav-band-head,
+  body.has-rail .nav-group[data-nav-tint].has-active .nav-group-btn { opacity: 1; }
+  body.has-rail .nav-band:has(.navlink.active) {
+    border-color: rgba(var(--nav-tint), 0.32);
+  }
+
+  /* The badge keeps its place at the end of the row. */
+  body.has-rail .nav-band .navlink .nav-badge { margin-left: auto; }
 }
 
-/* THE PHONE DRAWER gets the same colours. It is the same list with the same
-   problem, and two different colour schemes for one menu would be worse
-   than none. */
+/* ── THE PHONE DRAWER gets the same bands ────────────────────────────── */
 @media (max-width: 700px) {
-  .nav-group[data-nav-tint] .nav-group-btn { color: rgb(var(--nav-tint)); }
-  .nav-group[data-nav-tint] .nav-group-menu {
-    border-left: 2px solid rgba(var(--nav-tint), 0.3);
-    padding-left: 8px;
+  .nav-band,
+  .nav-group[data-nav-tint] {
+    /* Side margin because the drawer itself has none — its links run edge
+       to edge, and a band that did the same would have no shape at all. */
+    margin: 0 10px 8px;
+    padding: 4px 0 6px;
+    border-radius: 9px;
+    background: linear-gradient(
+      180deg,
+      rgba(var(--nav-tint), 0.12),
+      rgba(var(--nav-tint), 0.05));
+    border: 1px solid rgba(var(--nav-tint), 0.16);
+    box-shadow: inset 3px 0 0 rgba(var(--nav-tint), 0.55);
   }
-  .navlink[data-nav-tint].active {
+  .nav-band-head,
+  .nav-group[data-nav-tint] .nav-group-btn {
+    display: block;
+    padding: 6px 14px 4px;
+    font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: rgb(var(--nav-tint)); opacity: 0.75;
+    background: none; border: none;
+  }
+  /* The drawer's own link rule squares every corner and puts a 3px violet
+     bar on the left. Inside a band both are wrong: the band already has the
+     spine, and a square row in a rounded box looks like a mistake. */
+  .nav-band .navlink,
+  .nav-group[data-nav-tint] .nav-group-menu .navlink {
+    margin: 1px 6px;
+    padding: 11px 12px;
+    border-radius: 6px;
+    border-left: none;
+    display: flex; align-items: center; gap: 9px;
+  }
+  .nav-band .navlink::before,
+  .nav-group[data-nav-tint] .nav-group-menu .navlink::before {
+    content: "";
+    width: 5px; height: 5px; border-radius: 50%;
+    background: rgb(var(--nav-tint));
+    opacity: 0.7; flex: 0 0 auto;
+  }
+  .nav-band .navlink:hover,
+  .nav-group[data-nav-tint] .nav-group-menu .navlink:hover {
     background: rgba(var(--nav-tint), 0.16);
   }
+  .nav-band .navlink.active,
+  .nav-group[data-nav-tint] .nav-group-menu .navlink.active {
+    background: rgba(var(--nav-tint), 0.24);
+    border-left-color: transparent;
+    box-shadow: inset 2px 0 0 rgb(var(--nav-tint));
+  }
+  .nav-band .navlink.active::before,
+  .nav-group[data-nav-tint] .nav-group-menu .navlink.active::before {
+    opacity: 1;
+  }
+  .nav-band .navlink .nav-badge { margin-left: auto; }
 }
 
 /* ══════════════════════════════════════════════════════════════════════

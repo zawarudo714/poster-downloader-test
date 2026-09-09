@@ -1857,6 +1857,85 @@ def check_current_image_was_discarded(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def check_upload_gap_is_holding(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: with the gap switched on, batches really are that far apart.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY A SWITCHED-ON GUARD NEEDS WATCHING AT ALL
+    ════════════════════════════════════════════════════════════════════════
+    `brave_daily_query_cap` sat on the Settings page for months describing
+    itself as a safety net against a looping bug, and no code anywhere read
+    it. It was removed in v172 rather than fixed. The lesson was that a
+    control which LOOKS like protection and is not is worse than none, so
+    the upload gap ships with something that can tell the owner whether it
+    is actually holding.
+
+    ════════════════════════════════════════════════════════════════════════
+    IT COMPARES BATCHES, NOT DESIGNS
+    ════════════════════════════════════════════════════════════════════════
+    Inside one batch the uploads are seconds apart by design, so an
+    invariant over individual uploads would fire constantly and be switched
+    off within a day. What the gap governs is when a NEW batch may begin, so
+    the uploads are first grouped into runs — a fresh run starts wherever
+    there is more than half an hour of silence — and consecutive runs are
+    what get measured.
+
+    Half an hour is a judgement, not a measurement: an upload takes tens of
+    seconds, so a half-hour hole is far longer than any within-batch pause
+    and far shorter than the smallest sensible gap. If the owner ever sets
+    the gap below an hour this would start reporting nonsense, so it simply
+    declines to look in that case rather than inventing findings.
+    """
+    from .pipeline import get_setting
+
+    rows, total = [], 0
+    try:
+        on = bool(get_setting(db, "upload_gap_enabled"))
+        hours = float(get_setting(db, "upload_gap_hours") or 0)
+    except Exception:      # noqa: BLE001
+        on, hours = False, 0.0
+
+    # Nothing to assert when the gap is off, and nothing trustworthy to
+    # assert when it is shorter than the run-grouping window.
+    if on and hours >= 1:
+        RUN_GAP = timedelta(minutes=30)
+        need = timedelta(hours=hours)
+        for account in db.query(UploadAccount).all():
+            stamps = [
+                t for (t,) in db.query(UploadTracking.uploaded_at)
+                .filter(UploadTracking.account_id == account.id,
+                        UploadTracking.status == "uploaded",
+                        UploadTracking.uploaded_at.isnot(None))
+                .order_by(UploadTracking.uploaded_at.asc()).all()
+            ]
+            starts = [s for i, s in enumerate(stamps)
+                      if i == 0 or (s - stamps[i - 1]) > RUN_GAP]
+            for i in range(1, len(starts)):
+                apart = starts[i] - starts[i - 1]
+                if apart < need:
+                    total += 1
+                    if len(rows) < MAX_ROWS:
+                        rows.append(Finding(
+                            account.name,
+                            f"two batches {round(apart.total_seconds() / 3600, 1)} "
+                            f"hours apart on {starts[i]:%Y-%m-%d %H:%M}, with the "
+                            f"gap set to {hours}",
+                            "/admin/pipeline#upload"))
+
+    return _result(
+        "upload_gap_holding",
+        f"{total} batch(es) started sooner than the gap allows"
+        if total else "The gap between upload batches is holding",
+        "You asked for a wait between upload batches, and these went out "
+        "closer together than that. Either the wait is not being applied, or "
+        "the gap was changed after those uploads happened. The second is "
+        "harmless; the first means the marketplace may be seeing more from "
+        "you in a day than you intended.",
+        "warn", rows, total,
+    )
+
+
 def check_failure_evidence_is_pruned(db: Session, scope: Scope) -> CheckResult:
     """
     INVARIANT: the evidence folders never hold more than the cap.
@@ -2034,6 +2113,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_current_image_was_discarded,
     check_generations_share_a_file,
     check_chosen_colour_was_painted,
+    check_upload_gap_is_holding,
     check_failure_evidence_is_pruned,
     check_recalled_poster_still_painted,
     check_missing_files,

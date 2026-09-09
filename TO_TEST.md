@@ -816,6 +816,40 @@ again. The generation test still shows the token counts, without a price.
 
 ---
 
+## 31. THE GAP BETWEEN UPLOAD BATCHES — v173, and it ships OFF
+
+Two new boxes under **Pipeline → Upload Settings**: "Wait between upload
+batches" and "Hours to wait", set to 12.
+
+**Nothing changes until you switch it on.** You said you would test this much
+later, so it is off and twelve hours is a guess rather than a measurement.
+
+**When you do come to test it**
+
+- Switch it on. Any account that uploaded within the last twelve hours should
+  immediately show a **WAITING** pill with the time it resumes, on BOTH the
+  Overview quota list and the Upload tab's account list. If only one of them
+  shows it, tell me — they are two separate panels and I changed both.
+- Nothing should upload to that account until the time shown. Everything else
+  keeps working normally, including painting.
+- To test it quickly without waiting half a day, set the hours to something
+  small like 0.2 and watch an account go quiet and then come back.
+- Switch it off and the account should be available again on the next cycle,
+  with no lingering "waiting" state — there is nothing stored to clear.
+
+**Two things about how it behaves, so it does not surprise you**
+
+- **A batch already running is never interrupted.** The wait only decides
+  when the NEXT batch may start. If it worked the other way you would get one
+  design every twelve hours.
+- **The daily cap still applies on top.** Both have to allow an upload, so
+  switching this on can only ever slow things down, never speed them up. I
+  chose that direction because being too slow costs you a day, while being
+  too fast could cost you the account. If you would rather the wait REPLACED
+  the daily cap, say so — it is a one-line change.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

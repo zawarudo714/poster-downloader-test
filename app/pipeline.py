@@ -611,6 +611,28 @@ DEFAULTS: dict[str, Any] = {
     # matching, which is not guaranteed.
     "failure_evidence_keep": 30,
 
+    # ── THE GAP BETWEEN UPLOAD BATCHES ───────────────────────────────────
+    #
+    # Asked for 2026-09-09. The owner: "the FAA upload limit is not exactly
+    # 24 hours." The daily cap resets at local midnight, which is the wrong
+    # shape if the marketplace's own allowance turns over some interval
+    # after your last upload instead.
+    #
+    # OFF by default and it must stay that way. Twelve hours is his guess,
+    # not a measurement, and he has said he will test it much later. A guess
+    # that is switched on by default is a guess that ships as behaviour.
+    #
+    # GLOBAL rather than per project, because an account is shared across
+    # projects and the marketplace's limit belongs to the ACCOUNT. A
+    # per-project setting on an account-level fact is invisible to every
+    # other project — the mistake `account_projects` exists to prevent.
+    #
+    # When a SECOND marketplace arrives this needs to become a CAPABILITIES
+    # row rather than one global number, because "wait 12 hours" is a fact
+    # about FineArtAmerica and not about marketplaces in general.
+    "upload_gap_enabled": False,
+    "upload_gap_hours":   12,
+
     # WHERE OUR OWN TRADING STARTS on the marketplace, as YYYY-MM-DD.
     #
     # Asked for on 2026-09-09. The owner is reusing a FineArtAmerica account
@@ -2519,6 +2541,102 @@ def uploads_today(db: Session, account_id: int, *, day: Optional[date] = None) -
     )
 
 
+def upload_gap_state(db: Session, account: UploadAccount) -> dict:
+    """
+    Must this account WAIT before it may start uploading again?
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS EXISTS — the owner, 2026-09-09
+    ════════════════════════════════════════════════════════════════════════
+    His words: *"I am finding out that the FAA upload limit is not exactly 24
+    hours."* The daily cap in `account_quota` counts uploads on a CALENDAR
+    day and resets at local midnight. If FineArtAmerica's own allowance
+    resets some interval after your last upload instead, then a midnight
+    reset is the wrong shape entirely: it can let a second batch go at
+    00:01 when their clock has not turned over yet.
+
+    So this is a plain gap. An account may not begin a new batch until N
+    hours have passed since the last design it got onto the marketplace.
+    OFF by default, because the interval is a guess until he measures it.
+
+    ════════════════════════════════════════════════════════════════════════
+    IT GATES THE CLAIM, NOT EACH DESIGN, AND THAT IS THE WHOLE DESIGN
+    ════════════════════════════════════════════════════════════════════════
+    Read literally, "wait N hours after the last design" would mean ONE
+    design every twelve hours, because each upload restarts the clock. What
+    is wanted is a gap between BATCHES, so this is asked once, in
+    `claim_upload_batch`, when a batch is handed out. A batch already
+    claimed runs to the end.
+
+    ════════════════════════════════════════════════════════════════════════
+    IT SITS BESIDE THE DAILY CAP, IT DOES NOT REPLACE IT
+    ════════════════════════════════════════════════════════════════════════
+    Both must pass. That means switching this on can only ever make the
+    account upload LESS, never more — wrong in the cheap direction, which
+    matters because the expensive direction is a marketplace account being
+    closed. If it should REPLACE the cap instead, that is a one-line change
+    in `claim_upload_batch` and a deliberate decision, not a default.
+
+    ════════════════════════════════════════════════════════════════════════
+    DERIVED, NEVER STORED
+    ════════════════════════════════════════════════════════════════════════
+    Nothing is written down and nothing is toggled. This reads the clock and
+    the last upload and answers fresh every time, exactly like the quiet
+    window. A stored "waiting until" would be a second edge somebody has to
+    clear, and a lost edge leaves uploading dead while everything looks
+    fine.
+
+    Returns, always the same shape so the screen never has to guess:
+        on           the gap is switched on at all
+        hours        the configured gap
+        last_at      last confirmed upload (UTC), or None
+        ready_at     when it may go again (UTC), or None
+        waiting      True only when it is on AND not yet ready
+        minutes_left whole minutes still to wait, 0 when not waiting
+    """
+    out = {"on": False, "hours": 0.0, "last_at": None, "ready_at": None,
+           "waiting": False, "minutes_left": 0}
+
+    # `upload_gap_enabled` is declared as a real bool in DEFAULTS, so
+    # `_coerce` hands one back and no parsing is needed here.
+    if not get_setting(db, "upload_gap_enabled"):
+        return out
+    try:
+        hours = float(get_setting(db, "upload_gap_hours") or 0)
+    except (TypeError, ValueError):
+        hours = 0.0
+    # A gap of zero is the same as off. Refusing to treat it as "wait for
+    # ever" is the `daily_limit` lesson: a zero somebody typed must mean the
+    # harmless thing, not the catastrophic one.
+    if hours <= 0:
+        return out
+
+    out["on"] = True
+    out["hours"] = hours
+
+    last_at = (
+        db.query(func.max(UploadTracking.uploaded_at))
+          .filter(UploadTracking.account_id == account.id,
+                  UploadTracking.status == "uploaded",
+                  UploadTracking.uploaded_at.isnot(None))
+          .scalar()
+    )
+    # An account that has never uploaded has nothing to wait for. Treating a
+    # missing timestamp as "wait" would park a brand new account for ever on
+    # its very first batch, with the screen unable to say why.
+    if last_at is None:
+        return out
+
+    ready_at = last_at + timedelta(hours=hours)
+    now = datetime.utcnow()
+    out["last_at"] = last_at
+    out["ready_at"] = ready_at
+    if now < ready_at:
+        out["waiting"] = True
+        out["minutes_left"] = int((ready_at - now).total_seconds() // 60)
+    return out
+
+
 def account_quota(db: Session, account: UploadAccount, *, day: Optional[date] = None) -> dict[str, int]:
     used = uploads_today(db, account.id, day=day)
     # `or 100` here turned a deliberate ZERO into a hundred. Setting an
@@ -2987,6 +3105,20 @@ def claim_upload_batch(
 
         quota = account_quota(db, account)
         if quota["remaining"] <= 0:
+            continue
+
+        # ── THE GAP SINCE THIS ACCOUNT'S LAST UPLOAD ─────────────────────
+        #
+        # Checked HERE, where a batch is handed out, and nowhere else. That
+        # is what makes it a gap between batches rather than between
+        # designs — a batch already claimed runs to the end, because
+        # re-asking between designs would mean one design every N hours.
+        #
+        # It sits BESIDE the quota above rather than replacing it, so both
+        # have to pass. Switching it on can therefore only slow an account
+        # down, never speed it up. See `upload_gap_state` for why that
+        # direction was chosen.
+        if upload_gap_state(db, account)["waiting"]:
             continue
 
         # ── ONE PROJECT PER TURN ─────────────────────────────────────────

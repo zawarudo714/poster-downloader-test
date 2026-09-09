@@ -138,6 +138,10 @@
     ],
     upload: [
       ['upload_batch_size',   'number', 'Batch size',        'Images per upload run, capped by the account\'s remaining daily quota.'],
+      ['upload_gap_enabled',  'bool',   'Wait between upload batches',
+       'Off by default. FineArtAmerica\'s allowance may not reset at midnight the way the daily cap assumes, so this makes an account wait a fixed gap after its last upload before starting another batch. It sits ON TOP of the daily cap — both have to allow it — so switching this on can only ever slow uploading down, never speed it up.'],
+      ['upload_gap_hours',    'number', 'Hours to wait',
+       'How long after the last design went up before the same account may start another batch. 12 by default. A batch already running is never interrupted; this only decides when the next one may begin. 0 is the same as switching it off.'],
       ['upload_max_attempts', 'number', 'Max attempts',      'Retries before an upload is parked for review.'],
       ['upload_sequential',   'bool',   'Sequential uploads','Strongly recommended. One tab at a time. The old parallel-tab approach lost 20-30% of every batch to stale tabs, memory pressure and session timeouts.'],
       ['schedule_mode',       'select', 'Schedule',          'Continuous runs whenever there is work. Daily waits for the start hour.', ['continuous', 'daily']],
@@ -527,6 +531,9 @@
             ${paused ? `<span class="status-pill status-error">PAUSED</span>` : ''}
             ${!a.is_enabled ? `<span class="status-pill">DISABLED</span>` : ''}
             <span class="muted mono">${a.quota.used} / ${a.quota.limit} today · ${a.pending} queued</span>
+            ${a.gap && a.gap.waiting
+              ? `<span class="status-pill status-pending">WAITING ${esc(a.gap.ready_at)}</span>`
+              : ''}
           </div>
           <div class="pipe-progress">
             <div class="pipe-progress-bar pipe-bar-${tone}" style="width:${pct}%"></div>
@@ -1531,6 +1538,9 @@
             ${a.banned ? '<span class="status-pill status-error">BANNED</span>' : ''}
             ${a.is_enabled || a.banned ? '' : '<span class="status-pill">DISABLED</span>'}
             ${a.available || a.banned ? '' : '<span class="status-pill status-error">PAUSED</span>'}
+            ${a.gap && a.gap.waiting
+              ? `<span class="status-pill status-pending">WAITING ${esc(a.gap.ready_at)}</span>`
+              : ''}
             <span class="muted mono">${esc(a.email)}</span>
           </div>
           <div class="account-stats mono">
@@ -1542,6 +1552,12 @@
             removed ${s.removed || 0}
             ${a.last_run_at ? ' · last run ' + esc(a.last_run_at.slice(0, 16).replace('T', ' ')) : ''}
           </div>
+          ${a.gap && a.gap.waiting ? `<div class="quota-note">
+              <span class="quota-note-tag">WAITING</span>
+              Nothing will upload here until <strong>${esc(a.gap.ready_at)}</strong>.
+              The gap between batches is ${esc(String(a.gap.hours))} hours and the
+              last design went up at ${esc(a.gap.last_at)}. Deliberate, not a fault.
+            </div>` : ''}
           ${a.banned ? `<div class="quota-note">
               <span class="quota-note-tag">BANNED ${esc((a.banned_at || '').slice(0, 10))}</span>
               ${esc(a.banned_reason || '')}

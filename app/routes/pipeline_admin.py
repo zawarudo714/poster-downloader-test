@@ -244,6 +244,10 @@ def api_overview(
             "quota": quota,
             "pending": pending,
             "available": P.account_is_available(account),
+            # The SECOND of the two screens that draw an account row. Both
+            # send this, because a gap visible on one panel and invisible on
+            # the other is the same account looking broken on one of them.
+            "gap": _gap_for_screen(P.upload_gap_state(db, account)),
         })
 
     nodes = []
@@ -929,9 +933,35 @@ def api_accounts(
             **P.account_payload(db, account),          # never includes password
             "quota": P.account_quota(db, account),
             "available": P.account_is_available(account),
+            # WHY AN ACCOUNT IS QUIET, not just that it is. Without this the
+            # gap looks exactly like a fault: quota not used up, account not
+            # paused, and nothing uploading. "A working feature that looks
+            # like a fault is a bad feature."
+            "gap": _gap_for_screen(P.upload_gap_state(db, account)),
             "stats": stats,
         })
     return JSONResponse({"ok": True, "accounts": out})
+
+
+def _gap_for_screen(state: dict) -> dict:
+    """
+    The upload gap in words a person can act on, with LOCAL times.
+
+    The state itself carries UTC datetimes, because a duration must be
+    compared in one clock. A screen needs the opposite — the time on the
+    wall where the owner is — so the conversion happens here, once, rather
+    than in each place that draws it.
+    """
+    return {
+        "on": bool(state.get("on")),
+        "waiting": bool(state.get("waiting")),
+        "hours": state.get("hours") or 0,
+        "minutes_left": state.get("minutes_left") or 0,
+        "ready_at": (fmt_local(state["ready_at"], "%H:%M")
+                     if state.get("ready_at") else ""),
+        "last_at": (fmt_local(state["last_at"], "%Y-%m-%d %H:%M")
+                    if state.get("last_at") else ""),
+    }
 
 
 @router.get("/api/accounts/available")

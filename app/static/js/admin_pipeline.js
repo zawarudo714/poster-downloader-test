@@ -1093,6 +1093,19 @@
     q('[data-titles-selcount]').textContent = n;
     q('[data-action="titles-greenlight"]').disabled = n === 0;
     q('[data-action="titles-ungreenlight"]').disabled = n === 0;
+    const recallBtn = q('[data-action="titles-recall"]');
+    if (recallBtn) recallBtn.disabled = n === 0;
+
+    // The SEND BACK panel sits under this browser and acts on this same
+    // selection, so it says out loud how many are ticked. Without that the
+    // panel is a button with no visible subject, which is exactly what made
+    // the old COUNT button confusing (owner, 2026-09-09).
+    const selCount = q('[data-recall-selcount]');
+    if (selCount) {
+      selCount.textContent = n
+        ? `${n} title${n === 1 ? '' : 's'} ticked above`
+        : 'nothing ticked yet';
+    }
   }
 
   async function selectAllMatching() {
@@ -1147,6 +1160,79 @@
       await loadTitles(false);
       loadOverview();
     } catch (e) { toast(e.message, 'error'); }
+  }
+
+  // ── Send titles back to the start ───────────────────────────────────────
+  //
+  // This lives beside the Title Browser on purpose: it reads that browser's
+  // ticked rows. There is ONE preview call and ONE run function, used by the
+  // panel's buttons and by the bulk bar's button alike.
+
+  function recallPayload(forcedScope) {
+    const sel = q('[data-recall-scope]');
+    if (forcedScope && sel) sel.value = forcedScope;   // keep the panel honest
+    const scope = forcedScope || (sel ? sel.value : 'selected');
+    return { scope, title_ids: [...titlesState.selected] };
+  }
+
+  async function previewRecall(forcedScope) {
+    const el = q('[data-recall-count]');
+    const body = recallPayload(forcedScope);
+    if (body.scope === 'selected' && !body.title_ids.length) {
+      el.textContent = 'nothing ticked — tick some rows in the browser above';
+      return null;
+    }
+    el.textContent = 'counting…';
+    try {
+      const d = await postJSON(API + '/recall/preview', body);
+      el.textContent = d.posters
+        ? `${d.posters} picture(s) across ${d.titles} title(s), `
+          + `${d.images} painted version(s) would be deleted`
+        : 'nothing matches that';
+      return d;
+    } catch (err) { el.textContent = err.message; return null; }
+  }
+
+  async function runRecall(forcedScope) {
+    const el = q('[data-recall-count]');
+    const body = recallPayload(forcedScope);
+    // The count is fetched first every time, so the number in the warning is
+    // the number this press will actually act on.
+    const n = await previewRecall(forcedScope);
+    if (!n || !n.posters) return;
+
+    // The typed confirmation is the guard the server also insists on. Asking
+    // here as well puts the number and the words in the same box, which is
+    // the last moment this can be stopped.
+    const typed = prompt(
+      `This will DELETE ${n.images} painted version(s) for ${n.posters} `
+      + `picture(s) across ${n.titles} title(s), forget any upload, and `
+      + `put them back in Greenlight.\n\n`
+      + `The worker's original photographs are NOT touched.\n`
+      + `Anything genuinely live on FineArtAmerica must be deleted there `
+      + `first, or you will get a duplicate listing renamed "#2".\n\n`
+      + `Type SEND BACK to go ahead.`);
+    if ((typed || '').trim().toUpperCase() !== 'SEND BACK') {
+      el.textContent = 'cancelled';
+      return;
+    }
+
+    el.textContent = 'working…';
+    try {
+      const d = await postJSON(API + '/recall',
+        Object.assign({}, body, { confirm: 'SEND BACK' }));
+      const msg = `done — ${d.posters} picture(s) across ${d.titles} `
+        + `title(s) are back in Greenlight · ${d.images} version(s) and `
+        + `${d.files} file(s) deleted · ${d.uploads} upload record(s) cleared`;
+      el.textContent = msg;
+      toast(msg);
+      // Those rows have changed stage, so the browser is now out of date and
+      // the old selection points at work that no longer exists.
+      titlesState.selected.clear();
+      await loadTitles(false);
+      await loadOverview();
+      if (loaded.greenlight) loadGreenlight();
+    } catch (err) { el.textContent = err.message; toast(err.message, 'error'); }
   }
 
   function stageTone(stage) {
@@ -2518,59 +2604,15 @@
       case 'attention-load': loadAttention(); break;
 
       // ── SEND WORK BACK TO THE START (testing tool) ─────────────────
-      // COUNT is deliberately a separate press. This throws work away, and
-      // seeing the number BEFORE typing the confirmation is the difference
-      // between "12 posters" and "1,400 posters" being noticed in time.
-      case 'recall-preview': {
-        const el = q('[data-recall-count]');
-        el.textContent = 'counting…';
-        try {
-          const d = await postJSON(API + '/recall/preview', {
-            scope: q('[data-recall-scope]').value,
-            ids: q('[data-recall-ids]').value,
-          });
-          el.textContent = d.posters
-            ? `${d.posters} picture(s) across ${d.titles} title(s), `
-              + `${d.images} painted version(s) would be deleted`
-            : 'nothing matches that';
-        } catch (err) { el.textContent = err.message; }
-        break;
-      }
-      case 'recall-run': {
-        const el = q('[data-recall-count]');
-        const scope = q('[data-recall-scope]').value;
-        const ids = q('[data-recall-ids]').value;
-        let n = null;
-        try {
-          n = await postJSON(API + '/recall/preview', { scope, ids });
-        } catch (err) { el.textContent = err.message; break; }
-        if (!n.posters) { el.textContent = 'nothing matches that'; break; }
-        // The typed confirmation is the guard the server also insists on.
-        // Asking here as well means the number and the words appear in the
-        // same box, which is the only moment it can still be stopped.
-        const typed = prompt(
-          `This will DELETE ${n.images} painted version(s) for ${n.posters} `
-          + `picture(s) across ${n.titles} title(s), forget any upload, and `
-          + `put them back in Greenlight.\n\n`
-          + `The worker's original photographs are NOT touched.\n`
-          + `Anything genuinely live on FineArtAmerica must be deleted there `
-          + `first, or you will get a duplicate listing renamed "#2".\n\n`
-          + `Type SEND BACK to go ahead.`);
-        if ((typed || '').trim().toUpperCase() !== 'SEND BACK') {
-          el.textContent = 'cancelled';
-          break;
-        }
-        el.textContent = 'working…';
-        try {
-          const d = await postJSON(API + '/recall', {
-            scope, ids, confirm: 'SEND BACK' });
-          el.textContent = `done — ${d.posters} picture(s) across ${d.titles} `
-            + `title(s) are back in Greenlight · ${d.images} version(s) and `
-            + `${d.files} file(s) deleted · ${d.uploads} upload record(s) cleared`;
-          await loadOverview();
-        } catch (err) { el.textContent = err.message; }
-        break;
-      }
+      // Awaited, not fired and forgotten. A throw inside an async function
+      // nobody awaits becomes a rejected promise that says nothing at all,
+      // which is how the signature upload button did nothing for a day.
+      case 'recall-preview': await previewRecall(); break;
+      // Both this button and the one in the Title Browser's bulk bar call
+      // ONE function. A second copy of a destructive flow is how a shared
+      // setting gets read by three buttons and dropped by the fourth.
+      case 'recall-run':    await runRecall(); break;
+      case 'titles-recall': await runRecall('selected'); break;
 
       case 'shot-close': q('[data-shot-lightbox]').hidden = true; break;
     }

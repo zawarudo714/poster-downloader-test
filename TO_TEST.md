@@ -664,22 +664,33 @@ colour and your signature together, in one go.
 
 ---
 
-## 26. SENDING WORK BACK TO THE START — v167
+## 26. SENDING WORK BACK TO THE START — v167, rebuilt in v169
 
-The testing tool you asked for. **Greenlight tab, top panel.**
+The testing tool you asked for. **Greenlight tab, at the BOTTOM now**, directly
+under the Title Browser, because it works off that browser's tickboxes.
 
 **What to click**
 
-- Type a few title numbers and press **COUNT THEM FIRST**. It should say how
-  many pictures and how many painted versions would be deleted, and change
-  nothing.
+- Scroll to the **TITLE BROWSER**. Choose a stage such as "Uploaded" or
+  "Processed" and press **LOAD**. Tick a few rows.
+- As you tick, the panel below should count them out loud — "3 titles ticked
+  above". That is the thing the old COUNT button never told you.
+- Press **SHOW ME WHAT THIS WOULD DELETE**. It should say how many pictures
+  and how many painted versions would go, and change nothing. This is the
+  button that used to give you a 500.
 - Press **SEND BACK TO GREENLIGHT**. It shows the same numbers, warns about
   duplicate listings, and asks you to type `SEND BACK`. Type something else
   and it should cancel.
 - Type it properly. Those titles should reappear in the Greenlight queue,
   with no painted versions and no upload record. Their worker photographs
-  should be untouched.
+  should be untouched. The browser reloads itself and the ticks clear.
+- Try the same thing from the sticky bar at the top of the browser —
+  **SEND BACK TO THE START**, next to GREENLIGHT SELECTED. It is the same
+  action, put where your hand already is while scrolling a long list.
 - Greenlight them again and let the machine repaint them.
+- The three bulk options in **WHICH** still work without ticking anything:
+  everything uploaded, everything painted but not uploaded, everything
+  painted at all.
 
 **Read this before using it on anything real.** If a title is genuinely live
 on FineArtAmerica, delete it there first. Uploading the same title twice does

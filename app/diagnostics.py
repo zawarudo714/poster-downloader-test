@@ -1777,6 +1777,62 @@ def check_current_image_was_discarded(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def check_recalled_poster_still_painted(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: a poster that is not in the pipeline must have no paintings.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHAT THIS WATCHES, AND WHY IT NEEDS WATCHING
+    ════════════════════════════════════════════════════════════════════════
+    SEND TITLES BACK TO THE START (2026-09-09) is the one deliberately
+    destructive button in the system. It clears a poster's pipeline status
+    back to nothing, deletes every generation's row, and deletes the files
+    behind them, so the machine paints the poster again from the worker's
+    original photograph.
+
+    Those are three separate deletions and they are not one atomic thing on
+    the storage side: the database work rolls back together, but files
+    already removed from the archive do not come back. So the state to watch
+    for is a poster left looking un-painted while painted rows survive.
+
+    Why that costs something rather than merely looking untidy: greenlighting
+    such a poster paints it again and writes generation 1 over a file another
+    row still claims — which is the same "two records, one path" family as
+    `generations_share_a_file`, arriving by a different door. The version
+    picker on Approve Artwork would then offer an old generation and show a
+    new picture.
+
+    Nothing in the recall code can leave this behind today. That is a
+    statement about today's code, and an invariant is what holds whatever
+    tomorrow's does.
+    """
+    rows_q = (db.query(SavedPoster)
+                .filter(SavedPoster.deleted_at.is_(None),
+                        SavedPoster.pipeline_status.is_(None),
+                        scope.posters,
+                        SavedPoster.id.in_(
+                            db.query(ProcessedImage.saved_poster_id))))
+    found = rows_q.limit(MAX_ROWS).all()
+    total = rows_q.count()
+
+    rows = [Finding(f"poster #{p.id}",
+                    f"{p.filename} is back at the start but still has "
+                    f"painted version(s) recorded",
+                    "/admin/pipeline#greenlight")
+            for p in found]
+    return _result(
+        "recalled_poster_still_painted",
+        f"{total} poster(s) were sent back but kept their paintings"
+        if total else "Every poster sent back to the start was fully cleared",
+        "SEND TITLES BACK TO THE START is supposed to delete the painted "
+        "versions along with the pipeline status. These kept theirs, so "
+        "painting them again would write over a picture another record still "
+        "points at. Send the same titles back once more, which redoes the "
+        "deletion, and tell me if they stay on this list.",
+        "error" if total else "ok", rows, total,
+    )
+
+
 def _account_names(db: Session) -> dict[int, str]:
     """
     id -> name for every marketplace account, fetched once.
@@ -1793,6 +1849,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_approved_without_a_print_file,
     check_current_image_was_discarded,
     check_generations_share_a_file,
+    check_recalled_poster_still_painted,
     check_missing_files,
     check_posters_without_title,
     check_orphan_files,

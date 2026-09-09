@@ -1383,6 +1383,31 @@ not exist. **Sabotage found it; reading the check did not — and the first
 three attempts at the sabotage silently failed to apply, which is its own
 lesson: verify the sabotage landed before believing a green light.**
 
+**A NAME THAT EXISTS IS NOT A NAME YOU KNOW HOW TO CALL, AND THE GAP
+BETWEEN THOSE TWO IS A 500.** `check_module_attributes` proved that
+`P.project_scope` existed. It said nothing about the SHAPE of the call, and
+the recall panel shipped calling it as `P.project_scope(db.query(...),
+project.id, default_project_id=...)` — that function takes ONE positional
+argument and hands back a filter CONDITION rather than a query, so every
+press of the count button raised TypeError. Python compiled it, no name was
+undefined, the attribute really was there, and every check stayed green
+(owner's find, 2026-09-09).
+
+The lesson generalises past arity, and it is the same lesson as reading a
+working precedent before theorising about it (3c-ter): **when you reach for
+a function you did not just write, open its `def` line before you type the
+call.** Read what it TAKES and what it RETURNS. Guessing the shape of a
+signature is `3c-bis` wearing local clothes — inventing a value you could
+have looked up in four seconds, in a file already in the repo.
+
+Now mechanical: `check_call_arity` in `preflight.py` compares every call
+into our own module-level functions against the definition. It asks a
+deliberately narrow question — module-level only, so `self` never arises,
+nothing decorated, nothing whose name is declared in more than one visible
+place, and calls using `*` or `**` skipped, because the count is not
+knowable. Sabotage-tested in three directions on 2026-09-09: too many
+positional arguments, a misspelt keyword, and a missing one.
+
 **MATCH A CALL, NEVER A WORD — this is the commonest way a check reads as
 coverage while looking at nothing.** The guard check written on 25 Aug
 accepted the bare word `html_markers` as evidence that a function consulted
@@ -1494,7 +1519,7 @@ file type before saying you are done:
 |---|---|
 | a Jinja template | `<div>`/`<section>`/`<form>` opens == closes, and the template still parses |
 | a JS file | it parses (`node --check`) and every `data-` hook it queries still exists in the template |
-| Python | no undefined names (AST or `pyflakes`), not just `py_compile` |
+| Python | no undefined names (AST or `pyflakes`), not just `py_compile`, AND that every call passes the arguments its function actually takes |
 | a settings key | it is DECLARED in `pipeline.DEFAULTS`, not merely read and written |
 
 **A new settings key is a schema change, not a string.** `get_setting` and
@@ -1707,6 +1732,14 @@ is shared. 3d says a symptom belongs to the machine that does the work.
 This one says a new feature must be built on the machine that can already
 reach the thing — and for anything on the far side of a bot wall, a login
 wall, or a browser check, that machine is the node.
+
+**The nearest copy of the path you want is often in the file you are already
+editing.** `_recall_targets` wrote its own project scoping and got it wrong,
+while `_title_scope()` sat forty lines from the top of the same file and was
+what every other endpoint in it used. Before writing a query, a scope or a
+lookup, scroll to the top of the file you are in and read the helpers it
+already has. That costs one screen and it is where this project's answers
+usually are.
 
 **A corollary worth stating on its own: when the owner says "just copy how
 X does it", that is not a shortcut, it is usually the correct architecture.**
@@ -2471,6 +2504,15 @@ So, before shipping any figure or label:
   what a person would ask NEXT — and put that on the screen beside it.
 * **Numbers on a button must be the numbers that will happen.** A button
   saying 627 that then does 1,543 is worse than a button with no number.
+* **A BUTTON LABELLED WITH A BARE VERB HAS NO SUBJECT, SO NOBODY CAN TELL
+  WHAT IT WOULD ACT ON.** The recall panel's button read COUNT THEM FIRST
+  and the owner's reply was "not sure what count is supposed to do"
+  (2026-09-09). "Them" pointed at a text box of numbers he had not typed
+  anything into, so the word named nothing on the screen. It now reads SHOW
+  ME WHAT THIS WOULD DELETE, and the panel says "12 titles ticked above"
+  beside it at all times. The test: **read the label with the screen empty.**
+  If it still names what it acts on, it is a label; if it only makes sense
+  once you already know, it is a note to yourself.
 * **A WARNING THAT FIRES ON THE NORMAL CASE IS NOT A WARNING, IT IS A
   KEYSTROKE.** The "this looks like a low-resolution preview" message asked
   whether the address was on one particular image host and called everything

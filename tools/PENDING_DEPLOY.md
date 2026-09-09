@@ -1,57 +1,32 @@
 # Not yet deployed
 
-**v168 — the signature UPLOAD button, a second bug the same shape, and the
-check that finds both.**
+## v169 — the recall panel: the 500 on COUNT, and a checkbox list
 
-**No schema change. No node copy** — `worker_service/` is untouched and
-`AGENT_VERSION` stays at 1.31.0.
+**Server only. The Windows node is unchanged, so nothing needs copying.**
 
-## What was broken
+* **Fixed the 500 on the count button.** `_recall_targets` called
+  `P.project_scope()` with a query as its first argument. That function takes
+  a project id and returns a filter condition, so the call raised TypeError
+  on every press. It now goes through `_title_scope()`, the helper already at
+  the top of the same file that every other endpoint there uses.
+* **The recall panel now reads the Title Browser's ticked rows** instead of a
+  box of typed numbers, and it has moved to sit directly below that browser.
+  The owner asked for the checkbox list on 2026-09-09.
+* **COUNT THEM FIRST is now SHOW ME WHAT THIS WOULD DELETE**, and the panel
+  shows how many titles are ticked at all times, so the button has a visible
+  subject.
+* **SEND BACK TO THE START is also in the Title Browser's sticky bulk bar**,
+  beside GREENLIGHT SELECTED and PULL BACK SELECTED. Both buttons call one
+  function, so there is one destructive path with two ways in.
 
-`admin_pipeline.js` holds two separate wrappers. The big one declares a
-shortcut called `q`; the small GPT panel declares one called `$`. I wrote
-the signature UPLOAD handler in the second wrapper and called `q(...)`,
-which does not exist there. The file parses, the handler exists, and the
-error lands inside an `async` click handler — where it becomes a rejected
-promise nobody is waiting on. So the button did nothing at all and said
-nothing at all.
+New mechanical checks:
 
-## The second one, which the new check found
-
-`toast` was declared inside `admin_pipeline.js`'s wrapper while
-`admin_review_images.js` called it too. Those two scripts never load on the
-same page, so on Approve Artwork the name did not exist:
-
-- the eyedropper's "Click a colour in the poster" message threw every time,
-  so the eyedropper armed silently and never told you
-- worse, the one line that reports a pixel it could not read was itself
-  failing
-
-`toast` now lives in `static/js/toast.js`, on `window`, loaded by
-`base.html` on every page. One definition, reachable from everywhere.
-
-## The check
-
-`check_js_helpers_are_in_scope` asks one narrow question: **is this name
-somebody's private helper, being called from outside?** A name only counts
-if it is DECLARED inside some wrapper, so no list of browser globals is
-needed and no CDN library can trip it.
-
-The first version tried to be a scope analyser and had to be thrown away —
-it needed a real JavaScript lexer, my hand-rolled string-blanker silently
-ate real code, and it reported `jobTone` as undefined while
-`function jobTone` sat forty lines below.
-
-Getting the narrow version right still took four holes, every one at the
-edge of the pattern I had written:
-
-- `async function` declarations were not recognised
-- `//` comments were not stripped, so "every 4th tick (~12s)" read as a call
-- declarations nested deeper than two spaces were not seen
-- names the browser also provides — `open`, `load`, `close` — collided
-
-Sabotage-tested both ways: putting the `q` bug back fails the deploy, and
-so does making `toast` private again.
+* `check_call_arity` in `preflight.py` — a call into our own code with the
+  wrong number of arguments. Sabotage-tested in three directions: too many
+  positional, a misspelt keyword, too few. It would have caught this 500
+  before deploy.
+* `check_recalled_poster_still_painted` in `diagnostics.py` — a poster that is
+  back at the start while painted versions survive.
 
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.

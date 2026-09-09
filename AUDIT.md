@@ -129,6 +129,8 @@ queue's scoping.
 | Pipeline · Test generation | OK — GPT only |
 | Review Posters · "Paste URL to add one" | OK — verified, see below |
 | Upload · title template help text | **FIXED 2026-08-27** — gated on capability |
+| Pipeline · Greenlight · Title Browser | OK — three bulk actions on one selection: greenlight, pull back, send back to the start |
+| Pipeline · Greenlight · Send titles back to the start | OK — a TESTING tool, live in every project. It reads the Title Browser's ticked rows, scopes through `_title_scope()`, and needs no project gating because every project can be re-painted. `MEASURED 2026-09-09`: the first version called `P.project_scope()` with a query and 500'd on every press |
 
 ### FIXED · Upload title template help text
 

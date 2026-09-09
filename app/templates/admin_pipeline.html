@@ -165,57 +165,6 @@
   {# ═══════════════════════════════════════════════════════════════ #}
   <div class="pipe-section" data-section-panel="greenlight" {% if default_section == 'greenlight' %}{% else %}hidden{% endif %}>
 
-    {# ── SEND WORK BACK TO THE START ──────────────────────────────────────
-       A TESTING tool, asked for on 2026-09-09 so the owner can try a change
-       to the painting without going through the whole worker flow again for
-       every picture. It is destructive and it is deliberately awkward: a
-       typed confirmation, a plain list of what will happen, and the warning
-       about duplicate listings right on the panel rather than buried. #}
-    <section class="panel">
-      <div class="panel-head">
-        <span>SEND TITLES BACK TO THE START
-          {{ info("For testing. This forgets that these titles were ever painted or uploaded and puts them back in the greenlight queue, so the machine paints them again from the worker's original photograph. The worker is not involved and nothing they saved is touched. Read the warning on the panel before using it on anything that is really live on the marketplace.") }}
-        </span>
-        <span class="muted mono" data-recall-status></span>
-      </div>
-      <div class="panel-body">
-        <p class="quota-note">
-          <strong>This throws away work and cannot be undone.</strong>
-          Every generated picture for these titles is deleted, the record of
-          any upload is removed, and the money already spent at OpenAI to
-          paint them is spent. Only the worker's original photograph
-          survives, which is what the machine paints from again.
-          <br><br>
-          <strong>If a title is genuinely live on FineArtAmerica, do not use
-          this.</strong> Uploading the same title twice does not fail — the
-          marketplace silently renames the second one to "Title #2", which
-          lives at an address we never computed, so the listing check then
-          reports the first one as missing. Delete the listing there first.
-        </p>
-        <div class="filter-row">
-          <label>WHICH
-            <select data-recall-scope>
-              <option value="ids">Only the numbers I type</option>
-              <option value="uploaded">Everything marked uploaded</option>
-              <option value="processed">Everything painted but not yet uploaded</option>
-              <option value="all">Everything that has been painted at all</option>
-            </select>
-          </label>
-          <label>NUMBERS
-            <input type="text" data-recall-ids placeholder="e.g. 12, 34, 88"
-                   style="width:16rem">
-          </label>
-        </div>
-        <div class="filter-row" style="margin-top:10px">
-          <button type="button" class="btn btn-ghost btn-tiny"
-                  data-action="recall-preview">COUNT&nbsp;THEM&nbsp;FIRST</button>
-          <button type="button" class="btn btn-error btn-tiny"
-                  data-action="recall-run">SEND&nbsp;BACK&nbsp;TO&nbsp;GREENLIGHT</button>
-          <span class="muted mono" data-recall-count></span>
-        </div>
-      </div>
-    </section>
-
     <section class="panel">
       <div class="panel-head">
         <span>GREENLIGHT MODE
@@ -318,6 +267,10 @@
           <div class="pipe-bulkbar-right">
             <button type="button" class="btn btn-accent btn-tiny" data-action="titles-greenlight" disabled>GREENLIGHT SELECTED</button>
             <button type="button" class="btn btn-ghost btn-tiny"  data-action="titles-ungreenlight" disabled>PULL BACK SELECTED</button>
+            {# Third bulk action on the SAME selection. It runs the very same
+               function as the button on the panel below, so there is one
+               destructive path with two ways in rather than two paths. #}
+            <button type="button" class="btn btn-error btn-tiny"  data-action="titles-recall" disabled>SEND BACK TO THE START</button>
           </div>
         </div>
 
@@ -332,6 +285,63 @@
           <button type="button" class="btn btn-ghost btn-tiny" data-action="titles-last">LAST »</button>
         </div>
 
+      </div>
+    </section>
+
+    {# ── SEND WORK BACK TO THE START ──────────────────────────────────────
+       A TESTING tool, asked for on 2026-09-09 so the owner can try a change
+       to the painting without going through the whole worker flow again for
+       every picture.
+
+       It sits DIRECTLY BELOW the Title Browser and reads that browser's
+       ticked rows, because the owner asked for the checkbox list rather
+       than a box of typed numbers (2026-09-09). Building a second list here
+       would have meant a second thing to keep correct, and the browser
+       already filters by stage, searches, pages, and keeps a selection
+       across pages.
+
+       It is destructive and it is deliberately awkward: a typed
+       confirmation, the real numbers shown before that, and the warning
+       about duplicate listings on the panel rather than buried. #}
+    <section class="panel">
+      <div class="panel-head">
+        <span>SEND TITLES BACK TO THE START
+          {{ info("For testing. This forgets that the titles you ticked above were ever painted or uploaded, and puts them back in the greenlight queue so the machine paints them again from the worker's original photograph. The worker is not involved and nothing they saved is touched. Read the warning on the panel before using it on anything that is really live on the marketplace.") }}
+        </span>
+        <span class="muted mono" data-recall-status></span>
+      </div>
+      <div class="panel-body">
+        <p class="quota-note">
+          <strong>This throws away work and cannot be undone.</strong>
+          Every generated picture for these titles is deleted, the record of
+          any upload is removed, and the money already spent at OpenAI to
+          paint them is spent. Only the worker's original photograph
+          survives, which is what the machine paints from again.
+          <br><br>
+          <strong>If a title is genuinely live on FineArtAmerica, do not use
+          this.</strong> Uploading the same title twice does not fail — the
+          marketplace silently renames the second one to "Title #2", which
+          lives at an address we never computed, so the listing check then
+          reports the first one as missing. Delete the listing there first.
+        </p>
+        <div class="filter-row">
+          <label>WHICH
+            <select data-recall-scope>
+              <option value="selected">The titles I ticked in the browser above</option>
+              <option value="uploaded">Everything marked uploaded</option>
+              <option value="processed">Everything painted but not yet uploaded</option>
+              <option value="all">Everything that has been painted at all</option>
+            </select>
+          </label>
+          <span class="muted mono" data-recall-selcount>nothing ticked yet</span>
+        </div>
+        <div class="filter-row" style="margin-top:10px">
+          <button type="button" class="btn btn-ghost btn-tiny"
+                  data-action="recall-preview">SHOW&nbsp;ME&nbsp;WHAT&nbsp;THIS&nbsp;WOULD&nbsp;DELETE</button>
+          <button type="button" class="btn btn-error btn-tiny"
+                  data-action="recall-run">SEND&nbsp;BACK&nbsp;TO&nbsp;GREENLIGHT</button>
+          <span class="muted mono" data-recall-count></span>
+        </div>
       </div>
     </section>
 

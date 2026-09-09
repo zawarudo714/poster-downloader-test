@@ -405,6 +405,174 @@ def check_module_attributes() -> None:
                      f"{base}.{node.attr} does not exist in {module}.py")
 
 
+def _module_level_defs(tree):
+    """
+    Module-level functions in one file, as {name: (min_pos, max_pos, names,
+    takes_kwargs)}. Methods are deliberately excluded, so `self` never has to
+    be reasoned about, and so does anything decorated, because a decorator is
+    free to change the signature it presents.
+    """
+    nested = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for inner in ast.walk(node):
+                if inner is node:
+                    continue
+                if isinstance(inner, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    nested.add(inner.name)
+        elif isinstance(node, ast.ClassDef):
+            for inner in ast.walk(node):
+                if isinstance(inner, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    nested.add(inner.name)
+
+    out = {}
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.decorator_list:
+            continue
+        a = node.args
+        slots = [p.arg for p in (a.posonlyargs + a.args)]
+        max_pos = None if a.vararg else len(slots)
+        min_pos = len(slots) - len(a.defaults)
+        allowed = set(slots) | {p.arg for p in a.kwonlyargs}
+        required_kw = {p.arg for p, d in zip(a.kwonlyargs, a.kw_defaults)
+                       if d is None}
+        out[node.name] = (min_pos, max_pos, slots, allowed, required_kw,
+                          a.kwarg is not None, node.lineno)
+    # A name that is also declared inside some other function or class is
+    # ambiguous from here, so it is left alone.
+    return {k: v for k, v in out.items() if k not in nested}
+
+
+def check_call_arity() -> None:
+    """
+    A call into our own code with the WRONG NUMBER of arguments.
+
+    `check_module_attributes` above proves the name exists. It says nothing
+    about how the function is meant to be CALLED, and that gap shipped a 500:
+    `_recall_targets` called `P.project_scope(db.query(...), project.id,
+    default_project_id=...)`, but `project_scope` takes ONE positional
+    argument and hands back a filter condition rather than a query. Every
+    press of the count button on the recall panel raised TypeError (owner's
+    find, 2026-09-09). Python compiled it, no name was undefined, the
+    attribute really existed, and every other check stayed green.
+
+    The question asked here is narrow on purpose, because a full call-graph
+    analyser would have to be right about far too much to be right about
+    anything:
+
+      · only MODULE-LEVEL functions in files we own, so `self` never arises
+      · nothing decorated, because a decorator may change the signature
+      · nothing whose name is declared in more than one place we can see
+      · calls using * or ** are skipped, since the count is not knowable
+
+    What it catches is exactly the mistake above: too many arguments, too
+    few, or a keyword the function does not have.
+    """
+    defs_by_stem: dict[str, dict] = {}
+    ambiguous: dict[str, set] = {}
+    trees: dict[Path, object] = {}
+
+    for path in py_files():
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue
+        trees[path] = tree
+        found = _module_level_defs(tree)
+        if path.stem in defs_by_stem:
+            # Two files share a stem (there are two store_health.py). Any name
+            # they both define cannot be resolved from a call site, so it is
+            # dropped rather than guessed at.
+            clash = set(defs_by_stem[path.stem]) & set(found)
+            ambiguous.setdefault(path.stem, set()).update(clash)
+            defs_by_stem[path.stem].update(found)
+        else:
+            defs_by_stem[path.stem] = dict(found)
+
+    def check_one(path, lineno, label, sig, call):
+        min_pos, max_pos, slots, allowed, required_kw, takes_kw, _ = sig
+        if any(isinstance(a, ast.Starred) for a in call.args):
+            return
+        if any(k.arg is None for k in call.keywords):
+            return
+        n_pos = len(call.args)
+        kw = [k.arg for k in call.keywords]
+
+        if max_pos is not None and n_pos > max_pos:
+            fail(f"{path.relative_to(ROOT)}:{lineno}: {label} takes "
+                 f"{max_pos} positional argument(s), {n_pos} given")
+            return
+        if not takes_kw:
+            for name in kw:
+                if name not in allowed:
+                    fail(f"{path.relative_to(ROOT)}:{lineno}: {label} has no "
+                         f"argument named '{name}'")
+                    return
+        supplied = set(slots[:n_pos]) | set(kw)
+        missing = [n for n in slots[:min_pos] if n not in supplied]
+        missing += [n for n in sorted(required_kw) if n not in supplied]
+        if missing:
+            fail(f"{path.relative_to(ROOT)}:{lineno}: {label} is missing "
+                 f"argument(s): {', '.join(missing)}")
+
+    for path, tree in trees.items():
+        alias_of: dict[str, str] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                for a in node.names:
+                    if a.name in defs_by_stem:
+                        alias_of[a.asname or a.name] = a.name
+            elif isinstance(node, ast.Import):
+                for a in node.names:
+                    stem = a.name.split(".")[-1]
+                    if stem in defs_by_stem:
+                        alias_of[a.asname or stem] = stem
+
+        here = _module_level_defs(tree)
+        # Any name bound by an assignment, a parameter, an import or a `for`
+        # could be shadowing the module-level function of the same name, so
+        # bare calls to it are left alone.
+        shadowed = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                shadowed.add(node.id)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                shadowed |= {(a.asname or a.name).split(".")[0]
+                             for a in node.names}
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                a = node.args
+                shadowed |= {p.arg for p in
+                             a.posonlyargs + a.args + a.kwonlyargs}
+                if a.vararg:
+                    shadowed.add(a.vararg.arg)
+                if a.kwarg:
+                    shadowed.add(a.kwarg.arg)
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            if isinstance(fn, ast.Attribute):
+                base = getattr(fn.value, "id", None)
+                module = alias_of.get(base)
+                if module is None or module == path.stem:
+                    continue
+                if fn.attr in ambiguous.get(module, set()):
+                    continue
+                sig = defs_by_stem[module].get(fn.attr)
+                if sig:
+                    check_one(path, node.lineno, f"{base}.{fn.attr}()",
+                              sig, node)
+            elif isinstance(fn, ast.Name):
+                if fn.id in shadowed:
+                    continue
+                sig = here.get(fn.id)
+                if sig:
+                    check_one(path, node.lineno, f"{fn.id}()", sig, node)
+
+
 def check_js_parses() -> None:
     if not JS.is_dir():
         return
@@ -2055,6 +2223,7 @@ CHECKS = [
     ("settings reachable on the dashboard", check_settings_are_reachable),
     ("activity log calls valid",  check_activity_log_calls),
     ("cross-module calls exist",  check_module_attributes),
+    ("calls pass the right arguments", check_call_arity),
     ("javascript parses",         check_js_parses),
     ("template tags balance",     check_template_tags_balance),
     ("page hooks exist",          check_hooks_exist),

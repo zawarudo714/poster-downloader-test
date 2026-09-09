@@ -3828,35 +3828,46 @@ def _build_print_file(db: Session, processed, color: str, project,
 #  SEND WORK BACK TO THE START — a testing tool, and destructive
 # ════════════════════════════════════════════════════════════════════════════
 
-def _recall_targets(db: Session, project, scope: str, ids: str):
+def _recall_targets(db: Session, project, scope: str, title_ids: list):
     """
-    Which posters a recall would touch. Read-only, so COUNT can use it too.
+    Which posters a recall would touch. Read-only, so the preview uses it too.
 
     The preview and the run ask the SAME function, which is what stops the
-    count on the button being a different number from what the button does.
+    number on the screen being a different number from what the button does.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE SCOPING GOES THROUGH `_title_scope`, NOT THROUGH A SECOND COPY
+    ════════════════════════════════════════════════════════════════════════
+    The first version of this function called `P.project_scope()` with a
+    QUERY as its first argument. That function takes a project id and hands
+    back a filter CONDITION, so the call raised TypeError and every press of
+    the count button returned a 500 (owner's find, 2026-09-09). `_title_scope`
+    at the top of this file already wraps `project_scope` correctly and is
+    what every other endpoint here uses — rule 3c-ter, reuse the path that
+    already works instead of writing a second one.
     """
     from ..models import MasterTitle, SavedPoster
 
-    title_ids = P.project_scope(
-        db.query(MasterTitle.id), project.id,
-        default_project_id=P._default_project_id(db)).scalar_subquery()
+    scoped_titles = (db.query(MasterTitle.id)
+                       .filter(_title_scope(db, project))
+                       .scalar_subquery())
 
     q = (db.query(SavedPoster)
            .filter(SavedPoster.deleted_at.is_(None),
-                   SavedPoster.master_title_id.in_(title_ids)))
+                   SavedPoster.master_title_id.in_(scoped_titles)))
 
-    if scope == "ids":
-        wanted = [int(n) for n in re.findall(r"\d+", ids or "")]
+    if scope == "selected":
+        # The ids the owner ticked in the Title Browser. They are MasterTitle
+        # ids, exactly as the greenlight and pull-back buttons send, so the
+        # three bulk actions on that panel all speak the same language.
+        wanted = [int(n) for n in (title_ids or []) if str(n).strip().isdigit()]
         if not wanted:
             return []
-        # external_id is the sheet's own number, which is what the owner
-        # reads off the screen — and it is unique only INSIDE a project, so
-        # it is scoped through the subquery above like every other lookup.
-        inner = (db.query(MasterTitle.id)
-                   .filter(MasterTitle.id.in_(title_ids),
-                           MasterTitle.external_id.in_(wanted))
-                   .scalar_subquery())
-        q = q.filter(SavedPoster.master_title_id.in_(inner))
+        q = q.filter(SavedPoster.master_title_id.in_(
+            db.query(MasterTitle.id)
+              .filter(MasterTitle.id.in_(scoped_titles),
+                      MasterTitle.id.in_(wanted))
+              .scalar_subquery()))
     elif scope == "uploaded":
         q = q.filter(SavedPoster.pipeline_status == "uploaded")
     elif scope == "processed":
@@ -3914,8 +3925,8 @@ def api_recall(
         raise HTTPException(400, 'Type SEND BACK to confirm.')
 
     project = _project(request, admin, db)
-    scope = str(payload.get("scope") or "ids")
-    posters = _recall_targets(db, project, scope, str(payload.get("ids") or ""))
+    scope = str(payload.get("scope") or "selected")
+    posters = _recall_targets(db, project, scope, payload.get("title_ids") or [])
     if not posters:
         return JSONResponse({"ok": True, "posters": 0, "images": 0,
                              "uploads": 0, "files": 0})
@@ -3984,10 +3995,16 @@ def api_recall_preview(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """How many this would touch. Same query as the real thing, no writes."""
+    """
+    What this would throw away. Same query as the real thing, no writes.
+
+    It exists so the numbers can be read BEFORE the confirmation is typed.
+    The difference between "12 pictures" and "1,400 pictures" is the whole
+    reason this is two presses instead of one.
+    """
     project = _project(request, admin, db)
-    posters = _recall_targets(db, project, str(payload.get("scope") or "ids"),
-                              str(payload.get("ids") or ""))
+    posters = _recall_targets(db, project, str(payload.get("scope") or "selected"),
+                              payload.get("title_ids") or [])
     ids = [p.id for p in posters]
     images = (db.query(func.count(ProcessedImage.id))
                 .filter(ProcessedImage.saved_poster_id.in_(ids)).scalar() or 0) \

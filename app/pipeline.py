@@ -588,6 +588,16 @@ DEFAULTS: dict[str, Any] = {
     "signature_margin_pct": 0.5,
     "signature_opacity":    35,
     "signature_x_pct":      91.1,
+    # `signature_y_pct` is the gap UP FROM THE BOTTOM, in percent of the
+    # WIDTH — the same unit as the margin, so the two numbers are comparable.
+    # See the note on KEYS in app/signature.py for why it is not height.
+    "signature_y_pct":      0.5,
+    # The two keys that throw the mark to one side or the other. The owner
+    # asked for these to be editable (2026-09-09) because nearly every poster
+    # wants the mark hard left or hard right, and neither of those is worth
+    # aiming a slider at.
+    "signature_key_left":   ",",
+    "signature_key_right":  ".",
     # WHETHER THE REFERENCE IMAGE IS SENT AT ALL.
     #
     # Whether a style reference is wanted is a property of the PROMPT, not of

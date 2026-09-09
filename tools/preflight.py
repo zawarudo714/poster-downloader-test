@@ -1350,6 +1350,13 @@ def check_state_changes_are_logged() -> None:
         "api_cancel_job": "the job carries its own cancelled state and reason",
         "master_upload": "records itself as an ImportJob row with started_by",
         "chat_admin_mark_read": "read-state bookkeeping, not a state change worth auditing",
+        "api_review_remember": (
+            "an autosave of a slider position, fired every few hundred "
+            "milliseconds while the owner works through hundreds of posters. "
+            "Logging each one would bury the entries that matter under "
+            "thousands of 'moved a slider' rows, which is how a log stops "
+            "being read. The moment that IS auditable — releasing the poster "
+            "with that placement settled — is logged by the approve endpoint."),
     }
     MUTATING = ("post", "put", "delete", "patch")
 
@@ -2130,6 +2137,104 @@ def check_overlay_sits_in_its_measuring_layer() -> None:
              "this check is blind, and was passing on an empty set")
 
 
+def check_click_targets_do_not_swallow_controls() -> None:
+    """
+    A whole-region click target must not contain sliders or buttons.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE DEFECT THIS EXISTS FOR (2026-09-09)
+    ════════════════════════════════════════════════════════════════════════
+    `data-zoom-open` sat on the whole Approve Artwork card, so clicking
+    anywhere on it opened the full-screen overlay. The controls live on that
+    card, so the handler carried an exception list: not `.review-color`, not
+    `.review-versions`. The signature bar was added later and nobody extended
+    the list, so every nudge of a slider threw the overlay open in the
+    owner's face.
+
+    That is the shape this catches, and it is bigger than one attribute: **a
+    click target covering a REGION will swallow every control that region
+    ever grows.** The exception list is the tell — it has to be remembered,
+    and the thing that breaks it is a control added months later by somebody
+    who never read the handler.
+
+    So the rule is structural rather than behavioural: put the target on the
+    thing that was actually meant to be clicked. Then there is nothing to
+    exclude and nothing to remember.
+    """
+    from html.parser import HTMLParser
+
+    # The attributes that make a whole element clickable, read from the code
+    # rather than listed here — anything the scripts reach for with `closest`
+    # and then act on. Kept to the zoom family on purpose: `data-action` marks
+    # the buttons themselves, which are supposed to be clickable.
+    hooks = {"data-zoom-open"}
+
+    bad: list[tuple[str, int, str]] = []
+
+    # A void element holds nothing, so it can never swallow a control — and
+    # putting the target on one (an <img>) is exactly the fix this rule wants.
+    VOID = {"img", "br", "input", "hr", "meta", "link", "source", "area"}
+    CONTROLS = {"input", "button", "select", "textarea"}
+
+    class Walk(HTMLParser):
+        def __init__(self, where):
+            super().__init__(convert_charrefs=True)
+            self.where = where
+            self.depth = 0          # >0 while inside a click target
+
+        def handle_starttag(self, tag, attrs):
+            names = {k for k, _v in attrs}
+            if self.depth and tag in CONTROLS:
+                bad.append((self.where, self.getpos()[0], tag))
+            if tag in VOID:
+                return              # opens no region, closes no region
+            if self.depth:
+                self.depth += 1
+            elif names & hooks:
+                self.depth = 1
+
+        def handle_startendtag(self, tag, attrs):
+            self.handle_starttag(tag, attrs)
+
+        def handle_endtag(self, tag):
+            if tag in VOID:
+                return
+            if self.depth:
+                self.depth -= 1
+
+    def walk(fragment: str, where: str) -> None:
+        w = Walk(where)
+        try:
+            w.feed(fragment)
+        except Exception:      # noqa: BLE001 — a tolerant read, never fatal
+            pass
+
+    seen = 0
+    hole = re.compile(r"\$\{[^{}]*\}")
+    for tpl in sorted((APP / "templates").glob("*.html")):
+        text = tpl.read_text(encoding="utf-8")
+        seen += sum(text.count(h) for h in hooks)
+        walk(text, str(tpl.relative_to(ROOT)))
+    for js in sorted((APP / "static" / "js").glob("*.js")):
+        text = js.read_text(encoding="utf-8")
+        seen += sum(text.count(h) for h in hooks)
+        for lit in re.findall(r"`([^`]*)`", text):
+            if "<" in lit:
+                walk(hole.sub(" ", lit), str(js.relative_to(ROOT)))
+
+    for where, line, tag in bad:
+        fail(f"{where}:{line}: a click target contains a <{tag}>. Clicking "
+             f"that control will also fire the target's own handler, and an "
+             f"exception list in the handler is something somebody has to "
+             f"remember to extend (see v171). Put the target on the element "
+             f"that was meant to be clicked instead.")
+
+    # A renamed hook must say so rather than pass on an empty set.
+    if not seen:
+        fail("no click-target hooks were found in any template or script — "
+             "this check is blind, and was passing on nothing")
+
+
 def check_colour_names_have_rules() -> None:
     """
     A colour chosen in one file must be DEFINED in another. Both directions.
@@ -2398,6 +2503,8 @@ CHECKS = [
     ("the top bar carries no filter", check_no_filter_on_fixed_element_ancestors),
     ("no picture paints over its colour plate", check_no_background_on_composited_img),
     ("every colour name has a rule", check_colour_names_have_rules),
+    ("click targets do not swallow controls",
+     check_click_targets_do_not_swallow_controls),
     ("overlays sit in the box they are measured against",
      check_overlay_sits_in_its_measuring_layer),
     ("javascript helpers are in scope", check_js_helpers_are_in_scope),

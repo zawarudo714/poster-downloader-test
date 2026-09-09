@@ -1008,6 +1008,20 @@ class ProcessedImage(Base):
     # is how the rebuild decides whether it has anything to do.
     signature_applied = Column(Text, nullable=True)
 
+    # THE COLOUR THE ADMIN HAS CHOSEN BUT NOT YET RELEASED.
+    #
+    # `background_color` beside it is the colour actually FLATTENED INTO the
+    # file, and `_build_print_file` compares against it to decide whether it
+    # has any work to do. So the chosen colour cannot be written there early:
+    # doing that would tell the builder the colour was already applied and it
+    # would skip the flatten, shipping the old colour silently.
+    #
+    # This is the same pair as `signature_json` (chosen) beside
+    # `signature_applied` (painted), and it exists for the same reason. Two
+    # columns here are not two records of one fact — "what I want" and "what
+    # was done" are different facts, and the whole point is to compare them.
+    background_chosen = Column(String(16), nullable=True)
+
     saved_poster = relationship("SavedPoster")
 
     __table_args__ = (

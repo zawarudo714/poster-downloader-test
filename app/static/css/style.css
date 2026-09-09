@@ -5340,7 +5340,10 @@ html.theme-light .stat-value, html.theme-light .stat-pill-num {
    either — `.review-img img` matched that too, which is the kind of stray
    hit that only shows up once somebody sets the same property inline. */
 .review-img-source img { width: 100%; max-height: 68vh; object-fit: contain; }
-.review-img, .review-img-source { cursor: zoom-in; }
+/* The ZOOM CURSOR follows the zoom CLICK. Both used to be on the whole card,
+   so the controls underneath the poster looked clickable-to-enlarge and were.
+   Now only the pictures carry either. */
+[data-zoom-open] { cursor: zoom-in; }
 
 .review-zoom {
   position: fixed; inset: 0; z-index: 900;

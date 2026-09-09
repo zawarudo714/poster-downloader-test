@@ -1777,6 +1777,57 @@ def check_current_image_was_discarded(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def check_chosen_colour_was_painted(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: once released, the colour CHOSEN is the colour PAINTED.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THESE ARE TWO COLUMNS, AND WHY THAT NEEDS WATCHING
+    ════════════════════════════════════════════════════════════════════════
+    `background_chosen` is what the admin picked on the Approve Artwork
+    screen and has not released yet. `background_color` is what is actually
+    flattened into the print file. They are different facts on purpose:
+    `_build_print_file` compares the wanted colour against the painted one to
+    decide whether it has any work to do, so writing a mere preference into
+    that column would tell the builder the job was already done and the old
+    colour would ship in silence.
+
+    Before approval the two are supposed to differ — that is the whole point.
+    AFTER approval they must agree, because approving is what paints the
+    chosen colour in. A released poster where they still disagree means the
+    build skipped the colour, and the file on the marketplace is not the one
+    on the screen.
+
+    Nothing in today's code can leave that behind. An invariant is what holds
+    whatever tomorrow's code does, and this one costs a single query.
+    """
+    rows_q = (db.query(ProcessedImage)
+                .filter(ProcessedImage.review_status == "approved",
+                        ProcessedImage.background_chosen.isnot(None),
+                        ProcessedImage.background_chosen != "",
+                        func.lower(func.coalesce(ProcessedImage.background_color, ""))
+                        != func.lower(ProcessedImage.background_chosen)))
+    found = rows_q.limit(MAX_ROWS).all()
+    total = rows_q.count()
+
+    rows = [Finding(f"poster #{p.saved_poster_id}",
+                    f"you chose {p.background_chosen} and the file was built "
+                    f"with {p.background_color or 'nothing'}",
+                    "/admin/pipeline/review")
+            for p in found]
+    return _result(
+        "chosen_colour_was_painted",
+        f"{total} released image(s) were built with the wrong colour"
+        if total else "Every released image was built with the colour you chose",
+        "The background you picked was not the one painted into the print "
+        "file, so what is on the marketplace does not match what you "
+        "approved. Send these titles back to the start and approve them "
+        "again, which rebuilds the file — and tell me, because this state is "
+        "supposed to be impossible.",
+        "error" if total else "ok", rows, total,
+    )
+
+
 def check_recalled_poster_still_painted(db: Session, scope: Scope) -> CheckResult:
     """
     INVARIANT: a poster that is not in the pipeline must have no paintings.
@@ -1849,6 +1900,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_approved_without_a_print_file,
     check_current_image_was_discarded,
     check_generations_share_a_file,
+    check_chosen_colour_was_painted,
     check_recalled_poster_still_painted,
     check_missing_files,
     check_posters_without_title,

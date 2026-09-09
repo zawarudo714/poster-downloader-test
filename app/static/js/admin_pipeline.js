@@ -114,6 +114,12 @@
        'How solid the mark is. 35 is what you set in Photoshop. 100 would be fully solid.'],
       ['signature_x_pct', 'number', 'Position across the poster (%)',
        'Where the MIDDLE of the mark sits, left to right. 91.1 puts its right edge exactly on the gap above, which is your default. 8.9 would put it on the left. You will normally leave this alone and drag it on the Approve Artwork screen for the odd poster that needs it.'],
+      ['signature_y_pct', 'number', 'Height up from the bottom (%)',
+       'How far the BOTTOM of the mark sits above the bottom of the poster. Measured as a percentage of the poster WIDTH, the same as the gap above, so 0.5 here and 0.5 there are the same visible distance. 0.5 is where the mark has always sat. Raise it to lift the mark up the page.'],
+      ['signature_key_left', 'text', 'Key that throws it fully left',
+       'Press this on the Approve Artwork screen to send the mark as far left as the gap allows. One character. A comma by default.'],
+      ['signature_key_right', 'text', 'Key that throws it fully right',
+       'Press this to send the mark as far right as the gap allows. One character. A full stop by default.'],
     ],
     upscale: [
       ['upscale_width_px',  'number', 'Output width (px)', 'The processed image is resized to this width; height scales in proportion, so 1000x2000 becomes 4000x8000. Lanczos resampling.'],

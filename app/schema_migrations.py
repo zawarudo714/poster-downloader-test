@@ -144,6 +144,7 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     # project's defaults", which is the normal state for nearly every row.
     ("processed_images", "signature_json", "TEXT"),
     ("processed_images", "signature_applied", "TEXT"),
+    ("processed_images", "background_chosen", "VARCHAR(16)"),
 ]
 
 # ════════════════════════════════════════════════════════════════════════════

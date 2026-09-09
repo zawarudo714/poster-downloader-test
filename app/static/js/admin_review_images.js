@@ -114,8 +114,24 @@
     // The dashboard's colour, so RESET goes back to what the
     // project is set to rather than to a number hardcoded here.
     defaultBackground = d.default_background || '#000000';
+    // From the settings, not written in here, so changing which key throws
+    // the mark left is a box on a screen rather than a deploy.
+    if (d.sig_keys) {
+      sigKeys.left = d.sig_keys.left || ',';
+      sigKeys.right = d.sig_keys.right || '.';
+    }
     colors.clear();
+    // Decisions come back from the last sitting rather than being wiped.
+    // Pruned to the range just loaded, so the store cannot grow for ever
+    // with posters that were released weeks ago.
+    const kept = loadDecisions();
+    const inRange = new Set();
+    titles.forEach((t) => t.images.forEach((img) => inRange.add(img.poster_id)));
     decisions = new Map();
+    kept.forEach((d, posterId) => {
+      if (inRange.has(posterId)) decisions.set(posterId, d);
+    });
+    saveDecisions();
     chosen = new Map();
     if (!titles.length) { alert('Nothing to review in that range.'); return; }
 
@@ -146,6 +162,88 @@
   }
 
   // ══════════════════════════════════════════════════════════════════════
+  //  KEEPING WHAT YOU DID — asked for on 2026-09-09
+  // ══════════════════════════════════════════════════════════════════════
+  //
+  // Every tweak used to live only in this file's memory until SAVE & RELEASE.
+  // Closing the tab, following a link, or a reload threw away everything
+  // adjusted since. The owner will be doing hundreds of images in a sitting,
+  // so one mis-click costing an afternoon of nudging is not acceptable.
+  //
+  // TWO KINDS OF THING, KEPT IN TWO PLACES, AND THE SPLIT IS DELIBERATE:
+  //
+  //   · A TWEAK — the colour, and where the signature sits — belongs to the
+  //     POSTER. It goes to the server, onto the row, where it survives a
+  //     different browser and a different day. The row already has columns
+  //     for exactly this.
+  //   · A DECISION — keep, rerun, unusable — is unsent INTENT. Storing it on
+  //     the server would invent a "decided but not released" state that the
+  //     greenlight query, the funnel counts and the worker machine all know
+  //     nothing about. It stays in this browser instead.
+  //
+  // The tweak save is DEBOUNCED, because dragging a slider fires on every
+  // pixel and each one would otherwise be a request.
+
+  const REMEMBER_AFTER_MS = 400;
+  const rememberTimers = new Map();
+
+  function rememberSoon(pid) {
+    clearTimeout(rememberTimers.get(pid));
+    rememberTimers.set(pid, setTimeout(() => rememberNow(pid), REMEMBER_AFTER_MS));
+  }
+
+  async function rememberNow(pid) {
+    rememberTimers.delete(pid);
+    const t = current();
+    if (!t) return;
+    let v = null;
+    t.images.forEach((img) => versionsOf(img).forEach((cand) => {
+      if (cand.processed_id === pid) v = cand;
+    }));
+    if (!v) return;
+    const body = { processed_id: pid };
+    if (v.signature) body.signature = sigFor(v);
+    if (colors.has(pid)) body.background_color = colors.get(pid);
+    try {
+      const r = await fetch(API + '/review/remember', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      // SAY SO WHEN IT FAILS. A silent autosave that has stopped working
+      // looks exactly like one that is working, and he would only find out
+      // by losing an afternoon of tweaks.
+      if (!r.ok) {
+        toast('Could not save that adjustment — it will be lost if you '
+              + 'leave this page. ' + (await r.text()).slice(0, 120), 'error');
+      }
+    } catch (err) {
+      toast('Could not save that adjustment: ' + err.message, 'error');
+    }
+  }
+
+  // The decisions, kept in this browser so a stray click cannot wipe an
+  // afternoon. Written on every change and read back when the screen loads.
+  const DECISIONS_KEY = 'pd_review_decisions_v1';
+
+  function saveDecisions() {
+    try {
+      const flat = [];
+      decisions.forEach((d, posterId) => flat.push([posterId, d]));
+      localStorage.setItem(DECISIONS_KEY, JSON.stringify(flat));
+    } catch (e) { /* a full or blocked store must never break the screen */ }
+  }
+
+  function loadDecisions() {
+    try {
+      const flat = JSON.parse(localStorage.getItem(DECISIONS_KEY) || '[]');
+      const out = new Map();
+      flat.forEach(([posterId, d]) => out.set(posterId, d));
+      return out;
+    } catch (e) { return new Map(); }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
   //  THE SIGNATURE
   // ══════════════════════════════════════════════════════════════════════
   //
@@ -164,10 +262,21 @@
     if (!v.signature) return null;
     return sigs.get(v.processed_id) || {
       x_pct: v.signature.x_pct,
+      y_pct: v.signature.y_pct,
       w_pct: v.signature.w_pct,
       opacity: v.signature.opacity,
       dark: !!v.signature.dark,
     };
+  }
+
+  // How tall the mark is, as a percentage of the poster's WIDTH. Read off the
+  // loaded mark rather than assumed, because it depends on the file the owner
+  // uploaded. Needed to clamp the vertical slider: the mark's TOP must stay
+  // inside the margin too, and the top is the bottom plus this.
+  function markHeightPct(pid, wPct) {
+    const el = document.querySelector(`[data-sig-mark][data-pid="${pid}"]`);
+    if (!el || !el.naturalWidth) return 0;
+    return wPct * (el.naturalHeight / el.naturalWidth);
   }
 
   function setSig(pid, patch) {
@@ -185,12 +294,45 @@
     // JavaScript and one is Python); keeping the numbers identical is what
     // the shared `margin_pct` is for.
     const m = v.signature.margin_pct;
+    now.w_pct = Math.max(2, Math.min(60, now.w_pct));
     const half = now.w_pct / 2;
     now.x_pct = Math.max(m + half, Math.min(100 - m - half, now.x_pct));
-    now.w_pct = Math.max(2, Math.min(60, now.w_pct));
     now.opacity = Math.max(0, Math.min(100, now.opacity));
+
+    // THE VERTICAL LIMIT NEEDS THE POSTER'S SHAPE, which the mark alone does
+    // not know. `y_pct` is a gap in percent-of-WIDTH, so the tallest it can
+    // be is the poster's height in those same units, less the margin and the
+    // mark's own height. On a 4000x6000 poster the height is 150% of the
+    // width, which is why this cannot be a plain 100.
+    const shape = posterShape(pid);       // height ÷ width, or 0 if unknown
+    const hPct = markHeightPct(pid, now.w_pct);
+    const ceiling = shape ? (shape * 100) - m - hPct : 100;
+    now.y_pct = Math.max(m, Math.min(Math.max(m, ceiling), now.y_pct));
+
     sigs.set(pid, now);
     paintSig(pid);
+    rememberSoon(pid);
+  }
+
+  // The poster's height divided by its width, from the picture on screen.
+  // Read from the loaded image rather than from the stored width and height,
+  // for the same reason the signature layer is measured rather than assumed:
+  // the picture is the thing the server measures too.
+  function posterShape(pid) {
+    const el = document.querySelector(`[data-poster-img][data-pid="${pid}"]`);
+    if (!el || !el.naturalWidth) return 0;
+    return el.naturalHeight / el.naturalWidth;
+  }
+
+  // FULLY LEFT and FULLY RIGHT. Asked for on 2026-09-09: nearly every poster
+  // wants the mark hard against one side or the other, and neither is worth
+  // aiming a slider at.
+  //
+  // These pass 0 and 100 and let the clamp above decide where that lands.
+  // Working out the limit here as well would be a second copy of the margin
+  // rule, and the two would drift the first time the margin changed.
+  function throwSignature(pid, side) {
+    setSig(pid, { x_pct: side === 'left' ? 0 : 100 });
   }
 
   // ── THE BOX A PERCENTAGE IS MEASURED AGAINST ────────────────────────────
@@ -248,18 +390,18 @@
     document.querySelectorAll(`[data-sig-mark][data-pid="${pid}"]`).forEach((el) => {
       el.style.width = s.w_pct + '%';
       el.style.left = s.x_pct + '%';
-      // THE BOTTOM MARGIN IS A PERCENTAGE OF THE *WIDTH*, because that is
-      // what the server does: `margin = W * margin_pct` and then
-      // `top = H - margin - mark_height`, in app/signature.py. A CSS
-      // percentage on `bottom` resolves against the container's HEIGHT
-      // instead, so on a 4000x6000 poster the preview was showing the mark
-      // 30 pixels up where the file puts it at 20 — half again too far, and
-      // wrong by a different amount for every shape of poster.
+      // THE GAP UP FROM THE BOTTOM IS A PERCENTAGE OF THE *WIDTH*, because
+      // that is what the server does: `gap = W * y_pct` and then
+      // `top = H - gap - mark_height`, in app/signature.py. A CSS percentage
+      // on `bottom` resolves against the container's HEIGHT instead, so on a
+      // 4000x6000 poster the preview showed the mark 30 pixels up where the
+      // file puts it at 20 — half again too far, and wrong by a different
+      // amount for every shape of poster.
       const layer = el.closest('[data-sig-layer]');
       const w = layer ? layer.getBoundingClientRect().width : 0;
       el.style.bottom = w
-        ? (w * v.signature.margin_pct / 100) + 'px'
-        : v.signature.margin_pct + '%';   // pre-layout; fitSigLayer redoes it
+        ? (w * s.y_pct / 100) + 'px'
+        : s.y_pct + '%';                  // pre-layout; fitSigLayer redoes it
       el.style.opacity = String(s.opacity / 100);
       // The file is white strokes. `invert` is how the same file becomes the
       // black version, which is exactly what the server does by rebuilding
@@ -268,6 +410,8 @@
     });
     document.querySelectorAll(`[data-sig-x][data-pid="${pid}"]`).forEach(
       (el) => { el.value = String(Math.round(s.x_pct * 10) / 10); });
+    document.querySelectorAll(`[data-sig-y][data-pid="${pid}"]`).forEach(
+      (el) => { el.value = String(Math.round(s.y_pct * 10) / 10); });
     document.querySelectorAll(`[data-sig-w][data-pid="${pid}"]`).forEach(
       (el) => { el.value = String(Math.round(s.w_pct * 10) / 10); });
     document.querySelectorAll(`[data-sig-o][data-pid="${pid}"]`).forEach(
@@ -322,9 +466,21 @@
     return `
       <div class="review-sig" data-pid="${v.processed_id}" data-where="${where}">
         <span class="muted mono">signature</span>
+        <button class="btn btn-ghost btn-tiny" data-img-action="sig-left"
+                data-pid="${v.processed_id}"
+                title="Throw the mark as far left as the gap allows">
+          ◀ FAR LEFT <span class="mono">(${esc(sigKeys.left)})</span></button>
         <label class="sig-field">across
           <input type="range" min="0" max="100" step="0.1"
                  data-sig-x data-pid="${v.processed_id}" value="${s.x_pct}"></label>
+        <button class="btn btn-ghost btn-tiny" data-img-action="sig-right"
+                data-pid="${v.processed_id}"
+                title="Throw the mark as far right as the gap allows">
+          FAR RIGHT ▶ <span class="mono">(${esc(sigKeys.right)})</span></button>
+        <label class="sig-field">height
+          <input type="range" min="0" max="100" step="0.1"
+                 data-sig-y data-pid="${v.processed_id}" value="${s.y_pct}"
+                 title="How far up from the bottom of the poster the mark sits"></label>
         <label class="sig-field">size
           <input type="range" min="2" max="60" step="0.1"
                  data-sig-w data-pid="${v.processed_id}" value="${s.w_pct}"></label>
@@ -387,6 +543,7 @@
     if (!t.dataset || !t.dataset.pid) return;
     const pid = Number(t.dataset.pid);
     if (t.hasAttribute('data-sig-x')) setSig(pid, { x_pct: Number(t.value) });
+    else if (t.hasAttribute('data-sig-y')) setSig(pid, { y_pct: Number(t.value) });
     else if (t.hasAttribute('data-sig-w')) setSig(pid, { w_pct: Number(t.value) });
     else if (t.hasAttribute('data-sig-o')) setSig(pid, { opacity: Number(t.value) });
   });
@@ -398,6 +555,9 @@
   // colour picker costs no requests.
   const colors = new Map();
   let defaultBackground = '#000000';
+  // Overwritten from the server on every load. The values here are only what
+  // the buttons say in the instant before the first reply arrives.
+  const sigKeys = { left: ',', right: '.' };
 
   function colorFor(v) {
     return colors.get(v.processed_id)
@@ -491,9 +651,10 @@
       // invented a grander building of the same type. That cannot be judged
       // from the poster alone — you have to see what it was given.
       const source = `
-        <figure class="review-img review-img-source" data-zoom-open="${img.poster_id}"
-                title="Click to compare side by side, full screen">
-          <img loading="lazy" src="${img.source_url}" alt="">
+        <figure class="review-img review-img-source">
+          <img loading="lazy" src="${img.source_url}" alt=""
+               data-zoom-open="${img.poster_id}"
+               title="Click to compare side by side, full screen">
           <figcaption><span class="muted mono">what the worker found · click to enlarge</span></figcaption>
         </figure>`;
 
@@ -508,10 +669,10 @@
 
       return `
         ${source}
-        <figure class="review-img ${state ? 'is-' + state : ''}" data-pid="${v.processed_id}"
-                data-zoom-open="${img.poster_id}"
-                title="Click to compare side by side, full screen">
-            <span class="review-canvas" data-canvas data-pid="${v.processed_id}">
+        <figure class="review-img ${state ? 'is-' + state : ''}" data-pid="${v.processed_id}">
+            <span class="review-canvas" data-canvas data-pid="${v.processed_id}"
+                  data-zoom-open="${img.poster_id}"
+                  title="Click to compare side by side, full screen">
               <img loading="lazy" src="${shown}" alt="" data-poster-img
                    data-pid="${v.processed_id}" crossorigin="anonymous"
                    style="background-color:${esc(bg)}">
@@ -537,6 +698,11 @@
 
     probeTransparency();
     fitAllSigLayers();
+    // ONE place, so a new way of changing a decision cannot forget to save.
+    // Every path that changes `decisions` already ends in render(); making
+    // this the hook derives the save rather than asking each caller to
+    // remember it — the same preference as the quiet window being a window.
+    saveDecisions();
     // The sliders and the readout are filled in AFTER the markup exists.
     // Setting them from the template string would mean writing the same
     // numbers twice, and one of the two copies always goes stale.
@@ -556,6 +722,7 @@
   // this generation is repainted, so the card and the zoom can never drift.
   function setColor(pid, value) {
     colors.set(pid, value);
+    rememberSoon(pid);          // kept on the row, not just in this tab
     // ON THE PICTURE, NOT ON THE PLATE. The plate is wider than the artwork
     // on the card and taller than it in the zoom, so a colour painted there
     // showed as bars beside the poster that are not in the finished file
@@ -853,14 +1020,19 @@
 
     const el = e.target.closest('[data-action], [data-img-action]');
     if (!el) {
-      // A click on either PICTURE opens the compare overlay — but never
-      // while the eyedropper is armed (that click is picking a colour),
-      // and never on the colour bar or the version buttons.
-      const zoomEl = e.target.closest('[data-zoom-open]');
-      if (zoomEl && !eyedropFor && !e.target.closest('.review-color')
-          && !e.target.closest('.review-versions')) {
-        syncZoom();
-      }
+      // A click on a PICTURE opens the compare overlay. `data-zoom-open` now
+      // sits on the pictures themselves rather than on the whole card, so
+      // there is no list of things to exclude.
+      //
+      // It used to sit on the card, with `.review-color` and
+      // `.review-versions` named as exceptions. The signature bar was added
+      // later and nobody added it to that list, so every nudge of a slider
+      // threw the overlay open (owner, 2026-09-09). A rule that carries its
+      // own exceptions is one somebody has to remember to extend; deriving
+      // the scope from where the picture actually is cannot rot.
+      //
+      // The eyedropper still wins, because that click is picking a colour.
+      if (e.target.closest('[data-zoom-open]') && !eyedropFor) syncZoom();
       return;
     }
 
@@ -872,6 +1044,11 @@
       }
       if (imgAction === 'color-reset') {
         setColor(parseInt(el.dataset.pid, 10), defaultBackground);
+        return;
+      }
+      if (imgAction === 'sig-left' || imgAction === 'sig-right') {
+        throwSignature(parseInt(el.dataset.pid, 10),
+                       imgAction === 'sig-left' ? 'left' : 'right');
         return;
       }
       if (imgAction === 'sig-flip') {
@@ -947,6 +1124,25 @@
       pickVersionByNumber(Number(e.key));
       e.preventDefault();
       return;
+    }
+
+    // THROW THE MARK TO ONE SIDE. Checked BEFORE the fixed letter keys
+    // below, because these two are editable and he may well set one of them
+    // to a letter. Handled first, the setting always wins; handled after,
+    // setting the left key to "k" would silently keep approving instead.
+    if (e.key === sigKeys.left || e.key === sigKeys.right) {
+      const cur = current();
+      if (cur) {
+        cur.images.forEach((img) => {
+          const v = shownVersion(img);
+          if (v && v.signature) {
+            throwSignature(v.processed_id,
+                           e.key === sigKeys.left ? 'left' : 'right');
+          }
+        });
+        e.preventDefault();
+        return;
+      }
     }
 
     const t = current();
@@ -1054,6 +1250,7 @@
         + (d.files_removed
             ? ` · ${d.files_removed} old file(s) deleted from the archive` : '');
       decisions = new Map();
+      saveDecisions();      // released, so the browser must forget them too
       chosen = new Map();
       closeZoom();
       stage.hidden = true;

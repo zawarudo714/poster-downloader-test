@@ -53,7 +53,32 @@ from typing import Optional
 # for the same reason PipelineJob.payload_json is free-form: the second thing
 # somebody wants to adjust — rotation, a second mark, a per-account signature
 # — should not need a migration.
-KEYS = ("x_pct", "w_pct", "opacity", "dark", "off")
+KEYS = ("x_pct", "y_pct", "w_pct", "opacity", "dark", "off")
+
+# The ones that are NUMBERS, derived rather than typed out a second time.
+# Both the approve endpoint and the remember endpoint filter what the browser
+# sends against this, and `placement()` reads it — so adding a key to KEYS is
+# all it takes for a new adjustment to survive the whole round trip. They each
+# used to carry their own tuple, which is three copies of one list and three
+# chances for a slider to move on screen and change nothing in the file.
+NUMERIC_KEYS = tuple(k for k in KEYS if k not in ("dark", "off"))
+
+# ════════════════════════════════════════════════════════════════════════════
+# WHY `y_pct` IS A PERCENTAGE OF THE *WIDTH*, WHICH LOOKS WRONG AND IS NOT
+# ════════════════════════════════════════════════════════════════════════════
+# `y_pct` is the gap between the BOTTOM of the mark and the BOTTOM of the
+# poster, measured in percent of the poster's WIDTH — the same unit as
+# `margin_pct`, which it defaults to and replaces.
+#
+# Two reasons, and both are about the two numbers staying comparable:
+#
+#   * A gap of "0.5% of the width" is the same visible distance whether it is
+#     measured up from the bottom or in from the side. Measured against the
+#     HEIGHT instead, the bottom gap on a 4000x6000 poster would be half again
+#     bigger than the side gap while both read "0.5" on the screen.
+#   * The margin the mark is clamped to is in width-percent. Storing the
+#     position in a different unit from its own limit is how a preview and a
+#     builder end up disagreeing — which is exactly the fault fixed in v170.
 
 
 def settings_for(db, project) -> dict:
@@ -74,6 +99,10 @@ def settings_for(db, project) -> dict:
         "margin_pct": num("signature_margin_pct", 0.5),
         "opacity": num("signature_opacity", 35.0),
         "x_pct": num("signature_x_pct", 91.1),
+        # Defaults to the margin, which is exactly where the mark sat before
+        # there was a vertical control at all. So an existing poster that has
+        # never been nudged paints in the same place as it always did.
+        "y_pct": num("signature_y_pct", num("signature_margin_pct", 0.5)),
         "dark": False,
     }
 
@@ -102,7 +131,7 @@ def placement(db, project, processed) -> Optional[dict]:
         return None           # this one poster, deliberately unsigned
 
     out = dict(base)
-    for key in ("x_pct", "w_pct", "opacity"):
+    for key in NUMERIC_KEYS:
         if isinstance(own.get(key), (int, float)):
             out[key] = float(own[key])
     out["dark"] = bool(own.get("dark"))
@@ -162,7 +191,13 @@ def paint(img, mark, place: dict):
     centre = W * place["x_pct"] / 100.0
     left = int(round(centre - want_w / 2.0))
     left = max(margin, min(W - margin - want_w, left))
-    top = H - margin - want_h
+
+    # Y is the GAP UP FROM THE BOTTOM, in percent of the width — see the note
+    # on KEYS. The same clamp applies for the same reason: the margin holds on
+    # all four sides whatever the slider was dragged to.
+    gap = int(round(W * float(place.get("y_pct", place["margin_pct"])) / 100.0))
+    top = H - gap - want_h
+    top = max(margin, min(H - margin - want_h, top))
 
     img.paste(block, (left, top), block)
     return img

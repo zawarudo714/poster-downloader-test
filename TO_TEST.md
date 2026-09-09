@@ -749,6 +749,34 @@ running past the artwork, and the mark changing size when you zoom.
 
 ---
 
+## 29. THE APPROVE ARTWORK CONTROLS — v171
+
+**What to click**
+
+- Move the ACROSS slider, the SIZE slider and the SOLID slider. None of them
+  should open the big overlay any more. Clicking the poster itself still
+  should, and so should clicking the worker's photograph.
+- There is a new **HEIGHT** slider. It lifts the mark up the page. At its
+  lowest it sits where it always has.
+- Press **FAR LEFT** and **FAR RIGHT**, and the `,` and `.` keys. All four
+  should throw the mark hard against one side, stopping at the gap.
+- Change those two keys on the Settings page under SIGNATURE, reload Approve
+  Artwork, and check the buttons show the new letters and that they work.
+- **The one that matters most:** nudge a few posters, then leave the screen
+  without pressing SAVE & RELEASE. Go to another page, come back, and load
+  the same range. The colours, the positions and your KEEP / RERUN / UNUSABLE
+  marks should all still be there.
+- Then approve one and open the finished file on the S drive. The height and
+  the side you chose should be what is in the file.
+
+**Worth knowing.** Dragging the mark still only moves it left and right. You
+asked for a vertical slider rather than vertical dragging, and I left the drag
+alone on purpose — a slightly wobbly sideways drag would otherwise lift the
+mark off its line without you meaning it. Say if you would rather it dragged
+both ways.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

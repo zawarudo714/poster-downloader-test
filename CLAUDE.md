@@ -1482,8 +1482,34 @@ row between coloured blocks, which does not break and does not look
 deliberate either. Note how the scope is decided — by the HREF, not by a
 list of exempt links — so the "All Projects" exit link and the whole worker
 menu stay outside without anybody having to maintain an exceptions list.
-**A rule that carries its own exceptions is one somebody must remember to
-extend; derive the scope instead.**
+
+**A RULE THAT CARRIES ITS OWN EXCEPTIONS IS ONE SOMEBODY MUST REMEMBER TO
+EXTEND; DERIVE THE SCOPE INSTEAD.** The specimen is worth naming because it
+cost the owner a whole screen. `data-zoom-open` sat on the entire Approve
+Artwork card, so the click handler carried a list of what NOT to treat as a
+click on the picture: not the colour bar, not the version buttons. The
+signature bar arrived months later, nobody extended the list, and every
+nudge of a slider threw a full-screen overlay in his face (2026-09-09).
+
+Three things generalise:
+
+  * **The exception list IS the defect, not the missing entry.** Adding
+    `.review-sig` to it would have fixed the symptom and guaranteed the next
+    control repeats it. The attribute moved onto the pictures themselves,
+    and now there is nothing to exclude.
+  * **A click target that covers a REGION will swallow every control that
+    region ever grows.** Ask what the target will contain in a year, not
+    what it contains today. Same question as "can this column ever be
+    plural" (rule 6), asked about space instead of data.
+  * **The cursor and the click must be the same shape.** `cursor: zoom-in`
+    was on the card too, so the sliders truthfully advertised the bug. When
+    a handler and a style disagree about what is clickable, one of them is
+    already wrong.
+
+Now mechanical: `check_click_targets_do_not_swallow_controls` fails on any
+whole-region click target containing an `input`, `button`, `select` or
+`textarea`. Sabotage-tested by putting the original bug back, and it reports
+blindness rather than passing if the hook is ever renamed.
 
 **A TEST CAN MEASURE THE WRONG THING AND STILL GO GREEN — AND A GREEN
 NUMBER IS MORE CONVINCING THAN A GREEN TICK.** The signature had to land 20
@@ -1972,6 +1998,24 @@ file that holds one image — and no screen ever asked for an old one, so
 nothing looked wrong for weeks. It surfaced only when the owner asked to
 CHOOSE between generations (2026-09-09), at which point picking v1 would
 have shown him v2.
+
+**AND THE OPPOSITE ERROR IS REAL TOO: SOMETIMES TWO COLUMNS ARE TWO FACTS.**
+This rule is quoted so often that the reflex becomes "never store the same
+thing twice", and that reflex would have shipped a silent bug on 2026-09-09.
+The Approve Artwork screen needed to remember a colour the admin had picked
+but not yet released. The obvious move was to write it into
+`background_color` — and that column means "the colour already flattened
+into the print file", which `_build_print_file` COMPARES AGAINST to decide
+whether it has work to do. Writing a preference there would have told the
+builder the job was done, and the old colour would have gone to the
+marketplace with nothing on any screen saying so.
+
+So `background_chosen` sits beside it, exactly as `signature_json` (chosen)
+sits beside `signature_applied` (painted). **The test is not "are these two
+values usually equal" — it is "does anything COMPARE them".** If something
+does, they are two facts and the comparison is the feature; the duplication
+rule does not apply. If nothing ever does, they are one fact stored twice and
+it will drift. Ask which before merging two columns or splitting one.
 
 The reverse of that mistake is worth stating too, because the fix used it.
 When the print file moved to approval time (2026-09-09) there was a choice

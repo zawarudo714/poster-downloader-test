@@ -1,51 +1,57 @@
 # Not yet deployed
 
-## v170 — the signature and the blue: the preview was measuring the wrong box
+## v171 — Approve Artwork: the sliders, the vertical position, and keeping your work
 
 **Server only. The Windows node is unchanged, so nothing needs copying.**
+**This adds a database column, so back up `poster.db` before deploying.**
 
-Three things the owner reported on the Approve Artwork screen, all one cause:
-the signature sat outside the picture, the blue ran past the edges of the
-artwork, and the mark was a different size zoomed than not.
-
-The plate the poster sits on is deliberately BIGGER than the poster — wider
-on a card, taller in the zoom. The server places the signature as a
-percentage of the PICTURE. The preview was placing it as a percentage of the
-PLATE. Two different boxes, so the mark landed on the coloured bar and came
-out a different size in each view.
-
-* **The colour moved off the plate and onto the picture.** A background
-  paints its own element's box, and an image's box is the image, so the
-  colour can no longer extend past the artwork.
-* **The signature got its own layer**, `.sig-layer`, pinned to the poster's
-  rendered box. Percentages in the preview now mean what they mean on the
-  server. Dragging measures against it too.
-* **A fourth fault nobody had reported, found on the way:** the bottom margin
-  was `bottom: 0.5%`, which CSS resolves against the container's HEIGHT. The
-  server uses `W * margin_pct` — the WIDTH. On a 4000x6000 poster the preview
-  showed the mark 30 pixels up where the file puts it at 20. Now computed in
-  pixels from the layer width, in one place.
-* This REVERSES the v158 decision to let the plate show around the art. The
-  reason for v158 was that colour changes were invisible on an opaque
-  artwork; `probeTransparency()` now says so in words instead, which is the
-  honest version of the same thing.
+* **The overlay no longer opens when you touch a slider.** `data-zoom-open`
+  was on the whole card, with an exception list naming the colour bar and the
+  version buttons. The signature bar was added later and nobody extended that
+  list. The attribute now sits on the pictures themselves, so there is no list
+  to keep up to date.
+* **A vertical slider**, labelled "height". `signature_y_pct` is the gap from
+  the bottom of the mark to the bottom of the poster, measured in percent of
+  the poster's WIDTH — the same unit as the margin, so 0.5 in one box and 0.5
+  in the other are the same visible distance. It defaults to the margin, which
+  is exactly where the mark has always sat, so nothing already placed moves.
+* **Dragging is still horizontal only.** He asked for a vertical slider, not
+  vertical dragging, and adding it would mean a slightly wobbly sideways drag
+  quietly lifts the mark off its line.
+* **FAR LEFT and FAR RIGHT buttons**, plus `signature_key_left` (`,`) and
+  `signature_key_right` (`.`), both editable on the Settings page. The keys are
+  checked BEFORE the fixed letter keys, so setting one to `k` throws the mark
+  instead of silently approving.
+* **Tweaks now survive leaving the screen.** A new endpoint,
+  `/api/review/remember`, writes the colour and the signature onto the row as
+  you change them. It approves nothing and builds nothing.
+* **`ProcessedImage.background_chosen` is a NEW COLUMN** beside
+  `background_color`. They are not two records of one fact: one is what you
+  picked, the other is what was flattened into the file, and
+  `_build_print_file` compares them to decide whether it has work to do.
+  Writing a preference into the painted column would have told the builder
+  the job was done and shipped the old colour in silence.
+* **KEEP / RERUN / UNUSABLE are kept in the browser**, not on the server. A
+  decision is unsent intent, and a "decided but not released" row is a state
+  the greenlight query, the funnel counts and the worker machine know nothing
+  about.
+* Three copies of the signature key list became one: both endpoints now read
+  `signature.NUMERIC_KEYS` instead of carrying their own tuple. Adding a new
+  adjustment is now one edit rather than three.
 
 Mechanical checks:
 
-* `check_overlay_sits_in_its_measuring_layer` — NEW. The mark must be built
-  inside the layer it is measured against, at every place markup is built.
-  It also fails loudly if the mark is ever renamed, rather than going green
-  on an empty set.
-* `check_no_background_on_composited_img` — REVISED, because moving the
-  colour made its old question meaningless and it was passing for the wrong
-  reason. It now fails on a CSS background on the picture OR on the plate.
-* Two holes in that check were found by sabotage, not by reading it: the
-  selector pattern was blind to `img[data-poster-img]`, and `transition:
-  background-color` could read as a background being set.
+* `check_click_targets_do_not_swallow_controls` — NEW. A whole-region click
+  target may not contain a slider or a button. Sabotage-tested by putting the
+  original bug back, and it also reports blindness if the hook is renamed.
+* `check_chosen_colour_was_painted` — NEW invariant in Diagnostics. Once
+  released, the colour chosen must equal the colour painted.
+* The two new settings were confirmed to fail before deploy if their boxes are
+  removed.
 
-**What this cannot prove:** that the layer really covers the picture on
-screen. That is a fact about a rendered page, and nothing here renders. It
-needs a person to look at it.
+**What could not be checked here:** whether the sliders feel right, and
+whether the vertical position lands where you expect in the finished file.
+Nothing in this environment renders a page or builds a poster.
 
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.

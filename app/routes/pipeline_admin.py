@@ -3484,6 +3484,7 @@ def api_review_queue(
             return None
         return {
             "x_pct": place["x_pct"],
+            "y_pct": place.get("y_pct", place["margin_pct"]),
             "w_pct": place["w_pct"],
             "opacity": place["opacity"],
             "margin_pct": place["margin_pct"],
@@ -3511,7 +3512,12 @@ def api_review_queue(
             # transparent master to re-flatten from. No master means the
             # generation was opaque and the colour control does nothing —
             # so the screen hides it rather than offering a dead knob.
-            "background_color": p.background_color or "",
+            # THE CHOSEN COLOUR WINS OVER THE PAINTED ONE. `background_chosen`
+            # is what the admin picked and has not released yet, so it is what
+            # the screen must show when he comes back to a poster he tweaked
+            # earlier. Falling back to the painted colour is right for
+            # everything he has not touched.
+            "background_color": (p.background_chosen or p.background_color or ""),
             # Where this poster's signature sits. The project's defaults with
             # the poster's own nudges over the top, worked out server-side so
             # the screen and the builder can never disagree about it — two
@@ -3548,7 +3554,18 @@ def api_review_queue(
                          "count": len(titles), "status": status,
                          "default_background": str(
                              P.get_setting(db, "gpt_background_color",
-                                           project=project) or "#000000")})
+                                           project=project) or "#000000"),
+                         # The shortcut keys come from the settings rather
+                         # than being written into the script, so changing
+                         # them is a box on a screen and not a deploy.
+                         "sig_keys": {
+                             "left": str(P.get_setting(
+                                 db, "signature_key_left",
+                                 project=project) or ","),
+                             "right": str(P.get_setting(
+                                 db, "signature_key_right",
+                                 project=project) or "."),
+                         }})
 
 
 @router.get("/review/image/{processed_id}")
@@ -4014,6 +4031,83 @@ def api_recall_preview(
                          "images": images})
 
 
+@router.post("/api/review/remember")
+def api_review_remember(
+    request: Request,
+    payload: dict = Body(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Keep a colour or a signature nudge WITHOUT approving anything.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS EXISTS (owner, 2026-09-09)
+    ════════════════════════════════════════════════════════════════════════
+    Every tweak used to live only in the browser's memory until SAVE &
+    RELEASE. Closing the tab, clicking a link, or a reload threw away every
+    adjustment made since. His words: he will be doing hundreds of images at
+    once, so losing them to one mis-click or one interruption is a blunder
+    he cannot afford.
+
+    ════════════════════════════════════════════════════════════════════════
+    IT DECIDES NOTHING, AND THAT IS THE WHOLE POINT
+    ════════════════════════════════════════════════════════════════════════
+    This writes WHAT HE WANTS. It does not approve, does not build a print
+    file, does not create upload work, and does not touch the columns that
+    record what was actually painted. So there is no half-released state: a
+    poster with a remembered colour and no decision is exactly as unreleased
+    as one nobody has opened.
+
+    KEEP / RERUN / UNUSABLE are deliberately NOT stored here. A decision is
+    unsent intent, and a "pending decision" is a state no other part of the
+    pipeline understands — the greenlight query, the funnel counts and the
+    node would all have to learn it. Those stay in the browser instead.
+    """
+    import json as _json
+    from .. import signature as SIG
+
+    pid = payload.get("processed_id")
+    processed = db.query(ProcessedImage).filter_by(id=pid).first()
+    if processed is None:
+        raise HTTPException(404, "No such image.")
+
+    # SCOPED. Reached by an id from the page, so it gets the same check as
+    # anything else that picks a row — see MULTIPROJECT.md.
+    project = _project(request, admin, db)
+    poster = db.query(SavedPoster).filter_by(id=processed.saved_poster_id).first()
+    title = (db.query(MasterTitle).filter_by(id=poster.master_title_id).first()
+             if poster else None)
+    if title is None or P.project_for_title(db, title) is None \
+            or P.project_for_title(db, title).id != project.id:
+        raise HTTPException(404, "That image is not in this project.")
+
+    changed = []
+
+    sig = payload.get("signature")
+    if isinstance(sig, dict):
+        keep = {k: float(sig[k]) for k in SIG.NUMERIC_KEYS
+                if isinstance(sig.get(k), (int, float))}
+        keep["dark"] = bool(sig.get("dark"))
+        processed.signature_json = _json.dumps(keep, sort_keys=True)
+        changed.append("signature")
+
+    if "background_color" in payload:
+        colour = str(payload.get("background_color") or "").strip()
+        # Written to the CHOSEN column, never to `background_color`. That one
+        # means "already flattened into the file", and `_build_print_file`
+        # compares against it — so writing here would tell the builder the
+        # work was done and the old colour would ship.
+        processed.background_chosen = colour or None
+        changed.append("colour")
+
+    if not changed:
+        return JSONResponse({"ok": True, "saved": []})
+
+    db.commit()
+    return JSONResponse({"ok": True, "saved": changed})
+
+
 @router.post("/api/review/decide")
 def api_review_decide(
     request: Request,
@@ -4064,12 +4158,19 @@ def api_review_decide(
             # the row by another, which is two paths to one fact.
             sig = item.get("signature")
             if isinstance(sig, dict):
-                keep = {k: sig[k] for k in ("x_pct", "w_pct", "opacity")
+                from .. import signature as SIG_KEYS
+                keep = {k: sig[k] for k in SIG_KEYS.NUMERIC_KEYS
                         if isinstance(sig.get(k), (int, float))}
                 keep["dark"] = bool(sig.get("dark"))
                 processed.signature_json = json.dumps(keep, sort_keys=True)
 
-            wanted = (item.get("background_color") or "").strip()
+            # The colour the browser sent, then the one remembered from an
+            # earlier visit, then the project default. The middle step is what
+            # makes a tweak made yesterday still count today — without it, a
+            # poster whose colour was set on another day would silently
+            # release with the default.
+            wanted = ((item.get("background_color") or "").strip()
+                      or (processed.background_chosen or "").strip())
             if processed.master_path:
                 if not wanted:
                     wanted = str(P.get_setting(

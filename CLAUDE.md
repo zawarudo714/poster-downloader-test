@@ -1394,6 +1394,45 @@ searched the JS and found its own query. **The sabotage is what found it —
 without it this would have shipped as a protection that could not fire,
 guarding a bug that had just cost an evening.**
 
+**A HELPER BORROWED FROM THE WRONG SCOPE IS THE QUIETEST FAILURE IN THIS
+WHOLE FILE, BECAUSE `async` EATS THE ERROR.** `admin_pipeline.js` holds two
+wrappers: the big one declares `q`, the small GPT panel declares `$`. The
+signature UPLOAD handler was written in the second and called `q(...)`. The
+owner pressed UPLOAD and the page did nothing whatever — no message, no
+change, nothing in front of him at all. The same file had a second instance:
+`toast` was declared inside that wrapper while Approve Artwork's script
+called it too, and those two never load together, so the eyedropper's
+message had never once appeared and the line that reports an unreadable
+pixel was itself throwing.
+
+**An error inside an `async` handler becomes a rejected promise nobody
+awaits.** That is why this class is worse than an ordinary crash: a crash at
+least stops something visibly. Whenever a handler is `async`, assume any
+mistake inside it will be perfectly silent, and lean harder on the
+mechanical check than on trying it once.
+
+`check_js_helpers_are_in_scope` now asks the narrow question both defects
+answer yes to: is this name somebody's PRIVATE helper, called from outside?
+A name only counts if it is declared inside some wrapper, so no list of
+browser globals is needed. Two lessons from building it, both general:
+
+  * **The first version tried to be a scope analyser and had to be thrown
+    away.** It needed a real JavaScript lexer — template literals nest,
+    regex literals hold quotes — and the hand-rolled string-blanker silently
+    ATE REAL CODE, reporting `jobTone` as undefined while `function jobTone`
+    sat forty lines below. **A check that must be right about lexing to be
+    right about anything is the wrong check.** Ask a narrower question that
+    needs no parsing.
+  * **Getting the narrow version right still took four holes, every one at
+    the edge of the pattern**: `async function` unrecognised, `//` comments
+    unstripped so "every 4th tick (~12s)" read as a call, declarations
+    nested deeper than two spaces unseen, and names the browser also
+    provides colliding. When a check reports something you can see is wrong,
+    the hole is nearly always in the variant you did not enumerate — and
+    **prefer being permissive about what counts as "already defined here"
+    and strict about what counts as "private", because both directions make
+    a check quieter and neither can invent a false alarm.**
+
 **A NAME CHOSEN IN ONE FILE AND DEFINED IN ANOTHER FAILS SILENTLY, SO
 COMPARE THE TWO LISTS.** The sidebar marks each section
 `data-nav-tint="money"` and the status strip asks for `chip('warn', …)`;

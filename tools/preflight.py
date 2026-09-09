@@ -1914,6 +1914,140 @@ def check_colour_names_have_rules() -> None:
              f"base.html")
 
 
+def _js_wrappers(text: str):
+    """Each top-level `(function () { … })()` block, as (start_line, body)."""
+    import re as _re
+    text = _re.sub(r"/\*.*?\*/", " ", text, flags=_re.S)
+    # LINE COMMENTS TOO. Leaving them in made a sentence reading "only try
+    # every 4th tick (~12s)" look like a call to `tick()`. Prose must not
+    # satisfy a check, and it must not TRIGGER one either. The lookbehind
+    # keeps `https://` from being mistaken for a comment.
+    text = _re.sub(r"(?<![:\w])//[^\n]*", " ", text)
+    starts = [m.start() for m in
+              _re.finditer(r"^\(function \(\) \{", text, _re.M)]
+    bounds = starts + [len(text)]
+    return [(text[:b].count("\n") + 1, text[b:bounds[i + 1]])
+            for i, b in enumerate(starts)]
+
+
+def _js_private_names(body: str) -> set:
+    """
+    Helpers DECLARED inside one wrapper, so reachable only from inside it.
+
+    Only the three shapes this codebase actually uses to declare a helper.
+    Being narrow here makes the check quieter, never louder: a declaration
+    this misses simply is not considered, and no false alarm can result.
+    """
+    import re as _re
+    # `async ` must be optional. Leaving it out was a hole exactly at the
+    # edge of the pattern: `async function load()` was not seen as a
+    # declaration, so every file with one was accused of borrowing somebody
+    # else's `load`. Enumerate the variants — this codebase writes helpers
+    # both ways.
+    return (set(_re.findall(r"^\s{2}(?:async\s+)?function\s+"
+                            r"([A-Za-z_$][\w$]*)\s*\(", body, _re.M))
+            | set(_re.findall(r"^\s{2}(?:const|let)\s+([A-Za-z_$][\w$]*)\s*="
+                              r"\s*(?:function|\(|[A-Za-z_$][\w$]*\s*=>)",
+                              body, _re.M)))
+
+
+def check_js_helpers_are_in_scope() -> None:
+    """
+    A private helper must not be called from outside the wrapper that owns it.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE TWO DEFECTS THIS EXISTS FOR, BOTH FOUND ON 2026-09-09
+    ════════════════════════════════════════════════════════════════════════
+    · `admin_pipeline.js` holds two wrappers. The big one declares a shortcut
+      called `q`; the small GPT panel declares `$`. The signature UPLOAD
+      button's handler was written in the second and called `q(...)`, which
+      does not exist there. The owner pressed UPLOAD and nothing happened.
+    · `toast` was declared inside `admin_pipeline.js` while `admin_review_
+      images.js` called it too. Those two files never load on the same page,
+      so on Approve Artwork the eyedropper's message threw every time — and
+      so did the one line that reports a failed pixel read.
+
+    Neither could be seen. Both files PARSE: `q(...)` is perfectly good
+    JavaScript that happens to have no `q`. "Buttons have handlers" passed,
+    because a handler really was written. And an error thrown inside an
+    `async` handler becomes a rejected promise nobody awaits, so the page
+    does nothing at all and says nothing at all.
+
+    ════════════════════════════════════════════════════════════════════════
+    HOW IT ASKS THE QUESTION, AND WHY IT IS NOT A SCOPE ANALYSER
+    ════════════════════════════════════════════════════════════════════════
+    The first version tried to list every name each wrapper could see and
+    compare that with every call. That needs a real JavaScript lexer:
+    template literals nest, regex literals hold quotes, and my hand-rolled
+    string-blanker silently ate real code — it reported `jobTone` as
+    undefined while `function jobTone` sat forty lines below, because the
+    blanker had wiped the declaration. A check that has to be right about
+    lexing to be right about anything is the wrong check.
+
+    So this one never asks "what can be seen here". It asks the far narrower
+    question that both defects answer YES to: **is this name somebody's
+    private helper, being called from outside?** A name only qualifies if it
+    is DECLARED inside some wrapper, which means no list of browser globals
+    is needed and no CDN library can trip it — `Chart` and `URL` are declared
+    nowhere, so they are never candidates.
+    """
+    import re as _re
+
+    # NAMES THE BROWSER ALSO PROVIDES. One file declaring its own `open` or
+    # `close` says nothing about another file calling `window.open`, so a
+    # collision on one of these is meaningless and must not be reported.
+    also_global = {"open", "close", "load", "find", "focus", "blur", "print",
+                   "stop", "scroll", "name", "status", "alert", "confirm"}
+
+    files = sorted((APP / "static" / "js").glob("*.js"))
+    owners: dict = {}                      # name -> [(file, wrapper line), ...]
+    wrappers: dict = {}                    # file -> [(line, body), ...]
+
+    for js in files:
+        wrappers[js.name] = _js_wrappers(js.read_text(encoding="utf-8"))
+        for line, body in wrappers[js.name]:
+            for name in _js_private_names(body):
+                # EVERY owner, not just the first one found. Several files
+                # legitimately declare their own `q`, and blaming the
+                # alphabetically-first one sends the reader to a file that
+                # has nothing to do with it — a correct finding wearing a
+                # wrong address is a finding that gets doubted.
+                owners.setdefault(name, []).append((js.name, line))
+
+    for js in files:
+        for line, body in wrappers[js.name]:
+            # PERMISSIVE about what counts as "this wrapper has its own",
+            # STRICT about what counts as somebody's private helper. A
+            # declaration at any depth — `const run = async () => {` four
+            # spaces in — means this wrapper is not borrowing anything, and
+            # both directions can only make the check quieter.
+            mine = _js_private_names(body) | set(_re.findall(
+                r"\b(?:const|let|var|function)\s+([A-Za-z_$][\w$]*)", body))
+            for name, places in owners.items():
+                if name in mine or name in also_global:
+                    continue
+                if any(f == js.name and ln == line for f, ln in places):
+                    continue
+                # Prefer an owner in THIS file: that is the one the reader
+                # can act on, and it is the commoner mistake by far.
+                same = [(f, ln) for f, ln in places if f == js.name]
+                owner_file, owner_line = (same or places)[0]
+                # A call, not a mention: the name followed by an opening
+                # bracket, and not preceded by a dot or another word.
+                if not _re.search(r"(?<![.\w$])" + _re.escape(name) + r"\s*\(",
+                                  body):
+                    continue
+                where = (f"another wrapper in the same file (line {owner_line})"
+                         if owner_file == js.name
+                         else f"{owner_file} (line {owner_line})")
+                fail(f"{js.name}: the wrapper at line {line} calls {name}(), "
+                     f"but {name} is declared privately in {where}. Nothing "
+                     f"can reach it from here, so the control that runs it "
+                     f"does nothing at all — the error is swallowed inside "
+                     f"an async handler. Move it to its own file and put it "
+                     f"on `window`, the way toast.js does.")
+
+
 CHECKS = [
     ("python compiles",           check_python_compiles),
     ("no undefined names",        check_undefined_names),
@@ -1938,6 +2072,7 @@ CHECKS = [
     ("the top bar carries no filter", check_no_filter_on_fixed_element_ancestors),
     ("no picture paints over its colour plate", check_no_background_on_composited_img),
     ("every colour name has a rule", check_colour_names_have_rules),
+    ("javascript helpers are in scope", check_js_helpers_are_in_scope),
 ]
 
 

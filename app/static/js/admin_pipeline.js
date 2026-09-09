@@ -194,19 +194,10 @@
     return data;
   }
 
-  let toastEl = null;
-  function toast(msg, kind) {
-    if (!toastEl) {
-      toastEl = document.createElement('div');
-      toastEl.id = 'app-toast';
-      document.body.appendChild(toastEl);
-    }
-    toastEl.className = 'toast toast-' + (kind || 'ok');
-    toastEl.textContent = msg;
-    toastEl.classList.add('toast-shown');
-    clearTimeout(toastEl._t);
-    toastEl._t = setTimeout(() => toastEl.classList.remove('toast-shown'), 4500);
-  }
+  // `toast` moved to its own file on 2026-09-09 and is a real global now.
+  // It lived here, inside this wrapper, while the Approve Artwork screen
+  // called it too — so every call from there threw silently. A helper two
+  // screens want belongs to neither of them. See static/js/toast.js.
 
   function setStatus(el, msg, kind) {
     if (!el) return;
@@ -2810,8 +2801,13 @@
     }
 
     if (action === 'upload-signature') {
-      const sigFile = q('[data-sig-file]');
-      const sigStatus = q('[data-sig-status]');
+      // `$`, NOT `q`. This panel's own IIFE defines `$` and nothing else;
+      // `q` belongs to the other IIFE in this file and is invisible here.
+      // Calling it threw a ReferenceError inside an async click handler,
+      // which becomes a rejected promise nothing is awaiting — so the
+      // button did nothing at all, silently (owner's find, 2026-09-09).
+      const sigFile = $('[data-sig-file]');
+      const sigStatus = $('[data-sig-status]');
       if (!sigFile.files || !sigFile.files[0]) {
         sigStatus.textContent = 'pick a file first';
         return;

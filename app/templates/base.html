@@ -253,6 +253,11 @@
     });
   </script>
 
+  {# Loaded on every page because two different screens want it and it
+     belongs to neither. It used to live inside the Pipeline page's script,
+     where Approve Artwork could not reach it — so the eyedropper's message
+     threw instead of appearing. #}
+  <script src="/static/js/toast.js?v={{ app_version }}"></script>
   <script src="/static/js/tooltip.js?v={{ app_version }}"></script>
   <script src="/static/js/theme.js?v={{ app_version }}"></script>
   {% if user is defined and user %}<script src="/static/js/nav_badges.js?v={{ app_version }}"></script>{% endif %}

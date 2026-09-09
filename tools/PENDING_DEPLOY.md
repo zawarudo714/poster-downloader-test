@@ -1,72 +1,57 @@
 # Not yet deployed
 
-**v167 — the signature, the print file moved to approval, a recall tool for
-testing, and the approve screen's counts and speed.**
+**v168 — the signature UPLOAD button, a second bug the same shape, and the
+check that finds both.**
 
-**THERE IS A SCHEMA CHANGE** — two new columns on `processed_images`
-(`signature_json`, `signature_applied`). They are added by `migrate_schema()`
-at startup, so there is no separate step, but **back up `poster.db` before
-deploying**.
+**No schema change. No node copy** — `worker_service/` is untouched and
+`AGENT_VERSION` stays at 1.31.0.
 
-**No node copy.** `worker_service/` is untouched and `AGENT_VERSION` stays at
-1.31.0.
+## What was broken
 
-## The big one: where the print file is built
+`admin_pipeline.js` holds two separate wrappers. The big one declares a
+shortcut called `q`; the small GPT panel declares one called `$`. I wrote
+the signature UPLOAD handler in the second wrapper and called `q(...)`,
+which does not exist there. The file parses, the handler exists, and the
+error lands inside an `async` click handler — where it becomes a rejected
+promise nobody is waiting on. So the button did nothing at all and said
+nothing at all.
 
-The machine no longer makes the 4000-pixel print file when it paints. For a
-project with a review gate it saves only the see-through original and the
-small preview, and `storage_path` is left EMPTY until the file exists.
+## The second one, which the new check found
 
-The print file is built once, on approval, by `_build_print_file` (which was
-`_reflatten`): flatten onto the colour, enlarge, paint the signature at print
-resolution, encode ONE JPEG. That is less total work than before — the file
-used to be built at painting time and then rebuilt on approval whenever the
-colour changed — and it keeps the single-encode quality rule.
+`toast` was declared inside `admin_pipeline.js`'s wrapper while
+`admin_review_images.js` called it too. Those two scripts never load on the
+same page, so on Approve Artwork the name did not exist:
 
-**Deferring only happens when both halves are true**: there is a master to
-rebuild from, and there is a review gate to rebuild at. An opaque generation
-or an ungated project still builds at painting time, because otherwise
-nothing would ever build the file at all.
+- the eyedropper's "Click a colour in the poster" message threw every time,
+  so the eyedropper armed silently and never told you
+- worse, the one line that reports a pixel it could not read was itself
+  failing
 
-If the build fails, the approval now FAILS and rolls back. It used to be a
-cosmetic recolour that could be swallowed; it is now the thing that makes the
-file, and swallowing it would hand the marketplace a path with nothing behind
-it.
+`toast` now lives in `static/js/toast.js`, on `window`, loaded by
+`base.html` on every page. One definition, reachable from everywhere.
 
-## The signature
+## The check
 
-- Upload box on Pipeline → Settings. Refuses a picture with no transparency,
-  because one would paint a solid rectangle over every poster's corner.
-- Defaults from his own Photoshop placement, stored as percentages: 16.8% of
-  the width, 0.5% margin, 35% opacity, right-hand side.
-- On Approve Artwork: drag along X, size, opacity, a white/black switch (key
-  `B`), and RESET. The preview is the real arithmetic — the same percentages,
-  opacity and colour the server uses — so what is dragged is what is painted.
-- Per-poster adjustments live in `processed_images.signature_json`.
-  `signature_applied` records what was actually painted, so approving an
-  unchanged poster twice does not rebuild megabytes for nothing.
+`check_js_helpers_are_in_scope` asks one narrow question: **is this name
+somebody's private helper, being called from outside?** A name only counts
+if it is DECLARED inside some wrapper, so no list of browser globals is
+needed and no CDN library can trip it.
 
-**Verified by measurement, not by eye**: building the same print file with and
-without the overlay and diffing them gives a mark 672px wide, 20px from the
-right, 20px from the bottom, on a 4000 × 6000 poster. Those are his numbers
-exactly. Clamping, the black version and the already-big-enough path were
-tested too.
+The first version tried to be a scope analyser and had to be thrown away —
+it needed a real JavaScript lexer, my hand-rolled string-blanker silently
+ate real code, and it reported `jobTone` as undefined while
+`function jobTone` sat forty lines below.
 
-## Everything else
+Getting the narrow version right still took four holes, every one at the
+edge of the pattern I had written:
 
-- **Recall tool** on the Greenlight door: sends titles back to the start for
-  testing. Typed confirmation, a count before you commit, and the duplicate
-  listing warning on the panel.
-- **The released count on RELEASE WITHOUT FINISHING THE SKIM was wrong**
-  whenever KEEP had been used — it subtracted every decision including the
-  approvals. Counted from what the decisions say now.
-- **Saving is sent in chunks of five** with a real "saving 12 of 40", and it
-  says where it stopped if a chunk fails.
-- **Deleting the unchosen generations is one call for the whole batch**
-  instead of one Storage Box connection per poster, and the saved message now
-  says how many files went.
-- New Diagnostics invariant `approved_without_print_file`, and the
-  shared-file check now ignores rows whose file has not been built yet.
+- `async function` declarations were not recognised
+- `//` comments were not stripped, so "every 4th tick (~12s)" read as a call
+- declarations nested deeper than two spaces were not seen
+- names the browser also provides — `open`, `load`, `close` — collided
+
+Sabotage-tested both ways: putting the `q` bug back fails the deploy, and
+so does making `toast` private again.
 
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.

@@ -124,6 +124,12 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("upload_tracking",  "listing_status",     "VARCHAR(16)"),
     ("upload_tracking",  "listing_http",       "INTEGER"),
     ("upload_tracking",  "listing_checked_at", "DATETIME"),
+    # The owner's own verdict on a finding, and WHICH observation it
+    # answered — see the model for why those are two columns.
+    ("upload_tracking",  "listing_note",       "TEXT"),
+    ("upload_tracking",  "listing_ack_status", "VARCHAR(16)"),
+    ("upload_tracking",  "listing_ack_at",     "DATETIME"),
+    ("upload_tracking",  "listing_ack_by",     "VARCHAR(64)"),
     # Liveness for long jobs. `started_at` cannot serve: a switching stage
     # legitimately runs for an hour and was being declared dead at 45
     # minutes while it was reporting every sixteen seconds.

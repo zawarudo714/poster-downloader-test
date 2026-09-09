@@ -81,17 +81,23 @@
     return hours + ' hour' + (hours === 1 ? '' : 's') + ' ago';
   }
 
-  function renderJob(s) {
-    var j = s && s.job;
+  function renderJob(j) {
     var el = q('[data-sweep-log]');
     if (!el) return;
 
     if (!j) {
-      el.innerHTML = '<p class="muted">No job has been created for this '
-        + 'sweep yet. If this does not change within a few seconds, the '
-        + 'sweep could not be handed to the worker machine at all.</p>';
+      el.innerHTML = '<p class="muted">The worker machine has not been asked '
+        + 'to check anything yet. Start a sweep above and its log appears '
+        + 'here.</p>';
       return;
     }
+
+    // Say plainly whether this is happening now or is the last thing that
+    // happened. An old log presented as a live one is worse than no log.
+    var age = j.live
+      ? ''
+      : '<p class="muted">This is the LAST sweep (#' + j.sweep_id + ', '
+        + esc(j.sweep_status) + '). Nothing is running now.</p>';
 
     // WHAT EACH STATE MEANS, IN WORDS, WITH WHAT TO DO ABOUT IT.
     var verdict;
@@ -126,12 +132,12 @@
       verdict = '<p class="muted">This batch was cancelled.</p>';
     } else {
       verdict = '<p class="muted">This batch finished. '
-        + (s.status === 'running'
+        + (j.live
             ? 'The next batch should be handed out within a few seconds.'
             : '') + '</p>';
     }
 
-    el.innerHTML = verdict
+    el.innerHTML = age + verdict
       + '<p class="muted mono">job #' + j.id + ' · batch ' + j.chunks
       + ' of this sweep · runs on the WINDOWS worker machine, not the Linux '
       + 'server</p>'
@@ -247,12 +253,20 @@
   }
 
   // ── Findings ─────────────────────────────────────────────────────────
-  function group(title, rows, total, help, answerable) {
+  //
+  // `mode` decides which buttons a row gets:
+  //   'answer'  — the three verdicts, for a real disagreement
+  //   'settled' — one button to undo, for something already explained
+  //   'none'    — nothing to press
+  function group(title, rows, total, help, mode) {
     if (!total) return '';
+    var showNote = (mode === 'settled');
     return '<h4 class="section-head">' + esc(title) + ' — ' + total + '</h4>'
       + '<p class="muted">' + esc(help) + '</p>'
       + '<table class="data-table"><thead><tr><th>TITLE</th><th>ACCOUNT</th>'
-      + '<th>CODE</th><th>CHECKED</th><th></th></tr></thead><tbody>'
+      + '<th>CODE</th><th>CHECKED</th>'
+      + (showNote ? '<th>YOUR NOTE</th>' : '')
+      + '<th></th></tr></thead><tbody>'
       + rows.map(function (r) {
           return '<tr>'
             + '<td>' + (r.url
@@ -262,7 +276,12 @@
             + '<td>' + esc(r.account) + '</td>'
             + '<td class="mono">' + (r.http == null ? '—' : r.http) + '</td>'
             + '<td class="mono">' + when(r.checked_at) + '</td>'
-            + '<td>' + (answerable
+            + (showNote
+                ? '<td>' + esc(r.note)
+                  + '<br><span class="muted mono">'
+                  + esc(r.ack_by) + ' · ' + when(r.ack_at) + '</span></td>'
+                : '')
+            + '<td>' + (mode === 'answer'
                 ? '<button class="btn btn-ghost btn-tiny" '
                   + 'data-explain="' + r.id + '" data-answer="taken_down">'
                   + 'TAKEN DOWN</button> '
@@ -271,7 +290,12 @@
                   + 'UPLOAD IT AGAIN</button> '
                   + '<button class="btn btn-ghost btn-tiny" '
                   + 'data-explain="' + r.id + '" data-answer="ignore">'
-                  + 'LEAVE IT</button>'
+                  + 'I&nbsp;CHECKED&nbsp;IT&nbsp;—&nbsp;STOP&nbsp;ASKING</button>'
+                : '')
+              + (mode === 'settled'
+                ? '<button class="btn btn-ghost btn-tiny" '
+                  + 'data-explain="' + r.id + '" data-answer="unsettle">'
+                  + 'REPORT IT AGAIN</button>'
                 : '') + '</td>'
             + '</tr>';
         }).join('')
@@ -283,7 +307,12 @@
 
   function renderFindings(f) {
     state.findings = f;
-    var total = f.gone_total + f.unknown_total + f.back_total + f.impossible_total;
+    // Only things that still WANT a decision are counted. Settled rows and
+    // not-yet-checked rows both appear on the page, and neither is a thing
+    // waiting on him — putting them in this number would make the badge go
+    // up when he cleared something, which is the wrong direction.
+    var total = f.gone_total + f.no_page_total + f.unknown_total
+              + f.back_total + f.impossible_total;
     q('[data-findings-summary]').textContent = total
       ? total + ' to look at' : 'nothing to explain';
 
@@ -291,25 +320,45 @@
       group('TAKEN DOWN', f.gone, f.gone_total,
             'The marketplace says these pages were REMOVED — they existed '
             + 'and now they do not. That is a real takedown, or someone '
-            + 'deleted them by hand. This is the list worth reading.', true)
+            + 'deleted them by hand. This is the list worth reading.', 'answer')
       + group('NO PAGE AT THAT ADDRESS', f.no_page, f.no_page_total,
             'The marketplace says no page has ever existed here — which is '
             + 'NOT the same as removed. Usually it means the artist name or '
             + 'the stored title does not match what the marketplace has, so '
             + 'we are looking in the wrong place. Check the artist name '
-            + 'before treating any of these as missing.', true)
+            + 'before treating any of these as missing.', 'answer')
       + group('COULD NOT LOOK', f.unknown, f.unknown_total,
             'The site refused us or had a moment. This is NOT evidence that '
             + 'anything is missing — run the sweep again later and these '
-            + 'usually resolve themselves.', false)
+            + 'usually resolve themselves.', 'none')
+      // ── WHICH ONES WERE MISSED ──────────────────────────────────────
+      // Named, not counted. A sweep that reached 13 of 15 has to be able
+      // to say which two it did not reach, or the only honest reading of
+      // the screen is "13 are fine and I know nothing about the rest".
+      + group('NOT CHECKED YET', f.not_checked, f.not_checked_total,
+            'We believe these are live on the marketplace and no sweep has '
+            + 'ever looked at them. This is not a problem with the listing '
+            + '— it is the part of the catalogue nobody has been through. '
+            + 'Run the check again and it will pick these up.', 'none')
       + group('BACK AGAIN', f.back, f.back_total,
             'You marked these as removed, and their pages are loading again.',
-            true)
+            'answer')
       + group('MARKED UPLOADED WITH NOTHING BEHIND IT', f.impossible,
             f.impossible_total,
             'These say uploaded but no processed image is recorded against '
             + 'them, which cannot happen. The data is wrong rather than the '
-            + 'marketplace.', true);
+            + 'marketplace.', 'answer')
+      // ── WHAT YOU HAVE ALREADY SETTLED ───────────────────────────────
+      // Kept visible rather than silently dropped, so a decision can be
+      // read back and undone. Each note is tied to the answer it was about,
+      // so if the marketplace ever says something DIFFERENT about one of
+      // these it leaves this list by itself and reappears above.
+      + group('YOU HAVE ALREADY DEALT WITH THESE', f.settled, f.settled_total,
+            'You looked at each of these and wrote down what it meant, so '
+            + 'they are kept out of the lists above. If the marketplace ever '
+            + 'gives a DIFFERENT answer about one — the page loads again, or '
+            + 'we get blocked — it comes back on its own. Nothing here '
+            + 'expires and nothing needs clearing.', 'settled');
 
     q('[data-findings-list]').innerHTML = html
       || '<p class="muted">Nothing disagrees. Either everything is where we '
@@ -358,10 +407,12 @@
     }
 
     renderSweep(data);
-    // The log panel only exists while there is a sweep to talk about.
+    // ALWAYS ON SCREEN. It used to be hidden unless a sweep was running,
+    // which meant it vanished the moment the sweep it described finished —
+    // and "what did the machine do" is asked afterwards more than during.
     var logPanel = q('[data-sweep-log-panel]');
-    if (logPanel) logPanel.hidden = !data.sweep;
-    if (data.sweep) renderJob(data.sweep);
+    if (logPanel) logPanel.hidden = false;
+    renderJob(data.machine);
     renderAccounts(data.accounts || []);
     Object.keys(data.settings || {}).forEach(function (k) {
       var el = q('[data-set="' + k + '"]');
@@ -428,11 +479,20 @@
         requeue:    'Send this back to be uploaded again?\n\nIt goes to the '
                     + 'back of the upload queue and the pipeline will do it '
                     + 'properly this time.',
-        ignore:     'Leave this one alone?\n\nNothing changes; the note is '
-                    + 'just recorded.'
+        ignore:     'Stop reporting this one?\n\nWrite down what you found '
+                    + 'when you looked. It moves to "already dealt with" and '
+                    + 'stays there while the marketplace keeps giving the '
+                    + 'same answer. If the answer ever changes, it comes '
+                    + 'back on its own.',
+        unsettle:   'Report this one again?\n\nYour note is removed and it '
+                    + 'goes back into the lists above.'
       };
       if (!confirm(prompts[answer] || 'Are you sure?')) return;
-      var reason = prompt('Why? (optional — it is kept with the record)') || '';
+      var reason = answer === 'unsettle' ? '' : (
+        prompt(answer === 'ignore'
+          ? 'What did you find? This is kept with the record — for example '
+            + '"opened it by hand, the page loads fine".'
+          : 'Why? (optional — it is kept with the record)') || '');
       act(API + '/explain',
           { id: parseInt(t.dataset.explain, 10), answer: answer, reason: reason });
       return;

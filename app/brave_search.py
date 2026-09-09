@@ -4,8 +4,8 @@ Brave image search — the source stage for projects that search in-page.
 ════════════════════════════════════════════════════════════════════════════
 WHY THE SEARCH LIVES INSIDE THE SITE
 ════════════════════════════════════════════════════════════════════════════
-The movie project sends its workers to TMDB in another tab: find a poster,
-copy the URL, paste it back. That works because TMDB is one canonical source
+An external-source project sends its workers to another tab: find a picture,
+copy the URL, paste it back. That works when the site is one canonical source
 with predictable URLs.
 
 Celebrity photos have no such source. Doing it by hand meant searching Brave,
@@ -128,8 +128,8 @@ def build_queries(db, artist: str, *, project=None, kind: str = "",
 
     That was a niche word baked into shared code: a travel project asks about
     a mountain, and telling its operator to type `{artist}` to mean "Mount
-    Fuji" is the same defect as an "Open TMDB" button on a project that has
-    never touched TMDB.
+    Fuji" is the same defect as an "Open <somewhere>" button on a project
+    that has never touched that somewhere.
 
     Both are substituted rather than one being migrated, because a template
     is a string typed by a person into a settings box. Renaming the only

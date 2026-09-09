@@ -601,7 +601,7 @@ class Project(Base):
     """
     A niche / workflow. One row per (content vertical + processing style).
 
-    Project 1 is seeded as 'tell-a-vision' (movies & series, TMDB source,
+    Project 1 is seeded from the registry in `pipeline.PROJECT_DEFS` (
     Real Paint FX processing, FineArtAmerica target) to match the existing
     single-workflow install. A second project ('celebrity', Pinterest source,
     2 images per title) drops in as another row with no code changes.
@@ -617,7 +617,7 @@ class Project(Base):
     slug            = Column(String(64), unique=True, nullable=False, index=True)
     name            = Column(String(128), nullable=False)
     # Where source images come from — informational, drives UI copy/links.
-    source_site     = Column(String(64), nullable=True)       # 'tmdb' | 'pinterest' | ...
+    source_site     = Column(String(64), nullable=True)       # 'brave' | 'pinterest' | ...
     # Which marketplace this project publishes to. Drives the storage layout
     # (S:/{site}/{project}/processed/...) and how the project is labelled.
     # A project is one design type on one marketplace — it may have many
@@ -674,10 +674,10 @@ class Project(Base):
     has_review_gate  = Column(Integer, nullable=False, default=0)
 
     # Where the worker finds source images.
-    #   'external' — a link out to TMDB/whatever; the worker pastes a URL back
+    #   'external' — a link out to another site; the worker pastes a URL back
     #   'inpage'   — the search grid inside the site (Brave)
     # Declared rather than inferred from whether some setting happens to be
-    # blank: a project must never end up showing BOTH an "Open TMDB" button
+    # blank: a project must never end up showing BOTH an "Open source" button
     # and a search grid, or neither.
     search_mode      = Column(String(16), nullable=False, default="external")
     # ── DOES THIS PROJECT SEND THE WORKER TO AN OUTSIDE SITE? ────────────
@@ -944,6 +944,13 @@ class ProcessedImage(Base):
     #   'approved'   — released for upload
     #   'rerun'      — rejected; a fresh generation is queued
     #   'unusable'   — this poster can never be used
+    #   'discarded'  — another generation was approved instead, and THIS
+    #                  one's files have been deleted from the archive to
+    #                  stop four print files piling up per poster. The row
+    #                  stays as the record that the generation happened and
+    #                  what it cost; only the pictures are gone. Kept apart
+    #                  from 'superseded' because the version picker has to
+    #                  know which ones it can still show.
     #   'superseded' — another generation of the same poster was chosen.
     #                  Added 2026-09-09 with the version picker. It exists so
     #                  no row can be left on 'pending' with nobody waiting on
@@ -1061,6 +1068,31 @@ class UploadTracking(Base):
     listing_status     = Column(String(16), nullable=True, index=True)
     listing_http       = Column(Integer, nullable=True)
     listing_checked_at = Column(DateTime, nullable=True, index=True)
+
+    # ── "I HAVE LOOKED AT THIS ONE. STOP TELLING ME." ───────────────────
+    #
+    # A finding the owner has settled by hand — he opened the address,
+    # decided what it meant, and wrote down why. Without this, a listing he
+    # had already explained came back on the next sweep, and every sweep
+    # after that, saying the same thing. A list that reports the same
+    # settled item for ever is a list nobody reads, and then a real finding
+    # sits in it unnoticed.
+    #
+    # THE ACKNOWLEDGEMENT IS TIED TO THE OBSERVATION IT ANSWERED, which is
+    # the whole design and the reason this is two columns rather than a
+    # tickbox. `listing_ack_status` stores WHAT was acknowledged — "I know
+    # this one reads gone". A later sweep that finds the same thing stays
+    # quiet. A later sweep that finds something DIFFERENT — the page is
+    # loading again, or we were suddenly blocked — is new information, so
+    # the row speaks up again on its own.
+    #
+    # Nothing has to be un-ticked and nothing expires: same reason the quiet
+    # window is a window rather than a switch. Derive the silence from the
+    # data; never store "ignore me for ever".
+    listing_note       = Column(Text, nullable=True)
+    listing_ack_status = Column(String(16), nullable=True)
+    listing_ack_at     = Column(DateTime, nullable=True)
+    listing_ack_by     = Column(String(64), nullable=True)
 
     saved_poster    = relationship("SavedPoster")
     processed_image = relationship("ProcessedImage")

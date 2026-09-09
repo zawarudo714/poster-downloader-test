@@ -75,6 +75,18 @@ def api_overview(admin=Depends(require_admin), db: Session = Depends(get_db)):
         } for a in LC.accounts(db)],
         "counts": LC.counts(db, sweep),
         "sweep": _sweep_payload(db, sweep) if sweep else None,
+        # ── THE MACHINE PANEL MUST BE THERE WHEN THERE IS NO SWEEP TOO ───
+        #
+        # It was hung off the RUNNING sweep, so the moment a sweep finished
+        # the whole panel disappeared — and the owner, looking for it
+        # afterwards, could not find it at all (2026-09-09). The question
+        # "what did the worker machine actually do" is asked most often
+        # AFTER the thing has stopped, which is exactly when it was hidden.
+        #
+        # So it falls back to the most recent finished sweep. `sweep_id` and
+        # `live` say which of the two is being shown, so the screen never
+        # presents an old log as if it were happening now.
+        "machine": _last_machine(db, sweep),
         "history": [{
             "id": s.id, "status": s.status,
             "started_at": s.started_at.isoformat() if s.started_at else None,
@@ -116,6 +128,28 @@ def _sweep_payload(db: Session, sweep: ListingSweep) -> dict:
 # ════════════════════════════════════════════════════════════════════════════
 #  "IS IT STUCK?" — ANSWERED FROM THE JOB'S OWN HEARTBEAT
 # ════════════════════════════════════════════════════════════════════════════
+
+def _last_machine(db: Session, active: Optional[ListingSweep]) -> Optional[dict]:
+    """
+    What the worker machine is doing, or was doing last time.
+
+    The running sweep if there is one; otherwise the newest sweep of any
+    kind, so the log survives the sweep that produced it. Returns None only
+    when no sweep has ever been started, which is the one case where there
+    is genuinely nothing to say.
+    """
+    sweep = active or (db.query(ListingSweep)
+                         .order_by(ListingSweep.id.desc()).first())
+    if sweep is None:
+        return None
+    payload = _job_payload(db, sweep)
+    if payload is None:
+        return None
+    payload["sweep_id"] = sweep.id
+    payload["sweep_status"] = sweep.status
+    payload["live"] = bool(active)
+    return payload
+
 
 def _sweep_jobs(db: Session, sweep: ListingSweep) -> list[PipelineJob]:
     """Every job ever created for this sweep, newest first."""
@@ -357,7 +391,10 @@ def api_explain(payload: dict = Body(...), admin=Depends(require_admin),
                    is what `removed` / `removed_reason` were added for.
       requeue    — the upload was recorded as a success and never happened.
                    Send it back to pending so the pipeline does it properly.
-      ignore     — noted and left alone.
+      ignore     — the note is kept AND this observation is acknowledged, so
+                   the row stops being reported while the marketplace keeps
+                   giving the same answer.
+      unsettle   — undo an acknowledgement.
     """
     row = db.query(UploadTracking).filter_by(id=payload.get("id")).first()
     if row is None:
@@ -382,7 +419,30 @@ def api_explain(payload: dict = Body(...), admin=Depends(require_admin),
         row.removed_at = None
         row.removed_reason = reason or "Recorded as uploaded but not on the site."
     elif answer == "ignore":
-        row.removed_reason = reason or "Checked by hand — no action needed."
+        # ── "I HAVE LOOKED AT THIS. STOP TELLING ME." ────────────────────
+        #
+        # This used to write a sentence into `removed_reason` and change
+        # nothing else, so the very next sweep asked the marketplace the
+        # same question, got the same answer, and put the row straight back
+        # on the list. The owner had no way to finish with anything.
+        #
+        # The note is now attached to the OBSERVATION it answers. What is
+        # recorded is "I know this one reads gone", not "never mention this
+        # row again" — so the day the answer changes, the row comes back on
+        # its own. Nothing has to be remembered, cleared or expired.
+        row.listing_note = reason or "Checked by hand — no action needed."
+        row.listing_ack_status = row.listing_status or ""
+        row.listing_ack_at = datetime.utcnow()
+        row.listing_ack_by = admin.username
+        # Left in place too, because it is what the older screens read.
+        row.removed_reason = row.listing_note
+    elif answer == "unsettle":
+        # Undo. The row goes back to being reported, which is the only
+        # honest way to offer a decision that can be wrong.
+        row.listing_note = None
+        row.listing_ack_status = None
+        row.listing_ack_at = None
+        row.listing_ack_by = None
     else:
         raise HTTPException(400, "Unknown answer.")
 

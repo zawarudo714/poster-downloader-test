@@ -142,7 +142,7 @@
          JS hides this rather than showing a dead button. #}
       {# Label is set by JS from the project's source. The text here is only
          what shows for the half-second before the payload lands. #}
-      <a class="btn btn-accent att-tmdb" target="_blank" rel="noopener">↗ Open source</a>
+      <a class="btn btn-accent att-source-link" target="_blank" rel="noopener">↗ Open source</a>
       <button class="btn btn-ghost" data-action="unlock">CLOSE</button>
     </div>
   </div>
@@ -163,6 +163,16 @@
     <div class="posters-head">
       SAVED <span data-nouns="upper">{{ NOUNS | default('POSTERS', true) }}</span> {{ info("Saved on this title (live count). Hover one to delete or replace.") }}
       <span class="mono posters-count"></span>
+      {# THE LOADING ICON LIVES HERE, NOT ON THE BUTTON.
+         SAVE SELECTED used to change its own words to "LOADING IMAGE…" while
+         the thumbnail downloaded. The owner found that finicky: the button he
+         had just pressed changed into something else and stayed that way.
+         A spinner beside the count says the same thing without touching the
+         control, and it sits where the picture is about to appear. #}
+      <span class="thumb-loading" data-thumb-loading hidden>
+        <span class="spinner" aria-hidden="true"></span>
+        <span class="thumb-loading-text">loading image…</span>
+      </span>
     </div>
     <div class="posters-grid"></div>
   </div>
@@ -181,6 +191,21 @@
       <button class="btn btn-success" data-action="complete">DONE {{ info("Marks this title finished. Add an optional note for the admin if anything is unusual.") }}</button>
     </div>
     <button class="btn btn-ghost" data-action="reopen" hidden>REOPEN</button>
+  </div>
+
+  {# ── WHAT KIND OF PLACE THIS IS ────────────────────────────────────────
+     Sitting in the gap between DONE and SEARCH, and the gap is deliberate.
+     Those two buttons used to be close enough that a thumb reaching for one
+     could land on the other, and this strip both separates them and answers
+     the question a worker actually has at that moment: what am I looking
+     for a picture OF. A castle and a city want different pictures.
+
+     The icon is drawn by the script from a fixed set of seventeen, all in
+     one line style and one colour, so they read as a family rather than as
+     seventeen unrelated pictures. #}
+  <div class="subject-strip" data-subject-strip hidden>
+    <span class="subject-icon" data-subject-icon aria-hidden="true"></span>
+    <span class="subject-text">Subject: <strong data-subject-kind></strong></span>
   </div>
 
   {# ─────────────────────────────────────────────────────────────────────
@@ -283,7 +308,7 @@
       <span class="rev-title"></span>
       <span class="rev-file mono"></span>
       <span class="rev-status-pill"></span>
-      <a class="btn btn-ghost btn-tiny rev-tmdb" target="_blank" rel="noopener">↗ Open source</a>
+      <a class="btn btn-ghost btn-tiny rev-source-link" target="_blank" rel="noopener">↗ Open source</a>
       <button type="button" class="btn btn-info btn-tiny rev-view-catalog">VIEW ALL</button>
       <button type="button" class="btn btn-accent btn-tiny rev-go-to-title">GO TO TITLE</button>
     </div>

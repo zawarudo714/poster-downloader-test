@@ -32,7 +32,7 @@
      It exists because a count alone cannot tell "the machine is off" from
      "the machine is busy" from "the machine died halfway". The owner
      watched a sweep sit at 0 of 15 and had no way to know which. #}
-  <section class="panel" data-sweep-log-panel hidden>
+  <section class="panel" data-sweep-log-panel>
     <div class="panel-head">
       <span>WHAT THE WORKER MACHINE IS DOING
         {{ info("This check runs on the WINDOWS worker machine, not on the Linux server. That is not a preference: FineArtAmerica answers the server with 'refused' for every one of these pages, public ones included, while the Windows machine gets a clean answer with no browser and no sign-in. The machine does one job at a time, so a sweep waits its turn behind Photoshop and uploads. It writes a line here roughly every 30 seconds while it is working — if it has said nothing for several minutes it was probably rebooted, and the sweep picks itself up from where it got to.") }}

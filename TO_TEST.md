@@ -432,6 +432,94 @@ That is now printed on the panel so nobody goes looking on the wrong box.
 
 ---
 
+## 18. THE WORKER SCREEN — v164
+
+**What to click**
+
+- Open a title, pick an image, press **SAVE SELECTED**. The button should
+  keep its own name the whole time and go back to normal straight away. A
+  small turning circle and the words "loading image…" should appear beside
+  the SAVED IMAGES count, and disappear when the picture is there.
+- Before saving anything, look at **DONE**. It should be greyed out and
+  unclickable, and hovering it should say to use SKIP instead. Save an
+  image; DONE should become pressable without reloading the page.
+- Between DONE and SEARCH there should now be a gap with a strip in it
+  reading **Subject: City** (or Mountain, Island, Castle…) with a small
+  drawing. Open a few different titles and check the drawing changes and
+  always matches the word.
+
+**What failure looks like**
+
+- The button still greyed out after saving — tell me and I will look at the
+  spinner logic, not the button.
+- A subject with a map-pin drawing rather than its own. That is the
+  fallback, and it means the sheet used a word I do not have a drawing for.
+  Tell me the word.
+
+---
+
+## 19. THE THUMBNAIL WARNING — v164
+
+**What to click**
+
+- Paste a normal Google image address. It should just save, with **no**
+  warning at all. That warning used to appear on every single save and
+  talked about a film database.
+- To see it work on purpose, find a genuinely tiny image (under 300 pixels
+  both ways) and paste it. The message should name the real size, for
+  example "only 150 by 200 pixels", and let you save anyway.
+- On the **Settings → Image Search** panel there is a new box, **Warn below
+  this size (px)**, set to 300. Change it to 5000, save, and paste a normal
+  picture — the warning should now appear. Put it back to 300 afterwards.
+
+---
+
+## 20. TIDYING UP AFTER A CHOICE — v164
+
+**What to click**
+
+- Take a poster with two or more generations. Choose one and press **SAVE &
+  RELEASE**.
+- Open the same date range again. The poster is gone from the queue, which
+  is correct. On the **Storage Box**, the files for the generations you did
+  NOT choose should no longer be there — only the one you kept.
+- Run a **Diagnostics** scan. A check called "Every current picture still
+  has its file" should report nothing.
+
+**What failure looks like**
+
+- That Diagnostics check reporting anything at all. Stop and tell me before
+  uploading — it would mean the picture heading for FineArtAmerica has been
+  deleted.
+
+---
+
+## 21. THE LISTING CHECK — v164
+
+**What to click**
+
+- Open **Listing check**. The panel **WHAT THE WORKER MACHINE IS DOING**
+  should be there even with no sweep running, showing the last one and
+  saying plainly that nothing is running now.
+- Run a sweep and let it finish. Under **WHAT DOESN'T ADD UP** there should
+  now be a section called **NOT CHECKED YET** listing by name anything we
+  believe is live that no sweep has reached. If everything was reached, the
+  section is absent, which is also correct.
+- On any finding, press **I CHECKED IT — STOP ASKING** and write what you
+  found. It should move to **YOU HAVE ALREADY DEALT WITH THESE**, with your
+  note and the date beside it.
+- Run the sweep again. That listing should NOT come back into the problem
+  lists.
+- Press **REPORT IT AGAIN** on it. It should return to the list above.
+
+**The one worth understanding.** Your note is stored against the ANSWER the
+marketplace gave, not against the listing. So if a listing you settled as
+"gone, I checked, that is fine" ever starts loading again, it comes back on
+its own and tells you. Nothing is hidden for ever and nothing needs
+clearing.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

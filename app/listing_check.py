@@ -352,12 +352,37 @@ def artist_name_suspect(db: Session, sweep: ListingSweep) -> list[dict]:
 #  FINDINGS
 # ════════════════════════════════════════════════════════════════════════════
 
+def settled(row) -> bool:
+    """
+    Has a person already explained THIS observation?
+
+    True only when the verdict he wrote down is about the same answer the
+    marketplace is giving now. Acknowledge a listing that reads GONE and it
+    stops being reported; if a later sweep finds the page loading again, or
+    finds that we were blocked, that is different news and the row speaks up
+    without anybody clearing anything.
+
+    Written as one function because three screens ask the question and three
+    copies of a rule is three chances for them to disagree.
+    """
+    ack = (getattr(row, "listing_ack_status", None) or "").strip()
+    return bool(ack) and ack == (row.listing_status or "")
+
+
 def findings(db: Session, limit: int = 500) -> dict:
     """
     The disagreements, grouped by what each one means.
 
-    Only rows we have actually looked at appear. "Not yet checked" is not a
-    finding, and mixing the two would inflate every number on the screen.
+    Two kinds of row are deliberately kept OUT of the problem lists:
+
+      * anything the owner has already explained — see `settled()`. A list
+        that repeats a settled item every sweep is a list that stops being
+        read.
+      * anything nobody has looked at yet. "Not checked" is not a finding.
+        It gets its own section instead (`not_checked`), because a sweep
+        that covered 13 of 15 must be able to say WHICH two it missed —
+        without that, the only honest reading of the screen is "13 are fine
+        and I do not know about the rest", which is not what it looked like.
     """
     # Both looked up ONCE. The first version called accounts() inside the
     # row loop, which is a database query per row — fine against a handful
@@ -383,24 +408,50 @@ def findings(db: Session, limit: int = 500) -> dict:
             "checked_at": r.listing_checked_at.isoformat()
                           if r.listing_checked_at else None,
             "url": listing_url(r, artists.get(r.account_id, "")) or "",
+            "note": getattr(r, "listing_note", None) or "",
+            "ack_status": getattr(r, "listing_ack_status", None) or "",
+            "ack_at": (r.listing_ack_at.isoformat()
+                       if getattr(r, "listing_ack_at", None) else None),
+            "ack_by": getattr(r, "listing_ack_by", None) or "",
+            "status": r.status,
         } for r in rows[:limit]]
+
+    # ── WHAT NOBODY HAS LOOKED AT ────────────────────────────────────────
+    #
+    # Rows we believe are live on the marketplace and that no sweep has ever
+    # reached. Named rather than counted, because "15 listings, 13 checked"
+    # leaves the owner with no way to find the other two.
+    never = [r for r in (db.query(UploadTracking)
+                           .filter(UploadTracking.target_site == MARKETPLACE,
+                                   UploadTracking.status.in_(CLAIMS_LIVE),
+                                   UploadTracking.listing_checked_at.is_(None))
+                           .all())]
+
+    # Explained by hand and still saying the same thing. Kept in their own
+    # list so a settled decision can be read back and undone, rather than
+    # vanishing into a screen that no longer mentions it.
+    done_with = [r for r in checked if settled(r)]
 
     # We believe it is up; the marketplace returns a real 404.
     gone = [r for r in checked
-            if r.status == "uploaded" and r.listing_status == "gone"]
+            if r.status == "uploaded" and r.listing_status == "gone"
+            and not settled(r)]
     # Live, and we already knew it was taken down. Not a finding — the
     # opposite: a row somebody explained and that is now back. Worth seeing.
     back = [r for r in checked
-            if r.status == "removed" and r.listing_status == "live"]
+            if r.status == "removed" and r.listing_status == "live"
+            and not settled(r)]
     # No page has ever existed at that address. Almost always OUR address
     # is wrong rather than anything being missing, so it is kept well away
     # from the takedown list — mixing them would send him hunting a
     # copyright claim over a mistyped name.
     no_page = [r for r in checked
-               if r.status == "uploaded" and r.listing_status == "no_page"]
+               if r.status == "uploaded" and r.listing_status == "no_page"
+               and not settled(r)]
     # We could not look. Never presented as evidence of anything.
     unknown = [r for r in checked
-               if r.listing_status == "unknown" and r.status == "uploaded"]
+               if r.listing_status == "unknown" and r.status == "uploaded"
+               and not settled(r)]
     # Marked uploaded with nothing processed behind it — impossible, so the
     # data is wrong rather than the marketplace.
     impossible = [r for r in checked
@@ -412,6 +463,8 @@ def findings(db: Session, limit: int = 500) -> dict:
         "back": pack(back), "back_total": len(back),
         "unknown": pack(unknown), "unknown_total": len(unknown),
         "impossible": pack(impossible), "impossible_total": len(impossible),
+        "not_checked": pack(never), "not_checked_total": len(never),
+        "settled": pack(done_with), "settled_total": len(done_with),
     }
 
 

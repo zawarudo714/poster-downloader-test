@@ -5,16 +5,18 @@ Shared Jinja2 templates instance with palette + helpers globally available.
 PROJECT VOCABULARY IS INJECTED INTO EVERY TEMPLATE
 ════════════════════════════════════════════════════════════════════════════
 This app runs several niches side by side. The movie project calls its files
-"posters", finds them on TMDB and processes them in Photoshop; MUSIK calls
+"posters", finds them on one outside site and processes them in Photoshop;
+another calls
 them "images", finds them through Brave and generates them with AI. A label
-that says "poster" or "TMDB" is therefore WRONG on at least one screen, and
+that says "poster" or names one site is therefore WRONG on at least one
+screen, and
 will be wrong on more of them with every niche added.
 
 Rather than have each route remember to pass the words through, the subclass
 below injects them into every render, so any template can write:
 
     {{ noun }} {{ nouns }} {{ Noun }} {{ NOUNS }}     poster / posters / …
-    {{ source_label }}                                TMDB · Brave image search
+    {{ source_label }}                                Brave image search
     {{ target_label }}                                FineArtAmerica
     {{ processor_label }}                             Photoshop · AI generation
     {{ has_year }} {{ has_content_type }}             capability flags

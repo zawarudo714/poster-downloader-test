@@ -5527,3 +5527,63 @@ body.has-rail .nav-group-btn .nav-badge { opacity: 1; }
 /* The decision showing in the big view's header, so pressing R there gives
    the same visible answer as pressing it on the card. */
 .review-zoom-head .review-img-state { position: static; }
+
+/* ══════════════════════════════════════════════════════════════════════
+   v164 — the worker screen: a spinner, a locked DONE, and the subject
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* THE LOADING ICON. It replaces the old habit of renaming the SAVE
+   SELECTED button while a thumbnail downloaded, which left the control
+   greyed out reading "LOADING IMAGE…" until something re-rendered it. */
+.thumb-loading {
+  display: inline-flex; align-items: center; gap: 7px;
+  margin-left: 10px; font-size: 11.5px; color: var(--subtext);
+}
+.thumb-loading[hidden] { display: none; }
+.thumb-loading .spinner {
+  width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  animation: pd-spin 0.7s linear infinite;
+}
+@keyframes pd-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  /* Still says "busy", without the movement. A spinner that cannot spin
+     must not become an invisible state. */
+  .thumb-loading .spinner { animation: none; border-top-color: var(--accent); }
+}
+
+/* A DONE that cannot be pressed must LOOK like it cannot be pressed.
+   Greyed and cursor-blocked, with the reason in its tooltip. */
+.btn:disabled,
+.btn[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: grayscale(0.6);
+}
+
+/* ── THE SUBJECT STRIP, IN THE GAP BETWEEN DONE AND SEARCH ────────────
+   The gap is the point as much as the words are: those two buttons were
+   close enough that a thumb aiming for SEARCH could land on DONE. */
+.subject-strip {
+  display: flex; align-items: center; gap: 10px;
+  margin: 22px 0 20px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  background: var(--card);
+}
+.subject-strip[hidden] { display: none; }
+.subject-text { font-size: 13.5px; color: var(--subtext); letter-spacing: 0.02em; }
+.subject-text strong { color: var(--text); font-weight: 650; }
+/* ONE COLOUR FOR ALL SEVENTEEN. The drawings take `currentColor`, so the
+   whole set moves together with the theme and none of them can drift into
+   looking like a sticker from somewhere else. */
+.subject-icon { display: inline-flex; color: var(--accent); }
+.subject-icon svg { width: 26px; height: 26px; display: block; }
+
+@media (max-width: 700px) {
+  .subject-strip { margin: 16px 0 14px; }
+  .subject-icon svg { width: 22px; height: 22px; }
+}

@@ -10,7 +10,7 @@ Endpoints:
     POST /pull_next         → claim next N pending master titles
     POST /select_titles     → claim a set of master title ids (manual select)
     POST /release           → release untouched claims back to pending
-    POST /lock/{master_id}  → set active locked title; returns TMDB deep-link
+    POST /lock/{master_id}  → set active locked title; returns the source link
     POST /unlock            → clear active title
     POST /save_image        → download URL → file under the title's frozen folder
     POST /poster/{id}/delete   → soft-delete a saved poster + remove from disk
@@ -29,7 +29,7 @@ import re
 from datetime import date as date_type, datetime, timedelta
 from pathlib import Path
 from typing import Optional
-from urllib.parse import quote, urlparse
+from urllib.parse import urlparse
 
 import requests
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
@@ -46,7 +46,15 @@ from ..config import (
 )
 from ..db import get_db
 from ..models import ActivityLog, MasterTitle, Project, Revision, SavedPoster, User
-from ..pipeline import (resolve_project, search_text,
+# `get_setting` IS IMPORTED HERE, AT MODULE LEVEL, AND ON PURPOSE.
+#
+# Four functions used to import it locally instead. A local import binds the
+# name for the WHOLE function, so the module-level one becomes invisible and
+# any use ABOVE the import line raises UnboundLocalError — which is exactly
+# how v130 shipped and broke every paste-a-URL save. One import at the top
+# cannot do that, and preflight's undefined-name check found the fifth
+# instance of it before this deploy rather than after.
+from ..pipeline import (get_setting, resolve_project, search_text,
                         phrasing_cache_key as P_phrasing_cache_key,
                         search_phrasings as P_search_phrasings)
 from ..projects import (
@@ -133,9 +141,9 @@ def _project_ui(db: Session, project_id) -> dict:
         "images_per_title": proj.images_per_title,
         "item_noun":        proj.item_noun,
         "item_nouns":       proj.item_noun_plural,
-        # The source's NAME, so no button is labelled "Open TMDB" in a
-        # project that has never heard of TMDB. Sent as a label rather than
-        # the raw key because it is displayed, never compared.
+        # The source's NAME, so no button ever names a site this project
+        # has never heard of. Sent as a label rather than the raw key
+        # because it is displayed, never compared.
         "source_label":     SITE_LABELS.get(proj.source_site, proj.source_site or "the source"),
         # The label for the OUTSIDE-LINK button, derived from where the link
         # actually goes. It used to reuse source_label above — the IN-PAGE
@@ -154,14 +162,11 @@ def _project_ui(db: Session, project_id) -> dict:
 def _source_link_label(db: Session, proj) -> str:
     """What the outside-link button should call the place it opens."""
     try:
-        from ..pipeline import get_setting
         from urllib.parse import urlparse
         template = str(get_setting(db, "source_search_url", project=proj) or "")
         host = (urlparse(template).hostname or "").lower()
         if "google" in host:
             return "Google image search"
-        if "themoviedb" in host:
-            return "TMDB"
         if "pinterest" in host:
             return "Pinterest"
         return host.removeprefix("www.") or "the source"
@@ -242,11 +247,12 @@ def _source_search_url(db: Session, title: str, content_type: Optional[str],
     any one site. A project with no outside link returns an empty string,
     meaning "no button".
 
-    The movie project keeps its content-type-aware TMDB behaviour via the
-    legacy helper below, since /search/tv and /search/movie are genuinely
-    different URLs rather than one template with a substitution.
+    One template with `{query}` substituted, and nothing else. A per-site
+    branch used to live here for a source that needed two different search
+    paths; it went with the project that used it, because a branch nothing
+    reaches is a thing the next session has to work out before it can be
+    ignored.
     """
-    from ..pipeline import get_setting
 
     # CAPABILITY FIRST, CONFIGURATION SECOND — the rule survives, only the
     # field it reads has changed.
@@ -256,10 +262,11 @@ def _source_search_url(db: Session, title: str, content_type: Optional[str],
     # moment travel wanted both a Brave grid AND a Google link. It now asks
     # the field that means exactly this and nothing else.
     #
-    # The original bug is still worth remembering: MUSIK never overrode
-    # source_search_url, inherited the global TMDB default, and every "Open
-    # source" button pointed at a site that had never heard of the artist.
-    # Asking the setting first is what did that.
+    # The original bug is still worth remembering: a project never overrode
+    # source_search_url, inherited a global default belonging to a different
+    # niche, and every "Open source" button pointed at a site that had never
+    # heard of what the worker was looking for. Asking the setting first is
+    # what did that.
     if project is not None and not getattr(project, "has_source_link", 0):
         return ""
 
@@ -269,8 +276,6 @@ def _source_search_url(db: Session, title: str, content_type: Optional[str],
         template = ""
     if not template:
         return ""
-    if "themoviedb.org" in template:
-        return _tmdb_search_url(title, content_type)
 
     # ── WHAT THE OUTSIDE SITE IS ASKED FOR ───────────────────────────────
     #
@@ -298,16 +303,6 @@ def _source_search_url(db: Session, title: str, content_type: Optional[str],
             .replace("{content_type}", quote_plus(content_type or "")))
 
 
-def _tmdb_search_url(title: str, content_type: Optional[str]) -> str:
-    """Branch by content_type so worker lands on the right TMDB tab."""
-    q = quote(title)
-    if content_type and content_type.lower() in ("tvseries", "tv", "tv_series", "series"):
-        return f"https://www.themoviedb.org/search/tv?query={q}"
-    if content_type and content_type.lower() == "movie":
-        return f"https://www.themoviedb.org/search/movie?query={q}"
-    return f"https://www.themoviedb.org/search?query={q}"
-
-
 def _serialize_master(t: MasterTitle, db: Session) -> dict:
     """
     Compact dict for a title in the worker's queue and for the open title.
@@ -315,8 +310,9 @@ def _serialize_master(t: MasterTitle, db: Session) -> dict:
     Carries the project's UI declarations (`**_project_ui`) because EVERY
     title the front end renders comes through here. An earlier version added
     those fields to three other payloads and missed this one, so the open
-    title fell back to defaults: "Open TMDB" on a MUSIK artist, no search
-    grid, and "0 posters saved out of 3" when the target is 2.
+    title fell back to defaults: an "Open source" button pointing at
+    another niche's site, no search grid, and "0 posters saved out of 3"
+    when the target is 2.
 
     If a worker-facing dict describes a title, it is built here.
     """
@@ -426,7 +422,7 @@ def _active_revisions_for_user(db: Session, user: User, project=None):
             "title_folder": sp.title_folder_path,
             "date": sp.original_save_date.isoformat(),
             "master_id": mt.id,
-            "tmdb_search": _source_search_url(db, search_text(mt), mt.content_type,
+            "source_link": _source_search_url(db, search_text(mt), mt.content_type,
                                               resolve_project(db, mt.project_id),
                                               kind=(mt.description or "")),
             **_project_ui(db, mt.project_id),
@@ -452,7 +448,7 @@ def _state_payload(db: Session, user: User, project=None) -> dict:
                 lt = None
         if lt and lt.claimed_by_id == user.id:
             locked = _serialize_master(lt, db)
-            locked["tmdb_search"] = _source_search_url(
+            locked["source_link"] = _source_search_url(
                 db, lt.title, lt.content_type, resolve_project(db, lt.project_id))
             # Posters already on this title (live only)
             posters = (
@@ -1136,7 +1132,7 @@ def lock_title(
         "description": (t.description or "")[:600],
     }
     try:
-        payload["tmdb_search"] = _source_search_url(
+        payload["source_link"] = _source_search_url(
             db, search_text(t), t.content_type,
             resolve_project(db, t.project_id), kind=(t.description or ""))
         payload.update(_project_ui(db, t.project_id))
@@ -1145,7 +1141,7 @@ def lock_title(
         logging.getLogger("worker").exception(
             "lock_title decoration failed for title %s — the lock stands, "
             "a degraded payload was served", master_id)
-        payload.setdefault("tmdb_search", "")
+        payload.setdefault("source_link", "")
         payload.setdefault("search_mode", "inpage")
         payload.setdefault("images_per_title", 1)
         payload.setdefault("item_noun", "image")
@@ -1294,7 +1290,7 @@ def go_to_title(
         "year":         t.year,
         "content_type": t.content_type,
         "description":  (t.description or "")[:600],
-        "tmdb_search":  _source_search_url(db, search_text(t), t.content_type,
+        "source_link":  _source_search_url(db, search_text(t), t.content_type,
                                            resolve_project(db, t.project_id),
                                            kind=(t.description or "")),
         **_project_ui(db, t.project_id),
@@ -1341,7 +1337,8 @@ def _host_check(host: str, resolver=None) -> tuple[str, str]:
 
     There WAS a control for this — `RESTRICT_HOSTS` plus an allow-list — and
     it was off by default, set by an environment variable the owner cannot
-    see, and listed TMDB only. Turning it on would have blocked every MUSIK
+    see, and listed one niche's source only. Turning it on would have
+    blocked every other project's
     save, because those images come from wherever Brave found them. So it
     could never actually be switched on, which is the same as not having it.
     `MEASURED 2026-08-27`: it had always been "0".
@@ -1393,7 +1390,7 @@ def _validate_image_url(url: str, db: Optional[Session] = None,
     `db`/`project` are optional so the existing call sites keep working, but
     pass them where you have them: the host allow-list is a PER-PROJECT
     setting, because what counts as a legitimate source differs per niche —
-    the movie project takes everything from TMDB, MUSIK from wherever the
+    one project took everything from a single site, another from wherever the
     image search found it. Blank means "any public host", which is what this
     has always done in practice.
     """
@@ -1411,7 +1408,6 @@ def _validate_image_url(url: str, db: Optional[Session] = None,
         return False, message
 
     if db is not None:
-        from ..pipeline import get_setting
         raw = str(get_setting(db, "allowed_image_hosts", project=project) or "")
         allowed = {h.strip().lower() for h in raw.replace(",", " ").split() if h.strip()}
         if allowed and (parsed.hostname or "").lower() not in allowed:
@@ -1423,27 +1419,42 @@ def _validate_image_url(url: str, db: Optional[Session] = None,
     return True, ""
 
 
-# Low-quality detection — e.g. 'media.themoviedb.org/t/p/w440_and_h660_face/...'
-# vs HD 'image.tmdb.org/t/p/original/...'. We don't tell the worker the exact
-# host check; we just nudge them about copying the *link address*.
-_LOW_QUALITY_PATH_RE = re.compile(r"/(?:w\d+|h\d+)(?:_and_[wh]\d+)?(?:_face|_filter\(\w+\))?/", re.IGNORECASE)
+# ════════════════════════════════════════════════════════════════════════════
+#  IS THIS PICTURE TOO SMALL? — MEASURED, NEVER GUESSED FROM THE ADDRESS
+# ════════════════════════════════════════════════════════════════════════════
+#
+# This used to be `_is_low_quality_url`, and it answered a completely
+# different question: "is this address on the film database the deleted
+# movie project used". Anything else was
+# declared low quality. Travel workers paste Google addresses all day, so the
+# warning fired on EVERY save, said the picture was a preview when it was
+# not, and told them to go and click a thumbnail on a film database that
+# nothing in this system has used since the movie project was deleted.
+#
+# The general shape, and it is the reason this cost the owner real
+# irritation: **a warning that fires on the normal case is not a warning, it
+# is a keystroke.** Once every save is confirmed by reflex, the one save that
+# genuinely was a thumbnail gets confirmed by reflex too.
+#
+# The honest question is about the PICTURE, so it is asked of the picture,
+# after it is downloaded and its real size is known. The owner's rule
+# (2026-09-09): warn only when BOTH sides are under the limit. A tall narrow
+# banner 200 wide and 1400 high is not a thumbnail.
 
+def _too_small(width: Optional[int], height: Optional[int],
+               limit: int) -> bool:
+    """
+    True only when the picture is small in BOTH directions.
 
-def _is_low_quality_url(url: str) -> bool:
+    Unknown dimensions mean we could not measure it, which is not the same
+    as measuring it and finding it small — so an unreadable header never
+    produces a warning. Same rule as 404 against 403 on the listing check:
+    "we could not look" is its own answer and must never be presented as
+    evidence.
     """
-    Heuristic: if the URL path contains a TMDB size descriptor (w440, h660,
-    w300_and_h450_face, etc.) OR isn't on `image.tmdb.org`, treat it as a
-    likely low-quality preview link (the kind you get from "Copy image
-    address" on a thumbnail).
-    """
-    parsed = urlparse(url.strip())
-    if not parsed.netloc:
+    if not width or not height:
         return False
-    if parsed.netloc.lower() != "image.tmdb.org":
-        return True
-    if _LOW_QUALITY_PATH_RE.search(parsed.path):
-        return True
-    return False
+    return width < limit and height < limit
 
 
 def _download_to(url: str, target_path: Path) -> int:
@@ -1527,17 +1538,9 @@ def save_image(
         raise HTTPException(400, reason)
     src_url = url.strip()
 
-    # Low-quality preview-URL detection (cheap, before any download).
-    if _is_low_quality_url(src_url) and not confirm_low_quality:
-        return JSONResponse(
-            {"ok": False, "reason": "low_quality",
-             "message": (
-                 "This looks like a low-resolution preview, not the full-size poster. "
-                 "On TMDB, click the poster thumbnail first to open the full-size view, "
-                 "then right-click and choose 'Copy link address' (not 'Copy image address')."
-             )},
-            status_code=409,
-        )
+    # NOTE: whether this picture is too small is no longer guessed from the
+    # address. It is measured after the download, further down — see
+    # `_too_small()` for why the old address test warned on every save.
 
     # Duplicate URL guard — same URL already saved on this title (live).
     dup = (
@@ -1596,7 +1599,6 @@ def save_image(
     # through the settings cascade so a third niche needs no code change.
     soft_limit = SOFT_LIMIT_PER_TITLE
     try:
-        from ..pipeline import get_setting
         _proj = project
         soft_limit = int(_proj.images_per_title
                          or get_setting(db, "soft_limit_per_title", project=_proj))
@@ -1639,6 +1641,37 @@ def save_image(
     dims = read_file_dimensions(target_path)
     img_w, img_h = (dims if dims else (None, None))
 
+    # ── TOO SMALL? ASK THE PICTURE, NOT THE ADDRESS ──────────────────────
+    #
+    # The file has to come down before its real size is known, so the check
+    # happens here rather than before the download. That costs one fetch of
+    # a picture that may be thrown away, which is the correct trade: the old
+    # address-based guess cost a false warning on EVERY save.
+    #
+    # The file is deleted on refusal. Leaving it would put an unreferenced
+    # picture in the worker's folder that no database row points at, which
+    # Diagnostics would later report as an orphan.
+    min_px = 300
+    try:
+        min_px = int(get_setting(db, "min_image_px", project=project) or 300)
+    except Exception:
+        pass
+    small = _too_small(img_w, img_h, min_px)
+    if small and not confirm_low_quality:
+        target_path.unlink(missing_ok=True)
+        return JSONResponse(
+            {"ok": False, "reason": "low_quality",
+             "message": (
+                 f"That picture is only {img_w} by {img_h} pixels, which is "
+                 f"smaller than {min_px} on both sides. It is almost "
+                 f"certainly a thumbnail rather than the real image. Open "
+                 f"the picture at full size first, then copy ITS address. "
+                 f"Save this one anyway?"
+             ),
+             "width": img_w, "height": img_h, "min_px": min_px},
+            status_code=409,
+        )
+
     sp = SavedPoster(
         master_title_id    = t.id,
         user_id            = user.id,
@@ -1649,7 +1682,10 @@ def save_image(
         filename           = target_name,
         source_url         = src_url,
         file_size          = written,
-        low_quality_url    = 1 if (_is_low_quality_url(src_url) and confirm_low_quality) else 0,
+        # 1 only when the worker was warned it was small and went ahead. It
+        # is the record of a judgement, so it must not be set for a picture
+        # nobody was warned about.
+        low_quality_url    = 1 if small else 0,
         image_width        = img_w,
         image_height       = img_h,
         # Deferred: content_hash on a follow-up worker — keep save_image fast.
@@ -1860,8 +1896,8 @@ def replace_poster(
     If the poster has open revisions, those go to 'awaiting_approval' so
     admin can verify the replacement before clearing the flag.
 
-    Returns 409 reason='low_quality' if the URL looks like a TMDB preview;
-    client can re-call with confirm_low_quality=1 to bypass.
+    Returns 409 reason='low_quality' if the new picture measures under the
+    limit on BOTH sides; the client can re-call with confirm_low_quality=1.
     """
     sp = _load_my_poster(db, user, poster_id)
     _mt = db.query(MasterTitle).filter_by(id=sp.master_title_id).first()
@@ -1871,46 +1907,69 @@ def replace_poster(
         raise HTTPException(400, reason)
     src_url = url.strip()
 
-    if _is_low_quality_url(src_url) and not confirm_low_quality:
-        return JSONResponse(
-            {"ok": False, "reason": "low_quality",
-             "message": (
-                 "This looks like a low-resolution preview, not the full-size poster. "
-                 "On TMDB, click the poster thumbnail first to open the full-size view, "
-                 "then right-click and choose 'Copy link address' (not 'Copy image address')."
-             )},
-            status_code=409,
-        )
-
     # Reuse the same poster index so naming stays stable. e.g. "Title 2.jpg" → "Title 2.webp"
     folder = saved_poster_folder(sp)
     folder.mkdir(parents=True, exist_ok=True)
     # Extract the count number from the existing filename ("...{title} {n}.ext")
     m = re.search(r" (\d+)\.(jpg|jpeg|png|webp|gif)$", sp.filename, re.IGNORECASE)
     count = int(m.group(1)) if m else 1
-    # Delete the old physical file before writing the new one.
+
     old_fs = saved_poster_path(sp)
     old_filename = sp.filename
-    old_fs.unlink(missing_ok=True)
-
     mt = sp.master_title  # eager via relationship if loaded; safe to access
     new_name = filename_for(mt.title if mt else "Replacement", count, src_url)
-    target = folder / new_name
-    # If by some race the new name already exists, bump until unique.
-    while target.exists():
-        count += 1
-        new_name = filename_for(mt.title if mt else "Replacement", count, src_url)
-        target = folder / new_name
 
-    written = _download_to(src_url, target)
-    from ..imghdr_lite import read_file_dimensions
-    dims = read_file_dimensions(target)
-    img_w, img_h = (dims if dims else (None, None))
+    # ── THE NEW PICTURE ARRIVES BEFORE THE OLD ONE LEAVES ────────────────
+    #
+    # The old file used to be deleted first, which was fine while nothing
+    # after the download could refuse. Measuring the picture changed that:
+    # a refusal at that point would have left the row pointing at a file
+    # that no longer existed, and the worker with nothing at all instead of
+    # the image they already had. So the download lands on a temporary name
+    # beside it, and the swap only happens once the picture is accepted.
+    tmp_target = folder / (new_name + ".incoming")
+    try:
+        written = _download_to(src_url, tmp_target)
+        from ..imghdr_lite import read_file_dimensions
+        dims = read_file_dimensions(tmp_target)
+        img_w, img_h = (dims if dims else (None, None))
+
+        min_px = 300
+        try:
+            min_px = int(get_setting(
+                db, "min_image_px",
+                project=resolve_project(db, _mt.project_id if _mt else None))
+                or 300)
+        except Exception:
+            pass
+        small = _too_small(img_w, img_h, min_px)
+        if small and not confirm_low_quality:
+            tmp_target.unlink(missing_ok=True)
+            return JSONResponse(
+                {"ok": False, "reason": "low_quality",
+                 "message": (
+                     f"That picture is only {img_w} by {img_h} pixels, which "
+                     f"is smaller than {min_px} on both sides. It is almost "
+                     f"certainly a thumbnail rather than the real image. "
+                     f"Replace with it anyway?"
+                 ),
+                 "width": img_w, "height": img_h, "min_px": min_px},
+                status_code=409,
+            )
+
+        old_fs.unlink(missing_ok=True)
+        target = folder / new_name
+        if target.exists() and target != tmp_target:
+            target.unlink(missing_ok=True)
+        tmp_target.replace(target)
+    except Exception:
+        tmp_target.unlink(missing_ok=True)
+        raise
 
     sp.filename        = new_name
     sp.source_url      = src_url
     sp.file_size       = written
-    sp.low_quality_url = 1 if (_is_low_quality_url(src_url) and confirm_low_quality) else 0
+    sp.low_quality_url = 1 if small else 0
     sp.image_width     = img_w
     sp.image_height    = img_h
 

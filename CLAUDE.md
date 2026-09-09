@@ -171,6 +171,22 @@ vocabulary either — the `{artist}` placeholder sitting in shared search code
 for a project about mountains is the specimen. Ask which pieces would be dead
 for it and say so explicitly, rather than copying an existing definition.
 
+**AND A DELETED PROJECT'S VOCABULARY OUTLIVES ITS CODE, because a field NAME
+costs nothing to leave behind.** Long after the movie project was deleted,
+the worker payload still carried a key called `tmdb_search`, the outside-link
+button was `.att-tmdb`, a helper built film-database search URLs that nothing
+could reach, and the "this image is too small" warning told travel workers to
+go and click a poster thumbnail on a site this system no longer touches. None
+of it broke anything, which is why it survived — and it is precisely what
+makes the next session reason as though a film database were part of the
+system. Cleared out on 2026-09-09 at the owner's instruction ("remove all
+tmdb movie/poster traces, go through the whole code").
+
+So when a project or a marketplace is removed, **grep for its NAME, not just
+its code**, and rename the fields, classes and payload keys it left behind.
+Same rule as deleting a capability rather than disabling it (5b), applied to
+words.
+
 ---
 
 ## What this is
@@ -2073,6 +2089,26 @@ one for ever.** The derived version was already there and cost nothing —
 the address bar. A hash is set only by something the person did, it can be
 bookmarked, shared and gone back from, and it forgets by itself.
 
+**AN ACKNOWLEDGEMENT BELONGS TO THE OBSERVATION IT ANSWERED, NEVER TO THE
+ROW.** The listing check's LEAVE IT button wrote a sentence into
+`removed_reason` and changed nothing else, so the next sweep asked the
+marketplace the same question, got the same answer, and put the row back on
+the list — every sweep, for ever. The owner could not finish with anything,
+which is how a findings list stops being read and a real takedown sits in
+it unnoticed.
+
+The fix is not a "hide this for ever" flag, because that is a second edge
+somebody has to remember to clear, and a listing that is hidden while it
+quietly changes is exactly what this feature exists to catch. What is
+stored instead is WHICH ANSWER was acknowledged
+(`UploadTracking.listing_ack_status`). While the marketplace keeps saying
+the same thing the row stays quiet; the day it says something different,
+the row reappears on its own with nothing to clear and nothing to expire.
+
+Generally: **when you silence something, store what you silenced, not the
+silence.** Same shape as the quiet window being a window, and as
+`scan_incomplete` being a query.
+
 **Creating all the work up front is what makes stopping impossible.** The
 five deactivation jobs — one per account — were queued together, so
 STOP THIS RUN ended the run, released the pipeline, and did nothing at all
@@ -2137,6 +2173,25 @@ navigates the browser without consulting the wall, or looks a title up by
 row whenever a protective call has to accompany a risky one, and use a GLOB
 rather than a filename: a rule usually belongs to a kind of code, and a list
 of files is another thing somebody has to remember to extend.
+
+**A BUSY STATE ON A SCREEN IS A CLAIM, AND IT NEEDS THE SAME THREE EXITS.**
+SAVE SELECTED disabled itself, renamed itself to "LOADING IMAGE…" while the
+thumbnail downloaded, and was never re-enabled on the SUCCESS path — so the
+button the worker had just pressed sat greyed out wearing different words
+until something unrelated re-rendered the box. The failure path had been
+thought about; the happy one had not, which is the same blind spot as rule 8
+one level up.
+
+Two rules came out of it, and both generalise past this button:
+
+  * **Whatever enters a busy state must leave it on every path, including
+    the one where nothing went wrong.** Put the exit in a `finally` if there
+    is any branching at all.
+  * **Show progress NEXT TO THE THING THAT IS CHANGING, not on the control
+    that started it.** The picture was arriving in the saved-images panel,
+    so that is where the spinner belongs. A control that renames itself
+    mid-press is a control the person can no longer identify, and the owner
+    called it "finicky" for exactly that reason (2026-09-09).
 
 Concretely: **an exception must never be able to escape past the point where
 the work was claimed.** If setup can fail, either claim after it, or catch it
@@ -2302,6 +2357,27 @@ So, before shipping any figure or label:
   "waiting to try again at 23:44", not "retry_at set".
 * **Numbers on a button must be the numbers that will happen.** A button
   saying 627 that then does 1,543 is worse than a button with no number.
+* **A WARNING THAT FIRES ON THE NORMAL CASE IS NOT A WARNING, IT IS A
+  KEYSTROKE.** The "this looks like a low-resolution preview" message asked
+  whether the address was on one particular image host and called everything
+  else low quality. Travel workers paste Google addresses all day, so it
+  fired on EVERY save, and its advice named a film database nothing in this
+  system has used for weeks. Once a confirmation is answered by reflex, the
+  one save that genuinely WAS a thumbnail gets confirmed by reflex too — so
+  a warning nobody can act on is worse than none. It now measures the
+  picture instead, and only speaks when it is small on both sides.
+
+  Before shipping any guard, ask **how often it will fire when nothing is
+  wrong.** If the answer is "most of the time", it is not a guard. Same
+  family as "(N/A)" beside every title: noise trains the eye to skip the
+  line where the real thing eventually appears.
+* **A RECORD OF WHAT HAPPENED MUST OUTLIVE THE THING THAT WAS HAPPENING.**
+  The listing check's log panel was drawn only while a sweep was RUNNING, so
+  it disappeared the moment the sweep finished — and "what did the worker
+  machine actually do" is a question asked afterwards far more often than
+  during. The owner looked for the panel and could not find it at all
+  (2026-09-09). Anything that explains a run — a log, a tally, a reason —
+  falls back to the LAST one and says plainly which it is showing.
 
 This is not polish. He has no other way to verify the system is doing what
 he thinks: he cannot read the database and should not have to read a log on

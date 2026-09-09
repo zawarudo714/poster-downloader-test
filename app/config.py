@@ -14,7 +14,7 @@ from pathlib import Path
 # Bumped on every deploy. Templates append `?v={APP_VERSION}` to every
 # <script> and <link rel="stylesheet"> URL, so deploys force browsers to
 # refetch JS/CSS automatically — no Ctrl+Shift+R needed by users.
-APP_VERSION = "163"
+APP_VERSION = "164"
 
 
 # ── Paths ────────────────────────────────────────────────────────────────────
@@ -99,7 +99,8 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 # setting, `allowed_image_hosts` (blank = any public host). It used to be
 # this pair of constants plus a RESTRICT_HOSTS environment variable, which
 # was never switched on, could not be seen or changed from the dashboard,
-# and listed TMDB only — so enabling it would have blocked every MUSIK save.
+# and listed one niche's source only — so enabling it would have blocked
+# every other project's saves.
 # A protection that cannot be switched on is the same as no protection.
 #
 # Internal, private and loopback addresses are refused ALWAYS, by

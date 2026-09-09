@@ -1674,6 +1674,55 @@ def check_generations_share_a_file(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def check_current_image_was_discarded(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: the generation about to be UPLOADED must still have its file.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS IS THE ONE THAT COSTS MONEY
+    ════════════════════════════════════════════════════════════════════════
+    Approving an artwork now deletes the pictures of the generations that
+    were not chosen (2026-09-09, at the owner's request — four print files
+    per poster is not worth the space). `is_current` is what the uploader
+    reads to decide which file to send. If those two ever point at the same
+    row, the marketplace is handed a picture that has been deleted.
+
+    Nothing in the approve code can do that today: the chosen row is marked
+    current and the others discarded, in one place. But that is a statement
+    about the code as it is now, and the whole point of an invariant is that
+    it holds whatever future code does. This one is cheap, needs no
+    knowledge of how a bug would happen, and goes red the moment the state
+    exists rather than when an upload fails.
+
+    The companion mechanism — a listing finding the owner has settled — gets
+    no check here on purpose. It cannot go stale: the note is stored against
+    the observation it answered, so a different answer brings the row back
+    by itself. There is no state to drift.
+    """
+    rows_q = (db.query(ProcessedImage)
+                .filter(ProcessedImage.is_current == 1,
+                        ProcessedImage.review_status == "discarded"))
+    found = rows_q.limit(MAX_ROWS).all()
+    total = len(rows_q.all())
+
+    rows = [Finding(f"poster #{p.saved_poster_id}",
+                    f"generation {p.attempt or 1} is the current one and its "
+                    f"file was deleted ({p.storage_path})",
+                    "/admin/pipeline/review")
+            for p in found]
+    return _result(
+        "current_image_was_discarded",
+        f"{total} poster(s) point at a picture that was deleted"
+        if total else "Every current picture still has its file",
+        "The image the uploader would send has had its file removed, which "
+        "happens to the generations you did NOT choose. Something has marked "
+        "the wrong one as current. Do not upload these until it is sorted — "
+        "tell whoever built the step that did it, because this state is "
+        "supposed to be impossible.",
+        "error" if total else "ok", rows, total,
+    )
+
+
 def _account_names(db: Session) -> dict[int, str]:
     """
     id -> name for every marketplace account, fetched once.
@@ -1687,6 +1736,7 @@ def _account_names(db: Session) -> dict[int, str]:
 
 
 CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
+    check_current_image_was_discarded,
     check_generations_share_a_file,
     check_missing_files,
     check_posters_without_title,

@@ -85,6 +85,8 @@
        'One phrasing per line, and each line becomes ONE MORE BUTTON on the worker screen, in this order. Every line must contain {title}; {kind} is optional. Leave this blank and no extra buttons appear. For example: {title} {kind} scenic / {title} skyline / aerial view of {title}.'],
       ['brave_results_per_query', 'number', 'Results per search', 'How many images Brave is asked for each time. 50 is a full screen to scroll; 100 is the most it will give.'],
       ['brave_min_dimension', 'number', 'Smallest usable image (px)', 'An image smaller than this on BOTH sides is hidden before the worker sees it. The count of what was hidden is shown under the grid.'],
+      ['min_image_px', 'number', 'Warn below this size (px)',
+       'A saved picture is questioned only when it measures under this on BOTH sides, which is what a thumbnail looks like. A tall narrow banner or a wide panorama passes, because one small side is a shape rather than a fault. The worker can still save it after confirming, and the picture is marked so you can find it later. Set to 0 to stop asking.'],
     ],
     gpt: [
       ['openai_model',    'text',   'Model',    'gpt-image-2 unless you have a reason.'],

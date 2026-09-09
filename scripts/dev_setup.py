@@ -583,7 +583,7 @@ class DevSetup:
                     original_save_date=save_date,
                     title_folder_path=title.title_folder_path,
                     filename=filename,
-                    # A plainly fake host. It used to be a real TMDB address,
+                    # A plainly fake host. It used to be a real image address,
                     # which read as though the seed had genuinely fetched
                     # something from a site this system no longer touches.
                     source_url=f"https://dev-seed.invalid/{title.external_id}-{n}.png",

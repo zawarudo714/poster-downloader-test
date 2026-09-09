@@ -3399,6 +3399,11 @@ def api_review_queue(
             "height": p.output_height,
             "is_current": bool(p.is_current),
             "review_status": p.review_status or "",
+            # Whether this generation's PICTURE still exists. A row marked
+            # 'discarded' had its files removed when another generation was
+            # approved, so the screen must not offer it — the row is the
+            # audit record, not something you can still look at.
+            "file_kept": (p.review_status or "") != "discarded",
             "created_at": p.created_at.isoformat() if p.created_at else "",
             "preview_url": f"/admin/pipeline/review/image/{p.id}",
             # The colour already flattened in, and whether there is a
@@ -3420,7 +3425,12 @@ def api_review_queue(
             "date": poster.original_save_date.isoformat() if poster.original_save_date else "",
             "images": [],
         })
-        versions = [_version(p) for p in siblings.get(poster.id, [processed])]
+        # Only generations whose picture still exists can be chosen. One whose
+        # files were deleted when an earlier approval settled the choice is
+        # left out entirely rather than offered and then failing to load.
+        versions = [_version(p) for p in siblings.get(poster.id, [processed])
+                    if (p.review_status or "") != "discarded"
+                    or p.id == processed.id]
         block["images"].append({
             **_version(processed),
             "poster_id": poster.id,
@@ -3713,13 +3723,61 @@ def api_review_decide(
             # back round in the pending queue — a sibling left on 'pending'
             # would reappear as work with no picture anybody was waiting on.
             if poster is not None:
-                for other in (db.query(ProcessedImage)
-                                .filter(ProcessedImage.saved_poster_id == poster.id,
-                                        ProcessedImage.id != processed.id).all()):
+                losers = (db.query(ProcessedImage)
+                            .filter(ProcessedImage.saved_poster_id == poster.id,
+                                    ProcessedImage.id != processed.id).all())
+                for other in losers:
                     other.is_current = 0
                     if (other.review_status or "") in ("pending", ""):
                         other.review_status = "superseded"
                 processed.is_current = 1
+
+                # ── THE PICTURES NOBODY CHOSE ARE DELETED HERE ───────────
+                #
+                # Approving is the moment the choice between generations is
+                # settled, so it is the moment the losing pictures stop
+                # being worth their space. Each generation costs a 4000px
+                # print file plus its see-through original, and a poster
+                # rerun four times would otherwise hold four sets for ever
+                # (the owner asked for this on 2026-09-09).
+                #
+                # THE ROWS STAY. Only the FILES go. The row is the record
+                # that a generation happened, what it cost and what was
+                # decided about it, and that record is the audit trail —
+                # deleting it would leave the money spent on OpenAI with
+                # nothing to point at. `storage_path` on a losing row now
+                # names a file that is gone, which the row's
+                # 'superseded' status already says.
+                #
+                # Tidying must never be able to fail an approval: see
+                # `delete_paths`, which swallows everything and reports a
+                # count. Anything it leaves behind shows up in Diagnostics
+                # as an orphan file, so the net is already there.
+                doomed = []
+                for other in losers:
+                    # A row already emptied on an earlier approval is skipped,
+                    # so pressing approve twice does not count the same files
+                    # again and does not have to reach the Storage Box at all.
+                    if (other.review_status or "") == "discarded":
+                        continue
+                    doomed += [other.storage_path, other.preview_path,
+                               other.master_path]
+                    # 'discarded' rather than 'superseded' ON PURPOSE. The two
+                    # look alike and mean different things: superseded is "set
+                    # aside, the picture is still there", discarded is "the
+                    # picture has been deleted". The version picker reads this
+                    # to decide what it may still offer, and one word for both
+                    # would offer a version whose file is gone — which is the
+                    # exact family of bug that started this work.
+                    other.review_status = "discarded"
+                if doomed:
+                    from ..storage_remote import delete_paths
+                    from ..review_cache import clear as _clear_cache
+                    gone = delete_paths(
+                        db, doomed,
+                        project=P.project_for_title(db, title) if title else None)
+                    _clear_cache(doomed)
+                    counts["files_removed"] = counts.get("files_removed", 0) + gone
             # RELEASING IS WHAT CREATES THE UPLOAD WORK.
             #
             # On the Photoshop path, report_processed() seeds an upload row

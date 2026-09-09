@@ -433,8 +433,8 @@ DEFAULTS: dict[str, Any] = {
     # Blank is the right global default now that no project links out. A
     # leftover URL here is worse than none: a new project inherits it and
     # grows an "Open <somewhere>" button pointing at a site it has never
-    # heard of — the exact defect that put a live TMDB link on a project
-    # that never touched TMDB.
+    # heard of — the exact defect that once put a live film-database link
+    # on a project about places.
     "source_search_url":  "",
     # Hosts a worker may download from. Empty means unrestricted.
     "allowed_download_hosts": "",
@@ -443,6 +443,20 @@ DEFAULTS: dict[str, Any] = {
     # REDRAWN and then upscaled sets this to 0 — otherwise the warning fires
     # on every single image and stops meaning anything.
     "review_min_width_px": 800,
+    # THE THUMBNAIL GUARD, AND IT ASKS ABOUT THE PICTURE, NOT THE ADDRESS.
+    #
+    # A saved image is questioned only when it measures under this on BOTH
+    # width and height, which is what a thumbnail looks like. A tall narrow
+    # banner, or a wide short panorama, passes — one small side is a shape,
+    # not a quality.
+    #
+    # This replaced a test that asked whether the address was on
+    # one particular image host and called everything else low quality.
+    # Travel workers
+    # paste Google addresses, so the warning fired on every save until they
+    # stopped reading it (owner, 2026-09-09). Set to 0 to switch the
+    # question off entirely.
+    "min_image_px": 300,
 
     # ── Brave image search ───────────────────────────────────────────────
     # Two keys. Searches use the free key; the paid one is the FALLBACK for
@@ -681,7 +695,8 @@ DEFAULTS: dict[str, Any] = {
     # repeatedly. 0 switches retrying off.
     # Which hosts a project's images may be downloaded from. BLANK = any
     # public host, which is what the app has always done — the old
-    # RESTRICT_HOSTS env var was never switched on, and listed TMDB only, so
+    # RESTRICT_HOSTS env var was never switched on, and listed one niche's
+    # source only, so
     # enabling it would have blocked every MUSIK save. Per project because
     # what counts as a legitimate source differs per niche. Internal and
     # private addresses are refused regardless of this setting.
@@ -986,7 +1001,7 @@ MARKETPLACES = ("fineartamerica",)
 # ════════════════════════════════════════════════════════════════════════════
 #  HUMAN LABELS FOR THE THINGS A PROJECT PLUGS INTO
 # ════════════════════════════════════════════════════════════════════════════
-# A project stores machine keys — 'tmdb', 'brave', 'fineartamerica' — because
+# A project stores machine keys — 'brave', 'fineartamerica' — because
 # those are stable and safe in a path. Screens need words. Keeping the mapping
 # HERE means adding a marketplace is one line, and no template ever hardcodes
 # the name of a site it happens to know about today.
@@ -994,7 +1009,6 @@ MARKETPLACES = ("fineartamerica",)
 # An unknown key falls back to itself rather than to a movie-project default,
 # so a missing entry reads as an odd label rather than as a confident lie.
 SITE_LABELS = {
-    "tmdb":           "TMDB",
     "brave":          "Brave image search",
     "pinterest":      "Pinterest",
     "fineartamerica": "FineArtAmerica",

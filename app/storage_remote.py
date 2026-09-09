@@ -112,6 +112,80 @@ def write_bytes(db: Session, rel_path: str, data: bytes, *, project=None) -> str
                 pass
 
 
+def delete_paths(db: Session, rel_paths, *, project=None) -> int:
+    """
+    Remove files from the archive. Returns how many were actually deleted.
+
+    ════════════════════════════════════════════════════════════════════════
+    IT NEVER RAISES, AND THAT IS A DECISION RATHER THAN LAZINESS
+    ════════════════════════════════════════════════════════════════════════
+    The one caller is the tidy-up that runs when an artwork is approved: the
+    generations that were NOT chosen have their pictures removed, because
+    keeping four print files per poster for ever fills the Storage Box with
+    pictures nobody will look at again.
+
+    That tidy-up is not the point of approving. If the Storage Box is having
+    a moment, the right outcome is that the approval still succeeds and some
+    files are left behind — a leftover file costs disc space, while a failed
+    approval costs the owner a picture he had just decided to sell. So every
+    failure is swallowed here and the caller is told only how many went.
+
+    The leftovers are not lost, either: `check_orphan_files` in
+    `diagnostics.py` already reports files on the archive that no row points
+    at, which is exactly what these become.
+
+    A path that is already gone counts as nothing rather than as a failure.
+    Deleting twice must be harmless — the approve screen can be pressed
+    again on the same title.
+    """
+    wanted = [str(p).replace("\\", "/").lstrip("/")
+              for p in rel_paths if p]
+    if not wanted:
+        return 0
+
+    cfg = _settings(db, project)
+    removed = 0
+
+    if not cfg["host"]:
+        base = Path(cfg["local_root"] or "processed_local").resolve()
+        for rel in wanted:
+            try:
+                target = base / rel
+                if target.is_file():
+                    target.unlink()
+                    removed += 1
+            except OSError:
+                pass
+        return removed
+
+    try:
+        import paramiko
+    except ImportError:
+        return 0
+
+    transport = None
+    try:
+        transport = paramiko.Transport((cfg["host"], cfg["port"]))
+        transport.connect(username=cfg["user"], password=cfg["password"])
+        sftp = paramiko.SFTPClient.from_transport(transport)
+        for rel in wanted:
+            full = posixpath.join(cfg["root"], rel) if cfg["root"] else rel
+            try:
+                sftp.remove(full)
+                removed += 1
+            except Exception:
+                pass                    # already gone, or not ours to delete
+    except Exception:
+        return removed
+    finally:
+        if transport is not None:
+            try:
+                transport.close()
+            except Exception:
+                pass
+    return removed
+
+
 def _mkdirs(sftp, directory: str) -> None:
     """mkdir -p over SFTP, which has no such thing natively."""
     if not directory or directory in ("/", "."):

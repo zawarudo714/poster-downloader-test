@@ -1615,6 +1615,50 @@ FIRST version of that check compared selector TEXT against the plate's
 class and stayed green with the original bug put back, which is the sabotage
 rule earning its place twice in one afternoon.
 
+**A PERCENTAGE IS MEANINGLESS UNTIL YOU SAY "OF WHAT", AND THE TWO SIDES
+PICKED DIFFERENT ANSWERS.** The same screen, later the same day. The server
+places the signature against the PICTURE — `W, H = img.size`. The preview
+placed it against the PLATE, which since v158 was deliberately WIDER than
+the artwork on a card and TALLER than it in the zoom. So the mark sat out on
+the coloured bar outside the poster, and came out a different size in the two
+views. The owner reported those as three separate faults; they were one.
+
+Three things in that generalise well past this screen:
+
+  * **When one number is computed on both sides of a boundary, write down
+    what each side measures it against.** Not the formula — the DENOMINATOR.
+    Both sides here used `x_pct` and both were "correct"; they simply
+    disagreed about the box, and nothing named the box anywhere.
+  * **A unit can betray you inside one side too.** The bottom margin was
+    `bottom: 0.5%`, and a CSS percentage on `bottom` resolves against the
+    container's HEIGHT — while the server computes `W * margin_pct`, the
+    WIDTH. On a 4000x6000 poster the preview showed 30 pixels where the file
+    put 20. Nobody had reported it, and it had been wrong since v167.
+    Whenever a percentage crosses into CSS, check which axis CSS resolves it
+    against; `bottom`, `top`, `translate` and `padding` do not all agree.
+  * **A comment claiming the preview IS the arithmetic is a claim to test,
+    not a reassurance to trust.** The stylesheet said in capitals that
+    drawing the mark any other way "would be a second copy of the placement
+    rule, and two copies drift". It was already a second copy and had already
+    drifted. **Prose asserting an invariant is the softest evidence in the
+    repo** — the same lesson as a comment satisfying a guard check.
+
+Now mechanical, in the half that can be: `check_overlay_sits_in_its_
+measuring_layer` asserts the mark is built inside the layer that is measured
+to the picture, at every place markup is built. What it deliberately does NOT
+claim is that the layer covers the picture on screen, because that is a fact
+about a rendered page. **Say which half a check covers, or the green light
+gets read as covering both.**
+
+And moving the colour from the plate onto the picture silently invalidated
+the check above it: its question was "does the picture paint over the
+plate?", and once the picture legitimately carried the colour that question
+answered nothing. It stayed green because the new background is set inline
+from JavaScript, which it never looked at. **When you move a fact from one
+element to another, go and read the checks that were watching the old
+place** — a check whose premise you just removed does not fail, it agrees
+with you for ever.
+
 **When the owner reports "X does nothing", suspect the last structural edit to
 that page BEFORE suspecting X's logic.** The handler is usually fine. Check
 what shipped most recently against `tools/DEPLOY_LOG.md` and diff the region

@@ -4770,12 +4770,10 @@ label.inline-check {
 /* The coloured box the poster sits on. The browser composites the
    transparent picture over this, which is the same arithmetic the server
    does when it flattens — so the preview IS the result, not a guess at it. */
-.review-canvas {
-  display: block;
-  line-height: 0;
-  transition: background-color .08s linear;
-}
-.review-canvas img { display: block; width: 100%; height: auto; }
+/* No `transition: background-color` here any more: the plate does not carry
+   the colour, the picture does. A transition on a property nothing sets is
+   a false clue about where to look. */
+.review-canvas { line-height: 0; }
 .review-canvas.is-picking { outline: 2px dashed var(--accent); cursor: crosshair; }
 .review-canvas.is-picking img { cursor: crosshair; }
 
@@ -5337,7 +5335,11 @@ html.theme-light .stat-value, html.theme-light .stat-pill-num {
 /* ── Approve Artwork: the compare overlay (v154) ─────────────────────── */
 .review-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
 @media (max-width: 900px) { .review-pair { grid-template-columns: 1fr; } }
-.review-img img, .review-img-source img { width: 100%; max-height: 68vh; object-fit: contain; }
+/* The SOURCE photograph only. The poster inside a colour plate is sized by
+   the plate rules further down, and this must not reach the signature mark
+   either — `.review-img img` matched that too, which is the kind of stray
+   hit that only shows up once somebody sets the same property inline. */
+.review-img-source img { width: 100%; max-height: 68vh; object-fit: contain; }
 .review-img, .review-img-source { cursor: zoom-in; }
 
 .review-zoom {
@@ -5361,12 +5363,22 @@ html.theme-light .stat-value, html.theme-light .stat-pill-num {
   min-height: 0;
   display: flex; flex-direction: column; align-items: center; gap: 6px;
 }
-.review-zoom-cell img {
+/* The source photograph, which IS a flex item of the cell. Scoped to a direct
+   child so it stops reaching the poster and the signature mark inside the
+   plate — those are sized by the plate rules, and a stray `max-width` on a
+   mark whose width is a deliberate percentage is a bug waiting for a wide
+   setting. */
+.review-zoom-cell > img {
   flex: 1; min-height: 0; max-width: 100%; object-fit: contain;
 }
 .review-zoom-cell .zoom-label { font-size: 11px; letter-spacing: 0.1em; color: var(--subtext); }
+/* This plate GROWS to fill the cell, while the card's plate is WIDER than the
+   picture. Two different wrong boxes, which is why the same signature came
+   out a different size in the two views (owner, 2026-09-09). Both are now
+   harmless, because nothing is measured against either one — see
+   `.sig-layer` and the plate note above. */
 .review-zoom-canvas { flex: 1; min-height: 0; display: flex; justify-content: center; }
-.review-zoom-canvas img { max-height: 100%; }
+.review-zoom-canvas img[data-poster-img] { max-height: 100%; }
 
 /* The colour bar's honest state when the artwork has no see-through pixels */
 .review-color-dead { font-size: 11.5px; color: var(--subtext); }
@@ -5405,17 +5417,75 @@ html.theme-light .stat-value, html.theme-light .stat-pill-num {
 .jump-to-work:hover { box-shadow: var(--glow); }
 
 
-/* The coloured plate must be VISIBLE (v158). It used to hug the poster
-   exactly, so on a mostly-opaque artwork changing the colour changed
-   nothing you could see — the owner read that as a broken eyedropper. The
-   plate now fills the card's width and the poster sits centred on it,
-   like the zoom view, so the chosen colour always shows around the art. */
+/* ══════════════════════════════════════════════════════════════════════
+   THE PLATE IS THE PICTURE. v169 — and this REVERSES v158 on purpose.
+   ══════════════════════════════════════════════════════════════════════
+   v158 made the plate fill the card's width with the poster centred on it,
+   so the chosen colour always showed as bars beside the art. The reason
+   given was real at the time: on a mostly-opaque artwork, a plate that hugged
+   the poster meant changing the colour changed nothing you could see, and
+   the owner read that as a broken eyedropper.
+
+   That reason no longer holds, because the honest version of it was built
+   later. `probeTransparency()` now reads the artwork's alpha and, when there
+   are no see-through pixels, replaces the whole colour bar with a sentence
+   saying so. The screen SAYS the colour cannot do anything, instead of
+   proving it with a margin that is not in the file.
+
+   And v158 became actively wrong the day the signature arrived (v167). The
+   mark is placed at a PERCENTAGE, and a percentage is meaningless without
+   saying "of what". The server measures from the picture — `W, H = img.size`
+   in `app/signature.py`. The preview measured from the PLATE. While the
+   plate was wider than the picture those two disagreed, so the mark sat out
+   on the blue bar, outside the artwork entirely (owner, 2026-09-09).
+
+   The fix is in two halves, and each one is deliberately dull, because this
+   environment cannot render a page and a clever layout would be a guess:
+
+   1. THE COLOUR MOVES ONTO THE PICTURE. A background paints its own
+      element's box, and an image's box is exactly the image — so painting
+      the colour on the poster instead of on the plate makes the bars
+      impossible rather than merely smaller. It still composites correctly,
+      because a background sits BEHIND the see-through pixels. (This is not
+      the `background: #111` mistake fixed earlier that day: that one hid a
+      DIFFERENT element's colour. Here the picture's own background IS the
+      colour being chosen, so there is only one of them.)
+
+   2. THE SIGNATURE GETS ITS OWN LAYER, measured to the picture. `.sig-layer`
+      is absolutely positioned over the poster's rendered box by
+      `fitSigLayer()`. Being absolutely positioned it changes no layout, so
+      it cannot feed back into the size it is measuring — which is the trap
+      that makes "resize the plate to the image" go round in circles.
+
+   The plate itself keeps its old shape and is now only a positioning
+   context and a click target. Nothing on screen is measured against it. */
 .review-canvas {
   display: flex;
   justify-content: center;
   width: 100%;
 }
-.review-canvas img { width: auto; max-width: 100%; max-height: 68vh; }
+.review-canvas img[data-poster-img] { width: auto; max-width: 100%; max-height: 68vh; }
+
+/* The picture carries the chosen colour, so the colour cannot extend past
+   the artwork. `contain` is redundant while width and height are auto, and
+   is stated so that a later max-height cannot letterbox by stretching. */
+.review-canvas img[data-poster-img],
+.review-zoom-canvas img[data-poster-img] {
+  display: block;
+  object-fit: contain;
+  transition: background-color .08s linear;
+}
+
+/* THE BOX THE SIGNATURE IS PLACED IN, and the whole point of it is that it
+   is the PICTURE's box rather than the plate's. Its pixel position is
+   written by fitSigLayer(); it never affects layout, and it must not eat
+   clicks meant for the poster underneath — only the mark itself is
+   grabbable. */
+.sig-layer {
+  position: absolute;
+  pointer-events: none;
+  overflow: visible;
+}
 
 /* ── v162: worker screen polish ─────────────────────────────────────── */
 

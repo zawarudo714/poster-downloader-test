@@ -718,6 +718,37 @@ skimming, and pressing it again unmarks it. Nothing else.
 
 ---
 
+## 28. THE SIGNATURE AND THE BLUE, ON APPROVE ARTWORK — v170
+
+The three things you reported: the mark sitting outside the picture, the blue
+running past the artwork, and the mark changing size when you zoom.
+
+**What to look at**
+
+- Open Approve Artwork on a poster that has a signature. The blue should stop
+  exactly at the edge of the artwork. There should be no coloured bars down
+  the sides of the poster.
+- The signature should sit ON the picture, near the bottom right corner,
+  inside the artwork.
+- Click to zoom. The mark should be in the same place, and the same size
+  relative to the poster, as it was on the card.
+- Drag the mark left and right. It should follow your pointer exactly rather
+  than running ahead of it, and it should stop short of the edge on both
+  sides.
+- Change the background colour, then try the **EYEDROPPER**. Both should
+  still work. The eyedropper now reads the colour off the picture rather than
+  off the box behind it, so it is worth a click.
+- Make the browser window narrower and wider. The mark should stay in the
+  same place on the poster.
+- **The real test, and the one thing I could not check from here:** approve
+  one, then open the finished file on the S drive. The signature on screen
+  and the signature in the file should be in the same place at the same size.
+  I fixed a second fault you had not reported — the preview was putting the
+  mark about half again too far up the page — so this comparison is what
+  proves the two now agree.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

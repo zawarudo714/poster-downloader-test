@@ -193,6 +193,47 @@
     paintSig(pid);
   }
 
+  // ── THE BOX A PERCENTAGE IS MEASURED AGAINST ────────────────────────────
+  //
+  // The server places the mark against the PICTURE — `W, H = img.size` in
+  // app/signature.py. The preview used to place it against the PLATE, which
+  // is wider than the picture on a card and taller than it in the zoom. So
+  // the mark sat outside the artwork, and came out a different size in the
+  // two views (owner, 2026-09-09).
+  //
+  // `.sig-layer` is pinned to the poster's rendered box so a percentage here
+  // means what it means on the server. It is absolutely positioned, so it
+  // adds nothing to layout and cannot feed back into the size it measures.
+  function fitSigLayer(imgEl) {
+    if (!imgEl) return;
+    const plate = imgEl.closest('[data-canvas]');
+    if (!plate) return;
+    const layer = plate.querySelector('[data-sig-layer]');
+    if (!layer) return;
+    const pr = plate.getBoundingClientRect();
+    const ir = imgEl.getBoundingClientRect();
+    if (!ir.width || !ir.height) return;   // not laid out yet; a load or a
+                                           // resize will call this again
+    layer.style.left = (ir.left - pr.left) + 'px';
+    layer.style.top = (ir.top - pr.top) + 'px';
+    layer.style.width = ir.width + 'px';
+    layer.style.height = ir.height + 'px';
+    const pid = Number(imgEl.dataset.pid);
+    if (pid) paintSig(pid);      // the bottom margin is in pixels of THIS box
+  }
+
+  // Every poster on screen, in both views. Called after a render, after the
+  // overlay syncs, when a picture finishes loading, and on resize — a box
+  // measured once is a box that is wrong the moment the window moves.
+  function fitAllSigLayers() {
+    document.querySelectorAll('[data-poster-img]').forEach((imgEl) => {
+      if (imgEl.complete && imgEl.naturalWidth) fitSigLayer(imgEl);
+      else imgEl.addEventListener('load', () => fitSigLayer(imgEl), { once: true });
+    });
+  }
+
+  window.addEventListener('resize', fitAllSigLayers);
+
   // Repaint in place rather than re-render, so dragging stays smooth and
   // the poster image is not refetched on every mouse move.
   function paintSig(pid) {
@@ -207,7 +248,18 @@
     document.querySelectorAll(`[data-sig-mark][data-pid="${pid}"]`).forEach((el) => {
       el.style.width = s.w_pct + '%';
       el.style.left = s.x_pct + '%';
-      el.style.bottom = v.signature.margin_pct + '%';
+      // THE BOTTOM MARGIN IS A PERCENTAGE OF THE *WIDTH*, because that is
+      // what the server does: `margin = W * margin_pct` and then
+      // `top = H - margin - mark_height`, in app/signature.py. A CSS
+      // percentage on `bottom` resolves against the container's HEIGHT
+      // instead, so on a 4000x6000 poster the preview was showing the mark
+      // 30 pixels up where the file puts it at 20 — half again too far, and
+      // wrong by a different amount for every shape of poster.
+      const layer = el.closest('[data-sig-layer]');
+      const w = layer ? layer.getBoundingClientRect().width : 0;
+      el.style.bottom = w
+        ? (w * v.signature.margin_pct / 100) + 'px'
+        : v.signature.margin_pct + '%';   // pre-layout; fitSigLayer redoes it
       el.style.opacity = String(s.opacity / 100);
       // The file is white strokes. `invert` is how the same file becomes the
       // black version, which is exactly what the server does by rebuilding
@@ -302,7 +354,10 @@
     function start(e) {
       const mark = e.target.closest('[data-sig-mark]');
       if (!mark) return;
-      const plate = mark.closest('[data-canvas]');
+      // Measured against the SIGNATURE LAYER, which is the picture's box.
+      // Dragging against the plate meant the pointer and the mark moved at
+      // different rates, because the plate is wider than the artwork.
+      const plate = mark.closest('[data-sig-layer]');
       if (!plate) return;
       dragging = { pid: Number(mark.dataset.pid), plate: plate };
       mark.classList.add('is-dragging');
@@ -367,8 +422,7 @@
     if (!img || Number(img.dataset.pid) !== eyedropFor) return;
     e.preventDefault();
     e.stopPropagation();
-    const box = img.closest('[data-canvas]');
-    const hex = sampleAt(img, box, e);
+    const hex = sampleAt(img, e);
     if (hex) setColor(eyedropFor, hex);
     document.querySelectorAll('.is-picking').forEach(
       (el) => el.classList.remove('is-picking'));
@@ -457,11 +511,12 @@
         <figure class="review-img ${state ? 'is-' + state : ''}" data-pid="${v.processed_id}"
                 data-zoom-open="${img.poster_id}"
                 title="Click to compare side by side, full screen">
-            <span class="review-canvas" data-canvas data-pid="${v.processed_id}"
-                  style="background-color:${esc(bg)}">
+            <span class="review-canvas" data-canvas data-pid="${v.processed_id}">
               <img loading="lazy" src="${shown}" alt="" data-poster-img
-                   data-pid="${v.processed_id}" crossorigin="anonymous">
-              ${sigMarkHtml(v)}
+                   data-pid="${v.processed_id}" crossorigin="anonymous"
+                   style="background-color:${esc(bg)}">
+              <span class="sig-layer" data-sig-layer data-pid="${v.processed_id}"
+                    >${sigMarkHtml(v)}</span>
             </span>
           <figcaption>
             <span class="mono">${esc(v.filename)}</span>
@@ -481,6 +536,7 @@
     }).join('');
 
     probeTransparency();
+    fitAllSigLayers();
     // The sliders and the readout are filled in AFTER the markup exists.
     // Setting them from the template string would mean writing the same
     // numbers twice, and one of the two copies always goes stale.
@@ -500,8 +556,14 @@
   // this generation is repainted, so the card and the zoom can never drift.
   function setColor(pid, value) {
     colors.set(pid, value);
-    document.querySelectorAll(`[data-canvas][data-pid="${pid}"]`).forEach((box) => {
-      box.style.backgroundColor = value;
+    // ON THE PICTURE, NOT ON THE PLATE. The plate is wider than the artwork
+    // on the card and taller than it in the zoom, so a colour painted there
+    // showed as bars beside the poster that are not in the finished file
+    // (owner, 2026-09-09). An image's background paints its own box and sits
+    // behind its see-through pixels, which is both the right composite and
+    // the right shape.
+    document.querySelectorAll(`[data-poster-img][data-pid="${pid}"]`).forEach((el) => {
+      el.style.backgroundColor = value;
     });
     document.querySelectorAll(`[data-color-input][data-pid="${pid}"]`).forEach((input) => {
       if (input.value !== value) input.value = value;
@@ -525,7 +587,10 @@
     toast('Click a colour in the poster.');
   }
 
-  function sampleAt(imgEl, box, ev) {
+  // `box` (the plate) used to be passed in for its background colour and is
+  // gone rather than left as an ignored argument — a parameter nothing reads
+  // is a false clue about where the colour lives.
+  function sampleAt(imgEl, ev) {
     const rect = imgEl.getBoundingClientRect();
     const c = document.createElement('canvas');
     c.width = imgEl.naturalWidth || rect.width;
@@ -533,7 +598,11 @@
     const ctx = c.getContext('2d', { willReadFrequently: true });
     // Paint the background first, then the picture on top — the same order
     // the server flattens in, so the sampled pixel is the finished one.
-    ctx.fillStyle = getComputedStyle(box).backgroundColor;
+    // The colour is read off the PICTURE, because that is where it is
+    // painted. `box` is still the plate and is no longer the thing carrying
+    // the colour, so reading it here would have sampled a transparent
+    // background and every eyedropper pick would have come back black.
+    ctx.fillStyle = getComputedStyle(imgEl).backgroundColor;
     ctx.fillRect(0, 0, c.width, c.height);
     try {
       ctx.drawImage(imgEl, 0, 0, c.width, c.height);
@@ -681,7 +750,12 @@
     poster.dataset.pid = v.processed_id;
     const canvas = $('[data-zoom-canvas]');
     canvas.dataset.pid = v.processed_id;
-    canvas.style.backgroundColor = colorFor(v);
+    // The colour goes on the picture, not on this box — see setColor().
+    poster.style.backgroundColor = colorFor(v);
+    // Scoped to the overlay. `$` takes ONE argument, so `$(sel, canvas)`
+    // would have quietly returned the first card's layer instead.
+    const zoomLayer = canvas.querySelector('[data-sig-layer]');
+    if (zoomLayer) zoomLayer.dataset.pid = String(v.processed_id);
     // The big view carries the mark as well, because judging whether a
     // signature sits well is exactly what a bigger picture is for.
     const zoomMark = $('[data-zoom-sig]');
@@ -700,9 +774,15 @@
     $('[data-zoom-state]').textContent = d ? d.action.toUpperCase() : '';
     $('[data-zoom-controls]').innerHTML =
       versionBarHtml(img) + colorBarHtml(v, 'zoom') + sigBarHtml(v, 'zoom');
-    if (v.signature) paintSig(v.processed_id);
     box.hidden = false;
     zoomOpen = true;
+    // AFTER the overlay is shown, never before. A hidden element has no size,
+    // so measuring the poster while `box.hidden` was still true would have
+    // pinned the layer to a zero-sized box and the mark would not appear at
+    // all. This is the same trap as the busy-state exit: the ordering only
+    // matters on the path where everything is working.
+    if (v.signature) paintSig(v.processed_id);
+    fitAllSigLayers();
   }
 
   function closeZoom() {

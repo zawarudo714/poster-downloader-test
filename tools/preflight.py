@@ -1912,6 +1912,59 @@ def _plated_image_classes() -> set[str]:
     return found
 
 
+def _plate_own_classes() -> set[str]:
+    """
+    The class names of the plate elements themselves.
+
+    `_plated_image_classes()` returns everything on or above a plated picture,
+    which is deliberately broad. This is the narrow companion: only the
+    element actually carrying the plate hook, so a rule can be flagged for
+    painting the PLATE without also flagging every card and cell around it.
+    """
+    from html.parser import HTMLParser
+
+    plates: set[str] = set()
+    js_files = sorted((APP / "static" / "js").glob("*.js"))
+    for js in js_files:
+        text = js.read_text(encoding="utf-8")
+        if not re.search(r"\.style\.backgroundColor\s*=", text):
+            continue
+        for hook in re.findall(r"\[data-([a-z0-9-]*canvas[a-z0-9-]*)\]", text):
+            plates.add("data-" + hook)
+    if not plates:
+        return set()
+
+    found: set[str] = set()
+
+    class Walk(HTMLParser):
+        def handle_starttag(self, tag, attrs):
+            if not ({k for k, _v in attrs} & plates):
+                return
+            for k, v in attrs:
+                if k == "class" and v:
+                    found.update(v.split())
+
+        def handle_startendtag(self, tag, attrs):
+            self.handle_starttag(tag, attrs)
+
+    def walk(fragment: str) -> None:
+        w = Walk()
+        try:
+            w.feed(fragment)
+        except Exception:      # noqa: BLE001 — a tolerant read, never fatal
+            pass
+
+    hole = re.compile(r"\$\{[^{}]*\}")
+    for tpl in sorted((APP / "templates").glob("*.html")):
+        walk(tpl.read_text(encoding="utf-8"))
+    for js in js_files:
+        text = js.read_text(encoding="utf-8")
+        for lit in re.findall(r"`([^`]*)`", text):
+            if "<" in lit:
+                walk(hole.sub(" ", lit))
+    return found
+
+
 def check_no_background_on_composited_img() -> None:
     """
     A picture that sits on a chosen colour must not paint its own.
@@ -1934,14 +1987,32 @@ def check_no_background_on_composited_img() -> None:
     looking at the screen would ever have noticed.
 
     ════════════════════════════════════════════════════════════════════════
-    THE RULE, STATED GENERALLY
+    THE RULE, STATED GENERALLY, AND WHY IT GOT WIDER ON 2026-09-09
     ════════════════════════════════════════════════════════════════════════
-    Anything drawn on a plate must be see-through. A rule is flagged when
-    every class it names is one that really does sit on the path from a
-    plate down to a picture — so `.review-img-source img`, whose picture is
-    an opaque photograph outside any plate, is left alone.
+    The composite has exactly ONE background, and JavaScript owns it. Any
+    background written in CSS is a second one, and the two cannot both be
+    right.
+
+    The first version only asked about the PICTURE, because at the time the
+    colour lived on the plate and the picture was the thing wrongly painting
+    over it. Then the colour MOVED onto the picture — the plate is wider
+    than the artwork on a card and taller in the zoom, so a colour painted
+    there showed as bars that are not in the finished file (owner,
+    2026-09-09). At that moment this check went green for the wrong reason:
+    its question was still "does the picture paint over the plate?", and the
+    answer had stopped meaning anything.
+
+    So it now asks the question that survives the colour moving: does ANY
+    CSS rule give a background to the picture, or to the plate itself? Either
+    one competes with the JavaScript, and which of the two is currently the
+    carrier no longer has to be known.
+
+    A rule is flagged only when every class it names sits on that path, so
+    `.review-img-source img` — an opaque photograph outside any plate — is
+    left alone.
     """
     plated = _plated_image_classes()
+    plate_own = _plate_own_classes()
     if not plated:
         return
 
@@ -1955,22 +2026,108 @@ def check_no_background_on_composited_img() -> None:
     css = re.sub(r"/\*.*?\*/", " ", css, flags=re.S)
     for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
         sel, body = m.group(1), m.group(2)
-        if not re.search(r"\bbackground(-color)?\s*:", body):
+        # Anchored to the START of a declaration. Unanchored, `transition:
+        # background-color .08s` reads as a background being set, which it is
+        # not — and a check that fires on the innocent case gets switched off.
+        if not re.search(r"(?:^|[{;])\s*background(-color)?\s*:", body):
             continue
         if re.search(r"background(-color)?\s*:\s*(none|transparent|inherit)",
                      body):
             continue
         for part in sel.split(","):
             part = part.strip()
-            if not re.search(r"(^|[\s>+~])img\s*$", part):
+            names = set(re.findall(r"\.([A-Za-z0-9_-]+)", part))
+            if not names:
                 continue
-            names = re.findall(r"\.([A-Za-z0-9_-]+)", part)
-            if not names or not set(names) <= plated:
-                continue
-            fail(f"CSS rule '{part}' gives a background to a picture that "
-                 f"sits on a colour plate — it paints over the colour being "
-                 f"chosen and the preview goes wrong (see v163). "
-                 f"Remove the background.")
+            # `img`, but also `img[data-poster-img]` and `img:hover`. The
+            # first version stopped at a bare `img`, so the day the poster
+            # rules were narrowed to `img[data-poster-img]` this check would
+            # have gone quietly blind to the very bug it was written for.
+            # Found by sabotage, not by reading it (2026-09-09).
+            ends_in_img = re.search(
+                r"(^|[\s>+~])img(\[[^\]]*\]|::?[a-zA-Z-]+(\([^)]*\))?)*\s*$",
+                part)
+            if ends_in_img and names <= plated:
+                fail(f"CSS rule '{part}' gives a background to a picture "
+                     f"that sits on a colour plate. The composite already "
+                     f"has one background and JavaScript owns it, so this "
+                     f"one competes with the colour being chosen and the "
+                     f"preview goes wrong (see v163). Remove the background.")
+            elif not ends_in_img and names <= plate_own:
+                fail(f"CSS rule '{part}' gives a background to the colour "
+                     f"plate itself. The plate is bigger than the artwork, "
+                     f"so a colour there shows as bars beside the picture "
+                     f"that are not in the finished file (see v169). The "
+                     f"colour belongs on the picture. Remove the background.")
+
+
+def check_overlay_sits_in_its_measuring_layer() -> None:
+    """
+    A mark placed by PERCENTAGE must live inside the box it is a percentage of.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE DEFECT THIS EXISTS FOR (2026-09-09)
+    ════════════════════════════════════════════════════════════════════════
+    The signature is positioned `left: 91%`, `width: 16.8%`. A percentage in
+    CSS resolves against the nearest positioned ANCESTOR, and the mark was a
+    child of the colour plate. The plate is wider than the artwork on a card
+    and taller than it in the zoom, while the server measures from the
+    picture — `W, H = img.size` in app/signature.py. So the mark sat out on
+    the coloured bar OUTSIDE the artwork, and came out a different size in
+    the two views. The owner reported all three symptoms at once, because
+    they are one mistake.
+
+    `.sig-layer` now sits exactly over the poster's rendered box, and the
+    mark goes inside it. This check asserts the nesting at every place the
+    mark is built.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHAT THIS CANNOT DO, SAID PLAINLY
+    ════════════════════════════════════════════════════════════════════════
+    It proves the mark is in the right BOX. It cannot prove that box is the
+    right SIZE, because that is a fact about a rendered page and nothing here
+    renders. Only somebody looking at the screen can confirm the layer really
+    covers the picture. The nesting is the half that can be mechanised, and
+    the half that was actually got wrong.
+    """
+    def offenders(text: str, sites: list[int], where: str) -> None:
+        for i in sites:
+            before = text[:i]
+            plate = max(before.rfind("data-canvas"),
+                        before.rfind("data-zoom-canvas"))
+            layer = before.rfind("data-sig-layer")
+            if plate == -1:
+                continue          # not inside a plate at all; nothing to say
+            if layer < plate:
+                line = text.count("\n", 0, i) + 1
+                fail(f"{where}:{line}: the signature mark is built directly "
+                     f"inside the colour plate. Its percentages would be "
+                     f"measured against the plate, which is bigger than the "
+                     f"artwork, so it lands outside the picture (see v169). "
+                     f"Put it inside the [data-sig-layer] element.")
+
+    seen = 0
+    for tpl in sorted((APP / "templates").glob("*.html")):
+        text = tpl.read_text(encoding="utf-8")
+        sites = [m.start() for m in re.finditer(r'class="sig-mark"', text)]
+        seen += len(sites)
+        offenders(text, sites, str(tpl.relative_to(ROOT)))
+
+    for js in sorted((APP / "static" / "js").glob("*.js")):
+        text = js.read_text(encoding="utf-8")
+        # The CALL SITE, not the definition. On the card the mark's markup
+        # comes back from sigMarkHtml(), so where that result is dropped into
+        # the page is what decides its positioning context.
+        sites = [m.start() for m in re.finditer(r"\$\{\s*sigMarkHtml\s*\(", text)]
+        seen += len(sites)
+        offenders(text, sites, str(js.relative_to(ROOT)))
+
+    # A check that found nothing to look at is a check reporting on nothing.
+    # The mark was renamed once already; if it is renamed again this says so
+    # instead of going quietly green.
+    if not seen:
+        fail("no signature mark could be found in any template or script — "
+             "this check is blind, and was passing on an empty set")
 
 
 def check_colour_names_have_rules() -> None:
@@ -2241,6 +2398,8 @@ CHECKS = [
     ("the top bar carries no filter", check_no_filter_on_fixed_element_ancestors),
     ("no picture paints over its colour plate", check_no_background_on_composited_img),
     ("every colour name has a rule", check_colour_names_have_rules),
+    ("overlays sit in the box they are measured against",
+     check_overlay_sits_in_its_measuring_layer),
     ("javascript helpers are in scope", check_js_helpers_are_in_scope),
 ]
 

@@ -191,7 +191,7 @@
     cell.innerHTML = `
       <div class="pay-unpaid-line">
         <span class="pay-unpaid-icon">⚠</span>
-        <strong>${totalCount} unpaid poster${totalCount === 1 ? '' : 's'} from previous days</strong>
+        <strong>${totalCount} unpaid ${totalCount === 1 ? PD.noun : PD.nouns} from previous days</strong>
         <span class="muted">(${formatAmount(totalKes)} KES)</span>
         <span class="pay-unpaid-chips">${chips}</span>
       </div>
@@ -281,7 +281,7 @@
     backPaySummary.textContent =
       extraCount === 0
         ? 'No back-pay selected.'
-        : `+${extraCount} back-pay poster${extraCount === 1 ? '' : 's'} · +${formatAmount(extraCount * dialogRate)} KES`;
+        : `+${extraCount} back-pay ${extraCount === 1 ? PD.noun : PD.nouns} · +${formatAmount(extraCount * dialogRate)} KES`;
     dialogAmount.value = formatAmount(totalKes);
     // Update the human-readable summary line at the top.
     if (extraCount > 0) {

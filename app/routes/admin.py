@@ -1599,6 +1599,14 @@ def api_browse(
                 "master_id": key,
                 "title": mt.title if mt else "(unknown)",
                 "year":  mt.year  if mt else "",
+                # The kind word from the sheet — city, castle, waterfall —
+                # so the reviewer sees the same subject drawing the worker
+                # saw while choosing the photograph.
+                "kind":  (mt.description or "") if mt else "",
+                # The lightbox names the place with its number, and had been
+                # asking for a field this reply never carried — so the
+                # number silently never showed (found 2026-09-10).
+                "external_id": mt.external_id if mt else None,
                 "title_folder": sp.title_folder_path,
                 "needs_revision": bool(mt.needs_revision) if mt else False,
                 "posters": [],

@@ -5648,6 +5648,24 @@ body.has-rail .nav-group-btn .nav-badge { opacity: 1; }
   .subject-icon svg { width: 22px; height: 22px; }
 }
 
+/* The INLINE version of the subject, for the admin review screens — the
+   same drawing at title-line size, built by SubjectKind.chip() in
+   subject_icons.js. Small on purpose: it sits beside the place name and
+   must inform, not compete. */
+.subject-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 9px 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--accent);
+  font-size: 12.5px; font-weight: 600;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.subject-chip svg { width: 17px; height: 17px; display: block; }
+.subject-chip > span { color: var(--subtext); }
+
 /* ══════════════════════════════════════════════════════════════════════
    v166 — THE SIDEBAR AS COLOURED BANDS
    ══════════════════════════════════════════════════════════════════════

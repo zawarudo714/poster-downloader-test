@@ -2988,6 +2988,18 @@ def check_noun_fallbacks_agree() -> None:
             bare = line.strip()
             if bare.startswith(("//", "*", "#", "{#", "/*")):
                 continue                      # a comment says nothing to anybody
+            # STRIP ${...} FROM THE LINE, NOT FROM THE MATCHED STRING.
+            # `poster${n === 1 ? '' : 's'}` carries QUOTES inside its
+            # interpolation, and the string-finder below refuses to cross a
+            # quote — so the whole sentence was invisible and the dead word
+            # in it sat on the Worker Images screen through the v177 sweep
+            # (found 2026-09-10). Removing interpolations first means a
+            # quote inside ${...} can no longer hide the words around it.
+            # The stand-in is NOT a space: a space would turn the path
+            # "/admin/poster/${id}/delete" into two words with a gap, and
+            # a path is not a sentence — the first version did exactly
+            # that and reported nine URLs.
+            line = re.sub(r"\$\{[^}]*\}", "\x00", line)
             for _, text in quoted.findall(line):
                 # A SENTENCE, not an identifier. Class names, ids and paths
                 # legitimately say "poster" and renaming those buys nothing.

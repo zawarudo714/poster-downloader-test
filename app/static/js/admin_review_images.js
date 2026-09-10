@@ -635,6 +635,9 @@
     if (!t) return;
 
     $('[data-review-title]').textContent = `${t.external_id ?? '–'}. ${t.title}`;
+    // The subject drawing and word — the same strip the worker saw while
+    // choosing the photograph, so the judge has the same context.
+    $('[data-review-kind]').innerHTML = window.SubjectKind.chip(t.kind);
     $('[data-review-meta]').textContent = `saved ${t.date}`;
     $('[data-review-progress]').textContent = `${index + 1} / ${titles.length}`;
 

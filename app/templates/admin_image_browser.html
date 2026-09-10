@@ -98,6 +98,7 @@
     <button class="lightbox-close" data-lightbox-close aria-label="Close">×</button>
     <div class="lightbox-titlebar">
       <span class="lightbox-title" id="ib-lb-title"></span>
+      <span id="ib-lb-kind"></span>
       <span class="muted mono" id="ib-lb-pos"></span>
     </div>
     <button class="lightbox-arrow lightbox-arrow-prev" id="ib-lb-prev"
@@ -124,6 +125,11 @@
   <section class="g-title">
     <header class="g-title-head">
       <h3 class="g-title-name"></h3>
+      {# The kind of place — City, Castle, Waterfall — with its drawing, the
+         same one the worker saw while choosing. A castle and a city want
+         different pictures, and the judge needs the same context as the
+         chooser. #}
+      <span class="g-title-kind"></span>
       <span class="g-title-meta mono muted"></span>
     </header>
     <div class="g-title-posters"></div>
@@ -148,5 +154,8 @@
   // Server-rendered date list for the current worker.
   window.__dates = [{% for d in dates %}"{{ d }}"{% if not loop.last %},{% endif %}{% endfor %}];
 </script>
+{# Subject drawings, shared with the worker page — loaded before admin.js,
+   which reads window.SubjectKind when it draws each title's header. #}
+<script src="/static/js/subject_icons.js?v={{ app_version }}"></script>
 <script src="/static/js/admin.js?v={{ app_version }}"></script>
 {% endblock %}

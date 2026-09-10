@@ -35,51 +35,6 @@ account, so this is expected to be a non-issue; confirm rather than assume.
 
 ---
 
-## FOUR THINGS RAISED 2026-09-09, ANALYSED, NOT YET BUILT
-
-**1. The OpenAI reconcile alarm fires on the normal case.** `TRACED
-2026-09-09`. `fetch_month_to_date()` sends only `start_time`, `bucket_width`
-and `limit` to `/v1/organization/costs` — no project or key filter — and the
-module's own docstring already says the endpoint "covers the whole
-ORGANISATION". The owner's usage page shows 3,053 Responses/Chat requests and
-15.4M input tokens against 34 images, plus a Codex Plugins tab, so the $68
-gap is his other OpenAI usage. The panel currently blames "a price change on
-their side", which is wrong and sent him hunting. Cheapest honest fix is the
-WORDING plus a link telling him to filter the usage page by this app's key.
-The real fix is filtering the request, which needs OpenAI's parameter names
-READ FROM THEIR DOCS, never guessed (rule 3c-bis).
-
-**2. Failure evidence is never pruned.** `TRACED 2026-09-09`. `POST
-/artifact` in `pipeline_api.py` writes into
-`workspace/_pipeline_artifacts/{kind}/` and nothing anywhere deletes. The
-owner asked for a cap of 30. Note two things when building it: one failure
-writes TWO files (a `.png` and a `.html`), and `UploadTracking.last_screenshot`
-points at the png — so pruning must leave the Failures list able to cope with
-a picture that is gone.
-
-**3. `check_orphan_files` reports the signature and the reference image as
-orphans, and tells him to delete them.** `TRACED 2026-09-09` — this is a live
-FALSE ALARM, not a wish. The known-file set is built ONLY from `SavedPoster`
-rows via `saved_poster_path()`. Files referenced by a SETTING
-(`signature_image`, `openai_style_image`) or by a COLUMN
-(`UploadTracking.last_screenshot`) are invisible to it, so all 8 findings on
-his screen were wrong and the advice text reads "the app has no idea they
-exist". Acting on it would delete his signature and stop the poster builder.
-The shape is the one this repo keeps hitting: a check that knows ONE way a
-file can be claimed, in a system with three.
-
-**4. The status strip knows two of the machine's eight jobs.** `TRACED
-2026-09-09`. `pulse.js` builds "doing now" from `n.processing` and
-`n.uploading` only, which are counts of image ROWS in a state. The node's loop
-dispatches eight kinds: `process`, `upload`, `listing_check`, `earnings_read`,
-`profile_cleanup`, `test_download`, `test_process`, `test_upload`. So a
-listing check or an earnings read runs for an hour while the strip says
-"nothing". The fix is to read the live `PipelineJob` rows, which already carry
-the kind, rather than adding a counter per job type — derive it, do not
-maintain it.
-
----
-
 ## REUSING AN EARNING FAA ACCOUNT FOR TRAVEL — decided 2026-09-09
 
 The owner is rebranding an existing FineArtAmerica account rather than buying

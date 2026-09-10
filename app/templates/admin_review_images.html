@@ -62,6 +62,10 @@
       <div class="review-head">
         <div>
           <span class="review-title" data-review-title>—</span>
+          {# The kind of place, with the same drawing the worker saw while
+             choosing the photograph — so the judge knows whether this title
+             wanted a castle, a beach or a bridge. #}
+          <span data-review-kind></span>
           <span class="muted mono" data-review-meta></span>
         </div>
         <div class="review-nav">
@@ -148,5 +152,8 @@
 {% endblock %}
 
 {% block scripts %}
+{# Subject drawings, shared with the worker page — loaded before the page
+   script, which reads window.SubjectKind when it shows each title. #}
+<script src="/static/js/subject_icons.js?v={{ app_version }}"></script>
 <script src="/static/js/admin_review_images.js?v={{ app_version }}"></script>
 {% endblock %}

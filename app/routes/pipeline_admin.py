@@ -3444,6 +3444,10 @@ def api_review_queue(
             "title_id": title.id,
             "external_id": title.external_id,
             "title": title.title,
+            # The kind word from the sheet — city, castle, waterfall — shown
+            # with its drawing so the judge has the same context the worker
+            # had while choosing the photograph.
+            "kind": title.description or "",
             "date": poster.original_save_date.isoformat() if poster.original_save_date else "",
             "images": [],
         })

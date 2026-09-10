@@ -97,7 +97,7 @@
        'transparent is the production look — it changes HOW the model paints, and the see-through result is flattened onto the colour to the right. auto leaves the choice to the model, which is NOT the same as transparent. opaque forces a solid background.',
        ['transparent', 'auto', 'opaque']],
       ['gpt_background_color', 'text', 'Background colour behind transparency',
-       'Only used when the picture comes back with see-through areas, which happens when Background is set to transparent above. A hex colour like #000000. Black suits nearly every poster; the odd one needs its own colour, and you set that per image on the Approve Artwork screen with the eyedropper. This is just the starting point.'],
+       'Only used when the picture comes back with see-through areas, which happens when Background is set to transparent above. A hex colour like #000000. Black suits nearly every image; the odd one needs its own colour, and you set that per image on the Approve Artwork screen with the eyedropper. This is just the starting point.'],
       ['openai_use_style_image', 'bool', 'Send the style reference image',
        'On, the style reference is sent as the FIRST image and the worker\'s photo as the second — so the prompt can say things like "the style of the first image". Off, only the worker\'s photo is sent and the prompt has to describe the look in words. Match this to the prompt you have written: if the prompt talks about two images, this must be on.'],
       ['gpt_review_required', 'bool', 'Review images before upload', 'On, every generated image waits for you on the Review Images tab. Off, they go straight to the upload queue. Turning it OFF does not release what is already waiting — those still need approving, so nothing is ever listed that you never looked at.'],
@@ -1017,7 +1017,7 @@
         <tr class="pipe-subrow">
           <td></td>
           <td colspan="5" class="muted mono">
-            ↳ ${esc(p.filename)} — poster #${p.id} — ${esc(p.error)} (${p.attempts} attempts)
+            ↳ ${esc(p.filename)} — image #${p.id} — ${esc(p.error)} (${p.attempts} attempts)
           </td>
         </tr>`).join('')}`;
   }
@@ -2439,7 +2439,7 @@
       }
       case 'test-process': {
         const id = q('[data-test-poster-id]').value;
-        if (!id) return setStatus(q('[data-test-status="process"]'), 'Enter a poster id.', 'error');
+        if (!id) return setStatus(q('[data-test-status="process"]'), `Enter a ${PD.noun} id.`, 'error');
         runTest('process', { poster_id: parseInt(id, 10) }, q('[data-test-status="process"]'));
         break;
       }

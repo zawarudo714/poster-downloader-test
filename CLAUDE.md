@@ -220,6 +220,20 @@ fallback disagreeing. It ignores CSS class names, element ids and anything
 inside `${...}` — the first two versions did not, reported forty false
 alarms, and a check that shouts about class names is one nobody reads.
 
+**And the check itself had a blind spot that survived the whole v177
+sweep:** a quote mark INSIDE a `${...}` interpolation — the everyday
+plural `poster${n === 1 ? '' : 's'}` — stopped the string-finder before it
+ever saw the sentence, so seven "poster" sentences sat on live screens
+while the check read green (found 2026-09-10, while touching one of them
+for an unrelated reason). The check now strips interpolations from the
+LINE before hunting for strings, with a non-space stand-in so a URL does
+not turn into a false sentence. The general shape: **a scanner that skips
+region X must ask what region X can HIDE — a skipped span that can contain
+the scanner's own delimiters blinds it to everything around the span.**
+Known residual: a LITERAL quote in a template string's own text still
+hides that one string, accepted because handling it needs a real JS lexer,
+which is the wrong check (see 3c).
+
 ---
 
 ## What this is

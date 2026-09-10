@@ -400,5 +400,9 @@
 </button>
 
 {% block scripts %}
+{# The subject drawings are shared with the admin review screens, so they
+   live in their own file — and it must load BEFORE user.js, which reads
+   window.SubjectKind at call time. #}
+<script src="/static/js/subject_icons.js?v={{ app_version }}"></script>
 <script src="/static/js/user.js?v={{ app_version }}"></script>
 {% endblock %}

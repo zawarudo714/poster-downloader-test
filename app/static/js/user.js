@@ -746,6 +746,17 @@
       // record, the toggle is hidden and the dialog is two buttons.
       if (toggleBtn) toggleBtn.hidden = !!opts.noText;
       if (opts.noText && manualWrap) manualWrap.hidden = true;
+      // ── NO PRESETS MEANS TYPING IS THE ONLY WAY, SO SHOW THE BOX ─────
+      // With an empty preset list the dialog used to open blank, with the
+      // typing box hidden behind TYPE OWN REASON — one pointless click on
+      // every single skip, and a sentence promising buttons that were not
+      // there. When typing is the only option, the box is simply open and
+      // the toggle has nothing to toggle.
+      if (!opts.noText && !(opts.presets || []).length) {
+        manualWrap.hidden = false;
+        if (toggleBtn) toggleBtn.hidden = true;
+        setTimeout(() => manualInp.focus(), 0);
+      }
 
       // If opts.allowEmpty (e.g. complete-with-comment is optional),
       // include a "no reason" preset so worker can confirm without typing.
@@ -1578,10 +1589,14 @@
     if (!reason) {
       const result = await pickReason({
         title: 'Why are you skipping this title?',
-        sub:   'Pick a common reason or type your own. Skipped titles go to the admin for review.',
-        // Free text only, deliberately. A preset here is a one-click way to
-        // skip without thinking; for an artist you genuinely want to know
-        // WHY — obscure act, no photos, wrong person entirely.
+        // The sentence must describe the dialog that EXISTS. It used to say
+        // "pick a common reason or type your own" while presets was empty,
+        // so it promised buttons that were not there (owner, 2026-09-10).
+        sub:   'Type the reason in your own words. Skipped titles go to '
+             + 'the admin for review.',
+        // Free text only, deliberately. A preset is a one-click way to skip
+        // without thinking, and for a skipped PLACE the admin genuinely
+        // wants the why — too obscure, no usable photos, wrong place.
         presets: [],
         allowEmpty: false,
       });

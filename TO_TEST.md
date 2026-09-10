@@ -128,6 +128,15 @@ the clear you would be testing yesterday's code.
 
 ---
 
+## 42. THE SKIP QUESTION — v182
+
+- As the worker, press SKIP. The dialog should say "Type the reason in your
+  own words", the typing box should already be open with the cursor in it,
+  and there should be no TYPE OWN REASON button. One less click on every
+  skip.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

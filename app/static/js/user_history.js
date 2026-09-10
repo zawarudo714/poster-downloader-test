@@ -129,7 +129,13 @@
     const rows = body.querySelectorAll('.history-title-row');
     rows.forEach((row, i) => {
       row.querySelector('.history-title-name').textContent = data.titles[i].title;
-      row.querySelector('.history-title-year').textContent = '(' + data.titles[i].year + ')';
+      // NO YEAR MEANS NO BRACKETS. Gluing brackets round an empty year
+      // printed the literal word "null" beside every travel place (owner's
+      // find, 2026-09-10) — JavaScript spells nothing that way. Guard at
+      // the point of DISPLAY, the same as every other screen.
+      const yr = data.titles[i].year;
+      row.querySelector('.history-title-year').textContent =
+        (yr === null || yr === undefined || yr === '') ? '' : '(' + yr + ')';
       // Highlight matching titles in search mode.
       if (highlight && data.titles[i].title.toLowerCase().includes(highlight)) {
         row.classList.add('history-match');

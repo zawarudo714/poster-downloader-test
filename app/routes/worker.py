@@ -1112,8 +1112,17 @@ def lock_title(
     if t.claimed_by_id != user.id:
         raise HTTPException(403, "You haven't claimed this title.")
 
+    # Opening a title that is ALREADY open for this person is not an event.
+    # Four presses while the page loaded wrote four "opened" lines (owner's
+    # find, 2026-09-10). See the note in title_skip(): the record is what a
+    # pay dispute is settled from, so it holds changes, not keystrokes.
+    # The lock itself is still set either way — this only decides whether a
+    # line is written — so a repeat press remains harmless and still works.
+    already_open = user.locked_master_id == master_id
     user.locked_master_id = master_id
-    log_activity(db, user=user, action="locked", target_type="master_title", target_id=master_id)
+    if not already_open:
+        log_activity(db, user=user, action="locked",
+                     target_type="master_title", target_id=master_id)
     db.commit()
 
     # The LOCK is already committed above. Everything below is decoration,
@@ -2191,6 +2200,23 @@ def title_skip(
     db: Session = Depends(get_db),
 ):
     t = _load_my_master(db, user, master_id)
+
+    # ── A SECOND PRESS OF THE SAME BUTTON IS NOT A SECOND EVENT ────────────
+    # The page takes about a second to answer and nothing stopped the worker
+    # pressing again, so one skip arrived twice and wrote two identical lines
+    # to the Activity Log (owner's find, 2026-09-10). Nothing was corrupted —
+    # skipping an already-skipped title changes nothing — but the log is the
+    # evidence in a pay dispute, and a log that repeats itself is one the eye
+    # learns to skim. The same noise that made "(N/A)" invisible.
+    #
+    # Guarding the BUTTON was not enough on its own: a slow connection, a
+    # double-tap on a phone or a refresh all send it again, and none of those
+    # are things the browser can be trusted to prevent. So the server decides
+    # whether anything actually changed, which no fast mouse can get round.
+    if t.status == "skipped":
+        return JSONResponse({"ok": True, "deleted_posters": 0,
+                             "unchanged": True})
+
     t.status = "skipped"
     t.skip_reason = reason.strip() or None
     t.admin_note = None  # clear admin's prior send-back note

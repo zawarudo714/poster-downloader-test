@@ -49,13 +49,45 @@
     if (el) el.textContent = value;
   }
 
+  // ── ONE PRESS IS ONE REQUEST, HOWEVER MANY TIMES IT IS PRESSED ──────────
+  //
+  // A title takes about a second to open, and a worker who presses again in
+  // that second used to send a second, third and fourth request — every one
+  // of them real, every one of them written to the Activity Log (owner's
+  // find, 2026-09-10). On a phone, on a slow connection, that is not
+  // impatience, it is the normal way people use a button that has not
+  // visibly done anything yet.
+  //
+  // So a POST that is already in flight to the same address hands back the
+  // SAME promise instead of starting another one. Every caller still gets
+  // its answer and nothing downstream changes. The moment it settles the
+  // entry is cleared, so pressing again LATER works exactly as before —
+  // this collapses a burst, it does not remember a decision.
+  //
+  // The server refuses to record an unchanged skip or re-open as well, and
+  // that half is the one that counts: a browser guard can always be got
+  // round by a refresh, and this one cannot see a second tab at all.
+  const inFlight = new Map();
+
   async function postForm(url, body = {}) {
-    const fd = new FormData();
-    Object.entries(body).forEach(([k, v]) => fd.append(k, v));
-    const r = await fetch(url, { method: 'POST', body: fd, cache: 'no-store' });
-    let data = null;
-    try { data = await r.json(); } catch (e) {}
-    return { ok: r.ok, status: r.status, data };
+    const key = url + '|' + JSON.stringify(body);
+    if (inFlight.has(key)) return inFlight.get(key);
+
+    const run = (async () => {
+      const fd = new FormData();
+      Object.entries(body).forEach(([k, v]) => fd.append(k, v));
+      const r = await fetch(url, { method: 'POST', body: fd, cache: 'no-store' });
+      let data = null;
+      try { data = await r.json(); } catch (e) {}
+      return { ok: r.ok, status: r.status, data };
+    })();
+
+    inFlight.set(key, run);
+    // `finally` so a FAILED request clears too. Leaving a rejected promise
+    // in the map would make the button dead for the rest of the session —
+    // a busy state that never ends, which is the defect this is fixing
+    // wearing its opposite face.
+    try { return await run; } finally { inFlight.delete(key); }
   }
 
   async function getJSON(url) {
@@ -140,7 +172,7 @@
     const needle = queueSearchText.trim().toLowerCase();
     function matches(t) {
       if (!needle) return true;
-      const hay = `${t.external_id ?? ''} ${t.title} ${t.year} ${t.content_type || ''}`.toLowerCase();
+      const hay = `${t.external_id ?? ''} ${t.title} ${t.year || ''} ${t.content_type || ''}`.toLowerCase();
       return hay.includes(needle);
     }
     const activeShown = active.filter(matches);

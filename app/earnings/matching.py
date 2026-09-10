@@ -251,8 +251,12 @@ def is_previous_business(entry: LedgerEntry, starts_on) -> bool:
     Is this row from before we started, and therefore not ours to name?
 
     Kept as a named function rather than an inline comparison because THREE
-    places need the same answer — the matcher, the unmatched list, and the
-    Earnings screen — and a rule written three times is a rule that drifts.
+    places need the same answer — the matcher, the unmatched work queue, and
+    the WHAT SOLD table on the Earnings screen. That sentence was written
+    before the third one existed: WHAT SOLD ignored the date for a week and
+    kept listing the previous owner's albums (2026-09-10). It reads the same
+    `_start_date` now. A rule written three times is a rule that drifts, and
+    a rule CLAIMED in three places while living in two is worse.
 
     A row with no date is NEVER previous business. Refusing to classify
     something we cannot date is the same instinct as the matcher refusing to

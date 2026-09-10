@@ -2014,6 +2014,7 @@ def api_test(
 
 @router.get("/api/test/image")
 def api_test_image(
+    request: Request,
     path: str = Query(...),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -2031,7 +2032,7 @@ def api_test_image(
     if not clean.startswith("_tests/") or ".." in clean:
         raise HTTPException(403, "Only test output can be served here.")
     try:
-        data = read_bytes(db, clean)
+        data = read_bytes(db, clean, project=_project(request, admin, db))
     except StorageError as e:
         raise HTTPException(404, str(e))
     return Response(content=data, media_type="image/jpeg",
@@ -3503,7 +3504,11 @@ def serve_review_preview(
         return Response(content=cache.read_bytes(), media_type="image/jpeg",
                         headers={"Cache-Control": "private, max-age=3600"})
     try:
-        data = read_bytes(db, rel)
+        # The project comes off the ROW, not off the request. This picture
+        # was written by whichever project owns it, and it must be read back
+        # with that project's storage settings — see the module note in
+        # storage_remote.py for the day this was learnt.
+        data = read_bytes(db, rel, project=P.resolve_project(db, processed.project_id))
     except StorageError as e:
         raise HTTPException(404, str(e))
     if not full:
@@ -3588,7 +3593,8 @@ def serve_review_master(
         return Response(content=cache.read_bytes(), media_type=media,
                         headers={"Cache-Control": "private, max-age=3600"})
     try:
-        data = read_bytes(db, processed.master_path)
+        data = read_bytes(db, processed.master_path,
+                          project=P.resolve_project(db, processed.project_id))
     except StorageError as e:
         raise HTTPException(404, str(e))
 
@@ -3708,7 +3714,7 @@ def _build_print_file(db: Session, processed, color: str, project,
     out = tmpdir / f"{processed.id}.jpg"
     prev = tmpdir / f"{processed.id}_preview.jpg"
     try:
-        raw.write_bytes(read_bytes(db, processed.master_path))
+        raw.write_bytes(read_bytes(db, processed.master_path, project=project))
         # Flatten THEN enlarge, the same order as generation. Doing it the
         # other way drags dark fringes along every soft edge. The signature
         # goes on AFTER the enlargement — see imagefetch.upscale_to_width().
@@ -4242,7 +4248,8 @@ def api_review_decide(
     if batch_doomed:
         from ..storage_remote import delete_paths
         from ..review_cache import clear as _clear_cache
-        counts["files_removed"] = delete_paths(db, batch_doomed)
+        counts["files_removed"] = delete_paths(
+            db, batch_doomed, project=_project(request, admin, db))
         _clear_cache(batch_doomed)
 
     log_activity(db, user=admin, action="pipeline_review", target_type="pipeline",

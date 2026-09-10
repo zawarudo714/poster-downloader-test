@@ -19,15 +19,32 @@
   if (!stripEl) return;
 
   // Which card belongs to which badge, with words a stranger can act on.
+  //
+  // ── EVERY BADGE GETS A CARD, AND THAT IS ENFORCED ───────────────────────
+  // The strip's "waiting on you" number adds up EVERY badge the server
+  // sends. This list used to hold four of the six, so the strip read 2 while
+  // the panel below showed one thing and the second was invisible — a
+  // skipped title, counted and undrawable (owner's find, 2026-09-10).
+  //
+  // A count is only meaningful next to the thing it counts. So the two lists
+  // are now the same list, and `check_every_badge_has_a_card` in
+  // preflight.py compares them before deploy rather than trusting whoever
+  // adds the seventh badge to remember this comment.
   var CARDS = [
-    { key: 'browse',    label: 'worker images to review',
+    { key: 'browse',     label: 'worker images to review',
       hint: 'Judge what the workers found', href: '/admin/browse' },
-    { key: 'review',    label: 'artworks to approve',
+    { key: 'review',     label: 'artworks to approve',
       hint: 'Judge what the machine painted', href: '/admin/pipeline/review' },
-    { key: 'revisions', label: 'fixes awaiting your verdict',
+    { key: 'revisions',  label: 'fixes awaiting your verdict',
       hint: 'Workers have answered your flags', href: '/admin/revisions' },
-    { key: 'attention', label: 'things stuck in the pipeline',
+    { key: 'attention',  label: 'things stuck in the pipeline',
       hint: 'Failures waiting for a decision', href: '/admin/pipeline' },
+    { key: 'greenlight', label: 'ready to release into the pipeline',
+      hint: 'Approved images waiting for your go-ahead',
+      href: '/admin/pipeline/greenlight' },
+    { key: 'skipped',    label: 'titles a worker could not do',
+      hint: 'Read why, then send back or leave skipped',
+      href: '/admin/skipped' },
   ];
 
   function render(d) {

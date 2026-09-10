@@ -115,7 +115,7 @@
               {% endif %}
               <div class="rev-card-body">
                 <div class="rev-card-title">
-                  {{ mt.title if mt else '(unknown)' }} ({{ mt.year if mt else '–' }})
+                  {{ mt.title if mt else '(unknown)' }}{% if mt and mt.year %} ({{ mt.year }}){% endif %}
                   {% if rev.revision_type == 'similar' %}
                     <span class="status-pill status-similar">SIMILAR PAIR</span>
                   {% endif %}
@@ -168,7 +168,7 @@
               {% endif %}
               <div class="rev-card-body">
                 <div class="rev-card-title">
-                  {{ mt.title if mt else '(unknown)' }} ({{ mt.year if mt else '–' }})
+                  {{ mt.title if mt else '(unknown)' }}{% if mt and mt.year %} ({{ mt.year }}){% endif %}
                   {% if rev.admin_verdict %}<span class="status-pill status-rejected">RE-OPENED AFTER REJECT</span>{% endif %}
                   {% if rev.revision_type == 'similar' %}<span class="status-pill status-similar">SIMILAR PAIR</span>{% endif %}
                 </div>
@@ -203,7 +203,7 @@
               </div>
               <div class="rev-card-body">
                 <div class="rev-card-title">
-                  {{ mt.title if mt else '(unknown)' }} ({{ mt.year if mt else '–' }})
+                  {{ mt.title if mt else '(unknown)' }}{% if mt and mt.year %} ({{ mt.year }}){% endif %}
                 </div>
                 <div class="rev-card-path mono">{{ sp.username }} / {{ sp.original_save_date.isoformat() }} / {{ sp.title_folder_path }} / {{ sp.filename }}</div>
                 <div class="rev-card-comment"><strong>Original ask:</strong> {{ rev.comment or "(no comment)" }}</div>

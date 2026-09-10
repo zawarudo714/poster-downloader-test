@@ -1,79 +1,81 @@
 # Not yet deployed
 
-## v175 — the second Mega Audit, and the one bug it found
+## v176 — the six things found on the reset test box
 
-The owner asked for a full audit from scratch now that he is done tweaking.
-The pass walked everything built since the last audit. The artefact is the
-second half of `MEGA_AUDIT.md`. Seven questions, and only one real bug.
+All six came out of one afternoon on `178.105.232.196`. Five were mine.
 
-### The bug — the reset would have crashed on its first import
+### 1 · THE PAINTED POSTER WOULD NOT LOAD — and approving would have failed too
 
-Your next big step is to wipe the database and re-import the 88,970 travel
-titles. That import would have failed on its very first batch with "NOT NULL
-constraint failed: master_titles.year".
+**The one that was blocking you.** Your Storage Box details are saved as a
+project setting, at `pipeline.travel.storage_sftp_host`. Writing a painted
+picture asked for that setting AND named the project, so it found them and
+the files landed on `S:` perfectly. Reading it back did NOT name the project,
+found nothing, decided there was no Storage Box at all, and looked in a local
+folder that has never held anything — so the pane stayed empty.
 
-The reason is that v174 made the `year` column nullable in the model, which
-was right, but a database that already exists keeps its old column. The old
-column says "a year is required", the re-import writes no year for a place,
-and the two disagree. Neither startup nor the reset changes an existing
-column, so nothing had fixed it.
+The same unnamed read sits inside APPROVE, which has to fetch the transparent
+original to flatten the print file. **Approving that poster would have failed
+the same way**, with a worker's whole day behind it. Deleting files had it
+too, so "send back to the start" was removing nothing from the box.
 
-### The fix
+Fixed by making `project` a REQUIRED argument on every storage function, so
+forgetting it is now an error at the call site rather than a wrong answer.
+Five call sites corrected. A new preflight check fails the deploy on any
+future call that omits it — sabotage-tested.
 
-- `master_titles.year` is now in the list of columns the startup migration
-  relaxes from "required" to "optional".
-- That migration used to only know how to relax whole-number columns. The
-  `year` column holds text, so it is widened to relax a column of ANY type.
-- It now fails loudly if it ever meets a column it cannot relax, instead of
-  quietly rebuilding an identical table and claiming success.
+### 2 · "(null)" beside the title
 
-Reproduced in sqlite three ways: the old whole-number case still works, the
-text case now works, and a missing year inserts fine after the migration
-where it was refused before.
+Seven screens drew the year with nothing checking whether there is one. A
+travel place has no year, so JavaScript printed `null`, Jinja printed `None`,
+and one panel printed empty brackets. My v174 sweep fixed the two you had
+complained about and I wrongly called it complete.
 
-### What this means for you, in order
+All seven fixed. A new preflight check now finds every line that draws a year
+and fails if it is unguarded — sabotage-tested in both languages.
 
-1. **Deploy v175.**
-2. On the TEST box, rehearse the whole thing before production: deploy, then
-   `reset_workflow.py --dry-run --wipe-titles`, then the real
-   `--yes --wipe-titles`, then import `IMPORT_titles.csv`. The import should
-   now finish with no error. This is ROADMAP stage 6, and it is the one test
-   that proves the reset path end to end.
-3. The startup will print a line like `master_titles.year (now nullable)` the
-   first time it runs on a box that still had the old column. That is the fix
-   doing its job. On every boot after that it says nothing.
+### 3 · WHAT SOLD ignored the start date
 
-### Also riding in v175 — the THIRD audit pass (same day, owner's request)
+You set the date and the old albums stayed. The unmatched queue honoured it;
+that table did not. It does now. The money totals still include the old sales
+on purpose, because gross has to keep landing on FineArtAmerica's own Current
+Balance — that agreement is the only proof no rows were missed.
 
-A from-scratch walk over the whole system. Full record in `MEGA_AUDIT.md`;
-what changes behaviour:
+### 4 · Every rapid click written to the Activity Log
 
-- **The reset now wipes five more tables** it previously left behind —
-  earnings rows, marketplace snapshots, listing sweeps, sale-name aliases,
-  and the search cache. Without this, a "reset to zero" opened with the
-  TEST shop's money still showing on the Earnings tab. **This means a reset
-  now clears the Earnings tab too.** The money is not lost: the next
-  earnings read pulls the full history back off FAA's own Balance page.
-- **Two titles that FAA would fold into ONE name are now caught**: a new
-  Diagnostics check scans the whole catalogue ("Los Ángeles" vs
-  "Los Angeles"), and retitling a held upload refuses a name the account
-  already lists — FAA would silently rename it "#2" and the listing checker
-  could never find it again.
-- **A dead setting was deleted** (`allowed_download_hosts` — read by
-  nothing; the real one is `allowed_image_hosts`), three dead functions
-  were removed, and one findings list now shows account NAMES instead of
-  "account #3".
-- **Three new preflight checks**, each sabotage-tested red: every table must
-  be wiped-or-kept-on-purpose by the reset; every setting must be read by
-  something; (plus the v174 magic-word check now guards the seed data too).
-- **Documents that gave dead instructions were corrected** — DEPLOY.md and
-  SETUP_VPS.md both still told you to run a script deleted on 2026-09-01,
-  and PIPELINE.md described the movie era as current.
+The log was telling the truth: four presses sent four requests. Fixed in both
+places. The browser now collapses a burst of presses into one request, and —
+the half that matters, because a browser guard can always be got round — the
+server writes no line when nothing actually changed.
 
-### Nothing else changed
+### 5 · "Waiting on you 2" with one artwork
 
-The Windows node did NOT change, so there is nothing to copy and
-`AGENT_VERSION` stays where it is. No new setting, no new screen.
+The number added up six kinds of work; the panel below drew cards for four.
+Your second one was the skipped title, counted and invisible. Skipped and
+Greenlight now have cards. A new preflight check compares the two lists.
+
+### 6 · TITLE HEALTH — the master list you asked for
+
+`TITLE_RULES.md` is new: every way a title can be wrong, which check covers
+it, and which gaps are deliberate. Five Diagnostics checks back it —
+marketplace collisions including truncation at 100 characters, titles the
+marketplace would refuse, titles that would share one Windows folder, titles
+carrying invisible characters, and title numbering. Each was exercised
+against the shipped folding code.
+
+---
+
+**Deploy this.** The Windows node did NOT change, so nothing to copy and
+`AGENT_VERSION` stays where it is.
+
+**After deploying, in this order:**
+
+1. Open the artwork awaiting approval. **The painted poster should now
+   appear.** If it does not, tell me before doing anything else.
+2. Run **Diagnostics** and read the five new title checks against your real
+   88,970 rows. Expect findings — the 20 duplicate names are only the first
+   question of five.
+3. Fix what they list in `IMPORT_titles.csv` and re-import. Doing it now is
+   free; doing it after a listing exists does not give the name back.
 
 ---
 

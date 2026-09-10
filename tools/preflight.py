@@ -2682,6 +2682,152 @@ def check_every_default_is_read() -> None:
                  f"protection and is not. Wire it up or delete it.")
 
 
+# ── THE ARCHIVE IS READ WITH THE SAME SETTINGS IT WAS WRITTEN WITH ─────────
+# Every function in storage_remote.py resolves the Storage Box credentials
+# through `get_setting(..., project=...)`, and the Settings page saves those
+# credentials as a PROJECT override. So a call that omits the project reads
+# the GLOBAL row, finds it blank, and silently decides there is no Storage
+# Box — falling back to a local folder that has never held anything.
+#
+# That is exactly what happened on 2026-09-10: writes passed the project and
+# landed on the box, reads did not and returned "not found", so the review
+# screen showed an empty pane while the files sat there perfectly. The two
+# halves were each correct; they disagreed about which settings they meant.
+#
+# `project` is a REQUIRED argument now, so omitting it is a TypeError rather
+# than a wrong answer. This check is the belt to that braces: it reads the
+# calls out of the syntax tree, where a comment cannot satisfy it, and fails
+# on any that does not name the project.
+
+STORAGE_FUNCS = ("read_bytes", "write_bytes", "delete_paths")
+
+
+def check_storage_calls_name_their_project() -> None:
+    for path in py_files():
+        rel = path.relative_to(ROOT).as_posix()
+        if rel == "app/storage_remote.py":
+            continue                    # where they are DEFINED, not called
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue                    # check_python_compiles reports this
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = (node.func.id if isinstance(node.func, ast.Name)
+                    else getattr(node.func, "attr", ""))
+            if name not in STORAGE_FUNCS:
+                continue
+            # `raw.write_bytes(...)` is pathlib, not ours. Ours always takes
+            # the database session as its first argument.
+            first = node.args[0] if node.args else None
+            if not (isinstance(first, ast.Name) and first.id == "db"):
+                continue
+            if any(kw.arg == "project" for kw in node.keywords):
+                continue
+            fail(f"{rel} line {node.lineno}: {name}() is called without "
+                 f"project=. The Storage Box credentials are saved as a "
+                 f"project override, so a call that does not name the "
+                 f"project reads blank settings and silently uses a local "
+                 f"folder instead of the archive.")
+
+
+# ── NO SCREEN DRAWS A YEAR IT HAS NOT CHECKED FOR ─────────────────────────
+# Travel places have no year, so `year` is NULL on 88,970 rows. Every
+# language spells nothing differently and all of them spell it VISIBLY:
+# JavaScript writes `null`, Jinja writes `None`, and gluing brackets round
+# an empty string writes `()`. The owner met all three.
+#
+# v174 fixed the two screens he had complained about and claimed the sweep
+# was done. It was not — SEVEN more were drawing a year unguarded, and the
+# next screen he opened printed "(null)" (2026-09-10). The lesson is the one
+# rule 3c already states and I did not obey: enumerate every place, do not
+# fix only the places somebody pointed at.
+#
+# So this is the enumeration, done by a script instead of by eye. Any line
+# that DRAWS a year must also test it on the same line. The test is
+# deliberately loose about HOW — a ternary, an `or`, a Jinja `if`, a helper
+# like realYear() all count — because inventing a house style here would
+# fail on correct code and teach everyone to ignore the check.
+
+_YEAR_DRAWN = re.compile(r"""(?:\.year\b|\['year'\]|\["year"\])""")
+_YEAR_GUARDED = re.compile(
+    r"""\?|\bor\b|\|\||{%\s*if|==\s*null|!=\s*null|realYear|"""
+    r"""is\s+not\s+None|\bif\b""")
+
+
+def check_years_are_guarded_before_drawing() -> None:
+    for path in list(JS.glob("*.js")) + list(TPL.glob("*.html")):
+        rel = path.relative_to(ROOT).as_posix()
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            bare = line.strip()
+            if bare.startswith(("//", "*", "#", "{#")):
+                continue                      # a comment draws nothing
+            if not _YEAR_DRAWN.search(line):
+                continue
+            # Only lines that put the value ON THE PAGE. A line that merely
+            # assigns or compares a year is not drawing it, and demanding a
+            # guard there would fire on healthy code.
+            if not any(mark in line for mark in
+                       ("${", "{{", "textContent", "innerHTML", "+ ")):
+                continue
+            if _YEAR_GUARDED.search(line):
+                continue
+            fail("%s line %d: a year is drawn with nothing checking whether "
+                 "there is one. A travel place has no year, and an unguarded "
+                 "draw prints 'null', 'None' or empty brackets on the "
+                 "screen:\n        %s" % (rel, n, bare[:120]))
+
+
+# ── A NUMBER MUST COUNT ONLY WHAT THE SCREEN CAN SHOW ─────────────────────
+# The home strip's "waiting on you" is the SUM of every badge the server
+# sends. The panel underneath draws a card per badge — and it held four of
+# the six, so the strip read 2 while one of the two was a skipped title with
+# nowhere to appear (owner's find, 2026-09-10). Nothing was broken; the
+# number was even correct. It simply counted something invisible, which is
+# the defect CLAUDE.md describes as a status that answers nothing.
+#
+# Two lists, in two languages, that must hold the same keys. Exactly the
+# shape the colour-name check already handles: a script compares them in a
+# second, and a comment asking the next person to remember does not.
+
+def check_every_badge_has_a_card() -> None:
+    src = (APP / "routes" / "admin.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+
+    badges: set[str] = set()
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Assign)
+                and any(getattr(t, "id", "") == "badges" for t in node.targets)
+                and isinstance(node.value, ast.Dict)):
+            keys = {k.value for k in node.value.keys
+                    if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+            if keys:
+                badges = keys
+    if not badges:
+        fail("could not find the badges dict in app/routes/admin.py — the "
+             "check that keeps the home cards in step is now blind.")
+        return
+
+    js = (JS / "project_home.js").read_text(encoding="utf-8")
+    block = js[js.find("var CARDS = ["):]
+    block = block[:block.find("];") + 2]
+    cards = set(re.findall(r"key:\s*'([a-z_]+)'", block))
+    if not cards:
+        fail("could not read the CARDS list out of project_home.js — the "
+             "check that keeps it in step with the badges is now blind.")
+        return
+
+    for key in sorted(badges - cards):
+        fail("admin.py counts a badge %r in 'waiting on you', and "
+             "project_home.js draws no card for it. The number would include "
+             "something the person cannot see or click. Add a card, or stop "
+             "counting it." % key)
+    for key in sorted(cards - badges):
+        fail("project_home.js draws a card for %r, and admin.py sends no "
+             "such badge. The card can never appear." % key)
+
+
 CHECKS = [
     ("python compiles",           check_python_compiles),
     ("no undefined names",        check_undefined_names),
@@ -2715,6 +2861,9 @@ CHECKS = [
     ("absence is NULL, never a magic word", check_no_magic_absent_value),
     ("the reset has an opinion on every table", check_reset_covers_every_table),
     ("every setting is read by something", check_every_default_is_read),
+    ("storage calls name their project", check_storage_calls_name_their_project),
+    ("years are guarded before drawing", check_years_are_guarded_before_drawing),
+    ("every badge has a card", check_every_badge_has_a_card),
 ]
 
 

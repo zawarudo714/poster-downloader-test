@@ -79,6 +79,7 @@ its work from scratch.
 | `ROADMAP.md` | Everything outstanding, in order, and why that order |
 | `MEGA_AUDIT.md` | The seven-question audit of 2026-09-06 — what was asked, found, fixed, and NOT covered |
 | `OPEN_ISSUES.md` | Individual defects not yet fixed, with what is known about each |
+| `TITLE_RULES.md` | **Every way a title can be wrong**, which check covers it, and which gaps are deliberate. Read before touching titles, the importer, or the folder builder — a title is half of a primary key, not a label |
 | `PIPELINE.md` | Post-production: processing, uploading, the node |
 | `DEPLOY.md` | How to deploy |
 | `CLAUDE_CODE.md` | How the owner runs a session in Claude Code on his own machine, and what to type. **The split is: build in Cowork, VERIFY there** — the Cowork sandbox has no network and no SQLAlchemy, so it can never run this app or query a real database |
@@ -1820,6 +1821,32 @@ form field name, a header, an ID format:
    whose entire job was clearing a stuck profile had never run for any
    account, for months. A fallback default belongs in ONE function that
    everything calls, never inlined at each use.
+
+   **AND THE SAME SHAPE COST A WHOLE SCREEN AGAIN ON 2026-09-10, THROUGH AN
+   OPTIONAL ARGUMENT RATHER THAN A DEFAULT VALUE.** Every function in
+   `storage_remote.py` took `project=None`. Writes passed the project;
+   reads did not. The Settings page saves everything as a PROJECT override,
+   so the credentials lived at `pipeline.travel.storage_sftp_host` — writes
+   found them and put painted posters on the Storage Box, reads looked at
+   the blank global row, concluded there was no Storage Box configured, and
+   fell back to a local folder that had never held anything. The review
+   screen showed an empty pane beside a photograph that loaded fine, and the
+   same unnamed read sat inside APPROVE, so flattening the print file would
+   have failed identically.
+
+   Three things generalise, and the third is the fix worth copying:
+
+     * **An OPTIONAL argument is a default wearing different clothes.**
+       `project=None` reads as "this is usually fine to omit". It never was.
+     * **The asymmetry lived inside ONE function** — a read without the
+       project on one line and a write with it twenty lines below. Nothing
+       about either line looked wrong on its own.
+     * **The fix was to delete the default, not to fix the call sites.**
+       `project` is required now, so forgetting it is a TypeError at the
+       call site instead of a wrong answer at runtime. That is rule 5 —
+       impossible beats detectable — applied to a function signature. When
+       a parameter must always be supplied, say so in the signature and let
+       Python enforce it; a preflight check on top is belt to that braces.
 2. **Can I read it from the source at runtime?** Parsing the form off the
    login page beats hardcoding its action, because it survives a redesign.
 3. **Can I ask the owner?** He has the account open in a browser. One
@@ -1997,7 +2024,23 @@ Now mechanical on both rungs: `check_no_magic_absent_value` in `preflight.py`
 fails on a NOT NULL column defaulting to such a word and on any `x or "N/A"`
 fallback (sabotage-tested three ways), and `year_is_a_year_or_nothing` in
 `diagnostics.py` watches the live rows, because preflight is a claim about the
-code and only an invariant is a claim about the data. The word list is
+code and only an invariant is a claim about the data.
+
+**AND THE THIRD RUNG WAS MISSING FOR A WEEK, WHICH IS THE MORE USEFUL
+LESSON.** Fixing the DATA and the PRODUCER left the CONSUMERS unexamined. I
+guarded the two screens the owner had pointed at, wrote "the guards were
+correct everywhere", and moved on. Seven more were drawing a year with
+nothing checking it, so the next screen he opened printed "(null)" —
+JavaScript's spelling of nothing — and one panel printed empty brackets
+(2026-09-10). Changing the stored value from "N/A" to NULL had made every
+one of them WORSE, because "N/A" at least looked deliberate.
+
+The rule is rule 3c, and I broke it while writing about it: **fix the class,
+never the instances somebody pointed at.** The moment you find two of
+something, the next move is to enumerate ALL of it with a script, and the
+script is the deliverable. `check_years_are_guarded_before_drawing` is that
+enumeration; it reads every line that draws a year and fails on any without a
+test beside it, in JavaScript and in Jinja alike. The word list is
 deliberately short — "unknown", "-" and "?" are ordinary English and flagging
 them would fire on every healthy log line, which is a keystroke, not a guard.
 

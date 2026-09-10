@@ -64,7 +64,7 @@
       <td class="col-num mono">${row.external_id ?? '–'}</td>
       <td class="col-type mono">${row.content_type || ''}</td>
       <td class="col-title"></td>
-      <td class="col-year mono">${row.year}</td>
+      <td class="col-year mono">${row.year == null ? '' : row.year}</td>
       <td class="col-status"><span class="status-pill status-${row.status}">${row.status.replace('_', ' ')}</span>${row.needs_revision ? ' <span class="status-pill status-flag">flag</span>' : ''}</td>
       <td class="col-claim mono">${row.claimed_by || ''}${row.mine ? ' (you)' : ''}</td>
     `;

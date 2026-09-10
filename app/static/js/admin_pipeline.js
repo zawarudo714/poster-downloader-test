@@ -474,7 +474,7 @@
           <tr class="${i.stale ? 'inflight-stale' : ''}">
             <td><span class="status-pill status-${i.stage === 'processing' ? 'in-progress' : 'pending'}">${esc(i.stage)}</span></td>
             <td>${i.external_id == null ? '' : '<span class="muted mono">#' + i.external_id + '</span> '}${esc(i.title)}
-                <span class="muted">(${esc(i.year || '')})</span>
+                ${i.year ? `<span class="muted">(${esc(i.year)})</span>` : ''}
                 ${i.remote_title ? `<div class="muted mono" style="font-size:11px">→ ${esc(i.remote_title)}${i.account ? ' · ' + esc(i.account) : ''}</div>` : ''}</td>
             <td class="mono">${esc(i.filename)} <span class="muted">#${i.poster_id}</span></td>
             <td class="mono">${esc(i.node || '—')}</td>

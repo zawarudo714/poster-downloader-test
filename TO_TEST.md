@@ -925,6 +925,63 @@ session, not three.
    If it lets the name through, that is a bug — FAA would silently rename
    the listing "#2" and the listing checker could never find it again.
 
+## 34. THE SIX FIXES FROM THE RESET TEST BOX — v176
+
+**1. The painted poster loads.** Open Approve Artwork on the New York City
+image. The painted poster should appear beside the worker's photograph, on
+its blue background. Before this it was an empty pane. **If it is still
+empty, stop and tell me** — that would mean the cause is something other
+than what I traced.
+
+**2. Approving works.** Press KEEP on it. The print file has to be built at
+that moment, which needs the same Storage Box read that was failing, so this
+is the real proof rather than the picture appearing. Afterwards the file
+`New York City 1_Painted_v2.jpg` should exist on `S:` beside the
+`_master.png` files.
+
+**3. No more "(null)".** Look at Payments → save history, the Title List, the
+Skipped page and Changes Requested. A travel place should show its name and
+nothing after it. No brackets, no "null", no "None".
+
+**4. WHAT SOLD respects the date.** On Earnings, with your start date set,
+the old music albums should be gone from the WHAT SOLD table. The money
+totals at the top should NOT change — gross still includes them, on purpose,
+because it has to keep matching FineArtAmerica's own balance.
+
+**5. The Activity Log stops repeating.** As the worker, open a title and
+hammer the button five times while it loads. Then skip a title and press
+skip again. The log should show ONE opened line and ONE skipped line.
+
+**6. Waiting on you adds up.** The number in the strip should equal the
+number of cards below it. Your skipped Curaçao title should now have a card
+of its own reading "titles a worker could not do".
+
+---
+
+## 35. THE FIVE TITLE CHECKS, AGAINST YOUR REAL 88,970 ROWS — v176
+
+This is the one that will actually change your sheet, and it has never been
+run against real data. Open **Diagnostics** and read these five:
+
+| Check | What it is asking |
+|---|---|
+| titles collide after folding | Do two of your rows become ONE name on the marketplace? |
+| titles the marketplace would reject | Would any be refused, or silently cut at 100 characters? |
+| titles that share a folder | Would two of them land in one folder on the worker machine? |
+| titles with invisible characters | Is anything carrying a non-breaking space or stray whitespace? |
+| external ids are sound | Does every title have its own number? |
+
+**Expect findings.** You already saw 20 from the first one. The other four
+have never been asked.
+
+**Fix them in `IMPORT_titles.csv` and re-import, not on the site.** The sheet
+is the record. And do it before greenlighting anything, because once a
+listing exists on FineArtAmerica the name is spent for the life of the
+account — deleting the listing does not give it back.
+
+`TITLE_RULES.md` in the project folder explains every fault these look for,
+and names the ones deliberately not checked.
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

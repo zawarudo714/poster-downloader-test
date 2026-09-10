@@ -2135,6 +2135,12 @@ def check_titles_collide_after_folding(db: Session, scope: Scope) -> CheckResult
     groups: dict[str, list] = {}
     for tid, ext, title, mkt in q.all():
         name = (mkt or title or "").strip()
+        # TRUNCATION IS PART OF THE FOLD, so it is part of the comparison.
+        # FAA cuts at 100 characters without saying so, which means two long
+        # titles that differ only after character 100 arrive as ONE name —
+        # a collision with no visible cause at all. clean_for_marketplace
+        # already applies that cap; naming it here is what stops a future
+        # edit "simplifying" it away.
         folded = tidy_separators(clean_for_marketplace(name))
         if not folded:
             continue          # empty folds are validate_marketplace_title's job
@@ -2209,6 +2215,259 @@ def check_year_is_a_year_or_nothing(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+# ════════════════════════════════════════════════════════════════════════════
+#  TITLE HEALTH — the five questions in TITLE_RULES.md
+# ════════════════════════════════════════════════════════════════════════════
+#
+# READ `TITLE_RULES.md` BEFORE ADDING TO THESE. It is the enumeration these
+# implement — every way a title can be wrong, which check covers it, and
+# which gaps are deliberate. The owner asked for that list on 2026-09-10
+# after the folding check found twenty duplicate place names on its first
+# real run: "you cant miss things like this".
+#
+# All five read the whole catalogue and fold each title in Python. On 88,970
+# rows that costs a few seconds. Diagnostics runs on demand and never on a
+# page load, so that is the right price for a question nothing else asks.
+#
+# WHY FIVE CHECKS AND NOT ONE. Each has different ADVICE. "Two of your rows
+# are the same place" and "the marketplace will refuse this one" and "these
+# two would share a folder on the worker machine" are three different jobs
+# for the owner, and a single check reporting all of them would make him sort
+# the list himself.
+
+
+def _title_rows(db: Session, scope: Scope):
+    """Every title in scope, as (id, external_id, the name we would list)."""
+    q = db.query(MasterTitle.id, MasterTitle.external_id,
+                 MasterTitle.title, MasterTitle.marketplace_title)
+    out = []
+    for tid, ext, title, mkt in q.filter(scope.titles).all():
+        out.append((tid, ext, (mkt or title or "")))
+    return out
+
+
+def check_titles_the_marketplace_would_reject(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: every title survives FineArtAmerica's rewriting as itself.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY ASK THIS OF THE CATALOGUE AND NOT ONLY AT DISPATCH
+    ════════════════════════════════════════════════════════════════════════
+    `validate_marketplace_title` already refuses to send a title that folds
+    to nothing — but it runs at DISPATCH, which is after a worker has been
+    paid to photograph the place and the machine has been paid to paint it.
+    The same question asked of the catalogue costs nothing and is answerable
+    on the day the sheet is imported, when the fix is one spreadsheet edit.
+
+    It also asks two things dispatch does not: whether the title is over the
+    100-character cap FAA truncates at silently, and whether it already ends
+    in FAA's own "#2" numbering — which would collide with the renumbering
+    scheme itself and make the listing address unguessable.
+    """
+    from .pipeline import (MARKETPLACE_TITLE_MAX, clean_for_marketplace,
+                           tidy_separators, validate_marketplace_title)
+
+    rows = []
+    for tid, ext, name in _title_rows(db, scope):
+        folded = tidy_separators(clean_for_marketplace(name))
+        why = validate_marketplace_title(name, folded)
+        if not why and len(name.strip()) > MARKETPLACE_TITLE_MAX:
+            why = (f"{len(name.strip())} characters — FineArtAmerica cuts at "
+                   f"{MARKETPLACE_TITLE_MAX} without saying so.")
+        if not why and re.search(r"#\s*\d+\s*$", name):
+            why = ("ends in a # and a number, which is how FineArtAmerica "
+                   "renumbers a name it already holds. Ours would be "
+                   "indistinguishable from one of theirs.")
+        if why:
+            rows.append(Finding(f"#{ext} {name!r}", why, "/admin/master"))
+
+    total = len(rows)
+    return _result(
+        "titles_the_marketplace_would_reject",
+        f"{total} title(s) would be refused or silently changed"
+        if total else "Every title survives the marketplace's rewriting",
+        "FineArtAmerica strips accents and punctuation, cuts at 100 "
+        "characters, and refuses a name that ends up empty. These titles do "
+        "not survive that intact. Fix them in the sheet and re-import — "
+        "doing it after a listing exists does not give the old name back.",
+        "error" if total else "ok", rows[:MAX_ROWS], total,
+    )
+
+
+def check_titles_that_share_a_folder(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: no two titles produce one folder on the worker machine.
+
+    ════════════════════════════════════════════════════════════════════════
+    A DIFFERENT COLLISION FROM THE MARKETPLACE ONE, WITH A DIFFERENT CAUSE
+    ════════════════════════════════════════════════════════════════════════
+    Windows forbids nine characters in a folder name, so `folder_name_for`
+    replaces them. That replacement is LOSSY, and two different titles can
+    be replaced into the same folder: "Rome: Forum" and "Rome- Forum" both
+    become "Rome- Forum". The second worker's photographs would then be
+    saved into the first title's folder, and a poster's path is frozen at
+    first save — so it would never be noticed and never be undone.
+
+    Windows also strips a trailing dot or space silently, and refuses a
+    handful of reserved device names outright. Both are checked here because
+    both produce a folder that is not the one the database believes in.
+
+    The folder name includes the title's NUMBER, so two titles only collide
+    if they share that too — which cannot happen while external_ids are
+    unique. This check therefore compares the title part alone, which is the
+    honest question: it stays useful if the numbering ever changes.
+    """
+    from .parsing import sanitize
+
+    RESERVED = {"CON", "PRN", "AUX", "NUL"} | {f"COM{i}" for i in range(1, 10)} \
+        | {f"LPT{i}" for i in range(1, 10)}
+
+    groups: dict[str, list] = {}
+    odd: list = []
+    for tid, ext, name in _title_rows(db, scope):
+        safe = sanitize(name)
+        if not safe:
+            continue                    # the reject check above owns this one
+        groups.setdefault(safe.lower(), []).append((ext, name))
+        stripped = name.rstrip(". ")
+        if stripped != name.rstrip():
+            odd.append(Finding(
+                f"#{ext} {name!r}",
+                "ends in a dot or a space, which Windows removes from a "
+                "folder name without telling anyone — so the folder on disk "
+                "is not the one the database records.", "/admin/master"))
+        if safe.split(".")[0].strip().upper() in RESERVED:
+            odd.append(Finding(
+                f"#{ext} {name!r}",
+                "is a name Windows reserves for a device, so a folder cannot "
+                "be created with it at all.", "/admin/master"))
+
+    clashes = {k: v for k, v in groups.items() if len(v) > 1}
+    rows = [
+        Finding(f'both become the folder "{sanitize(members[0][1])}"',
+                " · ".join(f"#{e} {n!r}" for e, n in members[:6]),
+                "/admin/master")
+        for members in list(clashes.values())[:MAX_ROWS]
+    ] + odd[:MAX_ROWS]
+
+    total = len(clashes) + len(odd)
+    return _result(
+        "titles_that_share_a_folder",
+        f"{total} title(s) cannot have a folder of their own"
+        if total else "Every title gets its own folder on the worker machine",
+        "Windows will not accept nine of the characters people put in place "
+        "names, so the folder builder replaces them — and two different "
+        "titles can end up replaced into ONE folder. The second worker's "
+        "photographs would be saved into the first title's folder, and a "
+        "poster's path never changes once it is set. Rename one of each pair.",
+        "error" if total else "ok", rows, total,
+    )
+
+
+def check_titles_with_invisible_characters(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: a title contains only characters a person can see.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE HARDEST KIND TO DIAGNOSE BY EYE, WHICH IS WHY A MACHINE ASKS
+    ════════════════════════════════════════════════════════════════════════
+    A non-breaking space and a space look identical on every screen. A
+    zero-width joiner looks like nothing at all. Both survive a copy out of a
+    spreadsheet or a web page, and both make two titles that LOOK the same
+    compare as different — so the duplicate check above passes, both get
+    worked on, and the marketplace folds them together anyway.
+
+    Leading and trailing whitespace belongs here for the same reason: it is
+    invisible, it changes the folder name, and it is one strip() away from
+    being fixed at the source.
+    """
+    INVISIBLE = {
+        " ": "a non-breaking space posing as a space",
+        "​": "a zero-width space",
+        "‌": "a zero-width non-joiner",
+        "‍": "a zero-width joiner",
+        "﻿": "a byte-order mark",
+        "\t": "a tab",
+        "\n": "a line break",
+        "\r": "a carriage return",
+    }
+
+    rows = []
+    for tid, ext, name in _title_rows(db, scope):
+        faults = [word for ch, word in INVISIBLE.items() if ch in name]
+        if name != name.strip():
+            faults.append("space at the start or the end")
+        if "  " in name:
+            faults.append("two spaces in a row")
+        if faults:
+            rows.append(Finding(f"#{ext} {name.strip()!r}",
+                                "contains " + ", ".join(faults), "/admin/master"))
+
+    total = len(rows)
+    return _result(
+        "titles_with_invisible_characters",
+        f"{total} title(s) contain characters you cannot see"
+        if total else "No title carries an invisible character",
+        "These titles hold something that does not show on screen — usually "
+        "a non-breaking space or stray whitespace picked up from a "
+        "spreadsheet. Two titles that look identical will compare as "
+        "different, so the duplicate check passes and the marketplace merges "
+        "them anyway. Clean them in the sheet.",
+        "error" if total else "ok", rows[:MAX_ROWS], total,
+    )
+
+
+def check_external_ids_are_sound(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: inside one project, every title has its own number.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS IS NOT A COSMETIC CHECK
+    ════════════════════════════════════════════════════════════════════════
+    `external_id` is column 0 of the sheet and, inside a project, the key for
+    everything: the folder prefix on the worker machine, the row itself, and
+    the number printed beside the title on every screen. Two rows sharing one
+    number means two titles sharing one folder, and a lookup by number
+    picking whichever row the database happens to return first.
+
+    It has been expensive before. A lookup by external_id that was not scoped
+    to a project matched 0 of 4,865 images while printing a confident page of
+    findings about the wrong project's data. That fix was scoping; this check
+    is the other half — that the numbers are sound WITHIN one project.
+    """
+    from sqlalchemy import func
+
+    dupes = (db.query(MasterTitle.external_id, func.count(MasterTitle.id))
+               .filter(scope.titles, MasterTitle.external_id.isnot(None))
+               .group_by(MasterTitle.external_id)
+               .having(func.count(MasterTitle.id) > 1)
+               .all())
+    missing = (db.query(func.count(MasterTitle.id))
+                 .filter(scope.titles, MasterTitle.external_id.is_(None))
+                 .scalar() or 0)
+
+    rows = [Finding(f"#{ext}", f"{n} titles share this number", "/admin/master")
+            for ext, n in dupes[:MAX_ROWS]]
+    if missing:
+        rows.append(Finding("no number at all",
+                            f"{missing} title(s) have no external_id, so no "
+                            f"folder name can be built for them",
+                            "/admin/master"))
+
+    total = len(dupes) + (1 if missing else 0)
+    return _result(
+        "external_ids_are_sound",
+        f"{total} problem(s) with title numbers"
+        if total else "Every title has its own number",
+        "The number in column 0 of your sheet is what names the folder on "
+        "the worker machine and what every screen shows beside the title. "
+        "Two titles with one number share a folder, and a title with no "
+        "number cannot have one built. Fix the numbering in the sheet and "
+        "re-import.",
+        "error" if total else "ok", rows, total,
+    )
+
+
 def _account_names(db: Session) -> dict[int, str]:
     """
     id -> name for every marketplace account, fetched once.
@@ -2231,6 +2490,10 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_recalled_poster_still_painted,
     check_year_is_a_year_or_nothing,
     check_titles_collide_after_folding,
+    check_titles_the_marketplace_would_reject,
+    check_titles_that_share_a_folder,
+    check_titles_with_invisible_characters,
+    check_external_ids_are_sound,
     check_missing_files,
     check_posters_without_title,
     check_orphan_files,

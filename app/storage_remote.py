@@ -29,6 +29,27 @@ SFTP home. Same bytes, same string in the database, two access methods.
 If `storage_sftp_host` is blank, this falls back to writing under a local
 directory — which is what the dev setup uses, and what makes the pipeline
 testable without a Storage Box.
+
+════════════════════════════════════════════════════════════════════════════
+`project` IS REQUIRED ON EVERY FUNCTION HERE, AND THAT IS THE WHOLE POINT
+════════════════════════════════════════════════════════════════════════════
+It used to default to None, and that default cost the owner a working review
+screen (2026-09-10). The Settings page saves every field as a PROJECT
+override, so his Storage Box credentials live at
+`pipeline.travel.storage_sftp_host`. Writing passed the project and found
+them; reading did not pass it, found nothing, decided there was no Storage
+Box at all, and looked for the file in a local folder that has never held
+anything. Painted posters landed on the box perfectly and the review screen
+showed an empty pane — and the same unnamed read sits inside APPROVE, so
+flattening the print file would have failed the same way.
+
+Nothing was broken. Both halves were individually correct. They simply
+disagreed about which settings they were reading, and no screen could say so.
+
+A default of None made forgetting SILENT. Making the argument required makes
+forgetting a TypeError at the call site, which `check_call_arity` in
+preflight catches before deploy. This is rule 5 in CLAUDE.md — prefer
+impossible over detectable — applied to an argument.
 """
 
 from __future__ import annotations
@@ -47,7 +68,7 @@ class StorageError(Exception):
     """Could not place the file. The caller must treat the image as unprocessed."""
 
 
-def _settings(db: Session, project=None) -> dict:
+def _settings(db: Session, project) -> dict:
     from .pipeline import get_secret, get_setting
     return {
         "host": str(get_setting(db, "storage_sftp_host", project=project) or "").strip(),
@@ -59,7 +80,7 @@ def _settings(db: Session, project=None) -> dict:
     }
 
 
-def write_bytes(db: Session, rel_path: str, data: bytes, *, project=None) -> str:
+def write_bytes(db: Session, rel_path: str, data: bytes, *, project) -> str:
     """
     Put `data` at `rel_path` (relative to the storage root). Returns the path
     that was written, unchanged, so the caller can record it.
@@ -112,7 +133,7 @@ def write_bytes(db: Session, rel_path: str, data: bytes, *, project=None) -> str
                 pass
 
 
-def delete_paths(db: Session, rel_paths, *, project=None) -> int:
+def delete_paths(db: Session, rel_paths, *, project) -> int:
     """
     Remove files from the archive. Returns how many were actually deleted.
 
@@ -205,7 +226,7 @@ def _mkdirs(sftp, directory: str) -> None:
                 pass
 
 
-def read_bytes(db: Session, rel_path: str, *, project=None) -> bytes:
+def read_bytes(db: Session, rel_path: str, *, project) -> bytes:
     """
     Read a file back out of the archive.
 
@@ -248,7 +269,7 @@ def read_bytes(db: Session, rel_path: str, *, project=None) -> bytes:
                 pass
 
 
-def check(db: Session, project=None) -> tuple[bool, str]:
+def check(db: Session, project) -> tuple[bool, str]:
     """
     Can we write? Used by the pipeline's preflight and the Test & Debug panel.
 

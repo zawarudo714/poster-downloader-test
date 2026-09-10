@@ -22,7 +22,7 @@
               <tr data-master-id="{{ t.id }}">
                 <td class="mono">{{ t.external_id or '–' }}</td>
                 <td>{{ t.title }}</td>
-                <td class="mono">{{ t.year }}</td>
+                <td class="mono">{{ t.year or '' }}</td>
                 <td class="mono">{{ t.claimed_by_name or '(unclaimed)' }}</td>
                 <td class="muted">{{ t.skip_reason or '(no reason given)' }}</td>
                 <td class="actions-cell">

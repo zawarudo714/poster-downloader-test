@@ -1293,6 +1293,24 @@ def by_design(db: Session, *, marketplace: Optional[str] = None,
     what to make more of is the only reason this list exists.
     """
     start = datetime.utcnow() - timedelta(days=days)
+
+    # ── PREVIOUS BUSINESS IS NOT ONE OF OUR DESIGNS ────────────────────────
+    # This account sold something else before the travel rebrand, and those
+    # sales are imported and COUNTED — the gross total has to keep landing on
+    # FineArtAmerica's own Current Balance, which is the only proof we have
+    # not missed rows. But this table answers a different question: which of
+    # OUR designs earns. An old album can never be one, so listing it here is
+    # noise in the one place meant to guide what to make more of.
+    #
+    # The owner set the start date and this table kept showing the old music
+    # anyway (2026-09-10). The comment on `is_previous_business` claimed
+    # three screens shared the rule; only two did, and prose asserting a
+    # thing does not make it so.
+    from .matching import _start_date
+    starts_on = _start_date(db)
+    if starts_on is not None:
+        start = max(start, datetime.combine(starts_on, datetime.min.time()))
+
     rows = (
         _filtered(db, marketplace=marketplace, account_ids=account_ids, since=start)
         .filter(LedgerEntry.entry_type.in_(("sale", "refund")))

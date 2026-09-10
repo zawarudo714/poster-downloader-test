@@ -138,24 +138,51 @@ def backup_database() -> Path | None:
     return target
 
 
-def clear_workspace(dry_run: bool) -> int:
+def clear_workspace(dry_run: bool) -> tuple[int, list[str]]:
     """
-    Delete every saved poster file.
+    Delete every saved poster file, and NOTHING the settings still point at.
 
-    Only the per-user directories under the workspace root are removed, and
-    the root itself is left in place — the app creates it at import time and
-    deleting it out from under a running container is asking for trouble.
+    ════════════════════════════════════════════════════════════════════════
+    THE UNDERSCORE FOLDERS ARE ASSETS, NOT WORK — DO NOT DELETE THEM
+    ════════════════════════════════════════════════════════════════════════
+    This used to delete EVERY directory under the workspace root, while its
+    own docstring claimed it removed "only the per-user directories". It did
+    not, and the difference was expensive: the signature image lives at
+    `_signature/<project>.png` and the style reference at `_style/<project>
+    .png`, both of them under this root.
+
+    So a reset deleted both files and left the SETTINGS still naming them.
+    The setting is not work and survives — and `_build_print_file` REFUSES
+    outright when a signature is switched on and its file is missing. The
+    whole pipeline would have stopped on the first poster after a reset,
+    with a message about a missing file the owner had never knowingly
+    deleted (found 2026-09-10, before he ran it).
+
+    A file here can be claimed two ways: a poster ROW points at it, or a
+    SETTING names it. This function only ever meant the first kind. The
+    underscore prefix is how the app marks the second kind, so that is what
+    is skipped — and `check_workspace_assets_are_underscored` in preflight
+    fails the deploy if any new asset is written outside that convention,
+    because a convention nobody checks is a convention that gets broken.
+
+    Same family as `check_orphan_files`, which reported the signature as an
+    unknown file for the same reason: it knew one of the ways a file can be
+    owned.
     """
     if not WORKSPACE_DIR.is_dir():
-        return 0
+        return 0, []
     removed = 0
+    kept: list[str] = []
     for child in WORKSPACE_DIR.iterdir():
         if not child.is_dir():
+            continue
+        if child.name.startswith("_"):
+            kept.append(child.name)
             continue
         removed += sum(1 for _ in child.rglob("*") if _.is_file())
         if not dry_run:
             shutil.rmtree(child, ignore_errors=True)
-    return removed
+    return removed, sorted(kept)
 
 
 def reset(db, *, wipe_titles: bool, dry_run: bool) -> None:
@@ -298,8 +325,14 @@ def main() -> int:
 
         reset(db, wipe_titles=args.wipe_titles, dry_run=dry_run)
 
-        files = clear_workspace(dry_run)
+        files, kept_assets = clear_workspace(dry_run)
         print(f"  {'would delete' if dry_run else 'deleting':<14} {human(files):>9}  poster files on disk")
+        # SAY WHAT WAS KEPT, not only what went. These are the files the
+        # settings still point at, and the owner has no other way to know
+        # they survived — silence here reads as "they were deleted too".
+        if kept_assets:
+            print(f"  {'keeping':<14} {'':>9}  {', '.join(kept_assets)} "
+                  f"(signature, style reference and other settings assets)")
 
         if not dry_run:
             db.commit()

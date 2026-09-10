@@ -2828,6 +2828,98 @@ def check_every_badge_has_a_card() -> None:
              "such badge. The card can never appear." % key)
 
 
+# ── AN ASSET UNDER THE WORKSPACE MUST BE UNDERSCORED, OR A RESET EATS IT ───
+# `reset_workflow.py` deletes every folder under the workspace root that is
+# not underscore-prefixed, because those are one worker's saved posters. The
+# underscore folders are ASSETS the settings point at — the signature image
+# and the style reference — and they must survive.
+#
+# That convention was implicit until 2026-09-10, when the reset was found
+# deleting the signature and the style reference while the settings still
+# named them. `_build_print_file` REFUSES when a signature is switched on
+# with no file, so the pipeline would have stopped on the first poster after
+# a reset, blaming a file the owner had never knowingly deleted.
+#
+# TWO WRONG VERSIONS BEFORE THIS ONE, AND BOTH ARE THE LESSON:
+#   · the first matched only a literal written directly after
+#     `WORKSPACE_DIR /`. The real code says `rel = f"_signature/…"` on one
+#     line and `WORKSPACE_DIR / rel` on the next, so removing the underscore
+#     left it GREEN. The sabotage caught it; reading it did not.
+#   · the second widened to every path literal in any function touching
+#     WORKSPACE_DIR, and immediately reported `previews/` four times — a
+#     STORAGE BOX path that has nothing to do with the workspace.
+# Too narrow reads as coverage; too wide gets ignored. So this follows the
+# one thing that actually matters: the VARIABLE that is joined to
+# WORKSPACE_DIR, back to where it was assigned a literal in the same
+# function. No dataflow engine, no exception list.
+
+def check_workspace_assets_are_underscored() -> None:
+    for path in py_files():
+        rel = path.relative_to(ROOT).as_posix()
+        if rel.startswith("scripts/"):
+            continue                       # the reset tool itself
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue
+
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+
+            # What is joined to WORKSPACE_DIR in here?
+            joined_names, joined_texts = set(), []
+            for node in ast.walk(fn):
+                if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)):
+                    continue
+                if getattr(node.left, "id", "") != "WORKSPACE_DIR":
+                    continue
+                right = node.right
+                if isinstance(right, ast.Name):
+                    joined_names.add(right.id)
+                elif isinstance(right, ast.Constant) and isinstance(right.value, str):
+                    joined_texts.append((node.lineno, right.value))
+                elif isinstance(right, ast.JoinedStr):
+                    joined_texts.append((node.lineno, _fstring_text(right)))
+
+            # …and where did those variables get their value?
+            for node in ast.walk(fn):
+                if not isinstance(node, ast.Assign):
+                    continue
+                if not any(getattr(t, "id", None) in joined_names for t in node.targets):
+                    continue
+                v = node.value
+                if isinstance(v, ast.Constant) and isinstance(v.value, str):
+                    joined_texts.append((node.lineno, v.value))
+                elif isinstance(v, ast.JoinedStr):
+                    joined_texts.append((node.lineno, _fstring_text(v)))
+
+            for lineno, text in joined_texts:
+                first = (text or "").split("/")[0]
+                # "{...}" means the folder is built from DATA — a worker's
+                # username or a project folder. Those ARE the saved posters
+                # the reset exists to delete, so they must not be skipped.
+                if not first or first.startswith("_") or "{" in first:
+                    continue
+                fail("%s line %d: %s() builds the workspace path %r, whose "
+                     "first folder does not start with an underscore. "
+                     "reset_workflow.py treats every folder without one as a "
+                     "worker's saved posters and DELETES it, so this file "
+                     "would vanish on the next reset while the setting still "
+                     "named it." % (rel, lineno, fn.name, text))
+
+
+def _fstring_text(node: ast.JoinedStr) -> str:
+    """An f-string with its {slots} left in, so the folder can be judged."""
+    out = []
+    for v in node.values:
+        if isinstance(v, ast.Constant) and isinstance(v.value, str):
+            out.append(v.value)
+        else:
+            out.append("{}")
+    return "".join(out)
+
+
 CHECKS = [
     ("python compiles",           check_python_compiles),
     ("no undefined names",        check_undefined_names),
@@ -2864,6 +2956,7 @@ CHECKS = [
     ("storage calls name their project", check_storage_calls_name_their_project),
     ("years are guarded before drawing", check_years_are_guarded_before_drawing),
     ("every badge has a card", check_every_badge_has_a_card),
+    ("workspace assets are underscored", check_workspace_assets_are_underscored),
 ]
 
 

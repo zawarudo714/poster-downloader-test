@@ -1,81 +1,37 @@
 # Not yet deployed
 
-## v176 — the six things found on the reset test box
+## v177 — the reset was about to delete your signature
 
-All six came out of one afternoon on `178.105.232.196`. Five were mine.
+Found while writing the reset commands for the test box, BEFORE you ran
+anything.
 
-### 1 · THE PAINTED POSTER WOULD NOT LOAD — and approving would have failed too
+**`reset_workflow.py` deleted every folder under the workspace**, including
+`_signature/travel.png` and `_style/travel.png` — the signature image and the
+style reference you upload on the Settings page. Its own docstring claimed it
+removed "only the per-user directories". It did not.
 
-**The one that was blocking you.** Your Storage Box details are saved as a
-project setting, at `pipeline.travel.storage_sftp_host`. Writing a painted
-picture asked for that setting AND named the project, so it found them and
-the files landed on `S:` perfectly. Reading it back did NOT name the project,
-found nothing, decided there was no Storage Box at all, and looked in a local
-folder that has never held anything — so the pane stayed empty.
+**Why that was worse than losing two files.** The SETTINGS that name those
+files are not work, so a reset keeps them. You would have had a setting
+pointing at a signature that no longer existed — and `_build_print_file`
+REFUSES outright in that state. The pipeline would have stopped dead on the
+first poster after the reset, blaming a missing file you never knowingly
+deleted.
 
-The same unnamed read sits inside APPROVE, which has to fetch the transparent
-original to flatten the print file. **Approving that poster would have failed
-the same way**, with a worker's whole day behind it. Deleting files had it
-too, so "send back to the start" was removing nothing from the box.
+Fixed: folders whose name starts with an underscore are assets and are kept.
+The script now PRINTS what it kept, so silence cannot read as "those went
+too". A new preflight check enforces the convention that makes the skip
+correct, so a future asset written outside it fails before deploy.
 
-Fixed by making `project` a REQUIRED argument on every storage function, so
-forgetting it is now an error at the call site rather than a wrong answer.
-Five call sites corrected. A new preflight check fails the deploy on any
-future call that omits it — sabotage-tested.
+**Two wrong versions of that check first, and both are recorded in it.** The
+first matched only a literal written directly after `WORKSPACE_DIR /`, and
+the real code assigns the path to a variable one line earlier — so removing
+the underscore left it green. The second widened too far and reported a
+Storage Box path four times. The one that shipped follows the variable that
+is joined to WORKSPACE_DIR back to its assignment. Sabotage-tested on both
+the signature and the style reference.
 
-### 2 · "(null)" beside the title
-
-Seven screens drew the year with nothing checking whether there is one. A
-travel place has no year, so JavaScript printed `null`, Jinja printed `None`,
-and one panel printed empty brackets. My v174 sweep fixed the two you had
-complained about and I wrongly called it complete.
-
-All seven fixed. A new preflight check now finds every line that draws a year
-and fails if it is unguarded — sabotage-tested in both languages.
-
-### 3 · WHAT SOLD ignored the start date
-
-You set the date and the old albums stayed. The unmatched queue honoured it;
-that table did not. It does now. The money totals still include the old sales
-on purpose, because gross has to keep landing on FineArtAmerica's own Current
-Balance — that agreement is the only proof no rows were missed.
-
-### 4 · Every rapid click written to the Activity Log
-
-The log was telling the truth: four presses sent four requests. Fixed in both
-places. The browser now collapses a burst of presses into one request, and —
-the half that matters, because a browser guard can always be got round — the
-server writes no line when nothing actually changed.
-
-### 5 · "Waiting on you 2" with one artwork
-
-The number added up six kinds of work; the panel below drew cards for four.
-Your second one was the skipped title, counted and invisible. Skipped and
-Greenlight now have cards. A new preflight check compares the two lists.
-
-### 6 · TITLE HEALTH — the master list you asked for
-
-`TITLE_RULES.md` is new: every way a title can be wrong, which check covers
-it, and which gaps are deliberate. Five Diagnostics checks back it —
-marketplace collisions including truncation at 100 characters, titles the
-marketplace would refuse, titles that would share one Windows folder, titles
-carrying invisible characters, and title numbering. Each was exercised
-against the shipped folding code.
-
----
-
-**Deploy this.** The Windows node did NOT change, so nothing to copy and
-`AGENT_VERSION` stays where it is.
-
-**After deploying, in this order:**
-
-1. Open the artwork awaiting approval. **The painted poster should now
-   appear.** If it does not, tell me before doing anything else.
-2. Run **Diagnostics** and read the five new title checks against your real
-   88,970 rows. Expect findings — the 20 duplicate names are only the first
-   question of five.
-3. Fix what they list in `IMPORT_titles.csv` and re-import. Doing it now is
-   free; doing it after a listing exists does not give the name back.
+**Deploy this before running any reset.** The Windows node did NOT change,
+so nothing to copy and `AGENT_VERSION` stays where it is.
 
 ---
 

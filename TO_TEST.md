@@ -137,6 +137,27 @@ the clear you would be testing yesterday's code.
 
 ---
 
+## 43. SKIPS STOP WAITING ON YOU — v183
+
+Your question from the home page: does a skip sit in WAITING ON YOU for
+ever? It did. Now it waits only until you have read it.
+
+**What to click**
+
+- Open **Skipped**. Your two skips should be in a WAITING ON YOU section,
+  each with three buttons: SEND BACK, and I'VE READ IT — LEAVE IT SKIPPED.
+- Press I'VE READ IT on one. The row should move to an ALREADY READ section
+  below, and the home page's "titles a worker could not do" card should
+  drop from 2 to 1 (the strip's WAITING ON YOU total drops too).
+- Press ASK ME AGAIN on it. It should come back to the waiting section and
+  the card should go back up.
+- The real test of the design: mark one as read, then as the worker send
+  that title back to yourself... actually simpler — leave one marked as
+  read, and if a worker ever skips that same title again later, it should
+  reappear in the waiting section on its own. Nothing to clear.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

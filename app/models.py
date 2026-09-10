@@ -157,6 +157,17 @@ class MasterTitle(Base):
     #                      with all revisions reopened.
     needs_revision    = Column(Integer, nullable=False, default=0, index=True)  # 0/1
     skip_reason       = Column(Text, nullable=True)
+    # WHEN it was skipped, and WHICH skip the admin has read. Two columns on
+    # purpose, and the comparison between them is the feature (see rule 5d):
+    # a skip is "waiting on you" while skipped_at is newer than
+    # skip_acked_at. Acknowledging stores the skip that was read, not a
+    # hide-for-ever flag — so a title skipped AGAIN after being read comes
+    # back on its own, with nothing to clear. Same design as the listing
+    # check's listing_ack_status. Before these existed, every skip raised
+    # WAITING ON YOU by one for ever, because the only button was SEND BACK
+    # (owner's find, 2026-09-10).
+    skipped_at        = Column(DateTime, nullable=True)
+    skip_acked_at     = Column(DateTime, nullable=True)
     complete_comment  = Column(Text, nullable=True)   # optional note from worker on complete
     admin_note        = Column(Text, nullable=True)   # admin's note when sending a skipped title back
 

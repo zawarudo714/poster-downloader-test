@@ -143,6 +143,21 @@ def project_home(request: Request, admin: User = Depends(require_admin),
         {"user": admin, "admin": admin, "active_tab": "home"})
 
 
+def _skip_is_unread():
+    """
+    The ONE spelling of "this skip is still waiting on the admin".
+
+    A skip is waiting until it is acknowledged, and again the moment it is
+    skipped anew after the acknowledgement — the comparison, never a flag,
+    so nothing has to be remembered or cleared. Both the WAITING ON YOU
+    count and the Skipped page's split use THIS condition, because two
+    spellings of one rule drift and the copy that breaks is the newer one.
+    """
+    return or_(MasterTitle.skip_acked_at.is_(None),
+               and_(MasterTitle.skipped_at.isnot(None),
+                    MasterTitle.skipped_at > MasterTitle.skip_acked_at))
+
+
 @router.get("/api/pulse")
 def api_pulse(request: Request, admin: User = Depends(require_admin),
               db: Session = Depends(get_db)):
@@ -313,7 +328,14 @@ def api_pulse(request: Request, admin: User = Depends(require_admin),
         pending = scoped_titles("pending")
         working = scoped_titles("in_progress")
         awaiting_you = scoped_titles("complete_pending")
-        skipped = scoped_titles("skipped")
+        # Only skips the admin has NOT read yet. A skip he has acknowledged
+        # is finished business — it stays on the Skipped page but must not
+        # sit in WAITING ON YOU for ever, which is what it did while this
+        # counted every skipped title (owner, 2026-09-10).
+        skipped = (scope_titles(db.query(func.count(MasterTitle.id)), proj)
+                   .filter(MasterTitle.status == "skipped",
+                           _skip_is_unread())
+                   .scalar() or 0)
 
         badges = {
             "browse": awaiting_you,
@@ -2611,11 +2633,54 @@ def skipped_page(
           .limit(500)
           .all()
     )
+
+    # Read and unread, split by the SAME database condition the WAITING ON
+    # YOU count uses — one spelling of the rule, so the page and the card
+    # can never disagree about which rows are waiting.
+    waiting_ids = {tid for (tid,) in
+                   (scope_titles(db.query(MasterTitle.id),
+                                 current_project(request, admin, db))
+                    .filter(MasterTitle.status == "skipped",
+                            _skip_is_unread()).all())}
+    waiting = [t for t in rows if t.id in waiting_ids]
+    acked = [t for t in rows if t.id not in waiting_ids]
+
     return templates.TemplateResponse(
         request,
         "admin_skipped.html",
-        {"user": admin, "admin": admin, "titles": rows, "active_tab": "skipped"},
+        {"user": admin, "admin": admin, "titles": waiting, "acked": acked,
+         "active_tab": "skipped"},
     )
+
+
+@router.post("/skipped/{master_id}/ack")
+def ack_skip(
+    master_id: int,
+    undo: int = Form(0),
+    request: Request = None,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    "I have read this skip, leave it skipped" — or take that back.
+
+    Stores WHICH skip was read (a timestamp compared against skipped_at),
+    never a hide-for-ever flag: if a worker skips the same title again
+    later, the row returns to WAITING ON YOU on its own. Same design as the
+    listing check's acknowledgement, for the same reason — a silence that
+    outlives the thing it silenced is how a real problem hides.
+    """
+    t = (scope_titles(db.query(MasterTitle), current_project(request, admin, db))
+         .filter(MasterTitle.id == master_id).first())
+    if not t:
+        raise HTTPException(404, "Title not found in this project.")
+    if t.status != "skipped":
+        raise HTTPException(400, "This title is not skipped any more.")
+    t.skip_acked_at = None if undo else datetime.utcnow()
+    log_activity(db, user=admin, action="ack_skip", target_type="master_title",
+                 target_id=t.id, details={"undo": bool(undo)})
+    db.commit()
+    return JSONResponse({"ok": True})
 
 
 # ── Deletion review (worker deleted a flagged poster) ───────────────────────

@@ -50,6 +50,11 @@ from .db import engine
 NEW_COLUMNS: list[tuple[str, str, str]] = [
     # ── Post-production pipeline ────────────────────────────────────────
     ("master_titles", "project_id",       "INTEGER"),
+    # The skip acknowledgement pair — see the comment on the columns in
+    # models.py. Additive and nullable, so existing rows simply read as
+    # "not yet acknowledged", which is the truthful state for them.
+    ("master_titles", "skipped_at",       "DATETIME"),
+    ("master_titles", "skip_acked_at",    "DATETIME"),
     ("master_titles", "greenlit_at",      "DATETIME"),
     ("master_titles", "greenlit_by",      "VARCHAR(64)"),
     ("master_titles", "pipeline_status",  "VARCHAR(24)"),

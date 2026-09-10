@@ -4,40 +4,67 @@
 {% from "_macros.html" import info %}
 {% block title %}Skipped Titles · Admin{% endblock %}
 
+{% macro skip_row(t, read) %}
+  <tr data-master-id="{{ t.id }}">
+    <td class="mono">{{ t.external_id or '–' }}</td>
+    {# Year inline and guarded — a project without years shows the bare
+       name, one WITH years still shows it. The old table had a YEAR column
+       that rendered empty on every travel row. #}
+    <td>{{ t.title }}{% if t.year %} ({{ t.year }}){% endif %}</td>
+    <td class="mono">{{ t.claimed_by_name or '(unclaimed)' }}</td>
+    <td class="muted">{{ t.skip_reason or '(no reason given)' }}</td>
+    <td class="actions-cell">
+      <input type="text" placeholder="Note for user (required)" data-skip-note>
+      <button class="btn btn-accent btn-tiny" data-action="send-back">SEND BACK</button>
+      {% if read %}
+        <button class="btn btn-ghost btn-tiny" data-action="unack-skip">ASK ME AGAIN</button>
+      {% else %}
+        <button class="btn btn-ghost btn-tiny" data-action="ack-skip">I&#8217;VE READ IT &mdash; LEAVE IT SKIPPED</button>
+      {% endif %}
+    </td>
+  </tr>
+{% endmacro %}
+
 {% block content %}
 <div class="admin-grid">
 
   <section class="panel">
-    <div class="panel-head"><span>SKIPPED TITLES ({{ titles|length }}) {{ info("Titles a user marked as skipped, with their reason. Type a note and SEND BACK to bounce the title to the user with your instructions. The user sees both the original skip reason and your note.") }}</span></div>
+    <div class="panel-head"><span>WAITING ON YOU ({{ titles|length }}) {{ info("Skips you have not read yet. These are what the WAITING ON YOU card counts. SEND BACK bounces the title to the worker with your note; LEAVE IT SKIPPED marks it read and the card stops counting it. If a worker ever skips the same title again, it comes back here by itself.") }}</span></div>
     <div class="panel-body">
       {% if titles %}
         <table class="data-table">
           <thead>
             <tr>
-              <th>#</th><th>TITLE</th><th>YEAR</th><th>USER</th><th>SKIPPED REASON</th><th>SEND BACK WITH NOTE</th>
+              <th>#</th><th>TITLE</th><th>USER</th><th>SKIPPED REASON</th><th>WHAT TO DO</th>
             </tr>
           </thead>
           <tbody>
-            {% for t in titles %}
-              <tr data-master-id="{{ t.id }}">
-                <td class="mono">{{ t.external_id or '–' }}</td>
-                <td>{{ t.title }}</td>
-                <td class="mono">{{ t.year or '' }}</td>
-                <td class="mono">{{ t.claimed_by_name or '(unclaimed)' }}</td>
-                <td class="muted">{{ t.skip_reason or '(no reason given)' }}</td>
-                <td class="actions-cell">
-                  <input type="text" placeholder="Note for user (required)" data-skip-note>
-                  <button class="btn btn-accent btn-tiny" data-action="send-back">SEND BACK</button>
-                </td>
-              </tr>
-            {% endfor %}
+            {% for t in titles %}{{ skip_row(t, False) }}{% endfor %}
           </tbody>
         </table>
       {% else %}
-        <p class="muted">No skipped titles. ✓</p>
+        <p class="muted">Nothing waiting. Every skip has been read. &#10003;</p>
       {% endif %}
     </div>
   </section>
+
+  {% if acked %}
+  <section class="panel">
+    <div class="panel-head"><span>ALREADY READ ({{ acked|length }}) {{ info("Skips you marked as read. They stay skipped and are not counted as waiting on you. They are kept here rather than hidden, so the record survives — and you can still send one back, or ask to be reminded again.") }}</span></div>
+    <div class="panel-body">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>#</th><th>TITLE</th><th>USER</th><th>SKIPPED REASON</th><th>WHAT TO DO</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in acked %}{{ skip_row(t, True) }}{% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
 
 </div>
 {% endblock %}

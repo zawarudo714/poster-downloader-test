@@ -2243,6 +2243,9 @@ def title_skip(
 
     t.status = "skipped"
     t.skip_reason = reason.strip() or None
+    # Stamp WHEN. The admin's "I have read this" mark compares against this
+    # time, so a title skipped again after being read reappears on its own.
+    t.skipped_at = datetime.utcnow()
     t.admin_note = None  # clear admin's prior send-back note
     if user.locked_master_id == master_id:
         user.locked_master_id = None

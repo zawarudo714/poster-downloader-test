@@ -2556,7 +2556,15 @@ the row reappears on its own with nothing to clear and nothing to expire.
 
 Generally: **when you silence something, store what you silenced, not the
 silence.** Same shape as the quiet window being a window, and as
-`scan_incomplete` being a query.
+`scan_incomplete` being a query. The same defect shipped a second time on
+the SKIPPED titles: the home page counted every skipped title as "waiting
+on you" and the only button was SEND BACK, so a skip the owner had read and
+accepted raised the count for ever (his find, 2026-09-10). Fixed with the
+same design — `skip_acked_at` compared against `skipped_at`, one spelling
+of the comparison shared by the count and the page. **The test to run on
+any "waiting on you" number: for each thing it counts, name the action that
+makes it stop counting.** If the only actions are "do the work" and
+nothing, the count is a treadmill, not a to-do list.
 
 **Creating all the work up front is what makes stopping impossible.** The
 five deactivation jobs — one per account — were queued together, so

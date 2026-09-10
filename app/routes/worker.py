@@ -769,7 +769,8 @@ def api_search(
         # (they cost nothing); otherwise the grid says "press SEARCH".
         return JSONResponse({"ok": True, "variant": variant, "results": [],
                              "queries": [], "phrase_used": template or "",
-                             "filtered_small": 0,
+                             "filtered_small": 0, "filtered_junk": 0,
+                             "on_topic": 0,
                              "cached": False, "not_searched": True})
 
     try:
@@ -782,7 +783,10 @@ def api_search(
         # island, mountain. Passed rather than looked up inside the search so
         # that ONE function knows where a title's words come from.
         outcome = search(db, search_text(t), project=project,
-                         kind=(t.description or ""), template=template)
+                         kind=(t.description or ""), template=template,
+                         # The name with its comma, for ranking only — see
+                         # place_words(). The SEARCH still uses search_text.
+                         display_title=(t.title or ""))
     except BraveError as e:
         log_activity(db, user=user, action="search_failed", target_type="master_title",
                      target_id=t.id, details={"error": str(e), "variant": variant})
@@ -798,6 +802,12 @@ def api_search(
         "phrase_used": template or "",
         "queries": outcome.queries,
         "filtered_small": outcome.filtered_small,
+        # Dropped for calling themselves a map or a flag, and how many of
+        # what survived actually name the place. Both are counts the screen
+        # SAYS out loud: a filter that quietly thins the grid is
+        # indistinguishable from a bad search.
+        "filtered_junk": outcome.filtered_junk,
+        "on_topic": outcome.on_topic,
         "results": [r.as_dict() for r in outcome.results],
         "cached": False,
     }

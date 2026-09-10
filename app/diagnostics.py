@@ -2329,13 +2329,18 @@ def check_titles_that_share_a_folder(db: Session, scope: Scope) -> CheckResult:
         if not safe:
             continue                    # the reject check above owns this one
         groups.setdefault(safe.lower(), []).append((ext, name))
-        stripped = name.rstrip(". ")
-        if stripped != name.rstrip():
+        # NOT AN ALARM ANY MORE, because sanitize() removes the trailing dot
+        # itself now (2026-09-10). Kept as the reason that code exists: a
+        # trailing dot is accepted by Windows and silently dropped, while
+        # Linux keeps it — so the server wrote a folder the node could not
+        # find. If sanitize ever stops doing it, this speaks again.
+        if sanitize(name) != sanitize(name).rstrip(". "):
             odd.append(Finding(
                 f"#{ext} {name!r}",
-                "ends in a dot or a space, which Windows removes from a "
-                "folder name without telling anyone — so the folder on disk "
-                "is not the one the database records.", "/admin/master"))
+                "still ends in a dot or a space after the folder name is "
+                "built. Windows drops those without telling anyone, so the "
+                "folder on disk would not be the one the database records.",
+                "/admin/master"))
         if safe.split(".")[0].strip().upper() in RESERVED:
             odd.append(Finding(
                 f"#{ext} {name!r}",

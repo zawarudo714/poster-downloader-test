@@ -2,13 +2,13 @@
 {# Project-scoped page: the nav shows this project's links, not the master ones. #}
 {% set nav_scope = 'project' %}
 {% from "_macros.html" import info %}
-{% block title %}Review {{ Nouns | default('Posters', true) }} · Admin{% endblock %}
+{% block title %}Review {{ Nouns | default('Images', true) }} · Admin{% endblock %}
 
 {% block content %}
 <div class="admin-grid" data-no-global-scroll>
 
   <section class="panel">
-    <div class="panel-head"><span>REVIEW {{ NOUNS | default('POSTERS', true) }} {{ info("Each title shows everything saved on it side-by-side so you can scan them in one glance. Use ← / → arrow keys to step through titles. Click one to enlarge it and flag for changes.") }}</span></div>
+    <div class="panel-head"><span>REVIEW {{ NOUNS | default('IMAGES', true) }} {{ info("Each title shows everything saved on it side-by-side so you can scan them in one glance. Use ← / → arrow keys to step through titles. Click one to enlarge it and flag for changes.") }}</span></div>
     <div class="panel-body">
 
       <form class="filter-row" id="ib-filter">

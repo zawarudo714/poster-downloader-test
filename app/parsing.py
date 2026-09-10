@@ -18,8 +18,37 @@ IMAGE_EXT_RE = re.compile(r"\.(jpg|jpeg|png|webp|gif)(\?.*)?$", re.IGNORECASE)
 
 
 def sanitize(name: str) -> str:
-    """Strip filesystem-illegal chars. Same regex as main.py."""
-    return re.sub(r'[<>:"/\\|?*]', "", name).strip()
+    """
+    Strip filesystem-illegal characters, and anything Windows would strip
+    for us WITHOUT SAYING SO.
+
+    ════════════════════════════════════════════════════════════════════════
+    A TRAILING DOT IS THE ONE THAT CROSSES MACHINES
+    ════════════════════════════════════════════════════════════════════════
+    The nine characters in the regex are refused outright, so they are easy
+    to remember. A trailing dot or space is different: Windows ACCEPTS the
+    name and silently hands back a folder with the dot removed, while Linux
+    keeps it exactly as written.
+
+    That difference sits across the middle of this system. The Linux server
+    writes the archive over SFTP, where `8. Washington, D.C.` keeps its dot.
+    The Windows node then looks for `S:\...\8. Washington, D.C.` and Windows
+    resolves that to the name WITHOUT the dot — a folder that is not there.
+    A file the server had just written would be unfindable from the machine
+    that has to upload it (found by the new title check, 2026-09-10).
+
+    So the dot is removed HERE, once, at the only place a folder name is
+    built. Both machines then agree, because neither of them is guessing.
+    """
+    cleaned = re.sub(r'[<>:"/\\|?*]', "", name)
+    # REMOVING A CHARACTER LEAVES A HOLE. "Aoraki / Mount Cook" loses the
+    # slash and becomes "Aoraki  Mount Cook" with two spaces — a folder name
+    # nobody typed, impossible to match by eye against the title, and one
+    # keystroke away from colliding with the single-spaced version. Collapse
+    # the runs so the name is the one a person would have written.
+    cleaned = " ".join(cleaned.split())
+    # rstrip, not [:-1] — "Trailing..." ends in three of them.
+    return cleaned.rstrip(". ")
 
 
 def _extract_num(s: str) -> str:

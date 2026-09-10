@@ -52,7 +52,7 @@
       <a href="{% if user is defined and user and user.role == 'admin' %}{% if scope == 'project' and proj %}/admin/home{% else %}/admin{% endif %}{% else %}/{% endif %}" class="brand">
         <span class="brand-mark">▌</span>
         {% if user is defined and user and user.role != 'admin' %}
-          <span class="brand-full">{{ (pctx.get('worker_label') or 'Poster Downloader') | upper }}</span>
+          <span class="brand-full">{{ (pctx.get('worker_label') or 'Print On Demand') | upper }}</span>
           <span class="brand-short" aria-hidden="true">{{ (pctx.get('worker_label') or 'PD')[:2] | upper }}</span>
         {% elif scope == 'project' and proj %}
           <span class="brand-full">{{ proj.name | upper }}</span>
@@ -88,7 +88,7 @@
                tell apart — renamed 2026-09-06 with the owner's approval. #}
             <div class="nav-band" data-nav-tint="sourcing">
               <span class="nav-band-head">FINDING PICTURES</span>
-              <a href="/admin/browse"    class="navlink {% if active_tab == 'browse' %}active{% endif %}">Worker&nbsp;{{ Nouns | default('Posters', true) }}<span class="nav-badge" data-nav-badge="browse" hidden>0</span></a>
+              <a href="/admin/browse"    class="navlink {% if active_tab == 'browse' %}active{% endif %}">Worker&nbsp;{{ Nouns | default('Images', true) }}<span class="nav-badge" data-nav-badge="browse" hidden>0</span></a>
               <a href="/admin/master"    class="navlink {% if active_tab == 'master' %}active{% endif %}">Title&nbsp;List</a>
               <a href="/admin/revisions" class="navlink {% if active_tab == 'revisions' %}active{% endif %}">Changes&nbsp;Requested<span class="nav-badge" data-nav-badge="revisions" hidden>0</span></a>
               <a href="/admin/skipped"   class="navlink {% if active_tab == 'skipped' %}active{% endif %}">Skipped</a>
@@ -228,19 +228,23 @@
 
     Templates get these words injected by app/templating.py; this is the same
     thing for JavaScript, so a script never has to invent a fallback like
-    `t.item_noun || 'poster'` — a fallback that is silently WRONG on every
-    project except the movie one, and which had already spread to four files.
+    `t.item_noun || 'poster'` — a fallback that was silently WRONG on every
+    project except the movie one, and which had spread to four files and six
+    templates. All of them are gone (2026-09-10). Where a fallback is still
+    unavoidable the word is now 'image', which is true of every project this
+    system can have; `check_noun_fallbacks_agree` in preflight keeps them
+    from drifting apart again.
 
     Use PD.noun / PD.nouns / PD.Noun / PD.NOUNS in any script.
   #}
   <script>
     window.PD = Object.freeze({
-      noun:  {{ noun  | default('poster',  true) | tojson }},
-      nouns: {{ nouns | default('posters', true) | tojson }},
-      Noun:  {{ Noun  | default('Poster',  true) | tojson }},
-      Nouns: {{ Nouns | default('Posters', true) | tojson }},
-      NOUN:  {{ NOUN  | default('POSTER',  true) | tojson }},
-      NOUNS: {{ NOUNS | default('POSTERS', true) | tojson }},
+      noun:  {{ noun  | default('image',  true) | tojson }},
+      nouns: {{ nouns | default('images', true) | tojson }},
+      Noun:  {{ Noun  | default('Image',  true) | tojson }},
+      Nouns: {{ Nouns | default('Images', true) | tojson }},
+      NOUN:  {{ NOUN  | default('IMAGE',  true) | tojson }},
+      NOUNS: {{ NOUNS | default('IMAGES', true) | tojson }},
       sourceLabel: {{ source_label | default('the source', true) | tojson }},
       targetLabel: {{ target_label | default('the marketplace', true) | tojson }},
       {# 'external' (open a source site in a tab, paste a URL back) or

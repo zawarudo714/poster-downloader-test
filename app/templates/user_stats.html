@@ -33,7 +33,7 @@
     <div class="panel-head">
       <span>RECENT ACTIVITY {{ info("Your save activity for the last 30 days. Switch between " ~ noun ~ " counts and KES earned.") }}</span>
       <div class="stats-chart-toggle">
-        <button type="button" class="btn btn-ghost btn-tiny stats-toggle-btn active" data-metric="count">{{ NOUNS | default('POSTERS', true) }}</button>
+        <button type="button" class="btn btn-ghost btn-tiny stats-toggle-btn active" data-metric="count">{{ NOUNS | default('IMAGES', true) }}</button>
         <button type="button" class="btn btn-ghost btn-tiny stats-toggle-btn" data-metric="kes">KES</button>
       </div>
     </div>

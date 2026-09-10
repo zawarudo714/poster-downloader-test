@@ -13,8 +13,10 @@
   // by the worker page and the admin page, so a hardcoded noun here was
   // wrong on both at once for every project except the movie one.
   const PDW = (window.PD || {});
-  const NOUNS = PDW.nouns || 'posters';
-  const NOUN  = PDW.noun  || 'poster';
+  // PDW is window.PD, which already defaults to the word true of every
+  // project. A second fallback here would be a second chance to drift.
+  const NOUNS = PDW.nouns || 'images';
+  const NOUN  = PDW.noun  || 'image';
   const NOUNS_UP = (PDW.NOUNS || NOUNS.toUpperCase());
   const Nouns = (PDW.Nouns || (NOUNS.charAt(0).toUpperCase() + NOUNS.slice(1)));
 

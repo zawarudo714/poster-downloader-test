@@ -175,7 +175,7 @@
     // Restore title index from URL if available and valid, else 0.
     titleIdx = (restoredIdx > 0 && restoredIdx < titles.length) ? restoredIdx : 0;
     clearSelection();
-    $('ib-summary').textContent = `${data.title_count} title(s) · ${data.poster_count} poster(s) total`;
+    $('ib-summary').textContent = `${data.title_count} title(s) · ${data.poster_count} ${data.poster_count === 1 ? PD.noun : PD.nouns} total`;
     renderGallery();
     saveStateToUrl();
   }
@@ -306,7 +306,7 @@
     const delBtn = document.createElement('button');
     delBtn.type = 'button';
     delBtn.className = 'g-poster-delete';
-    delBtn.setAttribute('aria-label', 'Delete poster');
+    delBtn.setAttribute('aria-label', `Delete ${PD.noun}`);
     delBtn.title = 'Admin delete (does not count against worker)';
     delBtn.textContent = '✕';
     delBtn.addEventListener('click', async (e) => {
@@ -325,7 +325,7 @@
     const histBtn = document.createElement('button');
     histBtn.type = 'button';
     histBtn.className = 'g-poster-history';
-    histBtn.setAttribute('aria-label', 'Poster history');
+    histBtn.setAttribute('aria-label', `${PD.Noun} history`);
     histBtn.title = 'Where this image came from and everything that happened to it';
     histBtn.textContent = '🕑';
     histBtn.addEventListener('click', (e) => {

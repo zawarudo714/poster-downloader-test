@@ -22,9 +22,9 @@
   // Mapping action → friendly label + a CSS class that colors the pill.
   // Actions not mapped show as their raw name with a default style.
   const ACTION_META = {
-    saved:           { label: 'saved poster',          cls: 'act-save' },
-    deleted:         { label: 'deleted poster',        cls: 'act-delete' },
-    replaced:        { label: 'replaced poster',       cls: 'act-replace' },
+    saved:           { label: `saved ${PD.noun}`,      cls: 'act-save' },
+    deleted:         { label: `deleted ${PD.noun}`,    cls: 'act-delete' },
+    replaced:        { label: `replaced ${PD.noun}`,   cls: 'act-replace' },
     locked:          { label: 'opened title',          cls: 'act-claim' },
     unlocked:        { label: 'closed title',          cls: 'act-claim' },
     claimed:         { label: 'claimed batch',         cls: 'act-claim' },
@@ -36,7 +36,7 @@
     submitted_for_completion: { label: 'SUBMITTED for completion',  cls: 'act-await' },
     approved_completion:    { label: 'APPROVED completion',       cls: 'act-resolve' },
     rejected_completion:    { label: 'REJECTED completion',       cls: 'act-flag' },
-    flagged:         { label: 'FLAGGED poster',        cls: 'act-flag' },
+    flagged:         { label: `FLAGGED ${PD.noun}`,    cls: 'act-flag' },
     flagged_similar: { label: 'FLAGGED as similar',    cls: 'act-flag' },
     unflagged:       { label: 'cleared flag',          cls: 'act-resolve' },
     resolved:        { label: 'resolved revision',     cls: 'act-resolve' },

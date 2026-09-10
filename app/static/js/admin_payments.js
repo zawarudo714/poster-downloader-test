@@ -238,7 +238,7 @@
       const total = tr.querySelector('.pay-cell-total').textContent;
       dialogSummary.textContent =
         `Pay ${name} for ${startInp.value} → ${endInp.value} ` +
-        `(${cnt} eligible posters, computed ${total} KES).`;
+        `(${cnt} eligible ${cnt === 1 ? PD.noun : PD.nouns}, computed ${total} KES).`;
       dialogBaseCount = parseInt(cnt, 10) || 0;
       dialogBaseTotal = parseFloat(total) || 0;
       dialogRate = parseFloat(tr._rate || rateKes) || 0;
@@ -286,7 +286,7 @@
     // Update the human-readable summary line at the top.
     if (extraCount > 0) {
       dialogSummary.textContent =
-        `Total: ${totalCount} posters (${dialogBaseCount} from picker range + ${extraCount} back-pay) · ${formatAmount(totalKes)} KES.`;
+        `Total: ${totalCount} ${PD.nouns} (${dialogBaseCount} from picker range + ${extraCount} back-pay) · ${formatAmount(totalKes)} KES.`;
     }
   }
 
@@ -319,7 +319,7 @@
       closeDialog();
       const bpMsg = (data.back_pay_dates && data.back_pay_dates.length)
         ? ` (incl. back-pay from ${data.back_pay_dates.join(', ')})` : '';
-      alert(`Payment recorded — ${data.poster_count} posters marked as paid${bpMsg}.`);
+      alert(`Payment recorded — ${data.poster_count} ${PD.nouns} marked as paid${bpMsg}.`);
       location.reload();
     } else {
       alert('Failed: ' + (data.detail || r.status));
@@ -344,7 +344,7 @@
       const id = tr.getAttribute('data-run-id');
       if (!confirm(
         'DELETE this payment run?\n\n' +
-        'Its posters will become eligible for payment again. Use only to fix mistakes.'
+        `Its ${PD.nouns} will become eligible for payment again. Use only to fix mistakes.`
       )) return;
       btn.disabled = true;
       const r = await fetch(`/admin/payments/${id}/delete`, { method: 'POST' });

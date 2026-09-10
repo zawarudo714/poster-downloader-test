@@ -396,8 +396,11 @@
 
     // The project's own word for what is being saved — "posters" for movies,
     // "images" for MUSIK. Every worker-facing label reads this.
-    const nouns = t.item_nouns || 'posters';
-    const noun  = t.item_noun  || 'poster';
+    // PD holds the project's words for every script — see base.html.
+    // Inventing a fallback here is what spread the movie vocabulary
+    // through four files in the first place.
+    const nouns = t.item_nouns || PD.nouns;
+    const noun  = t.item_noun  || PD.noun;
     node.querySelectorAll('[data-noun]').forEach((el) => { el.textContent = noun; });
     node.querySelectorAll('[data-nouns]').forEach((el) => {
       // Headings are upper-case in this UI; inline mentions are not.
@@ -672,6 +675,20 @@
     })));
   }
 
+  // ── SWAP, ASKED FOR FROM THE SEARCH GRID ────────────────────────────────
+  //
+  // An EVENT rather than a function call, and that is deliberate.
+  // `undoSavedPick` is declared inside this wrapper; `wireSearch` is a
+  // top-level function outside it. Calling across that boundary is the
+  // quietest failure in this codebase — the signature UPLOAD button did
+  // exactly that, threw inside an async handler, and did nothing visible at
+  // all. An event crosses the boundary without either side reaching into
+  // the other's scope.
+  document.addEventListener('pd:swap-saved', () => {
+    const saved = (state.locked && state.locked.posters) || [];
+    if (saved.length) undoSavedPick(saved[saved.length - 1].id);
+  });
+
   async function undoSavedPick(posterId) {
     const r = await postForm(`/poster/${posterId}/delete`,
                              { note: 'Re-picking a different image',
@@ -771,6 +788,13 @@
         });
         presetWrap.appendChild(b);
       });
+      // ── A PLAIN CONFIRM MUST NOT OFFER A TYPING BOX ──────────────────
+      // "Are you sure?" with a TYPE OWN REASON button beside it is still
+      // asking for a reason, just more quietly. When there is nothing to
+      // record, the toggle is hidden and the dialog is two buttons.
+      if (toggleBtn) toggleBtn.hidden = !!opts.noText;
+      if (opts.noText && manualWrap) manualWrap.hidden = true;
+
       // If opts.allowEmpty (e.g. complete-with-comment is optional),
       // include a "no reason" preset so worker can confirm without typing.
       if (opts.allowEmpty) {
@@ -1114,7 +1138,7 @@
     const thumb = wrap.querySelector('.rev-thumb');
     if (thumb) {
       thumb.src = '/static/img/deleted-poster.svg';
-      thumb.alt = 'poster deleted';
+      thumb.alt = `${PD.noun} deleted`;
       thumb.classList.add('rev-thumb-placeholder');
     }
     // Remove the URL input + action buttons row entirely — there's nothing
@@ -1129,10 +1153,10 @@
       info.className = 'rev-deleted-info muted';
       if (r.status === 'awaiting_approval') {
         info.textContent =
-          'You deleted this poster. Admin will review the deletion and approve or send it back.';
+          `You deleted this ${PD.noun}. Admin will review the deletion and approve or send it back.`;
       } else if (r.was_rejected) {
         info.textContent =
-          'Admin sent back your deletion. Read the note above — you may need to upload a new poster on this title.';
+          `Admin sent back your deletion. Read the note above — you may need to save a new ${PD.noun} on this title.`;
       } else {
         info.textContent = `${PD.Noun} deleted — admin reviewing.`;
       }
@@ -1213,7 +1237,7 @@
       item.querySelector('.receipt-period').textContent =
         r.period_start === r.period_end ? r.period_start : `${r.period_start} → ${r.period_end}`;
       item.querySelector('.receipt-count').textContent =
-        `(${r.poster_count} poster${r.poster_count === 1 ? '' : 's'} × ${r.rate_kes} KES)`;
+        `(${r.poster_count} ${r.poster_count === 1 ? PD.noun : PD.nouns} × ${r.rate_kes} KES)`;
       item.querySelector('.receipt-meta').textContent =
         (r.reference ? `Ref: ${r.reference} · ` : '') + `Sent ${r.pushed_at || ''}`;
       const noteEl = item.querySelector('.receipt-note');
@@ -1468,47 +1492,51 @@
   }
 
   async function deletePoster(posterId, { fromRevision }) {
-    // Find the poster to figure out how many other live posters exist on
-    // the same title — needed for the dynamic "Only N usable poster(s)
-    // available" preset. We look in state.locked.posters since deletion
-    // can only happen from the active title.
-    const live = state.locked;
-    const livePosters = (live && live.posters) || [];
-    // Count POSTERS BESIDES the one being deleted; that's the worker's
-    // post-delete view of the title.
-    const remaining = Math.max(0, livePosters.filter((p) => p.id !== posterId).length);
-
-    // Presets differ by context. From a flag card the only meaningful reason
-    // is "this poster is bad/similar"; the N-usable preset is meaningless
-    // (zero context for what N would mean). From the title panel both
-    // presets are relevant, plus a quick-confirm escape since first-time
-    // mistake deletes are common ("I downloaded the wrong image").
-    const presets = [];
-    if (!fromRevision) {
-      // Title-panel delete: include the dynamic count preset.
-      presets.push(`Only ${remaining} usable poster${remaining === 1 ? '' : 's'} available`);
-      presets.push('All the posters available are similar');
-      presets.push('Other posters not usable');
+    // ── A DELETION IS NOT AN EVENT ANYBODY READS ABOUT ────────────────────
+    //
+    // This used to demand a reason from three preset buttons. The owner had
+    // them removed (2026-09-10): "if a worker wants to delete, it should
+    // only ask if they are sure, not give a reason, because the reason would
+    // be given when they go to skip it."
+    //
+    // The presets were worse than merely useless. They were written for the
+    // MOVIE project, where a film needed three posters and the interesting
+    // question was why you had fewer — so they said "Only 0 usable posters
+    // available", a word this project does not use, about a count that
+    // cannot mean anything when a title takes ONE image. A question nobody
+    // can answer sensibly gets answered by reflex, which is the same defect
+    // as a warning that fires on the normal case.
+    //
+    // THE FLAGGED PATH KEEPS ITS NOTE, and that distinction is the whole
+    // point. A deletion the ADMIN asked for goes back to the admin for
+    // approval, so a real person reads the sentence. An ordinary delete has
+    // no reader, and the reason that matters arrives at SKIP.
+    let result;
+    if (fromRevision) {
+      const picked = await pickReason({
+        title: `Delete this ${PD.noun}?`,
+        sub:   `The admin flagged this ${PD.noun}. Say why you are deleting `
+             + `it rather than fixing it — the admin reads this and has to `
+             + `approve it.`,
+        presets: [],
+        allowEmpty: false,
+      });
+      if (picked === null) return;
+      result = picked;
     } else {
-      // Flag-panel delete: focus on quality reasons.
-      presets.push('All the posters available are similar');
-      presets.push('Other posters not usable');
+      const ok = await pickReason({
+        title: `Delete this ${PD.noun}?`,
+        sub:   `This permanently removes the file. You can search again and `
+             + `save a different one.`,
+        hint:  `💡 Just swapping it? Use REPLACE instead — paste a new URL above.`,
+        presets: [],
+        allowEmpty: true,
+        emptyLabel: 'DELETE',
+        noText: true,
+      });
+      if (ok === null) return;
+      result = { text: '', source: '' };
     }
-
-    const hint = fromRevision
-      ? null
-      : '💡 Downloaded by mistake? Use REPLACE instead — paste a new URL above.';
-
-    const result = await pickReason({
-      title: `Delete this ${PD.noun}?`,
-      sub:   fromRevision
-        ? 'The admin flagged this poster. Pick a reason for deletion (admin will be notified).'
-        : 'This will permanently remove the file. Pick a reason or type your own.',
-      hint:  hint,
-      presets,
-      allowEmpty: false,
-    });
-    if (result === null) return;
 
     const r = await postForm(`/poster/${posterId}/delete`,
                              { note: result.text || '',
@@ -1541,9 +1569,14 @@
     const liveCount = (live.posters || []).length;
     // The target comes from the project, not a hardcoded 3. A MUSIK title
     // with 2 images is COMPLETE and must not be interrogated about it.
-    const limit = live.images_per_title || 3;
-    const noun  = live.item_noun  || 'poster';
-    const nouns = live.item_nouns || 'posters';
+    // ONE fallback, not two. This read `|| 3` while the search grid
+    // twenty lines of scrolling away read `|| 2` — two copies of one
+    // fact, already disagreeing, both of them a movie-era number. A
+    // project that does not say gets ONE, which is the only count that
+    // cannot ask a worker for images the project never wanted.
+    const limit = live.images_per_title || 1;
+    const noun  = live.item_noun  || PD.noun;
+    const nouns = live.item_nouns || PD.nouns;
     if (liveCount < limit && !comment) {
       const result = await pickReason({
         title: 'Confirm completion',
@@ -1638,7 +1671,7 @@
     }
     let msg = 'Replace failed: ' + (r.data && r.data.detail || r.status);
     if (r.status === 400 && r.data && /image|url/i.test(r.data.detail || '')) {
-      msg += '\nMake sure you\'re copying the LINK address (not the image address) from the full-size poster.';
+      msg += `\nMake sure you're copying the LINK address (not the image address) from the full-size ${PD.noun}.`;
     }
     alert(msg);
   }
@@ -1692,7 +1725,7 @@ function wireSearch(box, title) {
   const head    = box.querySelector('.search-head');
   const jump    = box.querySelector('[data-search-jump]');
 
-  const limit    = title.images_per_title || 2;
+  const limit    = title.images_per_title || 1;   // see submitComplete
   const selected = new Set();
   let probed     = false;   // has the free cached-results check come back yet
 
@@ -1732,6 +1765,14 @@ function wireSearch(box, title) {
   if (jump) jump.addEventListener("click", () => { backToActions(); jump.hidden = true; });
 
   let results    = [];
+  // How many of the results name the place, how many do not, and
+  // whether the worker has asked to see the off-topic ones. Held
+  // here rather than recomputed, so the count on the button and the
+  // number of cards drawn can never disagree.
+  let onTopic    = 0;
+  let offTopic   = 0;
+  let showAll    = false;
+  let noteBits   = [];
 
   function esc(v) {
     return String(v == null ? '' : v)
@@ -1746,6 +1787,34 @@ function wireSearch(box, title) {
     saveBtn.disabled  = selected.size === 0;
     clearBtn.disabled = selected.size === 0;
     barCount.textContent = `${selected.size} selected · ${alreadySaved()}/${limit} saved`;
+
+    // ── SAY WHY THE PICTURES ARE DEAD ─────────────────────────────────────
+    //
+    // With one image per title, EVERY title enters this state the moment the
+    // worker saves — so it is the normal case, not a corner. The owner met
+    // it on his phone after saving on the PC and read it as a broken page:
+    // "the images are there but greyed out, I click them and nothing
+    //  happens, so essentially I cant do any replacement" (2026-09-10).
+    //
+    // Nothing was broken. The grid had correctly refused a second pick and
+    // said so only in a small line reading "0 selected · 1/1 saved", which
+    // is the answer to a question he had not thought to ask. A working
+    // feature that looks like a fault is a bad feature — so the reason goes
+    // where the dead pictures are, in words, with the way out beside it.
+    if (note) {
+      if (room === 0 && alreadySaved() >= limit) {
+        note.innerHTML =
+          `You already have your ${limit === 1 ? '' : limit + ' '}`
+          + `${limit === 1 ? PD.noun : PD.nouns} for this title, so nothing `
+          + `else can be picked. `
+          + `<button type="button" class="btn btn-ghost btn-tiny" `
+          + `data-action="search-free-slot">SWAP IT FOR ANOTHER</button>`;
+        note.hidden = false;
+      } else if (note.dataset.owned === 'cap') {
+        note.hidden = true;
+      }
+      note.dataset.owned = (room === 0 && alreadySaved() >= limit) ? 'cap' : '';
+    }
     grid.querySelectorAll('.sr-card').forEach((card) => {
       const on = selected.has(card.dataset.url);
       card.classList.toggle('is-selected', on);
@@ -1769,12 +1838,43 @@ function wireSearch(box, title) {
                      + 'this title and say why.</p>';
       return;
     }
-    grid.innerHTML = results.map((r) => `
+    // ── HIDE THE OFF-TOPIC ONES, BUT NEVER THROW THEM AWAY ──────────────
+    //
+    // The server has already put the results that NAME the place first. The
+    // rest are not rubbish — a good photograph on a Kisumu page may be
+    // titled "Sunset over the lake", and naming the place is not its job —
+    // so they are folded away behind a count rather than deleted.
+    //
+    // A COUNT WITH AN ESCAPE, not a silent trim. The owner's own rule for
+    // this screen: a filter that quietly thins the grid is indistinguishable
+    // from a bad search, and the worker can only tell the difference if the
+    // screen says which happened.
+    const shown = showAll ? results : results.slice(0, Math.max(onTopic, 0));
+    const drawn = shown.length ? shown : results;   // never draw an empty grid
+
+    grid.innerHTML = drawn.map((r) => `
       <div class="sr-card" data-url="${esc(r.url)}">
         <img class="sr-img" loading="lazy" src="${esc(r.thumb)}" alt="">
         <span class="sr-badge" hidden></span>
         <span class="sr-dim mono">${r.width || '?'}×${r.height || '?'}</span>
       </div>`).join('');
+
+    if (note) {
+      const parts = [];
+      if (noteBits.length) parts.push(`Hidden: ${noteBits.join(', ')}.`);
+      if (offTopic > 0 && shown.length) {
+        const place = (title.title || '').split(',')[0].trim();
+        parts.push(showAll
+          ? `Showing everything, including ${offTopic} that do not mention `
+            + `${esc(place)}. <button type="button" class="btn btn-ghost `
+            + `btn-tiny" data-action="search-fewer">SHOW THE BEST ONLY</button>`
+          : `${offTopic} more hidden that do not mention ${esc(place)}. `
+            + `<button type="button" class="btn btn-ghost btn-tiny" `
+            + `data-action="search-show-all">SHOW THEM</button>`);
+      }
+      if (parts.length) { note.innerHTML = parts.join(' '); note.hidden = false; }
+      else if (note.dataset.owned !== 'cap') { note.hidden = true; }
+    }
 
     grid.querySelectorAll('.sr-card').forEach((card) => {
       // A thumbnail that 404s is noise the worker can't act on — drop it.
@@ -1784,7 +1884,17 @@ function wireSearch(box, title) {
         if (selected.has(url)) selected.delete(url);
         else {
           const room = Math.max(0, limit - alreadySaved());
-          if (selected.size >= room) return;
+          if (selected.size >= room) {
+            // A CLICK THAT DOES NOTHING AT ALL IS THE FAULT. Silence here is
+            // what made a working cap read as a dead page. Whichever kind of
+            // full it is, the person is told which.
+            status.textContent = (alreadySaved() >= limit)
+              ? `You already have your ${limit === 1 ? PD.noun : limit + ' ' + PD.nouns}`
+                + ` for this title — use SWAP IT FOR ANOTHER to change it.`
+              : `That is ${limit === 1 ? 'the one' : 'all ' + limit} you can`
+                + ` pick. Unpick one first.`;
+            return;
+          }
           selected.add(url);
         }
         refreshBar();
@@ -1839,11 +1949,23 @@ function wireSearch(box, title) {
       status.textContent = `${results.length} result${results.length === 1 ? '' : 's'}`
                          + (shownPhrase ? ` · ${shownPhrase}` : '')
                          + (d.cached ? ' · cached' : '');
+      // ── WHAT THE FILTERS DID, IN WORDS ────────────────────────────────
+      //
+      // A grid that is thinner than expected has two possible causes — a
+      // poor search, or our own filtering — and they call for opposite
+      // reactions. Saying which happened is the difference between "try
+      // another phrasing" and "that is fine, carry on".
+      const bits = [];
       if (d.filtered_small) {
-        note.hidden = false;
-        note.textContent = `${d.filtered_small} image${d.filtered_small === 1 ? ' was' : 's were'} `
-                         + 'too small to use and have been hidden.';
+        bits.push(`${d.filtered_small} too small`);
       }
+      if (d.filtered_junk) {
+        bits.push(`${d.filtered_junk} maps, flags or clipart`);
+      }
+      onTopic  = Number(d.on_topic || 0);
+      offTopic = Math.max(0, results.length - onTopic);
+      noteBits = bits;
+      showAll  = false;
       render();
     } catch (e) {
       grid.innerHTML = `<p class="error">Search failed: ${esc(e.message)}</p>`;
@@ -1863,6 +1985,23 @@ function wireSearch(box, title) {
   });
   box.querySelector('[data-action="search-clear"]')
      .addEventListener('click', () => { selected.clear(); refreshBar(); });
+
+  // Delegated, because the button is drawn by refreshBar() and replaced
+  // every time the bar redraws — a listener bound to the element itself
+  // would be attached to a button that no longer exists.
+  if (note) {
+    note.addEventListener('click', (e) => {
+      if (e.target.closest('[data-action="search-show-all"]')) {
+        showAll = true;  render();  return;
+      }
+      if (e.target.closest('[data-action="search-fewer"]')) {
+        showAll = false; render();  return;
+      }
+      const b = e.target.closest('[data-action="search-free-slot"]');
+      if (!b) return;
+      document.dispatchEvent(new CustomEvent('pd:swap-saved'));
+    });
+  }
 
   // Extracted so the floating button and the toolbar button are the SAME
   // action rather than two implementations that drift apart. The floating one

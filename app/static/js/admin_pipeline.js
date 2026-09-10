@@ -85,6 +85,7 @@
        'One phrasing per line, and each line becomes ONE MORE BUTTON on the worker screen, in this order. Every line must contain {title}; {kind} is optional. Leave this blank and no extra buttons appear. For example: {title} {kind} scenic / {title} skyline / aerial view of {title}.'],
       ['brave_results_per_query', 'number', 'Results per search', 'How many images Brave is asked for each time. 50 is a full screen to scroll; 100 is the most it will give.'],
       ['brave_min_dimension', 'number', 'Smallest usable image (px)', 'An image smaller than this on BOTH sides is hidden before the worker sees it. The count of what was hidden is shown under the grid.'],
+      ['brave_exclude_words', 'text', 'Words that mean "not a photo of the place"', 'Comma-separated. A result whose own title contains one of these is dropped before the worker sees it — maps, flags, clipart and so on. Brave ignores the minus operator (measured), so this is the only way to do it. Whole words only, so "mapping" is not a map. The count dropped is shown under the grid.'],
       ['min_image_px', 'number', 'Warn below this size (px)',
        'A saved picture is questioned only when it measures under this on BOTH sides, which is what a thumbnail looks like. A tall narrow banner or a wide panorama passes, because one small side is a shape rather than a fault. The worker can still save it after confirming, and the picture is marked so you can find it later. Set to 0 to stop asking.'],
     ],
@@ -102,20 +103,20 @@
       ['gpt_review_required', 'bool', 'Review images before upload', 'On, every generated image waits for you on the Review Images tab. Off, they go straight to the upload queue. Turning it OFF does not release what is already waiting — those still need approving, so nothing is ever listed that you never looked at.'],
     ],
     // The DEFAULT placement. Any one poster is nudged on the Approve
-    // Artwork screen; these are what a brand new poster starts from.
+    // Artwork screen; these are what a brand new picture starts from.
     signature: [
       ['signature_enabled', 'bool', 'Paint the signature',
-       'Off, nothing is painted and every poster is left plain. The file stays uploaded, so switching this back on needs no re-upload.'],
-      ['signature_width_pct', 'number', 'Width (% of the poster)',
-       'How wide the mark is, as a percentage of the poster width. 16.8 is your Photoshop placement — 672 pixels on a 4000-wide poster. A percentage rather than a pixel count, so it looks the same if you ever change the output size.'],
+       `Off, nothing is painted and every ${PD.noun} is left plain.`.replace(/`/g,'') + ' The file stays uploaded, so switching this back on needs no re-upload.'],
+      ['signature_width_pct', 'number', `Width (% of the ${PD.noun})`,
+       `How wide the mark is, as a percentage of the ${PD.noun} width. 16.8 is your Photoshop placement — 672 pixels on a 4000-wide picture. A percentage rather than a pixel count, so it looks the same if you ever change the output size.`],
       ['signature_margin_pct', 'number', 'Gap from the edge (%)',
-       'How far the mark sits from the bottom and from whichever side it is on. 0.5 is your 20 pixels on a 4000-wide poster. The mark can never be dragged closer to an edge than this.'],
+       'How far the mark sits from the bottom and from whichever side it is on. 0.5 is your 20 pixels on a 4000-wide picture. The mark can never be dragged closer to an edge than this.'],
       ['signature_opacity', 'number', 'Opacity (0-100)',
        'How solid the mark is. 35 is what you set in Photoshop. 100 would be fully solid.'],
-      ['signature_x_pct', 'number', 'Position across the poster (%)',
-       'Where the MIDDLE of the mark sits, left to right. 91.1 puts its right edge exactly on the gap above, which is your default. 8.9 would put it on the left. You will normally leave this alone and drag it on the Approve Artwork screen for the odd poster that needs it.'],
+      ['signature_x_pct', 'number', `Position across the ${PD.noun} (%)`,
+       'Where the MIDDLE of the mark sits, left to right. 91.1 puts its right edge exactly on the gap above, which is your default. 8.9 would put it on the left. You will normally leave this alone and drag it on the Approve Artwork screen for the odd picture that needs it.'],
       ['signature_y_pct', 'number', 'Height up from the bottom (%)',
-       'How far the BOTTOM of the mark sits above the bottom of the poster. Measured as a percentage of the poster WIDTH, the same as the gap above, so 0.5 here and 0.5 there are the same visible distance. 0.5 is where the mark has always sat. Raise it to lift the mark up the page.'],
+       'How far the BOTTOM of the mark sits above the bottom of the picture. Measured as a percentage of the picture WIDTH, the same as the gap above, so 0.5 here and 0.5 there are the same visible distance. 0.5 is where the mark has always sat. Raise it to lift the mark up the page.'],
       ['signature_key_left', 'text', 'Key that throws it fully left',
        'Press this on the Approve Artwork screen to send the mark as far left as the gap allows. One character. A comma by default.'],
       ['signature_key_right', 'text', 'Key that throws it fully right',
@@ -865,7 +866,7 @@
     try {
       const d = await postJSON(API + '/greenlight', { project_id: projectId, ...body });
       setStatus(statusEl,
-        `Greenlit ${d.greenlit} titles (${d.posters} posters)` +
+        `Greenlit ${d.greenlit} titles (${d.posters} ${PD.nouns})` +
         (d.skipped ? `, ${d.skipped} skipped` : ''), 'ok');
       toast(`Greenlit ${d.greenlit} titles.`);
       loadGreenlight();
@@ -1140,7 +1141,7 @@
     try {
       const d = await postJSON(API + '/greenlight',
         { title_ids: ids, project_id: projectId });
-      let msg = `Greenlit ${d.greenlit} titles (${d.posters} posters)`;
+      let msg = `Greenlit ${d.greenlit} titles (${d.posters} ${PD.nouns})`;
       if (d.skipped) msg += `, ${d.skipped} had nothing left to promote`;
       setStatus(statusEl, msg, 'ok');
       toast(msg);
@@ -1159,7 +1160,7 @@
     if (!ids.length) return toast('Nothing selected.', 'error');
     if (!confirm(
       `Pull ${ids.length} title(s) back out of the pipeline?\n\n` +
-      'Only posters not yet processed are affected — anything already in ' +
+      `Only ${PD.nouns} not yet processed are affected — anything already in ` +
       'storage or uploaded stays exactly as it is.'
     )) return;
     try {
@@ -2446,7 +2447,7 @@
         const poster = q('[data-test-upload-poster]').value;
         const acc    = q('[data-test-upload-account]').value;
         const statusEl = q('[data-test-status="upload"]');
-        if (!poster || !acc) return setStatus(statusEl, 'Pick a poster id and an account.', 'error');
+        if (!poster || !acc) return setStatus(statusEl, `Pick a ${PD.noun} id and an account.`, 'error');
         runTest('upload', {
           poster_id: parseInt(poster, 10), account_id: parseInt(acc, 10),
         }, statusEl);

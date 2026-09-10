@@ -480,7 +480,7 @@
         <label class="sig-field">height
           <input type="range" min="0" max="100" step="0.1"
                  data-sig-y data-pid="${v.processed_id}" value="${s.y_pct}"
-                 title="How far up from the bottom of the poster the mark sits"></label>
+                 title="How far up from the bottom of the picture the mark sits"></label>
         <label class="sig-field">size
           <input type="range" min="2" max="60" step="0.1"
                  data-sig-w data-pid="${v.processed_id}" value="${s.w_pct}"></label>
@@ -489,7 +489,7 @@
                  data-sig-o data-pid="${v.processed_id}" value="${s.opacity}"></label>
         <button class="btn btn-ghost btn-tiny" data-img-action="sig-flip"
                 data-pid="${v.processed_id}"
-                title="White reads on a dark poster, black on a pale one">
+                title="White reads on a dark picture, black on a pale one">
           ${s.dark ? 'BLACK' : 'WHITE'} <span class="mono">(B)</span></button>
         <button class="btn btn-ghost btn-tiny" data-img-action="sig-reset"
                 data-pid="${v.processed_id}">RESET</button>
@@ -600,7 +600,7 @@
                data-pid="${v.processed_id}" title="Pick a colour">
         <button class="btn btn-ghost btn-tiny" data-img-action="eyedrop"
                 data-pid="${v.processed_id}"
-                title="Press E, then click a colour in the poster">
+                title="Press E, then click a colour in the picture">
           EYEDROPPER <span class="mono">(E)</span></button>
         <button class="btn btn-ghost btn-tiny" data-img-action="color-reset"
                 data-pid="${v.processed_id}">RESET</button>
@@ -751,7 +751,7 @@
     eyedropFor = pid;
     document.querySelectorAll(`[data-canvas][data-pid="${pid}"]`).forEach(
       (box) => box.classList.add('is-picking'));
-    toast('Click a colour in the poster.');
+    toast('Click a colour in the picture.');
   }
 
   // `box` (the plate) used to be passed in for its background colour and is

@@ -521,6 +521,27 @@ DEFAULTS: dict[str, Any] = {
     # Same placeholders as the Brave query.
     "google_query": "{title} {kind}",
     "brave_min_dimension": 300,
+    # ── WORDS THAT MEAN "THIS IS NOT A PHOTOGRAPH OF THE PLACE" ──────────
+    #
+    # MEASURED 2026-09-10 by the owner: Brave's image search IGNORES the
+    # minus operator. He searched `caspian sea -map` and got a screen of
+    # nothing but maps. So the exclusion has to be ours, applied to what
+    # comes back — which costs nothing, because every result already
+    # carries its own title and we were throwing that away.
+    #
+    # A SETTING RATHER THAN A CONSTANT, because the junk differs by niche:
+    # a project about book covers would want "map" kept and "cover" gone.
+    # Comma-separated. A word matches as a WHOLE word, so "mapping" is not
+    # a map and "Flagstaff" is not a flag.
+    #
+    # NO BACKFILL, by the owner's decision the same day: "however many get
+    # dropped then it is what it is. If the results are too small and the
+    # worker doesnt see a repeating pattern of location, then they have the
+    # Google image option, which is there for cases like this." Asking Brave
+    # again to top the pool back up would have roughly tripled the search
+    # bill across 88,112 titles to show pictures nobody looks at.
+    "brave_exclude_words": "map, maps, flag, flags, clipart, vector, icon, "
+                           "logo, stock photo, infographic, diagram, chart",
     "brave_results_per_query": 50,
     # `brave_daily_query_cap` lived here until v172 and was NEVER READ BY
     # ANYTHING. It had a box on the Settings page describing itself as a

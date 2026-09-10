@@ -633,8 +633,19 @@ class Project(Base):
     # MUSIK saves "images"; a future niche might save "designs". Every piece
     # of worker-facing copy reads this rather than hardcoding a noun, so a new
     # niche needs no template edits.
-    item_noun        = Column(String(32), nullable=False, default="poster")
-    item_noun_plural = Column(String(32), nullable=False, default="posters")
+    # ── THE FALLBACK WORD MUST BE TRUE OF EVERY PROJECT ────────────────────────
+    # "poster" was the fallback in five separate places, and it is the vocabulary
+    # of a niche deleted on 2026-09-01. A fallback is not a harmless default: it
+    # is what the whole site says the day a value fails to arrive, and it would
+    # have said "poster" to a travel worker with nothing on any screen to explain
+    # why. Same shape as the `{artist}` placeholder left in shared search code.
+#
+    # "image" is the word chosen because it is true of every project this system
+    # can have — a film poster is an image, a photograph of Kyoto is an image.
+    # The three places below and `templating.py` must agree, which
+    # `check_noun_fallbacks_agree` in preflight.py now enforces.
+    item_noun        = Column(String(32), nullable=False, default="image")
+    item_noun_plural = Column(String(32), nullable=False, default="images")
 
     # ── What this project HAS ────────────────────────────────────────────
     # The UI renders from these instead of branching on slug. `if slug ==

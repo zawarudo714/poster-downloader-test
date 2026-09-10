@@ -982,6 +982,67 @@ account — deleting the listing does not give it back.
 `TITLE_RULES.md` in the project folder explains every fault these look for,
 and names the ones deliberately not checked.
 
+## 36. THE FIVE FIXES FROM THE TEST BOX — v177 + v178
+
+**1. The reset keeps your signature.** Run the dry-run again. It should now
+print a line reading **keeping `_pipeline_artifacts`, `_signature`, `_style`**.
+Before this it would have deleted your signature and style reference while
+the settings still named them, and the pipeline would have refused to build
+the first poster afterwards.
+
+**2. The delete popup is a plain question.** As the worker, delete a saved
+image. You should get one question and a DELETE button — no reason list, no
+TYPE OWN REASON. Then have the admin flag an image and delete it as the
+worker: **that one should still ask for a note**, because the admin reads it.
+
+**3. Nothing says "poster" any more.** Look at the Activity Log, Payments,
+and the Approve Artwork tooltips. Everything should say "image". If you find
+one that still says poster, tell me — the check should have caught it.
+
+**4. The greyed-out search explains itself.** Save an image on a title, do
+NOT press DONE, then reopen that title. Under the grid you should see *"You
+already have your image for this title"* with a **SWAP IT FOR ANOTHER**
+button. Press it — the saved image should be removed and the grid should
+come back live. Also tap a greyed picture: it should tell you why instead of
+doing nothing.
+
+**5. Washington, D.C.** Nothing to click. It only shows up when a folder is
+written, and the Diagnostics title check should no longer flag it.
+
+---
+
+## 37. BRAVE SEARCH — the exclusions and the ranking · v178
+
+Search a place you know brings junk. **Caspian Sea** is your own example.
+
+**What should happen**
+
+- The maps, flags and clipart should be **gone**, and a line under the grid
+  should say how many were dropped and why.
+- The pictures that actually **name the place should come first**.
+- If any were hidden for not mentioning it, you should see *"14 more hidden
+  that do not mention Caspian — SHOW THEM"*. Pressing it shows everything,
+  and there is a way back.
+
+**Two specific things worth checking, because I could only test the logic
+and not the real results:**
+
+- Search **Flagstaff** and **Mapungubwe**. Neither should be dropped — the
+  filter matches whole words, so "flag" inside Flagstaff must not count. If
+  either grid is empty, the word matching is too greedy and I want to know.
+- Search a place with an accent, for example **Curaçao** or **Zürich**. The
+  results should still rank correctly even where the page spells it without
+  the accent.
+
+**The new setting** is at Settings → *Words that mean "not a photo of the
+place"*. It ships with maps, flags, clipart, vector, icon, logo, stock
+photo, infographic, diagram and chart. Add to it as you see what gets
+through — it takes effect on the next search, no deploy.
+
+**One thing it deliberately does NOT do:** if the exclusions leave you with
+few results, it does not ask Brave again to top them up. That was your call,
+and the Google button is the fallback for an obscure place.
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

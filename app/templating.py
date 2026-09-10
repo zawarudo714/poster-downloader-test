@@ -15,7 +15,7 @@ will be wrong on more of them with every niche added.
 Rather than have each route remember to pass the words through, the subclass
 below injects them into every render, so any template can write:
 
-    {{ noun }} {{ nouns }} {{ Noun }} {{ NOUNS }}     poster / posters / …
+    {{ noun }} {{ nouns }} {{ Noun }} {{ NOUNS }}     image / images / …
     {{ source_label }}                                Brave image search
     {{ target_label }}                                FineArtAmerica
     {{ processor_label }}                             Photoshop · AI generation
@@ -69,8 +69,10 @@ def _vocabulary(pctx) -> dict:
     pctx = pctx or {}
     proj = pctx.get("active_project")
 
-    noun = (pctx.get("item_noun") or "poster")
-    nouns = (pctx.get("item_nouns") or "posters")
+    # See the note on Project.item_noun: the fallback is the word that
+    # is true of every project, not the word of the first one.
+    noun = (pctx.get("item_noun") or "image")
+    nouns = (pctx.get("item_nouns") or "images")
 
     from .pipeline import PROCESSOR_LABELS, SITE_LABELS
 

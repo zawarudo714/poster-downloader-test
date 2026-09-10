@@ -189,6 +189,37 @@ its code**, and rename the fields, classes and payload keys it left behind.
 Same rule as deleting a capability rather than disabling it (5b), applied to
 words.
 
+**AND THE WORST PLACE IT HIDES IS A FALLBACK, WHERE NOTHING IS WRONG UNTIL
+THE DAY IT IS.** That grep was run on 2026-09-09 and called done. On
+2026-09-10 the owner opened a delete dialog reading *"Only 0 usable posters
+available"* — a word this project does not use, about a count that cannot
+mean anything when a title takes ONE image. Behind it were **thirty-one
+sentences** across the admin screens still saying "poster", and worse, the
+dead word was the FALLBACK in eleven places: the database column default,
+the template layer, the project context and six templates, all shaped
+`item_noun || 'poster'`.
+
+Three things generalise:
+
+  * **A fallback is not a harmless default — it is what the whole site says
+    the day a value fails to arrive.** Every one of those would have spoken
+    the deleted niche's vocabulary to a travel worker, with nothing on any
+    screen to explain why.
+  * **Pick the fallback that is true of EVERY project**, not the one that
+    was true of the first. It is "image" now: a film poster is an image and
+    a photograph of Kyoto is an image.
+  * **A word can change owner, so re-read the dead list.** "artist" was
+    MUSIK's word — and FineArtAmerica calls the account's display name the
+    artist name, which this system stores and shows. It stopped being dead.
+    A check that does not know that spends its time crying about the Listing
+    check screen.
+
+Now mechanical: `check_noun_fallbacks_agree` in `preflight.py` fails on any
+dead niche's word inside a SENTENCE, and on the four places that state the
+fallback disagreeing. It ignores CSS class names, element ids and anything
+inside `${...}` — the first two versions did not, reported forty false
+alarms, and a check that shouts about class names is one nobody reads.
+
 ---
 
 ## What this is
@@ -2586,6 +2617,29 @@ Two rules came out of it, and both generalise past this button:
     so that is where the spinner belongs. A control that renames itself
     mid-press is a control the person can no longer identify, and the owner
     called it "finicky" for exactly that reason (2026-09-09).
+
+**AND A CONTROL THAT REFUSES MUST SAY SO — SILENCE IS INDISTINGUISHABLE FROM
+A DEAD PAGE.** The search grid greys out every picture once a title has its
+full complement of images and the click handler returns without doing
+anything. The cap is correct. But `images_per_title` is ONE for travel, so
+**every** title enters that state the moment the worker saves — it is the
+normal case, not a corner — and the only clue was a small line reading
+"0 selected · 1/1 saved". The owner met it on his phone and read it as
+broken: *"the images are there but greyed out, I click them and nothing
+happens"* (2026-09-10).
+
+Two questions to ask of any control that can refuse:
+
+  * **How often will it refuse when nothing is wrong?** If the answer is
+    "every time, after the first success", the refusal is the normal state
+    and it needs a sentence, not a subtle style.
+  * **What is the way out, and is it on the same screen?** Swapping the
+    image meant leaving the grid, finding the saved-images panel and
+    deleting from there. A refusal that does not name its own remedy sends
+    the person hunting.
+
+Same family as a status that is true and answers nothing, one level down: a
+count is not an explanation, and a greyed control is not a reason.
 
 **AN EARLY EXIT WRITTEN FOR THE OLD JOB WILL SILENTLY SKIP THE NEW ONE.**
 `upscale_to_width` began with "if it is already wide enough, return" — right,

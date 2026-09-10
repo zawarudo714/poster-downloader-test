@@ -2920,6 +2920,101 @@ def _fstring_text(node: ast.JoinedStr) -> str:
     return "".join(out)
 
 
+# ── A DELETED PROJECT'S VOCABULARY MUST NOT BE ANYBODY'S FALLBACK ─────────
+# The movie project was deleted on 2026-09-01 and its word survived as the
+# DEFAULT in eleven places — `item_noun || 'poster'` in four scripts and
+# `default('POSTERS', true)` in six templates, plus the database column
+# itself. A fallback is not harmless: it is what the whole site says the day
+# a value fails to arrive, and every one of those would have said "poster"
+# to a travel worker with nothing on screen to explain why.
+#
+# The owner found the last of them in a delete dialog reading "Only 0 usable
+# posters available" (2026-09-10) — a word this project does not use, about
+# a count that cannot mean anything when a title takes ONE image.
+#
+# Two rules, both mechanical from here on:
+#   · the fallback word is the one true of EVERY project — "image" — and the
+#     four places that state it must agree;
+#   · no niche's vocabulary may be hardcoded in text a worker reads.
+# The second is the one that matters for the NEXT niche: the specimen is not
+# "poster", it is any word that belongs to one project appearing where the
+# project's own word should be asked for.
+
+NOUN_FALLBACK = "image"
+# A word that belonged to a niche this system no longer runs. Add to it when
+# a project is deleted — the same sweep as grepping for its NAME.
+DEAD_VOCABULARY = ("poster", "posters", "movie", "movies", "film", "films",
+                   "album", "albums", "tmdb")
+# "ARTIST" IS DELIBERATELY NOT ON THAT LIST, and the reason is the point of
+# the whole check. It WAS the MUSIK word — but FineArtAmerica also calls the
+# account's display name the artist name, and this system stores and shows
+# exactly that (see "WE DO NOT STORE THE ARTIST NAME" in CLAUDE.md). The word
+# stopped belonging to a dead niche and started belonging to a live
+# marketplace. A dead-word list has to be re-read when a word changes owner,
+# or the check spends its time crying about the Listing check screen.
+
+
+def check_noun_fallbacks_agree() -> None:
+    # 1 · the four places that state the fallback must state the same thing.
+    places = {
+        # A tighter pattern than the first one, which used [^)]* and so
+        # stopped at the ")" inside String(32) — and reported itself BLIND
+        # rather than passing, which is how it was found.
+        "app/models.py":           r'item_noun\s*=\s*Column\(.*?default="([a-z]+)"',
+        "app/templating.py":       r"""noun\s*=\s*\(pctx\.get\("item_noun"\)\s*or\s*"([a-z]+)""",
+        "app/projects.py":         r""""item_noun":\s*\([^)]*else\s*"([a-z]+)""",
+        "app/templates/base.html": r"""noun:\s*{{ noun\s*\|\s*default\('([a-z]+)'""",
+    }
+    for rel, pat in places.items():
+        path = ROOT / rel
+        if not path.is_file():
+            fail(f"{rel} is missing — the noun fallback check is now blind.")
+            continue
+        m = re.search(pat, path.read_text(encoding="utf-8"))
+        if not m:
+            fail(f"{rel}: could not find where the item_noun fallback is "
+                 f"stated. The check that keeps the four in step is blind.")
+        elif m.group(1) != NOUN_FALLBACK:
+            fail(f"{rel} falls back to {m.group(1)!r} while the agreed word "
+                 f"is {NOUN_FALLBACK!r}. A fallback is what the whole site "
+                 f"says when a value fails to arrive, so the four places "
+                 f"that state one must state the same one.")
+
+    # 2 · no dead niche's word in text a person reads.
+    quoted = re.compile(r"""(['"`])((?:[^'"`\\]|\\.){2,200}?)\1""")
+    for path in list(JS.glob("*.js")) + list(TPL.glob("*.html")):
+        rel = path.relative_to(ROOT).as_posix()
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            bare = line.strip()
+            if bare.startswith(("//", "*", "#", "{#", "/*")):
+                continue                      # a comment says nothing to anybody
+            for _, text in quoted.findall(line):
+                # A SENTENCE, not an identifier. Class names, ids and paths
+                # legitimately say "poster" and renaming those buys nothing.
+                if " " not in text.strip():
+                    continue
+                # A WHOLE WORD, not a fragment of an identifier. Splitting
+                # on letters made "catalog-poster-name" and
+                # "d.poster_filename" look like sentences about posters, and
+                # a check that shouts about CSS class names is one nobody
+                # reads. The boundaries refuse a neighbouring - or _, so
+                # "poster(s) total" still counts and "posters-count" does not.
+                # WHAT IS INSIDE ${...} IS CODE, NOT PROSE. `${d.posters}`
+                # is a field name the person never sees; only the words
+                # around it are read. Judging the interpolation reported
+                # variables as sentences, which is the same noise as judging
+                # a CSS class name.
+                low = re.sub(r"\$\{[^}]*\}", " ", text.lower())
+                hit = next((w for w in DEAD_VOCABULARY
+                            if re.search(r"(?<![\w-])" + w + r"(?![\w-])", low)), None)
+                if hit:
+                    fail(f"{rel} line {n}: the sentence {text[:70]!r} contains "
+                         f"{hit!r}, a word belonging to a niche this system no "
+                         f"longer runs. Ask the project for its own word "
+                         f"(PD.noun / PD.nouns, or {{{{ noun }}}} in a "
+                         f"template) instead of naming one.")
+
+
 CHECKS = [
     ("python compiles",           check_python_compiles),
     ("no undefined names",        check_undefined_names),
@@ -2957,6 +3052,7 @@ CHECKS = [
     ("years are guarded before drawing", check_years_are_guarded_before_drawing),
     ("every badge has a card", check_every_badge_has_a_card),
     ("workspace assets are underscored", check_workspace_assets_are_underscored),
+    ("no dead niche vocabulary", check_noun_fallbacks_agree),
 ]
 
 

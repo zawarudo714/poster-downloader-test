@@ -217,8 +217,8 @@ def project_context(request, db: Session, user: Optional[User]) -> dict:
         "user_projects": permitted,
         "worker_label": worker_label(proj),
         # The project's own vocabulary, so no template hardcodes "poster".
-        "item_noun": (proj.item_noun if proj else "poster"),
-        "item_nouns": (proj.item_noun_plural if proj else "posters"),
+        "item_noun": (proj.item_noun if proj else "image"),
+        "item_nouns": (proj.item_noun_plural if proj else "images"),
         # Whether the Review Images tab should appear at all. Resolved here
         # rather than from proj.has_review_gate in the template, because the
         # gate is now a switch as well as a capability — and a nav that keeps

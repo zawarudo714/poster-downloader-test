@@ -45,7 +45,9 @@ worker looking at a rate-limit error with no way through.
 from __future__ import annotations
 
 import logging
+import re
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -98,6 +100,13 @@ class SearchOutcome:
     queries: list[str] = field(default_factory=list)
     key_used: str = ""
     filtered_small: int = 0
+    # Dropped for saying "map" or "flag" in their own title. Counted rather
+    # than merely done, because a number that vanishes with no explanation
+    # is how a filter gets blamed for a thin set of results.
+    filtered_junk: int = 0
+    # How many of what SURVIVED actually name the place. The screen uses it
+    # to offer "N hidden that do not mention Kisumu — show them".
+    on_topic: int = 0
 
 
 # ── Settings ────────────────────────────────────────────────────────────────
@@ -182,6 +191,124 @@ def normalise_for_search(name: str) -> str:
     return " ".join(text.split())
 
 
+# ── Judging a result by its own title ───────────────────────────────────────
+#
+# Every result Brave returns carries the title of the page it was found on,
+# and until 2026-09-10 we kept it and used it for nothing. Two questions can
+# be answered from it for free, with no extra request and no extra money:
+# is this a map rather than a photograph, and does it mention the place at
+# all. That is the whole mechanism.
+
+
+def _excluded(title: str, words: list[str]) -> bool:
+    """
+    Does this result's own title say it is not a photograph of the place?
+
+    WHOLE WORDS ONLY. A substring test would drop Flagstaff for saying flag
+    and Mapungubwe for saying map — real places, thrown away by a filter
+    nobody could see working. The boundaries also refuse a neighbouring
+    hyphen, so "map-reading" is still a map.
+    """
+    low = (title or "").lower()
+    return any(re.search(r"(?<![\w-])" + re.escape(w) + r"(?![\w-])", low)
+               for w in words if w)
+
+
+def _fold_for_match(text: str) -> str:
+    """
+    Accents off, lower case, for comparing two strings that mean the place.
+
+    ITS OWN FUNCTION RATHER THAN BORROWING `clean_for_marketplace`. That one
+    answers "what will FineArtAmerica store", which is a different question
+    that also truncates at 100 characters and deletes punctuation. Reusing it
+    here would tie two unrelated rules together, and the day the marketplace
+    changed its folding the search ranking would move for no reason. Reuse
+    the CONDITION that is genuinely shared, never the function that happens
+    to contain it.
+
+    Without this, "Church of San Ginés" never matched a page calling it
+    "Iglesia de San Gines" — caught by exercising it rather than by reading
+    it (2026-09-10).
+    """
+    stripped = unicodedata.normalize("NFKD", normalise_for_search(text or ""))
+    return "".join(c for c in stripped if not unicodedata.combining(c)).lower()
+
+
+def _mentions_place(title: str, place_words: list[str]) -> bool:
+    """
+    Does this result name the place we asked about?
+
+    ════════════════════════════════════════════════════════════════════════
+    AN UNKNOWN TITLE COUNTS AS A MATCH, ON PURPOSE
+    ════════════════════════════════════════════════════════════════════════
+    Some results come back with no title at all. Reading that as "does not
+    mention the place" would hide them, and on a title where most results
+    are untitled the grid would look broken — a guard firing on the normal
+    case, which the notes call a keystroke rather than a guard.
+
+    ANY significant word is enough, not the whole phrase. "Church of San
+    Ginés, Madrid" would otherwise demand that exact sentence; matching on
+    "Ginés" finds the Spanish page that calls it "Iglesia de San Ginés".
+    Being forgiving is the cheap direction to be wrong in, because this
+    decides the ORDER and an escape hatch shows the rest anyway.
+    """
+    if not place_words:
+        return True
+    low = _fold_for_match(title)
+    if not low:
+        return True                      # untitled is unknown, not off-topic
+    return any(w in low for w in place_words)
+
+
+# Words too common to identify a place. "Church of San Martín" must not match
+# every church in the world, and "Lake Como" must not match every lake.
+_PLACE_STOPWORDS = {
+    "the", "of", "and", "at", "in", "on", "de", "la", "le", "el", "du", "des",
+    "saint", "st", "mount", "mt", "lake", "river", "church", "cathedral",
+    "castle", "city", "town", "island", "national", "park", "bridge", "falls",
+    "old", "new", "great", "north", "south", "east", "west", "upper", "lower",
+}
+
+
+def place_words(title: str) -> list[str]:
+    """
+    The words that identify this place, from the part before the comma.
+
+    THE OWNER'S OWN RULE (2026-09-10): "everything before the comma, since
+    adding the country would dilute the results". `Kisumu, Kenya` gives
+    Kisumu; the country would have matched every Kenyan picture there is.
+
+    Taken from the TITLE, not from the search words — the sheet holds
+    `Curaçao, Netherlands` as the title and `Curaçao Netherlands` as the
+    search text, and only one of those has a comma to cut at.
+    """
+    head = (title or "").split(",")[0]
+    out = []
+    for w in re.findall(r"[^\W\d_]+", _fold_for_match(head)):
+        if len(w) > 3 and w not in _PLACE_STOPWORDS:
+            out.append(w)
+    # Nothing distinctive left — "Old Town" is all stopwords. Fall back to
+    # the longest word rather than matching everything, which would rank at
+    # random and be indistinguishable from the feature being off.
+    if not out:
+        words = re.findall(r"[^\W\d_]+", _fold_for_match(head))
+        out = [max(words, key=len)] if words else []
+    return out
+
+
+def place_phrase(title: str) -> str:
+    """
+    The whole name before the comma, folded — the strongest possible match.
+
+    "New York City" has only one distinctive word once "new" and "city" are
+    set aside, so it ranked on "york" alone and a photograph of York Minster
+    would have come first. The phrase settles that: a result naming the whole
+    thing outranks one that shares a single word, and the single word still
+    beats no match at all.
+    """
+    return " ".join(_fold_for_match((title or "").split(",")[0]).split())
+
+
 # ── The HTTP call ───────────────────────────────────────────────────────────
 
 def _call(api_key: str, query: str, count: int) -> list[dict]:
@@ -251,7 +378,8 @@ def _parse(raw: list[dict], min_dimension: int) -> tuple[list[ImageResult], int]
 # ── Public entry point ──────────────────────────────────────────────────────
 
 def search(db: Session, artist: str, *, project=None, kind: str = "",
-           template: str | None = None) -> SearchOutcome:
+           template: str | None = None,
+           display_title: str = "") -> SearchOutcome:
     """
     Run a normal or deep search and return de-duplicated results.
 
@@ -283,7 +411,11 @@ def search(db: Session, artist: str, *, project=None, kind: str = "",
     seen: set[str] = set()
     merged: list[ImageResult] = []
     filtered = 0
+    junk = 0
     key_used = ""
+    exclude = [w.strip().lower() for w in
+               str(_setting(db, "brave_exclude_words", project) or "").split(",")
+               if w.strip()]
 
     for query in queries:
         raw = None
@@ -317,7 +449,42 @@ def search(db: Session, artist: str, *, project=None, kind: str = "",
             if r.url in seen:
                 continue          # a multi-line phrasing can overlap itself
             seen.add(r.url)
+            if _excluded(r.title, exclude):
+                junk += 1
+                continue          # a map or a flag, by its own title
             merged.append(r)
 
+    # ── RANK, DO NOT REMOVE ────────────────────────────────────────────────
+    #
+    # The owner's choice on 2026-09-10, and it is the right way round: a
+    # genuinely good photograph on a Kisumu page may be titled "Sunset over
+    # the lake" and naming the place is not its job. Nothing is thrown away
+    # for failing to mention it — the ones that DO mention it simply come
+    # first, and the screen offers the rest behind "N hidden — show them".
+    #
+    # A STABLE sort, so within each group Brave's own ordering survives. It
+    # ranked them by relevance already, and shuffling that would throw away
+    # the one judgement the search engine is actually good at.
+    # THE DISPLAY TITLE, NOT THE SEARCH WORDS. The sheet holds
+    # "Curaçao, Netherlands" as the title and "Curaçao Netherlands" as the
+    # search text, and only the first has a comma to cut the country off at.
+    # Ranking on the search words would have matched every Dutch picture
+    # there is — the exact dilution the owner warned about. Falls back to
+    # the search words so a caller that has no title still ranks somehow.
+    wanted = place_words(display_title or artist)
+    phrase = place_phrase(display_title or artist)
+
+    def rank(r) -> int:
+        # 0 names the whole place, 1 shares a distinctive word, 2 neither.
+        # Three tiers rather than two so "New York City" outranks "York".
+        low = _fold_for_match(r.title)
+        if phrase and low and phrase in low:
+            return 0
+        return 1 if _mentions_place(r.title, wanted) else 2
+
+    on_topic = sum(1 for r in merged if rank(r) < 2)
+    merged.sort(key=rank)
+
     return SearchOutcome(results=merged, queries=queries,
-                         key_used=key_used, filtered_small=filtered)
+                         key_used=key_used, filtered_small=filtered,
+                         filtered_junk=junk, on_topic=on_topic)

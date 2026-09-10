@@ -725,7 +725,7 @@
       </div>
       <div class="panel-body">
         <div class="filter-row">
-          <label>{{ NOUN | default('POSTER', true) }} ID <input type="number" data-test-poster-id placeholder="e.g. 1234"></label>
+          <label>{{ NOUN | default('IMAGE', true) }} ID <input type="number" data-test-poster-id placeholder="e.g. 1234"></label>
           <button type="button" class="btn btn-accent btn-tiny" data-action="test-process">RUN TEST PROCESS</button>
           <span class="muted mono" data-test-status="process"></span>
         </div>
@@ -763,7 +763,7 @@
       </div>
       <div class="panel-body">
         <div class="filter-row">
-          <label>{{ NOUN | default('POSTER', true) }} ID <input type="number" data-test-upload-poster placeholder="e.g. 1234"></label>
+          <label>{{ NOUN | default('IMAGE', true) }} ID <input type="number" data-test-upload-poster placeholder="e.g. 1234"></label>
           <label>ACCOUNT
             <select data-test-upload-account><option value="">—</option></select>
           </label>

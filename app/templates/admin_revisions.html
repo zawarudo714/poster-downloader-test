@@ -102,7 +102,7 @@
                 <div class="rev-card-similar-thumbs">
                   {% for pid in related_ids %}
                     <a class="rev-similar-mini" href="/admin/file/{{ pid }}?v={{ vbust }}" target="_blank" rel="noopener">
-                      <img src="/admin/file/{{ pid }}?v={{ vbust }}" alt="poster #{{ pid }}" loading="lazy">
+                      <img src="/admin/file/{{ pid }}?v={{ vbust }}" alt="{{ noun }} #{{ pid }}" loading="lazy">
                     </a>
                   {% endfor %}
                 </div>
@@ -159,7 +159,7 @@
                 <div class="rev-card-similar-thumbs">
                   {% for pid in related_ids %}
                     <a class="rev-similar-mini" href="/admin/file/{{ pid }}?v={{ vbust }}" target="_blank" rel="noopener">
-                      <img src="/admin/file/{{ pid }}?v={{ vbust }}" alt="poster #{{ pid }}" loading="lazy">
+                      <img src="/admin/file/{{ pid }}?v={{ vbust }}" alt="{{ noun }} #{{ pid }}" loading="lazy">
                     </a>
                   {% endfor %}
                 </div>

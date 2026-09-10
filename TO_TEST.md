@@ -65,6 +65,35 @@ should say "image" now.
 
 ---
 
+## 39. CAPTIONS ON THE SEARCH RESULTS — v180
+
+Every tile in the worker's search grid now has a strip under the picture
+saying what the picture's own page calls it, with the pixel size in small
+beneath.
+
+**What to click**
+
+- Search a place as the worker. Under each picture there should be up to two
+  lines of text in the normal site font. A very long page title should end
+  in "…" rather than stretch its tile.
+- A result with no title at all should show just the size, with no empty gap
+  where the words would be.
+- Clicking the text should select the picture, exactly like clicking the
+  picture itself.
+- The captions should make stray results explain themselves — a tile
+  captioned "Physical map of China" now says why it slipped past the filter.
+
+**What failure looks like**
+
+- Captions that read like web addresses. The words come from each page's own
+  title, and a few sites use their address as their title — tell me if that
+  is common enough to be ugly and I will trim those.
+- Words sitting ON TOP of a photograph. The strip is below the image on
+  purpose; overlap means the old styling is cached — force-refresh once
+  before reporting it.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

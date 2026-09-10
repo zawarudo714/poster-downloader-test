@@ -1808,7 +1808,10 @@ function wireSearch(box, title) {
       <div class="sr-card" data-url="${esc(r.url)}">
         <img class="sr-img" loading="lazy" src="${esc(r.thumb)}" alt="">
         <span class="sr-badge" hidden></span>
-        <span class="sr-dim mono">${r.width || '?'}×${r.height || '?'}</span>
+        <div class="sr-caption">
+          <span class="sr-title">${esc(r.title || '')}</span>
+          <span class="sr-dim mono">${r.width || '?'}×${r.height || '?'}</span>
+        </div>
       </div>`).join('');
 
     if (note) {

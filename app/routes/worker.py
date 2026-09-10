@@ -234,7 +234,13 @@ def _my_queue(db: Session, user: User, project=None):
 
 
 def _source_search_url(db: Session, title: str, content_type: Optional[str],
-                       project=None, kind: str = "") -> str:
+                       project, *, kind: str) -> str:
+    # `kind` is REQUIRED, not optional. It used to default to "", and the
+    # one call site that forgot it was the OPEN title — the very button the
+    # worker presses — so "{title} {kind}" quietly searched the title alone
+    # (owner's find, 2026-09-10). Same shape as storage_remote's project=None:
+    # an optional argument is a default wearing different clothes, and
+    # deleting it turns the next forgotten call into a loud TypeError.
     """
     Where this project's workers go to find source images.
 
@@ -448,8 +454,12 @@ def _state_payload(db: Session, user: User, project=None) -> dict:
                 lt = None
         if lt and lt.claimed_by_id == user.id:
             locked = _serialize_master(lt, db)
+            # search_text() and kind=, like the other three call sites — this
+            # one used the raw title and no kind, so the OPEN title's Google
+            # button searched different words than everything else.
             locked["source_link"] = _source_search_url(
-                db, lt.title, lt.content_type, resolve_project(db, lt.project_id))
+                db, search_text(lt), lt.content_type,
+                resolve_project(db, lt.project_id), kind=(lt.description or ""))
             # Posters already on this title (live only)
             posters = (
                 db.query(SavedPoster)
@@ -808,6 +818,10 @@ def api_search(
         # indistinguishable from a bad search.
         "filtered_junk": outcome.filtered_junk,
         "on_topic": outcome.on_topic,
+        # Hidden for naming a DIFFERENT region — the Australian Newcastle on
+        # a search for the South African one. Counted apart so the screen
+        # can say why they are folded away.
+        "off_place": outcome.off_place,
         "results": [r.as_dict() for r in outcome.results],
         "cached": False,
     }

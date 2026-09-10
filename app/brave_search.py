@@ -107,6 +107,11 @@ class SearchOutcome:
     # How many of what SURVIVED actually name the place. The screen uses it
     # to offer "N hidden that do not mention Kisumu — show them".
     on_topic: int = 0
+    # How many were hidden for naming a DIFFERENT region — "Newcastle Beach
+    # Australia" on a search for the South African one. A separate count so
+    # the screen can say WHY they are hidden rather than lumping them in
+    # with the merely-untitled.
+    off_place: int = 0
 
 
 # ── Settings ────────────────────────────────────────────────────────────────
@@ -309,6 +314,127 @@ def place_phrase(title: str) -> str:
     return " ".join(_fold_for_match((title or "").split(",")[0]).split())
 
 
+def region_phrase(title: str) -> str:
+    """
+    The part AFTER the comma, folded — the country or region that tells two
+    places with one name apart. Empty when the title has no comma.
+    """
+    parts = (title or "").split(",", 1)
+    if len(parts) < 2:
+        return ""
+    return " ".join(_fold_for_match(parts[1]).split())
+
+
+# ── Knowing when a caption names a DIFFERENT place ──────────────────────────
+#
+# The sheet holds SIXTEEN Newcastles. Searching "Newcastle, South Africa"
+# returns pages captioned "Newcastle Beach Australia", which NAME the place
+# word — so the ranking filed them as perfect matches and put them first
+# (owner's find, 2026-09-10). Brave cannot be told "-australia"; the minus
+# operator is measured dead. So the contradiction is read out of the caption
+# instead: a result that names the place AND names a different region than
+# the title's is ranked off the grid, behind the existing SHOW THEM escape.
+#
+# WHERE THE REGION LIST COMES FROM — THE SHEET ITSELF, never a hand-kept
+# list. Every title's after-comma part is a qualifier; the ones used by many
+# titles are countries and states, the ones used by one or two are cities
+# ("Table Mountain, Cape Town"). Only the frequent ones may contradict:
+# MEASURED 2026-09-10 on the real 88,112 rows, a cut at 20 titles keeps 271
+# region-level names (Germany, Texas, New South Wales) and drops every
+# city-level qualifier — so a caption saying "Newcastle near Durban" is NOT
+# hidden, because Durban never makes the list.
+_REGION_MIN_TITLES = 20
+
+# Cache per project, keyed by how many comma-titles the project holds — the
+# count is one cheap query per search, and a re-import changes it, so the
+# list rebuilds itself with nothing to remember to clear.
+_region_cache: dict = {}
+
+
+def known_regions(db: Session, project) -> tuple[str, ...]:
+    """
+    The folded after-comma qualifiers this project's sheet uses 20+ times.
+    """
+    from sqlalchemy import func
+    from .models import MasterTitle
+    from .pipeline import project_scope, _default_project_id
+
+    scope = project_scope(getattr(project, "id", None),
+                          default_project_id=_default_project_id(db))
+    rows = (db.query(MasterTitle.title)
+              .filter(scope, MasterTitle.title.contains(",")))
+    count = rows.count()
+
+    key = getattr(project, "id", None)
+    hit = _region_cache.get(key)
+    if hit and hit[0] == count:
+        return hit[1]
+
+    freq: dict[str, int] = {}
+    for (name,) in rows.all():
+        q = region_phrase(name)
+        if q:
+            freq[q] = freq.get(q, 0) + 1
+    regions = tuple(sorted(q for q, n in freq.items()
+                           if n >= _REGION_MIN_TITLES))
+    _region_cache[key] = (count, regions)
+    return regions
+
+
+def _contains_phrase(folded_text: str, folded_phrase: str) -> bool:
+    """Whole words only — "flag" inside "Flagstaff" must not count."""
+    return re.search(r"(?<![a-z0-9])" + re.escape(folded_phrase)
+                     + r"(?![a-z0-9])", folded_text) is not None
+
+
+def foreign_regions_for(display_title: str,
+                        regions: tuple[str, ...]) -> tuple[str, ...]:
+    """
+    The regions that would CONTRADICT this title, from the known set.
+
+    A region sharing any word with the title itself is left out — for
+    "Newcastle, Washington" the region "washington" is ours, not foreign,
+    and for "Newcastle, New South Wales" even "New York" is skipped for
+    sharing "new". Over-keeping is the safe direction: a skipped region can
+    only ever leave a result VISIBLE.
+    """
+    ours = set(_fold_for_match(display_title or "").split())
+    return tuple(q for q in regions if not (set(q.split()) & ours))
+
+
+def rank_tier(result_title: str, *, phrase: str, wanted: list[str],
+              our_region: str, foreign: tuple[str, ...]) -> int:
+    """
+    One result's place in the grid, smallest first.
+
+      0  names the whole place              "Newcastle South Africa town"
+      1  shares a distinctive word          "Newcastle at dusk"
+      2  names neither                      "Sunset over the beach"
+      3  names the place AND a different    "Newcastle Beach Australia"
+         region than the title's — hidden
+         behind SHOW THEM with tier 2
+
+    The contradiction check runs only when the title HAS a region of its
+    own. "New York City" carries no comma, so nothing can contradict it and
+    a caption saying "Little Italy, New York" stays exactly where it was.
+    A caption that mentions OUR region can never conflict, whatever else it
+    also says — a "Newcastle SA vs Newcastle NSW" page names both and is
+    evidence for us, not against.
+
+    A pure function on purpose: `tools/test_brave_ranking.py` feeds it the
+    real Newcastle captions and fails the deploy if this table ever stops
+    being true.
+    """
+    low = " ".join(_fold_for_match(result_title or "").split())
+    if our_region and low and not _contains_phrase(low, our_region):
+        for q in foreign:
+            if _contains_phrase(low, q):
+                return 3
+    if phrase and low and phrase in low:
+        return 0
+    return 1 if _mentions_place(result_title, wanted) else 2
+
+
 # ── The HTTP call ───────────────────────────────────────────────────────────
 
 def _call(api_key: str, query: str, count: int) -> list[dict]:
@@ -473,18 +599,24 @@ def search(db: Session, artist: str, *, project=None, kind: str = "",
     # the search words so a caller that has no title still ranks somehow.
     wanted = place_words(display_title or artist)
     phrase = place_phrase(display_title or artist)
+    our_region = region_phrase(display_title or "")
+    foreign: tuple[str, ...] = ()
+    if our_region:
+        try:
+            foreign = foreign_regions_for(display_title,
+                                          known_regions(db, project))
+        except Exception:
+            foreign = ()          # a scoping hiccup must not kill the search
 
-    def rank(r) -> int:
-        # 0 names the whole place, 1 shares a distinctive word, 2 neither.
-        # Three tiers rather than two so "New York City" outranks "York".
-        low = _fold_for_match(r.title)
-        if phrase and low and phrase in low:
-            return 0
-        return 1 if _mentions_place(r.title, wanted) else 2
-
-    on_topic = sum(1 for r in merged if rank(r) < 2)
-    merged.sort(key=rank)
+    # One tier per result, computed once — see rank_tier() for the table.
+    tiers = {id(r): rank_tier(r.title, phrase=phrase, wanted=wanted,
+                              our_region=our_region, foreign=foreign)
+             for r in merged}
+    on_topic = sum(1 for t in tiers.values() if t < 2)
+    off_place = sum(1 for t in tiers.values() if t == 3)
+    merged.sort(key=lambda r: tiers[id(r)])
 
     return SearchOutcome(results=merged, queries=queries,
                          key_used=key_used, filtered_small=filtered,
-                         filtered_junk=junk, on_topic=on_topic)
+                         filtered_junk=junk, on_topic=on_topic,
+                         off_place=off_place)

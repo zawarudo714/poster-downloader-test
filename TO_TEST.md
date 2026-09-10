@@ -94,6 +94,40 @@ beneath.
 
 ---
 
+## 40. THE WRONG NEWCASTLE IS HIDDEN — v181
+
+Your Newcastle, South Africa example. A result whose caption names the place
+AND a different region — "Newcastle Beach Australia" — is now folded away
+with the hidden ones.
+
+**Press CLEAR SEARCH CACHE first** (Settings → Image Search). A search you
+have already run replays its saved answer, old ranking included, so without
+the clear you would be testing yesterday's code.
+
+**What to click**
+
+- Open Newcastle, South Africa as the worker and search. The Australian
+  beach pictures from your screenshot should be gone from the top. The line
+  under the grid should say how many were hidden and that some of them
+  "name a different place". SHOW THEM still shows everything.
+- Captions naming South Africa should sit first. Captions saying just
+  "Newcastle" with no country stay visible — those words carry no evidence
+  either way, so hiding them would be guessing.
+- What this cannot catch, so you are not surprised: an Australian photo
+  captioned only "Newcastle beach" shows no evidence in its words, so it
+  stays visible. The caption under each tile is what lets you catch those.
+
+## 41. THE GOOGLE BUTTON'S {kind} — v181
+
+- Keep the GOOGLE BUTTON phrasing as `{title} {kind}`. Open a title and
+  press OPEN GOOGLE IMAGE SEARCH. The Google tab should now have the kind
+  word in its search box — for example "... South Africa town" — where
+  before the kind was silently missing.
+- The button also uses the search-words column now, like the in-page search
+  always did, so the two searches finally ask for the same thing.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

@@ -1723,6 +1723,7 @@ function wireSearch(box, title) {
   // number of cards drawn can never disagree.
   let onTopic    = 0;
   let offTopic   = 0;
+  let offPlace   = 0;   // of the hidden, how many NAME A DIFFERENT PLACE
   let showAll    = false;
   let noteBits   = [];
 
@@ -1819,11 +1820,18 @@ function wireSearch(box, title) {
       if (noteBits.length) parts.push(`Hidden: ${noteBits.join(', ')}.`);
       if (offTopic > 0 && shown.length) {
         const place = (title.title || '').split(',')[0].trim();
+        // Two different reasons to be hidden, said apart: not naming the
+        // place is neutral, naming a DIFFERENT place is a warning — the
+        // Australian Newcastle on a South Africa search.
+        const why = offPlace > 0
+          ? `that do not mention ${esc(place)} (${offPlace} of them name `
+            + `a different place)`
+          : `that do not mention ${esc(place)}`;
         parts.push(showAll
-          ? `Showing everything, including ${offTopic} that do not mention `
-            + `${esc(place)}. <button type="button" class="btn btn-ghost `
+          ? `Showing everything, including ${offTopic} ${why}. `
+            + `<button type="button" class="btn btn-ghost `
             + `btn-tiny" data-action="search-fewer">SHOW THE BEST ONLY</button>`
-          : `${offTopic} more hidden that do not mention ${esc(place)}. `
+          : `${offTopic} more hidden ${why}. `
             + `<button type="button" class="btn btn-ghost btn-tiny" `
             + `data-action="search-show-all">SHOW THEM</button>`);
       }
@@ -1919,6 +1927,7 @@ function wireSearch(box, title) {
       }
       onTopic  = Number(d.on_topic || 0);
       offTopic = Math.max(0, results.length - onTopic);
+      offPlace = Number(d.off_place || 0);
       noteBits = bits;
       showAll  = false;
       render();

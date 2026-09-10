@@ -1892,6 +1892,16 @@ form field name, a header, an ID format:
        impossible beats detectable — applied to a function signature. When
        a parameter must always be supplied, say so in the signature and let
        Python enforce it; a preflight check on top is belt to that braces.
+
+     The SAME shape struck again the SAME DAY, hours after this entry was
+     written: `_source_search_url` took `kind=""`, three call sites passed
+     it and the one for the OPEN title did not — so the Google button's
+     `{title} {kind}` template silently searched the title alone, on the
+     one button the worker actually presses. Fixed the same way: the
+     default is deleted, `kind` is required, and `check_call_arity` now
+     fails the deploy if a call site forgets it. When you add an argument
+     to a function with several call sites, grep the call sites and count
+     them — the one that predates the argument is the one that misses it.
 2. **Can I read it from the source at runtime?** Parsing the form off the
    login page beats hardcoding its action, because it survives a redesign.
 3. **Can I ask the owner?** He has the account open in a browser. One

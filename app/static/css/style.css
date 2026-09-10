@@ -4740,7 +4740,8 @@ label.inline-check {
    is a sentence, and mono makes it read like a web address. Clamped to two
    lines with … so one long title cannot stretch its tile. */
 .sr-title {
-  font-size: 12.5px; line-height: 1.35; color: var(--text);
+  font-size: 13px; line-height: 1.45; color: var(--text);
+  font-weight: 500; letter-spacing: 0.01em;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
   overflow: hidden; word-break: break-word;
 }

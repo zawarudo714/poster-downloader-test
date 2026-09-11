@@ -1402,9 +1402,57 @@
     await refreshState();
   }
 
+  // ── WHAT THE WORKER PASTED, JUDGED BEFORE WE SEND IT ──────────────────
+  //
+  // On a phone the worker cannot right-click, so they often copy the WRONG
+  // thing off Google: the tiny grey preview link, or the address of the
+  // Google page itself. Both fail in a way that is confusing after the
+  // event — a thumbnail saves a postage stamp, a page link saves nothing.
+  // Catching them here, on our own page, needs no add-on and works on
+  // every browser. Returns a plain sentence to show, or null if the link
+  // looks fine to try.
+  function pasteProblem(url) {
+    const u = url.toLowerCase();
+    // Google's preview thumbnail. The `tbn:` id and the encrypted-tbn host
+    // are the tells; both are Google's small copy, never the real photo.
+    if (u.includes('gstatic.com/images') || u.includes('tbn:and') ||
+        /encrypted-tbn\d/.test(u)) {
+      return 'That is Google’s small preview, not the real photo. ' +
+             'Open the picture full-size first (tap it, then open the image), ' +
+             'then copy that link.';
+    }
+    // A Google page, not a picture: a results page, a "visit" link, or the
+    // click-through wrapper. None of these is an image the server can save.
+    if (/^https?:\/\/(www\.)?google\.[a-z.]+\/(search|imgres|url)\b/.test(u)) {
+      return 'That is a Google page link, not a picture. Open the image ' +
+             'itself, then copy its link.';
+    }
+    // Not a web link at all, or an in-browser data blob we cannot fetch.
+    if (!/^https?:\/\//.test(u)) {
+      return 'That does not look like a web link. It should start with http.';
+    }
+    return null;
+  }
+
   async function doSave(urlInput, msgEl, flashEl, opts = {}) {
     const url = (urlInput.value || '').trim();
     if (!url) { msgEl.textContent = 'Paste a URL first.'; msgEl.className = 'save-msg err'; return; }
+    // Only on the FIRST try — opts.force lets the worker overrule us and
+    // send it anyway, because our guess about a link can be wrong and the
+    // server is the real judge.
+    if (!opts.force) {
+      const problem = pasteProblem(url);
+      if (problem) {
+        msgEl.innerHTML = problem +
+          ' <button type="button" class="btn btn-ghost btn-tiny" ' +
+          'data-action="save-anyway">SEND IT ANYWAY</button>';
+        msgEl.className = 'save-msg err';
+        const anyway = msgEl.querySelector('[data-action="save-anyway"]');
+        if (anyway) anyway.addEventListener('click',
+          () => doSave(urlInput, msgEl, flashEl, { ...opts, force: true }));
+        return;
+      }
+    }
     msgEl.textContent = 'Saving…'; msgEl.className = 'save-msg';
     const r = await postForm('/save_image', {
       url,

@@ -561,6 +561,12 @@ def _state_payload(db: Session, user: User, project=None) -> dict:
         "chat_unread": chat_unread,
         "pending_complete_titles": pending_complete_for_worker,
         "default_pull_size": user.last_pull_size or DEFAULT_PULL_SIZE,
+        # The too-small threshold, read live so the phone add-on refuses a
+        # tiny picture using THIS number rather than a second copy of it that
+        # would drift (2026-09-11). The server still measures the real file
+        # and remains the true gate — the add-on's check is only a courtesy
+        # so the worker does not send an obvious thumbnail.
+        "min_image_px": int(get_setting(db, "min_image_px", project=project) or 300),
     }
 
 

@@ -3,21 +3,22 @@
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.
 
-## v183 — a skip stops waiting on you once you have read it · 2026-09-10
+## v184 — the paste helper, and one value for the phone add-on · 2026-09-11
 
-- **The WAITING ON YOU card no longer counts skips for ever.** The Skipped
-  page has a new button per row: I'VE READ IT — LEAVE IT SKIPPED. Pressing
-  it moves the row to an ALREADY READ section and the home-page card stops
-  counting it. SEND BACK still works from both sections, and ASK ME AGAIN
-  undoes the mark. If a worker ever skips the SAME title again, it returns
-  to the waiting list on its own — the mark remembers WHICH skip you read,
-  not "never show this".
-- Under the surface: two new date columns on titles (`skipped_at`,
-  `skip_acked_at`), added by the automatic startup migration — no manual
-  database step. The "is this skip unread" rule is written ONCE and used by
-  both the count and the page, so they cannot disagree.
-- The year column on the Skipped page now renders inline and only when a
-  year exists, instead of an always-empty column.
+- **The paste-a-URL box now catches a bad link before saving.** If the
+  worker pastes Google's small grey preview link, or a Google page link
+  instead of a picture, the box turns red and says what to do, with a SEND
+  IT ANYWAY button so our guess can be overruled. This is the site-side
+  half of the phone add-on idea and needs no add-on.
+- **/api/state now also returns `min_image_px`.** The phone add-on reads
+  the site's own too-small number from here instead of keeping a second
+  copy that would drift. No behaviour change for the site itself.
+
+The phone ADD-ON is a separate thing, delivered as a zip beside the repo
+(`../poster_helper_extension/`). It is NOT deployed to the server — the
+worker loads it on their own phone. It talks to this site's existing
+`/api/state` and `/save_image`, which is why the only server change needed
+was the one value above.
 
 Deploy: the server only. The NODE does not need copying — nothing in
 `worker_service/` changed.

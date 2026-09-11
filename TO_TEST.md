@@ -158,6 +158,18 @@ ever? It did. Now it waits only until you have read it.
 
 ---
 
+## 44. THE PASTE BOX CATCHES A BAD LINK — v184
+
+- As the worker, open a title and paste a Google preview link into the
+  paste box — one starting with `encrypted-tbn` or `gstatic.com/images`.
+  The box should turn red and tell you to open the picture full-size first,
+  with a SEND IT ANYWAY button beside it.
+- Paste a normal photo link. It should save as always, no message.
+- Paste a Google page link (a search or results address). It should say it
+  is a page, not a picture.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

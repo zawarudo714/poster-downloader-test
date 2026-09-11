@@ -341,6 +341,31 @@ changes.
 
 ## PARKED — the owner will say when
 
+**THE ADMIN AS A PICTURE-FINDER.** `DECIDED 2026-09-10` — the owner's idea,
+parked at his request. **Remind him this exists whenever he asks what is
+outstanding, and whenever the Skipped page or the pay rules are being
+worked on.**
+
+The idea, in his words: on his own time he does a deep search for titles a
+worker skipped (ones he has not sent back), saves what he finds, and his
+finds do not count towards worker pay. Pressing DONE on such a title goes
+STRAIGHT to painting — his save is its own approval, so the review gate and
+the greenlight would both be him agreeing with himself. If he fails to find
+anything, the title returns to the skipped list. The screen for it is a new
+ADMIN link under FINDING PICTURES.
+
+**Retrofit risk: NONE, verified 2026-09-10 against the code, which is why
+parking it is safe.** The two halves that could have hurt already exist:
+`payable_criteria` in `payments.py` already refuses to pay for any image
+with `added_by` filled in, and the admin's existing "+ ADD" box already
+stamps `added_by`. Skipped is an ordinary title state, and the nav bands
+take new links by design. Two decisions wait for build time, neither
+structural: WHERE his finds are saved (the claiming worker's frozen folder,
+or an `admin` folder of his own — the workspace layout supports either),
+and whether returning a title to skipped deletes a half-saved find. The
+I'VE READ IT button on the Skipped page (v183) is the natural neighbour —
+"I'll do this one myself" becomes a third button on the same row.
+
 **~~Remove TeePublic from the server~~ — DONE, v147, 2026-09-06.** The
 owner said the word and everything TeePublic left the site in one pass: the
 tab, the store machinery, the wall machinery, the earnings reader, ~15

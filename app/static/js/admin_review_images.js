@@ -148,9 +148,15 @@
     chosen = new Map();
     if (!titles.length) { alert('Nothing to review in that range.'); return; }
 
-    index = 0;
+    // Come back in where you left, if that design is in what just loaded.
+    index = lastSeenIndex();
     picker.hidden = true;
     stage.hidden = false;
+    if (index > 0) {
+      toast(`Picking up where you left off — design ${index + 1} of `
+            + `${titles.length}. Type a number in the top-right counter `
+            + `to jump anywhere.`);
+    }
     // Say plainly whether this is a batch and how much is still behind it,
     // so releasing feels like clearing a slice, not the whole pile.
     const waiting = Number(d.total_waiting || titles.length);
@@ -265,6 +271,30 @@
       flat.forEach(([posterId, d]) => out.set(posterId, d));
       return out;
     } catch (e) { return new Map(); }
+  }
+
+  // WHERE HE LEFT OFF — the title's ID, never its position number. The list
+  // shifts as work is released, so "design 23" names a different poster
+  // tomorrow while the id still names the same one. If the remembered title
+  // is not in the loaded list (already released, or outside this batch),
+  // the screen starts at the beginning — the memory can only return you
+  // somewhere real, never trap you somewhere stale. That is what separates
+  // this from the removed "reopen the last Pipeline section" memory: this
+  // is only ever written by a design the owner was actually looking at.
+  const LAST_SEEN_KEY = 'pd_review_last_title_v1';
+
+  function rememberSeen(t) {
+    try { localStorage.setItem(LAST_SEEN_KEY, String(t.title_id || '')); }
+    catch (e) { /* a blocked store must never break the screen */ }
+  }
+
+  function lastSeenIndex() {
+    try {
+      const id = Number(localStorage.getItem(LAST_SEEN_KEY) || 0);
+      if (!id) return 0;
+      const at = titles.findIndex((t) => Number(t.title_id) === id);
+      return at >= 0 ? at : 0;
+    } catch (e) { return 0; }
   }
 
   // ══════════════════════════════════════════════════════════════════════
@@ -663,7 +693,12 @@
     // choosing the photograph, so the judge has the same context.
     $('[data-review-kind]').innerHTML = window.SubjectKind ? window.SubjectKind.chip(t.kind) : '';
     $('[data-review-meta]').textContent = `saved ${t.date}`;
-    $('[data-review-progress]').textContent = `${index + 1} / ${titles.length}`;
+    const jumpBox = $('[data-review-jump]');
+    if (jumpBox) { jumpBox.value = index + 1; jumpBox.max = titles.length; }
+    $('[data-review-total]').textContent = titles.length;
+    // Every design shown is remembered, so leaving and coming back reopens
+    // on this one rather than at the start.
+    rememberSeen(t);
 
     $('[data-review-pair]').innerHTML = t.images.map((img) => {
       const d = decisions.get(img.poster_id);
@@ -960,6 +995,24 @@
     if (next < 0 || next >= titles.length) return;
     index = next;
     render();
+  }
+
+  // The counter is editable: type a design number, press Enter (or click
+  // away), and land on that design. This is deliberate navigation, so it
+  // does not wait for the advance gate the way a double-pressed arrow does
+  // — render() arms the gate for the new poster the moment it lands.
+  const jumpBox = document.querySelector('[data-review-jump]');
+  if (jumpBox) {
+    jumpBox.addEventListener('change', () => {
+      const n = Number(jumpBox.value);
+      if (!Number.isFinite(n) || !titles.length) { render(); return; }
+      index = Math.min(Math.max(1, Math.round(n)), titles.length) - 1;
+      render();
+    });
+    jumpBox.addEventListener('keydown', (e) => {
+      // Enter commits; blurring fires the change handler above once.
+      if (e.key === 'Enter') { e.preventDefault(); jumpBox.blur(); }
+    });
   }
 
   // ── The compare overlay ──────────────────────────────────────────────

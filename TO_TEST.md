@@ -259,6 +259,23 @@ around 22:00 could kill an earnings read halfway.
 
 ---
 
+## 50. THE REVIEW SCREEN RESUMES WHERE YOU LEFT, AND THE COUNTER JUMPS — v193
+
+- Open a review, step to some design in the middle, press CLOSE (or leave
+  the page). Open the same review again — it should land on that same
+  design, with a small message saying it picked up where you left off.
+- The "23 / 25" counter at the top right: the first number is now a box.
+  Type a number, press Enter, and you should land on that design. A number
+  too big just takes you to the last one.
+- Release a batch fully, then reopen — it should start at design 1 with no
+  message, because the design it remembered is gone. That is correct, not
+  a fault.
+- The arrow keys and every decision key should behave exactly as before,
+  including while the counter box is NOT focused. While you are typing in
+  the box, letters and arrows only affect the box.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

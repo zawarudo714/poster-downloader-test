@@ -53,7 +53,13 @@
     <div class="panel-head">
       <span>REVIEWING <span class="mono" data-review-range></span></span>
       <span class="filter-row" style="gap:8px">
-        <span class="muted mono" data-review-progress></span>
+        {# The position is a place you can TYPE, not only read: put a number
+           in the box and press Enter to jump straight to that design. #}
+        <span class="muted mono" data-review-progress
+              title="Type a number and press Enter to jump straight to that design">
+          <input type="number" min="1" data-review-jump class="review-jump-box"
+                 aria-label="Jump to design number"> / <span data-review-total></span>
+        </span>
         <button class="btn btn-ghost btn-tiny" data-action="review-exit">CLOSE</button>
       </span>
     </div>

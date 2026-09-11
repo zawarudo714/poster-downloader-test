@@ -707,6 +707,23 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 .review-loading { color: var(--skip, #d8a24a); margin-left: 8px; font-size: 12px; }
 .review-loading[hidden] { display: none; }
 
+/* The review counter's position is a box you can TYPE in, not only read.
+   Styled to look like the plain counter until hovered or focused, so it
+   reads as "23 / 25" first and reveals itself as a control on approach. */
+.review-jump-box {
+  width: 3.4em; text-align: right;
+  background: transparent; color: inherit; font: inherit;
+  border: 1px solid transparent; border-radius: 4px; padding: 1px 3px;
+}
+.review-jump-box:hover, .review-jump-box:focus {
+  border-color: var(--border); background: rgba(255, 255, 255, .05);
+  outline: none;
+}
+/* The number spinners are clutter at this size. */
+.review-jump-box::-webkit-outer-spin-button,
+.review-jump-box::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.review-jump-box { -moz-appearance: textfield; appearance: textfield; }
+
 /* Save box */
 .save-box { margin-bottom: 14px; }
 .save-label { font-size: 11px; color: var(--subtext); margin-bottom: 6px; }

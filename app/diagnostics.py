@@ -2485,7 +2485,59 @@ def _account_names(db: Session) -> dict[int, str]:
             db.query(UploadAccount.id, UploadAccount.name).all()}
 
 
+def check_number_settings_hold_numbers(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: a setting whose default is a number holds a number.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THE DOOR GUARD IS NOT ENOUGH ON ITS OWN
+    ════════════════════════════════════════════════════════════════════════
+    Since 2026-09-11 `set_setting` refuses a non-number into a numeric key
+    (see `_reject_a_value_the_key_cannot_hold` in pipeline.py). That is a
+    statement about tomorrow's WRITES. This is the matching statement about
+    the DATA: anything stored before the door existed, or written past the
+    door by hand or by an import, is found here instead of as a 500 on
+    whichever of the ~20 `int(get_setting(...))` readers touches it first —
+    one of which is the worker's entire state call.
+    """
+    from .models import AppSetting
+    from .pipeline import DEFAULTS, SETTINGS_ROOT
+
+    numeric = {k: v for k, v in DEFAULTS.items()
+               if isinstance(v, (int, float)) and not isinstance(v, bool)}
+    rows: list = []
+    total = 0
+    for row in (db.query(AppSetting)
+                  .filter(AppSetting.key.like(f"{SETTINGS_ROOT}.%")).all()):
+        tail = row.key.rsplit(".", 1)[-1]
+        default = numeric.get(tail)
+        if default is None:
+            continue
+        text = str(row.value or "").strip()
+        try:
+            float(text) if isinstance(default, float) else int(text)
+        except (TypeError, ValueError):
+            total += 1
+            if len(rows) < MAX_ROWS:
+                rows.append(Finding(
+                    row.key,
+                    f"holds {row.value!r} where a number belongs — every "
+                    f"page that reads this setting would fail on it",
+                    "/admin/pipeline/settings"))
+    return _result(
+        "number_settings_hold_numbers",
+        f"{total} number setting(s) hold something that is not a number"
+        if total else "Every number setting holds a number",
+        "A number box that ends up holding text breaks the page that reads "
+        "it, not the page that saved it, which makes the cause hard to see. "
+        "Re-type the value on the Settings page; the save now refuses "
+        "anything that is not a number.",
+        "error" if total else "ok", rows, total,
+    )
+
+
 CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
+    check_number_settings_hold_numbers,
     check_approved_without_a_print_file,
     check_current_image_was_discarded,
     check_generations_share_a_file,

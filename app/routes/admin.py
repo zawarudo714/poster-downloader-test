@@ -2656,8 +2656,8 @@ def skipped_page(
 @router.post("/skipped/{master_id}/ack")
 def ack_skip(
     master_id: int,
+    request: Request,
     undo: int = Form(0),
-    request: Request = None,
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):

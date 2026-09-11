@@ -436,6 +436,14 @@ def _active_revisions_for_user(db: Session, user: User, project=None):
     return out
 
 
+def _safe_min_px(db: Session, project) -> int:
+    """The too-small threshold, or its default if the stored value is bad."""
+    try:
+        return int(get_setting(db, "min_image_px", project=project) or 300)
+    except Exception:
+        return 300
+
+
 def _state_payload(db: Session, user: User, project=None) -> dict:
     today = local_today()
     queue = _my_queue(db, user, project)
@@ -581,7 +589,10 @@ def _state_payload(db: Session, user: User, project=None) -> dict:
         # would drift (2026-09-11). The server still measures the real file
         # and remains the true gate — the add-on's check is only a courtesy
         # so the worker does not send an obvious thumbnail.
-        "min_image_px": int(get_setting(db, "min_image_px", project=project) or 300),
+        # Guarded like save_image's read of the same key: a garbage stored
+        # value must degrade to the default here, never 500 the whole
+        # worker state call (2026-09-11 audit).
+        "min_image_px": _safe_min_px(db, project),
         # The Google refine words the phone add-on turns into buttons, one
         # per line or comma. Read live so the dashboard is the single source.
         "google_refine_terms": [

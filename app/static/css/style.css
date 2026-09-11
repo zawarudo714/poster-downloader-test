@@ -764,7 +764,6 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 .title-actions .btn-skip,
 .title-actions .btn-success { flex: 0 0 auto; min-width: 104px; }
 .title-actions .actions-gap { flex: 0 0 20px; }
-.skip-row { display: flex; gap: 6px; align-items: center; flex: 1; min-width: 240px; }
 .skip-reason {
   flex: 1; padding: 6px 8px; font-size: 12px;
   background: var(--bg); color: var(--text);
@@ -1033,22 +1032,8 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 /* Title-list hint when admin has left a note */
 .title-item.has-admin-note { border-left: 3px solid #78b4ff; }
 
-/* ── DONE row mirrors SKIP row layout ───────────────────────────────── */
-.done-row, .skip-row {
-  display: flex;
-  gap: 8px;
-  align-items: stretch;
-  margin-bottom: 6px;
-}
-.done-row input, .skip-row input {
-  flex: 1;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 8px 10px;
-  border-radius: 4px;
-  font-size: 13px;
-}
+/* The old .skip-row / .done-row wrappers were deleted with the one-row
+   action bar (2026-09-11) — their rules went with them. */
 
 /* ── Revisions banner: extra styling for awaiting items ──────────────── */
 .revision-item.rev-awaiting {
@@ -1710,7 +1695,6 @@ html.theme-light .env-banner-name {
   .att-actions { flex-wrap: wrap; gap: 6px; }
   .save-row { flex-direction: column; align-items: stretch; gap: 6px; }
   .save-row input { width: 100%; }
-  .done-row, .skip-row { flex-direction: column; align-items: stretch; min-width: 0; }
   /* Keep the actions on ONE row even on a phone — the owner wants SKIP and
      DONE side by side, not stacked (2026-09-11). It wraps only if truly
      too narrow. */

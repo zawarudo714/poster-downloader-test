@@ -71,9 +71,10 @@
       $('[data-rerun-count]').textContent = d.reruns || 0;
       const totalImgs = (d.dates || []).reduce((n, r2) => n + (r2.images || 0), 0);
       batchSize = Number(d.batch_size || 0);
-      const waitEl = $('[data-review-waiting-count]');
-      if (waitEl) waitEl.textContent = totalImgs ? `(${totalImgs})` : '(0)';
       // Relabel the big button to say what pressing it will actually load.
+      // (This REPLACES the button's contents, so the template's count span
+      // only exists for the instant before this first runs — do not also
+      // write to it, that was a second copy of the same label.)
       // With batching on it reads "REVIEW NEXT 20 · 137 waiting"; with it off
       // it stays "REVIEW EVERYTHING WAITING (137)".
       const allBtn = $('[data-action="review-all"]');
@@ -660,7 +661,7 @@
     $('[data-review-title]').textContent = `${t.external_id ?? '–'}. ${t.title}`;
     // The subject drawing and word — the same strip the worker saw while
     // choosing the photograph, so the judge has the same context.
-    $('[data-review-kind]').innerHTML = window.SubjectKind.chip(t.kind);
+    $('[data-review-kind]').innerHTML = window.SubjectKind ? window.SubjectKind.chip(t.kind) : '';
     $('[data-review-meta]').textContent = `saved ${t.date}`;
     $('[data-review-progress]').textContent = `${index + 1} / ${titles.length}`;
 

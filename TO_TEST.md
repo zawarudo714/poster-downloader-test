@@ -227,6 +227,20 @@ ever? It did. Now it waits only until you have read it.
 
 ---
 
+## 48. THE AUDIT'S TWO GUARDS — v191
+
+- On Pipeline -> Settings, try saving a number box with text in it — for
+  example put "abc" into "Review batch size" (you may need to paste it,
+  since the box itself resists letters). The save should REFUSE with a
+  plain sentence naming the box, and nothing should be stored.
+- Run a Diagnostics scan. A new check called "number settings hold numbers"
+  should exist and report nothing.
+- The review screen, the worker page and the Skipped page should all look
+  and behave exactly as before — everything else in v191 was cleaning,
+  not behaviour change.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

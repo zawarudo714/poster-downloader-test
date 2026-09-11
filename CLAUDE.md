@@ -1705,6 +1705,19 @@ first click. Before saying a feature is done, grep every `get_setting` /
 and needs no declaration — check WHICH function is imported before believing
 a hit.
 
+**AND THE VALUE'S TYPE IS PART OF THE SCHEMA, NOT ONLY THE KEY.** The door
+checked the key and let any STRING through, while roughly twenty readers
+trust `int(get_setting(...))` bare — so one stored "abc" (or "") in a
+number setting would have 500'd whichever page read it next, including the
+worker's entire state call. Found by the 2026-09-11 audit, not by a crash.
+Fixed at the door, where the wrong shape can be refused once and loudly:
+`_reject_a_value_the_key_cannot_hold` in `pipeline.py` reads the key's own
+DEFAULT to know what type it must hold, and `check_number_settings_hold_
+numbers` in `diagnostics.py` watches for garbage that predates the door.
+The general shape: **when a gate validates identity, ask what it lets
+through about CONTENT** — twenty defensive readers is the wrong fix; one
+refusing door is the right one.
+
 **Deleting is the dangerous edit, not adding.** Removing a panel means
 removing its opening tag, its body AND its closing tags — a slice that starts
 at the right place and ends one tag early leaves markup that still renders,

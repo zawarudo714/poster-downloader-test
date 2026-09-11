@@ -513,8 +513,10 @@
   // two admin screens that show the same subject while reviewing — three
   // private copies of seventeen drawings would be three chances to drift.
   // The page loads that file first, so window.SubjectKind is always there.
-  const subjectIcon  = (kind) => window.SubjectKind.icon(kind);
-  const subjectWords = (kind) => window.SubjectKind.words(kind);
+  // Guarded: if the shared icon file ever failed to load, the strip goes
+  // blank rather than the whole panel render dying on the missing global.
+  const subjectIcon  = (kind) => window.SubjectKind ? window.SubjectKind.icon(kind) : '';
+  const subjectWords = (kind) => window.SubjectKind ? window.SubjectKind.words(kind) : '';
 
   function renderSubject(root, kind) {
     const strip = root.querySelector('[data-subject-strip]');

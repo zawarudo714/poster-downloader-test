@@ -937,6 +937,7 @@ def set_setting(
     if key not in DEFAULTS:
         raise KeyError(f"Unknown pipeline setting {key!r}. Add it to DEFAULTS.")
     _reject_a_search_line_with_no_place_in_it(key, value)
+    _reject_a_value_the_key_cannot_hold(key, value)
 
     slug = project.slug if isinstance(project, Project) else project
     full = f"{SETTINGS_ROOT}.{slug}.{key}" if slug else f"{SETTINGS_ROOT}.{key}"
@@ -955,6 +956,41 @@ def set_setting(
         row.value = raw
         row.updated_by = by
         row.updated_at = datetime.utcnow()
+
+
+def _reject_a_value_the_key_cannot_hold(key: str, value) -> None:
+    """
+    Refuse a non-number being saved into a number setting.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THE DOOR, AND NOT THE TWENTY READERS
+    ════════════════════════════════════════════════════════════════════════
+    Roughly twenty places read a number setting as `int(get_setting(...))`,
+    and most of them are bare — a stored value of "abc" or "" would 500
+    whatever page happens to read it next, including the WORKER's whole
+    state call (`min_image_px`) and the review start screen
+    (`review_batch_size`). Found in the 2026-09-11 audit, not by a crash.
+
+    The key's own DEFAULT says what type it must hold, so the door can
+    refuse the wrong shape once, loudly, at the moment the admin is looking
+    at the box — instead of a mystery error later on an unrelated screen.
+    Same reasoning as the phrasing guard above, and the same rung: an
+    impossible state beats twenty defensive readers. `check_number_settings_
+    hold_numbers` in diagnostics.py watches for garbage that predates this
+    door, because a guard at the door cannot clean what is already inside.
+    """
+    default = DEFAULTS.get(key)
+    # bool is a subclass of int in Python; a 0/1 key validates as int fine.
+    if not isinstance(default, (int, float)) or isinstance(default, bool):
+        return
+    text = str(value).strip()
+    try:
+        float(text) if isinstance(default, float) else int(text)
+    except (TypeError, ValueError):
+        kind = "number" if isinstance(default, float) else "whole number"
+        raise ValueError(
+            f"{key} needs a {kind}, not {str(value)!r}. "
+            f"Use 0 if you mean 'off'.")
 
 
 # The three settings that hold search phrasings. Named once, here, because a

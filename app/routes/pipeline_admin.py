@@ -851,7 +851,10 @@ def api_set_settings(
                 applied.append(f"{key} (unchanged)")
                 continue
             P.set_setting(db, key, value, project=target, by=admin.username)
-        except KeyError as e:
+        except (KeyError, ValueError) as e:
+            # KeyError: unknown key. ValueError: a number box holding a
+            # non-number — refused at the door so it can never 500 one of
+            # the twenty pages that read it with int() later.
             raise HTTPException(400, str(e))
         applied.append(key)
 
@@ -3275,6 +3278,14 @@ def review_page(
 # together — that is how a customer sees them, and it is the only way to spot
 # "these two are basically the same picture".
 
+def _safe_batch_size(db: Session, project) -> int:
+    """Review batch size, or 0 (no batching) if the stored value is bad."""
+    try:
+        return int(P.get_setting(db, "review_batch_size", project=project) or 0)
+    except Exception:
+        return 0
+
+
 @router.get("/api/review/dates")
 def api_review_dates(
     request: Request,
@@ -3317,9 +3328,10 @@ def api_review_dates(
                             ProcessedImage.project_id == project.id).scalar() or 0,
         # How many painted images the REVIEW EVERYTHING WAITING button loads
         # at once. 0 means all of them (batching off). The button label reads
-        # this to say "REVIEW NEXT 20" instead of "everything".
-        "batch_size": int(P.get_setting(db, "review_batch_size",
-                                        project=project) or 0),
+        # this to say "REVIEW NEXT 20" instead of "everything". Guarded so a
+        # garbage stored value degrades to "no batching" rather than killing
+        # the review start screen (2026-09-11 audit).
+        "batch_size": _safe_batch_size(db, project),
     })
 
 
@@ -3480,12 +3492,11 @@ def api_review_queue(
     # reruns list is targeted and returns whole.
     all_titles = list(titles.values())
     total_waiting = len(all_titles)
-    batch = 0
-    if status == "pending" and not start and not end:
-        try:
-            batch = int(P.get_setting(db, "review_batch_size", project=project) or 0)
-        except Exception:
-            batch = 0
+    # ONE spelling of the batch-size read (_safe_batch_size), shared with
+    # /review/dates — two inline copies of "read it, tolerate garbage" is
+    # exactly the drift this repo keeps paying for.
+    batch = (_safe_batch_size(db, project)
+             if status == "pending" and not start and not end else 0)
     shown = all_titles[:batch] if batch > 0 else all_titles
 
     return JSONResponse({"titles": shown,

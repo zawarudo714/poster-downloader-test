@@ -199,7 +199,7 @@
       // The subject drawing and word — the same strip the worker saw while
       // choosing, so the judge knows a castle was wanted and not a city.
       node.querySelector('.g-title-kind').innerHTML =
-        window.SubjectKind.chip(t.kind);
+        window.SubjectKind ? window.SubjectKind.chip(t.kind) : '';
       node.querySelector('.g-title-meta').textContent =
         `${t.posters.length} ${t.posters.length === 1 ? PD.noun : PD.nouns} · ${t.title_folder}`;
       const grid = node.querySelector('.g-title-posters');
@@ -451,7 +451,7 @@
         + t.title + (t.year ? ` (${t.year})` : '');
     }
     const kindEl = $('ib-lb-kind');
-    if (kindEl) kindEl.innerHTML = window.SubjectKind.chip(t.kind);
+    if (kindEl) kindEl.innerHTML = window.SubjectKind ? window.SubjectKind.chip(t.kind) : '';
     const posEl = $('ib-lb-pos');
     if (posEl) {
       const list = lightboxList();

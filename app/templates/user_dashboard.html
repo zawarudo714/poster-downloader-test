@@ -87,7 +87,7 @@
             titles {{ info("Adds the next N titles from the master list to your own list. They are reserved for you until you complete, skip, or return them.") }}
           </label>
           <button class="btn btn-accent" id="btn-pull-next">GET</button>
-          <a class="btn btn-ghost" href="/master_browse">BROWSE&nbsp;ALL&nbsp;TITLES</a>
+          <span class="browse-all-wrap"><a class="btn btn-ghost" href="/master_browse">BROWSE&nbsp;ALL&nbsp;TITLES</a></span>
           <button class="btn btn-ghost" id="btn-release" title="Return titles you haven't started back to the pool">RETURN&nbsp;UNWORKED</button>
         </div>
 
@@ -142,8 +142,11 @@
          JS hides this rather than showing a dead button. #}
       {# Label is set by JS from the project's source. The text here is only
          what shows for the half-second before the payload lands. #}
-      <a class="btn btn-accent att-source-link" target="_blank" rel="noopener">↗ Open source</a>
+      {# CLOSE on the LEFT, OPEN GOOGLE on the RIGHT so the button the worker
+         actually presses sits under the thumb (owner's ask, 2026-09-11). The
+         source link is pushed to the right edge by CSS (margin-left:auto). #}
       <button class="btn btn-ghost" data-action="unlock">CLOSE</button>
+      <a class="btn btn-accent att-source-link" target="_blank" rel="noopener">↗ Open source</a>
     </div>
   </div>
 

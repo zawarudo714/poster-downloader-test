@@ -697,6 +697,10 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 .att-year, .att-type { color: var(--subtext); }
 .att-desc  { margin-top: 8px; color: var(--subtext); font-size: 12px; line-height: 1.5; }
 .att-actions { display: flex; gap: 8px; margin-top: 10px; }
+/* OPEN GOOGLE sits at the right edge, under the thumb; CLOSE stays left. */
+.att-source-link { margin-left: auto; }
+/* BROWSE ALL TITLES on its own line, centred, instead of packed left. */
+.browse-all-wrap { flex-basis: 100%; display: flex; justify-content: center; }
 
 /* Save box */
 .save-box { margin-bottom: 14px; }

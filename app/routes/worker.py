@@ -460,6 +460,21 @@ def _state_payload(db: Session, user: User, project=None) -> dict:
             locked["source_link"] = _source_search_url(
                 db, search_text(lt), lt.content_type,
                 resolve_project(db, lt.project_id), kind=(lt.description or ""))
+            # The PLACEHOLDER-ONLY base for the phone add-on's refine buttons:
+            # "{title} {kind}" rendered, with any literal extra in the Google
+            # template (for example the default "view") left OUT. A refine
+            # button rebuilds the search as this base plus its one word, so
+            # tapping a term REPLACES "view" and replaces a previous term
+            # rather than stacking (owner's ask, 2026-09-11).
+            try:
+                from ..brave_search import build_queries
+                _base = build_queries(
+                    db, search_text(lt),
+                    project=resolve_project(db, lt.project_id),
+                    kind=(lt.description or ""), template="{title} {kind}")
+                locked["google_base_query"] = _base[0] if _base else ""
+            except Exception:
+                locked["google_base_query"] = ""
             # Posters already on this title (live only)
             posters = (
                 db.query(SavedPoster)

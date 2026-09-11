@@ -748,6 +748,13 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 
 /* Title actions */
 .title-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding-top: 12px; border-top: 1px solid var(--border); margin-top: 12px; }
+/* One horizontal row: reason box grows on the left; SKIP and DONE are fixed
+   and sized like the SEARCH button; a small empty gap keeps DONE clear of
+   SKIP. */
+.title-actions .skip-reason { flex: 1 1 120px; min-width: 100px; }
+.title-actions .btn-skip,
+.title-actions .btn-success { flex: 0 0 auto; min-width: 104px; }
+.title-actions .actions-gap { flex: 0 0 20px; }
 .skip-row { display: flex; gap: 6px; align-items: center; flex: 1; min-width: 240px; }
 .skip-reason {
   flex: 1; padding: 6px 8px; font-size: 12px;
@@ -1695,7 +1702,10 @@ html.theme-light .env-banner-name {
   .save-row { flex-direction: column; align-items: stretch; gap: 6px; }
   .save-row input { width: 100%; }
   .done-row, .skip-row { flex-direction: column; align-items: stretch; min-width: 0; }
-  .title-actions { flex-direction: column; gap: 8px; }
+  /* Keep the actions on ONE row even on a phone — the owner wants SKIP and
+     DONE side by side, not stacked (2026-09-11). It wraps only if truly
+     too narrow. */
+  .title-actions { flex-direction: row; flex-wrap: wrap; gap: 8px; align-items: center; }
 
   /* Bigger tap targets */
   .btn { min-height: 38px; padding: 8px 12px; font-size: 12px; }

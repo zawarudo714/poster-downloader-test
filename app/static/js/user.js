@@ -425,10 +425,9 @@
     const skipBtn     = node.querySelector('[data-action="skip"]');
     const reopenBtn   = node.querySelector('[data-action="reopen"]');
     const skipReason  = node.querySelector('.skip-reason');
-    const doneComment = node.querySelector('.done-comment');
     const unlockBtn   = node.querySelector('[data-action="unlock"]');
 
-    completeBtn.addEventListener('click', () => completeTitle((state.locked && state.locked.id) || t.id, doneComment));
+    completeBtn.addEventListener('click', () => completeTitle((state.locked && state.locked.id) || t.id));
     skipBtn.addEventListener('click',     () => skipTitle((state.locked && state.locked.id) || t.id, skipReason.value));
     reopenBtn.addEventListener('click',   () => reopenTitle((state.locked && state.locked.id) || t.id));
     unlockBtn.addEventListener('click',   () => unlock());
@@ -1566,7 +1565,7 @@
     alert('Delete failed: ' + (r.data && r.data.detail || r.status));
   }
 
-  async function completeTitle(masterId, doneCommentEl) {
+  async function completeTitle(masterId) {
     // Force a fresh state read first — this defeats both browser caching
     // and any race where parallel saves resolved out of order.
     await refreshState();
@@ -1575,8 +1574,11 @@
       alert('The active title changed in the background — please reopen it.');
       return;
     }
-    let comment = (doneCommentEl.value || '').trim();
-    let reason_source = comment ? 'manual' : '';
+    // No note box any more — a plain DONE carries no comment. A reason is
+    // still asked for below ONLY when the title is under its image target,
+    // which is the one moment a completion genuinely needs explaining.
+    let comment = '';
+    let reason_source = '';
     const liveCount = (live.posters || []).length;
     // The target comes from the project, not a hardcoded 3. A MUSIK title
     // with 2 images is COMPLETE and must not be interrogated about it.

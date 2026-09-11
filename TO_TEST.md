@@ -170,6 +170,33 @@ ever? It did. Now it waits only until you have read it.
 
 ---
 
+## 45. THE ONE-ROW ACTION BAR + GOOGLE-TERM BUTTONS — v186
+
+**On the site, as the worker:**
+
+- Open a title. The bottom controls should be ONE row: the "(optional)
+  reason" box, then SKIP, a small gap, then DONE on the far right. SKIP and
+  DONE should look the same size as the SEARCH button.
+- There should be NO "note for the admin" box any more. Press DONE on a
+  title with its image saved — it should just complete, no note asked.
+- Press DONE on a title with NOTHING saved — it should still ask for a
+  reason (that prompt is kept).
+- On your phone, check the row stays side by side and does not stack, and
+  that opening a title now leaves the OPEN GOOGLE button easier to reach.
+  If it is still too high, tell me and I will lower where the scroll lands.
+
+**On the dashboard + phone add-on (v1.6):**
+
+- Pipeline -> Settings -> Image Search: a new box "Google extra-term
+  buttons (phone add-on)". It should hold aerial / skyline / street / at
+  night / old town. Change it and save.
+- On the phone add-on, open a title, press OPEN GOOGLE. Above SEND there
+  should be a green "+ aerial", "+ skyline" button for each word. Tapping
+  one re-runs the Google search with that word added. It is a normal search,
+  one per tap.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

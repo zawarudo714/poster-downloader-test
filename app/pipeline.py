@@ -520,6 +520,13 @@ DEFAULTS: dict[str, Any] = {
     #
     # Same placeholders as the Brave query.
     "google_query": "{title} {kind}",
+    # Extra words the PHONE ADD-ON turns into one-tap refine buttons on
+    # Google, one per line. Each button re-runs the Google search with that
+    # word added — for example "aerial" or "at night". Deliberately separate
+    # from `brave_search_phrasings`: that drives the in-page Brave buttons and
+    # its own default is "view", and the owner did not want the two tangled
+    # (2026-09-11). Plain words, NOT a template, so no {title} is required.
+    "google_refine_terms": "aerial\nskyline\nstreet\nat night\nold town",
     "brave_min_dimension": 300,
     # ── WORDS THAT MEAN "THIS IS NOT A PHOTOGRAPH OF THE PLACE" ──────────
     #

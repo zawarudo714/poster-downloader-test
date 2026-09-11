@@ -181,15 +181,20 @@
      thumb reaching for SEARCH could land on it and throw the title away.
      DONE is the common, safe ending and now takes that position; SKIP is
      pushed to the far side (owner's ask, 2026-09-06). #}
+  {# ONE ROW, left to right: the skip reason box, then SKIP, then a small
+     empty gap, then DONE on the far right. DONE is the common, safe ending
+     and sits furthest from the reason box so a thumb reaching for it cannot
+     land on SKIP. The old "note for the admin" box is gone: a worker has
+     never written one, and an image with a problem is skipped, not noted
+     (owner's ask, 2026-09-11). Sized to match the SEARCH button so the row
+     reads as one set of controls and the panel is shorter — which lets the
+     auto-scroll on opening a title sit the Google button lower and easier
+     to reach. #}
   <div class="title-actions">
-    <div class="skip-row">
-      <input type="text" class="skip-reason" placeholder="(optional) reason">
-      <button class="btn btn-skip" data-action="skip">SKIP {{ info("Marks this title skipped. Use when nothing usable exists. Admin can review skipped titles and ask you to look again.") }}</button>
-    </div>
-    <div class="done-row">
-      <input type="text" class="done-comment" placeholder="(optional) note for the admin">
-      <button class="btn btn-success" data-action="complete">DONE {{ info("Marks this title finished. Add an optional note for the admin if anything is unusual.") }}</button>
-    </div>
+    <input type="text" class="skip-reason" placeholder="(optional) reason">
+    <button class="btn btn-skip" data-action="skip">SKIP {{ info("Marks this title skipped. Use when nothing usable exists. Admin can review skipped titles and ask you to look again.") }}</button>
+    <span class="actions-gap" aria-hidden="true"></span>
+    <button class="btn btn-success" data-action="complete">DONE {{ info("Marks this title finished.") }}</button>
     <button class="btn btn-ghost" data-action="reopen" hidden>REOPEN</button>
   </div>
 

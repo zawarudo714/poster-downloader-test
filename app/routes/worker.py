@@ -567,6 +567,14 @@ def _state_payload(db: Session, user: User, project=None) -> dict:
         # and remains the true gate — the add-on's check is only a courtesy
         # so the worker does not send an obvious thumbnail.
         "min_image_px": int(get_setting(db, "min_image_px", project=project) or 300),
+        # The Google refine words the phone add-on turns into buttons, one
+        # per line or comma. Read live so the dashboard is the single source.
+        "google_refine_terms": [
+            w.strip() for w in
+            re.split(r"[\n,]", str(get_setting(db, "google_refine_terms",
+                                                project=project) or ""))
+            if w.strip()
+        ],
     }
 
 

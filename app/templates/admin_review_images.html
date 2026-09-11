@@ -67,6 +67,11 @@
              wanted a castle, a beach or a bridge. #}
           <span data-review-kind></span>
           <span class="muted mono" data-review-meta></span>
+          {# Shown while the painted poster of the title on screen is still
+             loading. The NEXT / arrow steps are held until it clears, so a
+             fast second press cannot carry you past a title before you have
+             seen its poster (owner's ask, 2026-09-11). #}
+          <span class="review-loading" data-poster-loading hidden>· waiting for the poster to load…</span>
         </div>
         <div class="review-nav">
           <button class="btn btn-ghost" data-action="review-prev">&larr; PREV</button>

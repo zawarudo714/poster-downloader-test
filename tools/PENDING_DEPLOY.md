@@ -3,23 +3,19 @@
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.
 
-## v187 — refine buttons REPLACE the extra word, not stack · 2026-09-11
+## v188 — Approve Artwork will not step past a poster still loading · 2026-09-11
 
-- **/api/state now returns `google_base_query`** on the open title: the
-  "{title} {kind}" part rendered, with any literal extra in the Google
-  template (like the default "view") left OUT. The phone add-on's refine
-  buttons rebuild the search as this base plus their one word, so tapping a
-  term REPLACES "view" and replaces a previously tapped term instead of
-  piling words up (owner's ask). One line of state, no behaviour change for
-  the site itself.
+- **The NEXT / arrow step is held until the painted poster of the title on
+  screen has loaded.** The worker photograph loads in a blink and the poster
+  lags, so a fast second press used to swap the fast half and carry the
+  reviewer past a title whose poster they never saw (owner's find). Now a
+  second press while the poster is loading is ignored, and a small amber
+  "waiting for the poster to load..." note shows why.
+- Deciding (KEEP / RERUN / UNUSABLE) is NOT affected — only stepping
+  between titles waits.
+- The lock ALWAYS clears: on load, on a broken image, or after a 4-second
+  safety timeout, so a poster that never arrives can never trap the
+  reviewer.
 
-## v187 also — two worker-page reach tweaks · 2026-09-11
-
-- **OPEN GOOGLE and CLOSE swapped sides.** CLOSE is on the left now and OPEN
-  GOOGLE IMAGE SEARCH sits at the right edge, under the thumb — that button
-  being on the left was the real reach problem, not the scroll.
-- **BROWSE ALL TITLES is centred** on its own line instead of packed to the
-  left.
-
-Pairs with add-on v1.8. Deploy: the server only. The NODE does not need
-copying — nothing in `worker_service/` changed.
+Deploy: the server only. The NODE does not need copying — nothing in
+`worker_service/` changed.

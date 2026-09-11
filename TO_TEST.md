@@ -197,6 +197,20 @@ ever? It did. Now it waits only until you have read it.
 
 ---
 
+## 46. APPROVE ARTWORK WON'T SKIP A LOADING POSTER — v188
+
+- Open Approve Artwork on a range. Step through titles fast with the arrow
+  keys or NEXT, double-pressing on purpose. You should NOT be able to jump
+  past a title before its poster shows — the extra press is ignored while
+  a small amber "waiting for the poster to load..." note is up, and the step
+  lands the moment the poster appears.
+- KEEP / RERUN / UNUSABLE should still work instantly, even while a poster
+  is loading — only stepping waits.
+- If a poster is genuinely broken and never loads, stepping should free
+  itself within about 4 seconds so you are never stuck.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

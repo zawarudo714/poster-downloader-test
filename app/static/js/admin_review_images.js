@@ -715,6 +715,8 @@
     });
     updateTally();
     if (zoomOpen) syncZoom();
+    // Lock stepping until this title's poster is on screen — see move().
+    armAdvanceGate();
   }
 
   // ── Changing the colour ────────────────────────────────────────────────
@@ -892,7 +894,44 @@
     pickVersion(img.poster_id, list[(at + 1) % list.length].processed_id);
   }
 
+  // ── HOLD THE STEP UNTIL THE POSTER IS ON SCREEN ──────────────────────
+  // The worker photograph loads in a blink; the painted poster is heavier
+  // and lags. A fast second NEXT would swap the fast half and carry you past
+  // a title whose poster you never actually saw (owner's find, 2026-09-11).
+  // So stepping is locked from the moment you move until the NEW title's
+  // poster has loaded. The lock ALWAYS clears — on load, on a broken image,
+  // or after a safety timeout — so a poster that never arrives can never
+  // trap the reviewer (rule 8: every busy state needs every exit).
+  let advanceLock = false;
+  let advanceTimer = null;
+
+  function armAdvanceGate() {
+    const img = document.querySelector('[data-review-pair] [data-poster-img]');
+    const hint = $('[data-poster-loading]');
+    clearTimeout(advanceTimer);
+    // Already there (cached), or nothing to wait for: no lock.
+    if (!img || (img.complete && img.naturalWidth)) {
+      advanceLock = false;
+      if (hint) hint.hidden = true;
+      return;
+    }
+    advanceLock = true;
+    if (hint) hint.hidden = false;
+    const release = () => {
+      advanceLock = false;
+      clearTimeout(advanceTimer);
+      if (hint) hint.hidden = true;
+    };
+    img.addEventListener('load', release, { once: true });
+    img.addEventListener('error', release, { once: true });
+    advanceTimer = setTimeout(release, 4000);   // never trap the reviewer
+  }
+
   function move(step) {
+    // A second press while the poster is still loading is ignored, so you
+    // cannot skip a title you have not seen. Deciding (KEEP/RERUN) is not
+    // affected — only stepping between titles waits.
+    if (advanceLock) return;
     const next = index + step;
     if (next < 0 || next >= titles.length) return;
     index = next;

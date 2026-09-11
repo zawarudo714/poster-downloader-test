@@ -702,6 +702,11 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 /* BROWSE ALL TITLES on its own line, centred, instead of packed left. */
 .browse-all-wrap { flex-basis: 100%; display: flex; justify-content: center; }
 
+/* The "waiting for the poster to load" note on Approve Artwork. Amber so it
+   reads as "hold on", small so it does not shout. Hidden by default. */
+.review-loading { color: var(--skip, #d8a24a); margin-left: 8px; font-size: 12px; }
+.review-loading[hidden] { display: none; }
+
 /* Save box */
 .save-box { margin-bottom: 14px; }
 .save-label { font-size: 11px; color: var(--subtext); margin-bottom: 6px; }

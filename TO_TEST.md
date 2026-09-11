@@ -276,6 +276,26 @@ around 22:00 could kill an earnings read halfway.
 
 ---
 
+## 51. RERUNS OPEN ON THE NEW VERSION, CHOICES SURVIVE LEAVING, AND A
+## CUT-SHORT SAVE EXPLAINS ITSELF — v193
+
+- Open any poster that has more than one version. It should open on the
+  NEWEST version, not v1 — in every door: whole date, reruns, everything
+  waiting. (This was a real bug: the screen always started at v1.)
+- Pick an older version on purpose (press 1, or the v1 button), leave the
+  page, come back. It should still show the version you picked.
+- Mark a poster RERUN and release it. When the new painting arrives and
+  you review it, it must open on the NEW version even though you had an
+  older one picked before — a fresh painting always outranks the memory.
+- Press SAVE AND RELEASE and try to close the tab mid-save. The browser
+  should ask if you really want to leave. Stay, and it finishes normally.
+- Leave anyway mid-save. Reopen the review page: an amber note at the top
+  should say the save was cut short, how many were released, and that the
+  rest are waiting below with your marks. Press SAVE AND RELEASE to finish
+  — the note disappears on its own. GOT IT also dismisses it.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

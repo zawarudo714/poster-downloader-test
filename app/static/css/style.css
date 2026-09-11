@@ -707,6 +707,17 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 .review-loading { color: var(--skip, #d8a24a); margin-left: 8px; font-size: 12px; }
 .review-loading[hidden] { display: none; }
 
+/* The banner shown when the last SAVE AND RELEASE was cut short. One
+   sentence for the whole remainder, dismissed by its own button or by the
+   next completed save. Amber, not red: nothing is broken or lost. */
+.review-cut-note {
+  border: 1px solid var(--skip, #d8a24a); border-radius: 6px;
+  padding: 8px 12px; margin-bottom: 10px;
+  color: var(--skip, #d8a24a); font-size: 13px; line-height: 1.5;
+}
+.review-cut-note[hidden] { display: none; }
+.review-cut-note .btn { margin-left: 8px; }
+
 /* The review counter's position is a box you can TYPE in, not only read.
    Styled to look like the plain counter until hovered or focused, so it
    reads as "23 / 25" first and reveals itself as a control on approach. */

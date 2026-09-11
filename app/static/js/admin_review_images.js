@@ -146,6 +146,7 @@
     });
     saveDecisions();
     chosen = new Map();
+    restoreChosen();
     if (!titles.length) { alert('Nothing to review in that range.'); return; }
 
     // Come back in where you left, if that design is in what just loaded.
@@ -177,14 +178,23 @@
 
   function current() { return titles[index]; }
 
-  // WHICH GENERATION IS ON SCREEN for a poster. Defaults to the one the
-  // queue handed us, which is the newest. Everything else on the screen —
-  // the colour, the decision, the zoom — reads through here, so there is one
-  // answer to "what am I looking at" rather than one per widget.
+  // WHICH GENERATION IS ON SCREEN for a poster. Defaults to the NEWEST.
+  // Everything else on the screen — the colour, the decision, the zoom —
+  // reads through here, so there is one answer to "what am I looking at"
+  // rather than one per widget.
+  //
+  // The default was list[0] until v193 — and the versions list arrives
+  // OLDEST first, so every poster with a rerun opened on v1 while the
+  // comment here claimed it showed the newest (owner's find, 2026-09-11:
+  // "they all start at v1"). The queue's own pick (img.processed_id, the
+  // is_current row) is the honest default; the last list entry is the
+  // fallback for an image payload without one.
   function shownVersion(img) {
     const pid = chosen.get(img.poster_id);
-    const list = img.versions && img.versions.length ? img.versions : [img];
-    return list.find((v) => v.processed_id === pid) || list[0];
+    const list = versionsOf(img);
+    return list.find((v) => v.processed_id === pid)
+        || list.find((v) => v.processed_id === img.processed_id)
+        || list[list.length - 1];
   }
 
   function versionsOf(img) {
@@ -295,6 +305,80 @@
       const at = titles.findIndex((t) => Number(t.title_id) === id);
       return at >= 0 ? at : 0;
     } catch (e) { return 0; }
+  }
+
+  // WHICH GENERATION HE CHOSE, kept like the decisions so leaving does not
+  // forget it. Each entry also records the highest attempt number that was
+  // on screen when the choice was made — because a generation that arrives
+  // AFTER the choice outranks it. A remembered "show me v1" must never hide
+  // the fresh v3 he explicitly asked to be painted; that would defeat the
+  // rerun it belongs to.
+  const CHOSEN_KEY = 'pd_review_chosen_v1';
+
+  function topAttempt(img) {
+    return Math.max(...versionsOf(img).map((v) => v.attempt || 1));
+  }
+
+  function saveChosen() {
+    try {
+      const flat = [];
+      titles.forEach((t) => t.images.forEach((img) => {
+        const pid = chosen.get(img.poster_id);
+        if (pid) flat.push([img.poster_id, { pid, top: topAttempt(img) }]);
+      }));
+      localStorage.setItem(CHOSEN_KEY, JSON.stringify(flat));
+    } catch (e) { /* a blocked store must never break the screen */ }
+  }
+
+  function restoreChosen() {
+    let kept = new Map();
+    try {
+      JSON.parse(localStorage.getItem(CHOSEN_KEY) || '[]')
+        .forEach(([posterId, c]) => kept.set(posterId, c));
+    } catch (e) { kept = new Map(); }
+    titles.forEach((t) => t.images.forEach((img) => {
+      const c = kept.get(img.poster_id);
+      if (!c) return;
+      // Something newer than he ever saw has arrived: the memory loses.
+      if (topAttempt(img) > (c.top || 0)) return;
+      if (versionsOf(img).some((v) => v.processed_id === c.pid)) {
+        chosen.set(img.poster_id, c.pid);
+      }
+    }));
+  }
+
+  // THE RECORD OF A SAVE CUT SHORT. Written while SAVE AND RELEASE runs,
+  // wiped the moment one finishes — so it only ever survives an interrupted
+  // save, and the banner it feeds can never nag about a resolved one. Lives
+  // in this browser because the server never learned about the unsent
+  // decisions: from its side the leftovers are simply still waiting.
+  const CUT_KEY = 'pd_review_cut_v1';
+
+  function writeCut(sent, total) {
+    try { localStorage.setItem(CUT_KEY, JSON.stringify({ sent, total })); }
+    catch (e) { /* never break the save over a blocked store */ }
+  }
+
+  function clearCut() {
+    try { localStorage.removeItem(CUT_KEY); } catch (e) { /* as above */ }
+  }
+
+  function showCutNoteIfAny() {
+    const box = $('[data-review-cutnote]');
+    if (!box) return;
+    let cut = null;
+    try { cut = JSON.parse(localStorage.getItem(CUT_KEY) || 'null'); }
+    catch (e) { cut = null; }
+    if (!cut || !cut.total) { box.hidden = true; return; }
+    box.innerHTML =
+      `Your last SAVE AND RELEASE was cut short — <b>${cut.sent} of `
+      + `${cut.total}</b> images were saved and released before it stopped. `
+      + `The rest are simply still waiting below, with your marks kept. `
+      + `Open the review and press SAVE AND RELEASE to finish. `
+      + `<button class="btn btn-ghost btn-tiny" data-action="cutnote-dismiss">GOT IT</button>`;
+    box.hidden = false;
+    box.querySelector('[data-action="cutnote-dismiss"]')
+       .addEventListener('click', () => { clearCut(); box.hidden = true; });
   }
 
   // ══════════════════════════════════════════════════════════════════════
@@ -930,6 +1014,7 @@
   // ── Choosing a generation ──────────────────────────────────────────────
   function pickVersion(posterId, processedId) {
     chosen.set(posterId, processedId);
+    saveChosen();     // survives leaving, like the decisions do
     render();
   }
 
@@ -1338,6 +1423,12 @@
     const CHUNK = 5;
     const all = payload.decisions;
     const tally = { approved: 0, rerun: 0, unusable: 0, files_removed: 0 };
+    // From here until the save ends, leaving the page costs unsent work —
+    // so the browser's own "leave site?" prompt is armed (commitBusy), and
+    // a running tally is written down so a cut-short save can explain
+    // itself the next time the screen opens.
+    commitBusy = true;
+    writeCut(0, all.length);
     try {
       for (let i = 0; i < all.length; i += CHUNK) {
         const part = all.slice(i, i + CHUNK);
@@ -1353,11 +1444,15 @@
           // STOPS HERE, AND SAYS WHERE. Everything before this chunk is
           // already saved on the server, so telling you how far it got is
           // the difference between "try again" and "try again from where".
+          // The cut record keeps the same numbers, so the banner tells the
+          // same story if he only comes back tomorrow.
           status.textContent =
             `stopped after ${i} of ${all.length} — ${d.detail || 'failed'}`;
+          writeCut(i, all.length);
           await loadDates();
           return;
         }
+        writeCut(Math.min(i + part.length, all.length), all.length);
         tally.approved += d.approved || 0;
         tally.rerun += d.rerun || 0;
         tally.unusable += d.unusable || 0;
@@ -1371,14 +1466,30 @@
       decisions = new Map();
       saveDecisions();      // released, so the browser must forget them too
       chosen = new Map();
+      saveChosen();         // the choices went with them
+      clearCut();           // finished cleanly: nothing to explain later
       closeZoom();
       stage.hidden = true;
       picker.hidden = false;
       await loadDates();
+      showCutNoteIfAny();   // hides the banner now that the save completed
     } catch (err) {
       status.textContent = 'failed: ' + err.message;
+    } finally {
+      commitBusy = false;   // every exit disarms the leave-page prompt
     }
   }
 
+  // ── Leaving mid-save gets a hold-on prompt ───────────────────────────
+  // Armed ONLY while SAVE AND RELEASE is running. Everything already sent
+  // is safe on the server; the prompt exists for the part that is not yet.
+  let commitBusy = false;
+  window.addEventListener('beforeunload', (e) => {
+    if (!commitBusy) return;
+    e.preventDefault();
+    e.returnValue = '';   // what makes the browser actually ask
+  });
+
   loadDates();
+  showCutNoteIfAny();
 })();

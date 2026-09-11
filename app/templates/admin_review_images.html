@@ -20,6 +20,10 @@
       <span class="muted mono" data-review-summary></span>
     </div>
     <div class="panel-body">
+      {# Shown only when the last SAVE AND RELEASE was cut short (browser
+         closed mid-save). One banner for the whole remainder, not a note
+         per poster — the leftovers share a single explanation. #}
+      <div class="review-cut-note" data-review-cutnote hidden></div>
       {# One obvious way in. The common case is "clear everything waiting",
          so that is the big button; narrowing by date and the rerun queue are
          the side doors. Reworked 2026-09-06 after the owner called the old

@@ -952,6 +952,27 @@ def api_search_save(
         target_path.unlink(missing_ok=True)
         return JSONResponse({"ok": False, "message": str(e)}, status_code=422)
 
+    # ── TOO SMALL? THE SAME HARD FLOOR THE PASTE FLOW USES ───────────────
+    # The paste endpoint refuses a picture under `min_image_px` on BOTH
+    # sides; this endpoint did not, so a tiny image sent from the phone
+    # add-on would have saved (owner's find, 2026-09-11). The in-page grid
+    # also lands here, but its pictures are pre-filtered above the Brave
+    # minimum, so this only ever catches a genuinely tiny Google pick — no
+    # confirm, a plain refuse, which is what was asked for.
+    min_px = 300
+    try:
+        min_px = int(get_setting(db, "min_image_px", project=project) or 300)
+    except Exception:
+        pass
+    if img_w and img_h and img_w < min_px and img_h < min_px:
+        target_path.unlink(missing_ok=True)
+        return JSONResponse(
+            {"ok": False, "reason": "low_quality",
+             "message": f"That picture is too small ({img_w}×{img_h}). "
+                        f"Pick one at least {min_px}px on one side."},
+            status_code=409,
+        )
+
     sp = SavedPoster(
         master_title_id    = t.id,
         user_id            = user.id,

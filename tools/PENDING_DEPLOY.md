@@ -3,22 +3,21 @@
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.
 
-## v184 — the paste helper, and one value for the phone add-on · 2026-09-11
+## v185 — the swap endpoint now refuses a too-small picture · 2026-09-11
 
-- **The paste-a-URL box now catches a bad link before saving.** If the
-  worker pastes Google's small grey preview link, or a Google page link
-  instead of a picture, the box turns red and says what to do, with a SEND
-  IT ANYWAY button so our guess can be overruled. This is the site-side
-  half of the phone add-on idea and needs no add-on.
-- **/api/state now also returns `min_image_px`.** The phone add-on reads
-  the site's own too-small number from here instead of keeping a second
-  copy that would drift. No behaviour change for the site itself.
+- **`/api/search_save` now refuses a picture under `min_image_px` on both
+  sides**, the same hard floor the paste flow already had. This endpoint is
+  what the phone add-on saves through (because it also does the
+  one-per-title SWAP), and without this a tiny Google pick would have saved.
+  The in-page Brave grid also uses this endpoint, but its pictures are
+  pre-filtered above the Brave minimum, so this only ever catches a
+  genuinely tiny image — a plain refuse, no confirm.
 
-The phone ADD-ON is a separate thing, delivered as a zip beside the repo
-(`../poster_helper_extension/`). It is NOT deployed to the server — the
-worker loads it on their own phone. It talks to this site's existing
-`/api/state` and `/save_image`, which is why the only server change needed
-was the one value above.
+This pairs with the phone ADD-ON (v1.2, delivered as a zip beside the repo),
+which now (1) sends the picture the worker actually TAPPED rather than
+guessing which is open, and (2) saves through this swap endpoint so a second
+SEND replaces the first image instead of erroring at the limit. The add-on
+is loaded on the phone, not deployed here.
 
 Deploy: the server only. The NODE does not need copying — nothing in
 `worker_service/` changed.

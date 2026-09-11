@@ -291,14 +291,18 @@ DEFAULT_TIMINGS = {
     "login_wait":       2.0,
     "page_load_wait":   2.0,
     "upload_wait":      5.0,
-    "form_input_delay": 0.4,
+    "form_input_delay": 0.2,
     "submit_wait":      2.5,
-    "element_timeout":  30.0,
+    # 60 rather than 30 — the owner's running value, adopted as the default
+    # 2026-09-11 with the rest of his dashboard settings. FAA's slower form
+    # variants were timing out at 30.
+    "element_timeout":  60.0,
     "popup_delay":      2.0,
     # Pause between consecutive images in a batch. Sequential uploading is
-    # what fixed the old 20-30% failure rate; a small human-ish gap also
-    # keeps us well clear of rate heuristics.
-    "between_images":   3.0,
+    # what fixed the old 20-30% failure rate. 0.5 is the owner's running
+    # value (2026-09-11); the sequential single tab is the protection, and
+    # a longer gap on top proved unnecessary.
+    "between_images":   0.5,
 }
 
 
@@ -526,7 +530,7 @@ DEFAULTS: dict[str, Any] = {
     # from `brave_search_phrasings`: that drives the in-page Brave buttons and
     # its own default is "view", and the owner did not want the two tangled
     # (2026-09-11). Plain words, NOT a template, so no {title} is required.
-    "google_refine_terms": "aerial\nskyline\nstreet\nat night\nold town",
+    "google_refine_terms": "aerial\nlandscape\nphotography",
     "brave_min_dimension": 300,
     # ── WORDS THAT MEAN "THIS IS NOT A PHOTOGRAPH OF THE PLACE" ──────────
     #
@@ -549,7 +553,7 @@ DEFAULTS: dict[str, Any] = {
     # bill across 88,112 titles to show pictures nobody looks at.
     "brave_exclude_words": "map, maps, flag, flags, clipart, vector, icon, "
                            "logo, stock photo, infographic, diagram, chart",
-    "brave_results_per_query": 50,
+    "brave_results_per_query": 90,
     # `brave_daily_query_cap` lived here until v172 and was NEVER READ BY
     # ANYTHING. It had a box on the Settings page describing itself as a
     # safety net against a looping bug, and no code anywhere consulted it —
@@ -562,7 +566,9 @@ DEFAULTS: dict[str, Any] = {
     # ── OpenAI image generation ──────────────────────────────────────────
     "openai_api_key":     "",
     "openai_model":       "gpt-image-2",
-    "openai_size":        "auto",
+    # 1024x1536 is the owner's production choice (2026-09-11): portrait,
+    # matching the poster shape, rather than letting the model pick.
+    "openai_size":        "1024x1536",
     "openai_quality":     "low",
     # MEASURED 2026-09-05, and it is the owner's whole look: asking for a
     # transparent background changes HOW gpt-image-2 renders. The see-through
@@ -600,18 +606,22 @@ DEFAULTS: dict[str, Any] = {
     # margin pinned in pixels would silently become a different-looking
     # margin the day he changes the output size.
     #
-    #     672 / 4000 = 16.8   the width
+    #     672 / 4000 = 16.8   his original Photoshop width
     #      20 / 4000 =  0.5   the margin
     #
     # `signature_x_pct` is the CENTRE of the mark across the width, which is
-    # what makes dragging it feel the same whatever size it is set to. The
-    # default puts its right edge exactly on the margin.
+    # what makes dragging it feel the same whatever size it is set to.
+    #
+    # The width, opacity and position defaults below are the values the
+    # owner settled on after using the screen (adopted 2026-09-11): 11 wide
+    # at 50 opacity, centred at 93.5 — slightly in from the hard-right
+    # position, which is where he dragged it and left it.
     "signature_image":      "",
     "signature_enabled":    1,
-    "signature_width_pct":  16.8,
+    "signature_width_pct":  11,
     "signature_margin_pct": 0.5,
-    "signature_opacity":    35,
-    "signature_x_pct":      91.1,
+    "signature_opacity":    50,
+    "signature_x_pct":      93.5,
     # `signature_y_pct` is the gap UP FROM THE BOTTOM, in percent of the
     # WIDTH — the same unit as the margin, so the two numbers are comparable.
     # See the note on KEYS in app/signature.py for why it is not height.
@@ -696,11 +706,12 @@ DEFAULTS: dict[str, Any] = {
     # deliberate: `background: transparent` makes gpt-image-2 render in a way
     # the owner wants, and the see-through parts are flattened away here.
     #
-    # Black suits nearly every poster. The exceptions are pictures whose sky
-    # came out semi-transparent — those go muddy on black and read correctly
-    # on their own colour, which is why the review screen lets him pick one
-    # per image with an eyedropper. This is only the starting point.
-    "gpt_background_color": "#000000",
+    # #0067c6 is the owner's running choice (2026-09-11): a sky blue,
+    # because the pictures that come back semi-transparent are nearly always
+    # skies, and they read correctly on blue where black goes muddy. The odd
+    # image that needs something else gets its own colour on the Approve
+    # Artwork screen with the eyedropper. This is only the starting point.
+    "gpt_background_color": "#0067c6",
     # ── Storage access from THIS server ──────────────────────────────────
     # The Windows node writes to the drive letter in `storage_root`. This
     # server has no such drive, so the GPT stage pushes over SFTP to the same
@@ -1284,19 +1295,31 @@ PROJECT_DEFS: list[dict] = [
             # See render_keywords() if that becomes worth doing.
             "keywords_static": (", travel, destination, tourism, landscape, "
                                 "scenery, landmark, world"),
-            # ── STILL TO BE SPECIFIED BY THE OWNER ──────────────────────
-            # Two left, and neither can be guessed. The placeholder below is
-            # deliberately generic so a wrong value is obvious rather than
-            # plausible.
+            # The listing description is the bare place name. 'master' would
+            # print the sheet's description column, which for travel is the
+            # KIND ("city", "town") — a one-word description no buyer needs.
+            # Stated by the owner's running settings, adopted 2026-09-11.
+            "description_source":   "template",
+            "description_template": "{title}",
+            # ── The search wordings, stated by the owner (2026-09-11) ────
+            # These were placeholders awaiting his say-so; they are now his
+            # tested values, adopted from the running dashboard. `{title}`
+            # substitutes the sheet's search_query column, which already
+            # carries the country; `{kind}` is the sheet's description.
+            # (brave_query_normal itself needs no override any more — his
+            # value equals the global default, "{title} {kind}".)
             #
-            #   brave_query_normal  what the worker's SEARCH button asks for
-            #   openai_prompt       how the sourced photo becomes artwork
-            #
-            # NOTE on brave_query_normal: `{title}` here now substitutes the
-            # sheet's `search_query` column, not the worker-facing name — so
-            # this template is only the STYLING (a suffix, quotes), and the
-            # subject already carries its own country. See search_text().
-            "brave_query_normal": "{title}",
+            # Each phrasing line is one more button on the worker screen.
+            "brave_search_phrasings": ("{title} {kind} view\n"
+                                       "{title} {kind} landscape\n"
+                                       "{title} {kind} aerial\n"
+                                       "{title} {kind} photography"),
+            # What the GOOGLE button opens with. One query, not a list —
+            # the refine buttons on the phone add-on handle variations.
+            "google_query": "{title} {kind} view",
+            # Still the owner's to state and not guessable: openai_prompt,
+            # the wording that turns the photo into artwork. His real prompt
+            # lives in the dashboard; the global default is only a skeleton.
         },
     },
 ]
@@ -2723,13 +2746,41 @@ def intake_open(db: Session, project: Optional[Project] = None) -> bool:
     One question asked in one place, by every stage — the node's process
     claim, the node's upload claim, and the generation worker. A stop that
     only some stages honoured would be worse than none, because the queue
-    would look stopped while something quietly kept spending.
+    would look stopped while something quietly kept spending. (The jobs
+    queue — earnings reads, listing sweeps — was exactly such a stage until
+    v192: it is gated by machine_paused_on_purpose() below, not by this
+    function, because the quiet window closes THIS gate in order to let the
+    earnings read run, and that read arrives through the jobs queue.)
 
     Per-project, so one niche can be paused while another keeps running.
     """
     if str(get_setting(db, "run_mode", project=project) or "run") != "run":
         return False
     return not quiet_window_state(db)["blocking"]
+
+
+def machine_paused_on_purpose(db: Session) -> bool:
+    """
+    Has the owner pressed PAUSE NEW WORK for EVERY active project?
+
+    This is the "I am about to reboot the worker machine" question, and it
+    is deliberately NOT intake_open(): the quiet window also closes intake,
+    every night, precisely so the nightly earnings read can run — and that
+    read arrives through the jobs queue this answer gates. Using intake_open
+    here would block the one job the quiet window exists to make room for.
+
+    So only the run_mode switch counts, and only when ALL active projects
+    are stopped: while any project still runs, the machine is busy with its
+    work anyway, and account-wide jobs like earnings reads have no reason
+    to wait for a niche that is not theirs.
+    """
+    projects = db.query(Project).filter(Project.is_active.is_(True)).all()
+    if not projects:
+        return False
+    return all(
+        str(get_setting(db, "run_mode", project=p) or "run") != "run"
+        for p in projects
+    )
 
 
 def _parse_hhmm(text: Any) -> Optional[tuple[int, int]]:

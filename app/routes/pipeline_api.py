@@ -587,6 +587,16 @@ def jobs_claim(
                     "listing_check"]
     if kinds:
         allowed = [k for k in allowed if k in kinds]
+
+    # PAUSE NEW WORK must mean the machine goes idle, or the owner reboots
+    # it mid-earnings-read. While EVERY active project is paused, only test
+    # jobs are handed out — a test is the owner debugging right now, and one
+    # image is over in seconds. Everything else (earnings reads, listing
+    # sweeps, manual runs) stays QUEUED rather than being claimed, so it
+    # runs after RESUME instead of being lost.
+    if P.machine_paused_on_purpose(db):
+        allowed = [k for k in allowed if k.startswith("test_")]
+
     if not allowed:
         return JSONResponse({"ok": True, "job": None})
 

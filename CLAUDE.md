@@ -2612,7 +2612,17 @@ switch live listings — the ones where continuing costs money. It looked
 fixed from the screen, and the gap only showed up when a run had to be
 stopped at the wrong moment. **When a mechanism has several instances, list
 them and say which ones you changed**; "the loop now checks" is a claim
-about one loop.
+about one loop. The same shape struck the server's own PAUSE (found
+2026-09-11): `intake_open()` said in its docstring "one question asked in
+one place, by every stage" — and the JOBS queue was a hand-out stage that
+never asked, so a "paused" machine still picked up earnings reads and
+listing sweeps. The list of instances must come from asking **"every path
+that hands out work"**, not from the paths the docstring remembers; a
+docstring claiming full coverage is prose asserting an invariant, the
+softest evidence in the repo. (The jobs queue is deliberately gated by
+`machine_paused_on_purpose()` rather than `intake_open()` — the quiet
+window closes intake precisely so the nightly earnings read can run, and
+that read arrives through the jobs queue. One gate per intention.)
 
 **And a GUARD is the same defect wearing its worst hat, because a missing
 guard looks like nothing at all.** Switching a design OFF checked for the

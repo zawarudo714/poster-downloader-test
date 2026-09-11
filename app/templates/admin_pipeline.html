@@ -149,7 +149,7 @@
           #}
           <button type="button" class="btn btn-error btn-tiny" data-action="run-drain">
             PAUSE&nbsp;NEW&nbsp;WORK
-            {{ info("Stops handing out new work. Anything a machine has already claimed keeps going and reports back normally — nothing is abandoned half-done, because a part-finished image has already cost money or minutes. Press RESUME when you're ready.") }}
+            {{ info("Stops handing out new work — image batches AND side jobs like earnings reads and listing sweeps (those wait in the queue and run after you resume; only test jobs still go through). Anything a machine has already claimed keeps going and reports back normally — nothing is abandoned half-done, because a part-finished image has already cost money or minutes. Once RECENT JOBS shows nothing running, the machine is safe to reboot. Press RESUME when you're ready.") }}
           </button>
         </span>
       </div>

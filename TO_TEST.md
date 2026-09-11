@@ -241,6 +241,24 @@ ever? It did. Now it waits only until you have read it.
 
 ---
 
+## 49. PAUSE NEW WORK NOW ALSO HOLDS BACK SIDE JOBS — v192
+
+Before this, the pause stopped image batches but the machine could still
+pick up an earnings read or a listing sweep while "paused" — so a reboot
+around 22:00 could kill an earnings read halfway.
+
+- Press PAUSE NEW WORK on the Pipeline page, then press "READ EARNINGS NOW"
+  on the Earnings page (or queue a listing sweep). The job should appear in
+  RECENT JOBS as queued and just SIT there — the machine must not start it.
+- Press RESUME. The waiting job should start within a minute, on its own.
+  Nothing should need re-queuing.
+- While paused, a TEST job (test upload, test process) should still run —
+  tests are you debugging and go through on purpose.
+- The button's help bubble now says all of this, including "once RECENT
+  JOBS shows nothing running, the machine is safe to reboot".
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

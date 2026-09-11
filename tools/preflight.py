@@ -1253,6 +1253,20 @@ GUARDED: list[tuple[str, str, tuple[str, ...], str]] = [
      ("_may_touch(", "_scope_to_project(", "_worker_project("),
      "claims a title for a worker without checking the title is in a "
      "project that worker is allowed to work in"),
+    # ── PAUSE NEW WORK MUST COVER THE JOBS QUEUE TOO ────────────────────
+    #
+    # The batch claims (process, upload) ask intake_open(); the jobs queue
+    # (earnings reads, listing sweeps) does not — it asks
+    # machine_paused_on_purpose() instead, because the quiet window closes
+    # intake_open every night precisely so the earnings read can run.
+    # Found 2026-09-11 while answering "is PAUSE safe before a reboot":
+    # the pause covered the batches and quietly missed the jobs, so a
+    # reboot at 22:00 could kill an earnings read mid-run. A stop only
+    # some hand-out paths honour looks stopped while something keeps going.
+    ("app/routes/pipeline_api.py", "claim_job(",
+     ("machine_paused_on_purpose(",),
+     "hands out a queued job without asking whether the owner has paused "
+     "the whole machine for a reboot"),
 ]
 
 

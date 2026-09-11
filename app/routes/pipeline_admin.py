@@ -3315,6 +3315,11 @@ def api_review_dates(
                             ProcessedImage.is_current == 1,
                             ProcessedImage.attempt > 1,
                             ProcessedImage.project_id == project.id).scalar() or 0,
+        # How many painted images the REVIEW EVERYTHING WAITING button loads
+        # at once. 0 means all of them (batching off). The button label reads
+        # this to say "REVIEW NEXT 20" instead of "everything".
+        "batch_size": int(P.get_setting(db, "review_batch_size",
+                                        project=project) or 0),
     })
 
 
@@ -3464,8 +3469,30 @@ def api_review_queue(
             "versions": versions,
         })
 
-    return JSONResponse({"titles": list(titles.values()),
-                         "count": len(titles), "status": status,
+    # ── BATCH IT, IF THE DASHBOARD ASKS ─────────────────────────────────
+    # The owner reviews in small batches on purpose: inspect N, release N,
+    # then the next N. Fewer at a time means a forgotten RERUN cannot ride
+    # along with a hundred others (his ask, 2026-09-11). Titles are already
+    # oldest-first, so the oldest N are the batch — and because releasing a
+    # batch removes it from the pending set, asking for the oldest N again
+    # naturally returns the NEXT N. No page numbers to keep in step.
+    # Only the "everything waiting" flow batches; a named DATE range or the
+    # reruns list is targeted and returns whole.
+    all_titles = list(titles.values())
+    total_waiting = len(all_titles)
+    batch = 0
+    if status == "pending" and not start and not end:
+        try:
+            batch = int(P.get_setting(db, "review_batch_size", project=project) or 0)
+        except Exception:
+            batch = 0
+    shown = all_titles[:batch] if batch > 0 else all_titles
+
+    return JSONResponse({"titles": shown,
+                         "count": len(shown),
+                         "total_waiting": total_waiting,
+                         "batch_size": batch,
+                         "status": status,
                          "default_background": str(
                              P.get_setting(db, "gpt_background_color",
                                            project=project) or "#000000"),

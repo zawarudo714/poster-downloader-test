@@ -211,6 +211,22 @@ ever? It did. Now it waits only until you have read it.
 
 ---
 
+## 47. REVIEW PAINTED IMAGES IN BATCHES — v189
+
+- Pipeline -> Settings -> Processing: set "Review batch size" to 20 and save.
+- On Approve Artwork with more than 20 painted images waiting, the big
+  button should read "REVIEW NEXT 20 · N waiting". Press it — only 20
+  should load, and the header should say "batch of 20 · N more waiting".
+- Inspect them, mark a couple RERUN, press SAVE & RELEASE. Only those 20
+  should be released/queued; you land back at the start screen.
+- The button should now show the reduced count and say "REVIEW NEXT 20"
+  again. Press it for the next 20.
+- Set the size to 0 and confirm it goes back to loading everything at once.
+- Reviewing a single DATE, or JUST THE RERUNS, should still load the whole
+  set (batching is only on the "everything waiting" button).
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

@@ -47,6 +47,7 @@
       ['photoshop_restart_every','number','Restart Photoshop every N images','Photoshop stays open between images for speed, but degrades over a long run — memory climbs and images get slower. A periodic restart costs ~30s and prevents a slide into timeouts. 0 disables it.'],
       ['process_batch_size',  'number', 'Batch size',              'Images claimed per Photoshop run.'],
       ['process_max_attempts','number', 'Max attempts',            'Retries before an image is parked for review.'],
+      ['review_batch_size',   'number', 'Review batch size',       'How many painted images REVIEW EVERYTHING WAITING loads at once, so you inspect and release a small set at a time instead of a hundred. For example 20. Set to 0 to load everything at once. Only affects the "everything waiting" button; reviewing a single date still loads that whole day.'],
     ],
     // TWO MACHINES, ONE ARCHIVE. The Windows node writes through a mounted
     // drive letter; this server has no such drive and pushes over SFTP. Both

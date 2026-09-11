@@ -740,6 +740,12 @@ DEFAULTS: dict[str, Any] = {
     # release work you hadn't looked at.
     "gpt_review_required": 1,
 
+    # How many painted images the REVIEW EVERYTHING WAITING button loads at
+    # once. The owner reviews in small batches so a forgotten RERUN cannot
+    # ride along with a hundred others: inspect N, release N, then the next
+    # N. 0 means load them all at once (batching off).
+    "review_batch_size":  20,
+
     # Node poll interval hint (seconds). The node honours this.
     "poll_interval_s":    30,
     # Idle back-off. After `poll_idle_after_min` minutes with nothing to do,

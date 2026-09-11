@@ -55,6 +55,7 @@
   let decisions = new Map(); // poster_id -> {action, reason}
   let chosen    = new Map(); // poster_id -> processed_id being looked at
   let mode     = 'pending';
+  let batchSize = 0;        // 0 = review all at once; N = load N at a time
 
   const esc = (v) => String(v == null ? '' : v)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -68,10 +69,21 @@
       const d = await r.json();
       const rows = d.dates || [];
       $('[data-rerun-count]').textContent = d.reruns || 0;
+      const totalImgs = (d.dates || []).reduce((n, r2) => n + (r2.images || 0), 0);
+      batchSize = Number(d.batch_size || 0);
       const waitEl = $('[data-review-waiting-count]');
-      if (waitEl) {
-        const totalImgs = (d.dates || []).reduce((n, r2) => n + (r2.images || 0), 0);
-        waitEl.textContent = totalImgs ? `(${totalImgs})` : '(0)';
+      if (waitEl) waitEl.textContent = totalImgs ? `(${totalImgs})` : '(0)';
+      // Relabel the big button to say what pressing it will actually load.
+      // With batching on it reads "REVIEW NEXT 20 · 137 waiting"; with it off
+      // it stays "REVIEW EVERYTHING WAITING (137)".
+      const allBtn = $('[data-action="review-all"]');
+      if (allBtn) {
+        if (batchSize > 0 && totalImgs > batchSize) {
+          allBtn.innerHTML = `REVIEW&nbsp;NEXT&nbsp;${Math.min(batchSize, totalImgs)}` +
+            ` <span class="mono">· ${totalImgs} waiting</span>`;
+        } else {
+          allBtn.innerHTML = `REVIEW&nbsp;EVERYTHING&nbsp;WAITING <span class="mono">(${totalImgs})</span>`;
+        }
       }
 
       if (!rows.length) {
@@ -138,8 +150,19 @@
     index = 0;
     picker.hidden = true;
     stage.hidden = false;
-    $('[data-review-range]').textContent =
-      mode === 'rerun' ? 'reruns' : `${start || 'start'} → ${end || 'today'}`;
+    // Say plainly whether this is a batch and how much is still behind it,
+    // so releasing feels like clearing a slice, not the whole pile.
+    const waiting = Number(d.total_waiting || titles.length);
+    if (mode === 'rerun') {
+      $('[data-review-range]').textContent = 'reruns';
+    } else if (start || end) {
+      $('[data-review-range]').textContent = `${start || 'start'} → ${end || 'today'}`;
+    } else if (Number(d.batch_size) > 0 && waiting > titles.length) {
+      $('[data-review-range]').textContent =
+        `batch of ${titles.length} · ${waiting - titles.length} more waiting after this`;
+    } else {
+      $('[data-review-range]').textContent = 'everything waiting';
+    }
     render();
   }
 

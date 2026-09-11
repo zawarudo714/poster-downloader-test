@@ -47,7 +47,6 @@
       ['photoshop_restart_every','number','Restart Photoshop every N images','Photoshop stays open between images for speed, but degrades over a long run — memory climbs and images get slower. A periodic restart costs ~30s and prevents a slide into timeouts. 0 disables it.'],
       ['process_batch_size',  'number', 'Batch size',              'Images claimed per Photoshop run.'],
       ['process_max_attempts','number', 'Max attempts',            'Retries before an image is parked for review.'],
-      ['review_batch_size',   'number', 'Review batch size',       'How many painted images REVIEW EVERYTHING WAITING loads at once, so you inspect and release a small set at a time instead of a hundred. For example 20. Set to 0 to load everything at once. Only affects the "everything waiting" button; reviewing a single date still loads that whole day.'],
     ],
     // TWO MACHINES, ONE ARCHIVE. The Windows node writes through a mounted
     // drive letter; this server has no such drive and pushes over SFTP. Both
@@ -104,6 +103,7 @@
       ['openai_use_style_image', 'bool', 'Send the style reference image',
        'On, the style reference is sent as the FIRST image and the worker\'s photo as the second — so the prompt can say things like "the style of the first image". Off, only the worker\'s photo is sent and the prompt has to describe the look in words. Match this to the prompt you have written: if the prompt talks about two images, this must be on.'],
       ['gpt_review_required', 'bool', 'Review images before upload', 'On, every generated image waits for you on the Review Images tab. Off, they go straight to the upload queue. Turning it OFF does not release what is already waiting — those still need approving, so nothing is ever listed that you never looked at.'],
+      ['review_batch_size',   'number', 'Review batch size',       'How many painted images REVIEW EVERYTHING WAITING loads at once, so you inspect and release a small set at a time instead of a hundred. For example 20. Set to 0 to load everything at once. Only affects the "everything waiting" button; reviewing a single date still loads that whole day.'],
     ],
     // The DEFAULT placement. Any one poster is nudged on the Approve
     // Artwork screen; these are what a brand new picture starts from.

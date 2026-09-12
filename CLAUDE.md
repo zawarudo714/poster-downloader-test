@@ -107,9 +107,14 @@ Then:
   not what shipped).
 
   **AND RE-READ IT. A deploy state read at the START of a session is stale
-  by the middle of it.** On 2026-09-03 I told him v144 was not deployed and
-  that a test would fail because the file was not on the server. It had been
-  live for some time. I had read the log hours earlier, then reasoned from
+  by the middle of it.** It happened again on 2026-09-12: three deploys
+  landed DURING one conversation, two were caught by re-reading, and the
+  third was missed in the very reply that planned the production move —
+  because that reply was written from the conversation's memory. Treat
+  every pause in the conversation as having contained a deploy; he ships
+  the moment a thing is ready. On 2026-09-03 I told him v144 was not
+  deployed and that a test would fail because the file was not on the
+  server. It had been live for some time. I had read the log hours earlier, then reasoned from
   the SCROLLBACK of his terminal — which showed an older session — instead
   of opening the file that answers the question. He had to send a screenshot
   of the deploy tool reading `live 144` to correct me.

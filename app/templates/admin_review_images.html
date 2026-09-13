@@ -31,6 +31,17 @@
       <div class="filter-row">
         <button class="btn btn-primary" data-action="review-all">REVIEW&nbsp;EVERYTHING&nbsp;WAITING&nbsp;<span class="mono" data-review-waiting-count></span></button>
         <button class="btn btn-ghost" data-action="review-reruns">JUST&nbsp;THE&nbsp;RERUNS&nbsp;<span data-rerun-count>0</span></button>
+        {# The queue order, remembered across visits. Applies to every door
+           — the big button, a single day, a range, and the reruns. #}
+        <label class="muted mono" style="margin-left:auto; display:flex; align-items:center; gap:6px">
+          order
+          <select data-review-sort
+                  title="How the images are ordered when a review opens. Your choice is remembered.">
+            <option value="saved">oldest saved first</option>
+            <option value="modified">freshest painted first</option>
+            <option value="number">by sheet number</option>
+          </select>
+        </label>
       </div>
       <div class="filter-row" style="margin-top:10px">
         <span class="muted">…or a narrower slice:</span>

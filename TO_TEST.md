@@ -355,6 +355,24 @@ Also in v196, the full back-and-forth on Changes Requested:
 
 ---
 
+## 54. REVIEW ORDER IS YOURS TO PICK, AND COMING BACK WALKS BACK IN — v197
+
+- On Approve Artwork's start screen there is now an "order" dropdown:
+  oldest saved first / freshest painted first / by sheet number. Pick
+  one, open a review, and the designs should come in that order. Reload
+  the page — the dropdown must still show your pick.
+- Open a review, step to a design, open the ZOOM compare view, then
+  leave the page entirely (close the tab or click another screen). Click
+  Approve Artwork again: it should walk straight back in — same door,
+  same design, zoom already open.
+- Now press CLOSE inside a review, then reopen Approve Artwork: this
+  time it must show the normal start screen, not jump back in. Same
+  after SAVE AND RELEASE finishes — next visit starts at the picker.
+- "Freshest painted first" should put a rerun that just came back at the
+  front of the queue.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

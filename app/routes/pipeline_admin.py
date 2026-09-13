@@ -3341,6 +3341,7 @@ def api_review_queue(
     start: str = Query(""),
     end: str = Query(""),
     status: str = Query("pending"),
+    sort: str = Query("saved"),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -3380,9 +3381,23 @@ def api_review_queue(
         except ValueError:
             raise HTTPException(400, "Bad end date.")
 
-    rows = q.order_by(SavedPoster.original_save_date.asc(),
-                      MasterTitle.external_id.asc().nullslast(),
-                      SavedPoster.id.asc()).all()
+    # ── HOW THE QUEUE IS ORDERED — the admin's choice, remembered by the
+    # screen (owner's ask, 2026-09-13). 'saved' is the old behaviour and
+    # stays the default; an unknown word falls back to it rather than
+    # erroring, so a stale stored value can never break the page.
+    if sort == "number":
+        order = (MasterTitle.external_id.asc().nullslast(),
+                 SavedPoster.id.asc())
+    elif sort == "modified":
+        # Freshest paintings first — 'modified' is when the current
+        # generation was painted, so a rerun that just came back leads.
+        order = (ProcessedImage.created_at.desc().nullslast(),
+                 SavedPoster.id.desc())
+    else:
+        order = (SavedPoster.original_save_date.asc(),
+                 MasterTitle.external_id.asc().nullslast(),
+                 SavedPoster.id.asc())
+    rows = q.order_by(*order).all()
 
     # ── EVERY GENERATION OF EACH POSTER, NOT ONLY THE NEWEST ────────────
     #
@@ -3488,9 +3503,9 @@ def api_review_queue(
     # ── BATCH IT, IF THE DASHBOARD ASKS ─────────────────────────────────
     # The owner reviews in small batches on purpose: inspect N, release N,
     # then the next N. Fewer at a time means a forgotten RERUN cannot ride
-    # along with a hundred others (his ask, 2026-09-11). Titles are already
-    # oldest-first, so the oldest N are the batch — and because releasing a
-    # batch removes it from the pending set, asking for the oldest N again
+    # along with a hundred others (his ask, 2026-09-11). The batch is the
+    # FIRST N of whatever order he chose above — and because releasing a
+    # batch removes it from the pending set, asking for the first N again
     # naturally returns the NEXT N. No page numbers to keep in step.
     # Only the "everything waiting" flow batches; a named DATE range or the
     # reruns list is targeted and returns whole.

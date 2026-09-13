@@ -115,11 +115,13 @@
     }
   }
 
-  async function openRange(start, end, status) {
+  async function openRange(start, end, status, opts) {
     mode = status || 'pending';
     const qs = new URLSearchParams({ status: mode });
     if (start) qs.set('start', start);
     if (end)   qs.set('end', end);
+    // The remembered queue order rides on every door.
+    qs.set('sort', currentSort());
 
     const r = await fetch(`${API}/review/queue?${qs}`);
     const d = await r.json();
@@ -147,7 +149,15 @@
     saveDecisions();
     chosen = new Map();
     restoreChosen();
-    if (!titles.length) { alert('Nothing to review in that range.'); return; }
+    if (!titles.length) {
+      // The quiet path is the auto-resume at page load: an empty door
+      // there just leaves the picker showing, with nothing to dismiss.
+      if (!(opts && opts.quiet)) alert('Nothing to review in that range.');
+      return false;
+    }
+
+    // Which door this review came through, for the resume memory.
+    lastDoor = { start: start || '', end: end || '', status: mode };
 
     // Come back in where you left, if that design is in what just loaded.
     index = lastSeenIndex();
@@ -172,6 +182,7 @@
       $('[data-review-range]').textContent = 'everything waiting';
     }
     render();
+    return true;
   }
 
   // ── The reviewer ─────────────────────────────────────────────────────────
@@ -300,18 +311,49 @@
   // is only ever written by a design the owner was actually looking at.
   const LAST_SEEN_KEY = 'pd_review_last_title_v1';
 
+  // Which DOOR the current review came through — everything waiting, a
+  // date range, or the reruns. Remembered so an interrupted session can
+  // walk back in through the same one.
+  let lastDoor = null;
+
   function rememberSeen(t) {
-    try { localStorage.setItem(LAST_SEEN_KEY, String(t.title_id || '')); }
-    catch (e) { /* a blocked store must never break the screen */ }
+    try {
+      localStorage.setItem(LAST_SEEN_KEY, JSON.stringify({
+        id: Number(t.title_id) || 0,
+        door: lastDoor,
+        zoom: zoomOpen,
+      }));
+    } catch (e) { /* a blocked store must never break the screen */ }
+  }
+
+  function readSeen() {
+    try {
+      const raw = localStorage.getItem(LAST_SEEN_KEY) || '';
+      if (!raw) return null;
+      const v = JSON.parse(raw);
+      // v193 stored a bare title id; read it as one with no door memory.
+      if (typeof v === 'number') return { id: v, door: null, zoom: false };
+      return (v && v.id) ? v : null;
+    } catch (e) { return null; }
   }
 
   function lastSeenIndex() {
+    const seen = readSeen();
+    if (!seen || !seen.id) return 0;
+    const at = titles.findIndex((t) => Number(t.title_id) === seen.id);
+    return at >= 0 ? at : 0;
+  }
+
+  // The queue order the admin chose — oldest saved, freshest painted, or
+  // by sheet number. His explicit pick, so it is remembered like the
+  // decisions are; an unknown stored word falls back to the default.
+  const SORT_KEY = 'pd_review_sort_v1';
+
+  function currentSort() {
     try {
-      const id = Number(localStorage.getItem(LAST_SEEN_KEY) || 0);
-      if (!id) return 0;
-      const at = titles.findIndex((t) => Number(t.title_id) === id);
-      return at >= 0 ? at : 0;
-    } catch (e) { return 0; }
+      const v = localStorage.getItem(SORT_KEY) || 'saved';
+      return ['saved', 'modified', 'number'].includes(v) ? v : 'saved';
+    } catch (e) { return 'saved'; }
   }
 
   // WHICH GENERATION HE CHOSE, kept like the decisions so leaving does not
@@ -1171,12 +1213,17 @@
     // matters on the path where everything is working.
     if (v.signature) paintSig(v.processed_id);
     fitAllSigLayers();
+    // The memory notes the zoom is open, so an interrupted session
+    // reopens straight into this view.
+    rememberSeen(t);
   }
 
   function closeZoom() {
     const box = $('[data-review-zoom]');
     if (box) box.hidden = true;
     zoomOpen = false;
+    const t = current();
+    if (t) rememberSeen(t);   // the memory notes the zoom is closed again
   }
 
   // ── The honest colour bar ────────────────────────────────────────────
@@ -1312,6 +1359,18 @@
       case 'review-exit':
         if (!confirm('Leave without saving? Nothing in this range will be released.')) return;
         stage.hidden = true; picker.hidden = false; closeZoom();
+        // A deliberate CLOSE means "show me the picker next time". Only an
+        // INTERRUPTED session auto-resumes — that is what lets the memory
+        // tell "I chose to leave" from "I was pulled away". The position
+        // itself stays remembered for when a door is opened by hand.
+        lastDoor = null;
+        try {
+          const seen = readSeen();
+          if (seen) {
+            seen.door = null; seen.zoom = false;
+            localStorage.setItem(LAST_SEEN_KEY, JSON.stringify(seen));
+          }
+        } catch (e) { /* a blocked store must never break the screen */ }
         await loadDates();
         break;
       case 'review-commit':  await commit(); break;
@@ -1485,6 +1544,16 @@
       chosen = new Map();
       saveChosen();         // the choices went with them
       clearCut();           // finished cleanly: nothing to explain later
+      // A finished save ends the sitting, so there is no "where I was" to
+      // walk back into — the next visit opens on the picker.
+      lastDoor = null;
+      try {
+        const seen = readSeen();
+        if (seen) {
+          seen.door = null; seen.zoom = false;
+          localStorage.setItem(LAST_SEEN_KEY, JSON.stringify(seen));
+        }
+      } catch (e) { /* a blocked store must never break the screen */ }
       closeZoom();
       stage.hidden = true;
       picker.hidden = false;
@@ -1507,6 +1576,31 @@
     e.returnValue = '';   // what makes the browser actually ask
   });
 
-  loadDates();
-  showCutNoteIfAny();
+  // ── The queue-order picker, remembered across visits ─────────────────
+  const sortSel = document.querySelector('[data-review-sort]');
+  if (sortSel) {
+    sortSel.value = currentSort();
+    sortSel.addEventListener('change', () => {
+      try { localStorage.setItem(SORT_KEY, sortSel.value); }
+      catch (e) { /* a blocked store must never break the screen */ }
+    });
+  }
+
+  // ── COMING BACK WALKS STRAIGHT BACK IN ───────────────────────────────
+  // If the last visit ended mid-review — the page was left without
+  // pressing CLOSE — opening this screen returns through the same door,
+  // lands on the remembered design, and reopens the zoom if it was open.
+  // A deliberate CLOSE (or a finished save) cleared the door, so after
+  // either of those the picker opens normally. That split is what lets
+  // remembered state tell "I chose the picker" from "I was pulled away".
+  (async () => {
+    await loadDates();
+    showCutNoteIfAny();
+    const seen = readSeen();
+    if (!seen || !seen.door) return;
+    const door = seen.door;
+    const ok = await openRange(door.start, door.end, door.status,
+                               { quiet: true });
+    if (ok && seen.zoom) syncZoom();
+  })();
 })();

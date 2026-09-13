@@ -1157,6 +1157,13 @@ exists or a marketplace catalogue that has been taken down.
   became a second record that could disagree with the database.
 * **A file rename does not update the record that points at it.** Renaming
   44 files on disk fixed nothing until the JSON keys were rewritten too.
+  The row-level twin struck 2026-09-13: the grid swap stood down a flagged
+  image and created a successor ROW, and the flag stayed pinned to the
+  dead row — so the admin's card showed a deleted-file placeholder while
+  the image the decision was about lived on a row no screen rendered.
+  **When one thing replaces another, enumerate what still points at the
+  old one and move each pointer** — records, flags, list memberships —
+  in the same transaction as the swap.
 * **"No tool is needed" was a judgement about cost, written in the same voice
   as the measured figures around it.** Nothing on the page distinguished
   them. That is what the provenance tags are for.

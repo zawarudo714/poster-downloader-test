@@ -316,6 +316,45 @@ Do one save each way, then look for the word in four places:
 
 ---
 
+## 53. DELETING A FLAGGED IMAGE LEAVES A RECORD, NOT A QUESTION — v196
+
+- First, clear the leftover: the Troy, Turkey flag still says "awaiting
+  approval" from the old flow. Approve it once on Changes Requested.
+- Flag any image with a comment. As the worker, DELETE that image. The
+  worker should see a toast saying the flag is closed and they can carry
+  on — no "awaiting admin approval" anywhere, and the title returns to
+  the pool immediately.
+- On Changes Requested, the deletion should appear under RECENT
+  DELETIONS with the worker's reason. ACKNOWLEDGE makes it disappear;
+  SEND BACK (with a note) re-flags the title and pins your note to it.
+- The dashboard's "needs your attention" digest should count it under
+  pending deletions until you acknowledge it.
+- Flag an image and have the worker REPLACE it instead — that must still
+  wait for your approval exactly as before. Only deletion changed.
+
+Also in v196, the full back-and-forth on Changes Requested:
+
+- Flag an image, then as the worker SWAP it from the search grid (tap a
+  new picture, confirm the replace). The worker should see a toast that
+  the new image went to the admin. On Changes Requested the card must
+  show the NEW image — not a deleted-file placeholder — with a REPLACED
+  pill. Approve and reject both act on that new image.
+- Every PENDING COMPLETIONS card now has a "THE TITLE NOW HOLDS" strip
+  with the live images, clickable to full size. Approving should never
+  require opening Worker Images to cross-check.
+- RECENT DELETIONS cards show the same "title now holds" line — images
+  if the worker re-did the title, or "nothing yet" if it went back to
+  the pool untouched.
+- Run a Diagnostics scan after playing through the above: "change
+  requests on deleted work" must report nothing (once the old Troy row
+  is approved away).
+- The thumbnails on Changes Requested: a LANDSCAPE photo must show whole
+  (letterboxed, not cropped to a portrait sliver), and clicking any
+  thumbnail — change cards, awaiting cards, open flags, "title now
+  holds" — opens the full-size image in a new tab.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

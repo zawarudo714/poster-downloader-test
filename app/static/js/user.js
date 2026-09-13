@@ -1012,7 +1012,10 @@
     if (r.status === 'awaiting_approval') {
       // Distinguish what the worker did so they know what kind of approval is pending.
       let actionLabel;
-      if (r.worker_action === 'deleted') actionLabel = 'your deletion is awaiting admin approval';
+      // 'deleted' can only appear here on rows from before round 12 —
+      // deleting now closes the flag instead of parking it — but those old
+      // rows exist and must still read truthfully.
+      if (r.worker_action === 'deleted') actionLabel = 'your deletion was recorded for the admin';
       else if (r.worker_action === 'replaced') actionLabel = 'your replacement is awaiting admin approval';
       else                                     actionLabel = 'awaiting admin approval';
       flagged.textContent = `${actionLabel} since ${r.submitted_at || ''}`;
@@ -1555,12 +1558,12 @@
                                reason_source: result.source || '' });
     if (r.ok) {
       await refreshState();
-      // If the delete was on a flagged poster, the server responds with
-      // submitted_for_approval:true so we can tell the worker their action
-      // is pending (not silently complete). UI-wise the flag card will now
-      // render in awaiting-approval state too, so this toast is a nudge.
-      if (r.data && r.data.submitted_for_approval) {
-        showToast('Deletion sent to admin for approval.', 'ok', 5000);
+      // A delete on a flagged poster closes the flag and leaves the admin
+      // a record — nothing waits on anyone. Say so, or the worker wonders
+      // whether they may carry on (they may).
+      if (r.data && r.data.flag_closed) {
+        showToast('Deleted. The flag is closed — the admin will see a '
+                  + 'record of it. You can carry on.', 'ok', 5000);
       }
       return;
     }
@@ -2069,6 +2072,13 @@ function wireSearch(box, title) {
           ({ r, d } = await send(true));
         }
         if (!r.ok || !d.ok) { alert(d.message || 'Save failed.'); break; }
+        // A swap that answered a flag was silently absorbing the flag —
+        // now the server moves it onto the new image and submits it, and
+        // the worker deserves to hear that happened.
+        if (d.flag_submitted) {
+          showToast('Your new image was sent to the admin as the answer '
+                    + 'to the flag on this title.', 'ok', 5000);
+        }
         saved += 1;
       } catch (e) { alert('Save failed: ' + e.message); break; }
     }

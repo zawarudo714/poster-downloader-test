@@ -707,6 +707,19 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 .review-loading { color: var(--skip, #d8a24a); margin-left: 8px; font-size: 12px; }
 .review-loading[hidden] { display: none; }
 
+/* "THE TITLE NOW HOLDS" — the live images shown right on the Changes
+   Requested cards, so approving never needs a trip to Worker Images. */
+.pcc-current-strip { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0 10px; }
+.pcc-current-thumb img {
+  height: 110px; border-radius: 6px; border: 1px solid var(--border);
+  display: block;
+}
+.rev-card-current { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.rev-current-mini img {
+  height: 72px; border-radius: 4px; border: 1px solid var(--border);
+  display: block;
+}
+
 /* Where the worker found the picture — 'Google', 'Brave' or 'pasted'.
    Informational, not a warning: neutral tint on the gallery pill, and a
    quiet inline word on the review captions and the zoom label. */
@@ -979,7 +992,9 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 /* ── Revisions cards ───────────────────────────────────────────────────── */
 .rev-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 12px; }
 .rev-card { display: flex; gap: 12px; padding: 10px; border: 1px solid var(--border); border-left: 3px solid var(--error); background: var(--bg); border-radius: 2px; }
-.rev-card-thumb { width: 80px; height: 120px; object-fit: cover; border: 1px solid var(--border); }
+/* (The .rev-card-thumb box is defined once, further down — an older copy
+   of the rule sat here and silently lost the cascade, which is exactly
+   the two-records-drift this repo keeps paying for. Removed 2026-09-13.) */
 .rev-card-body  { flex: 1; min-width: 0; }
 .rev-card-title { font-family: inherit; font-weight: 650; letter-spacing: -0.01em; font-size: 14px; font-weight: bold; }
 .rev-card-path  { font-size: 10px; color: var(--subtext); word-break: break-all; }
@@ -1254,13 +1269,19 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
   background: rgba(255, 180, 0, 0.04);
 }
 .rev-card-thumb {
-  width: 90px;
-  height: 130px;
+  /* Landscape box, whole image shown — travel photos are mostly wide.
+     `contain` was already right here; only the shape changed. */
+  width: 150px;
+  height: 110px;
   object-fit: contain;
   background: #000;
   border-radius: 3px;
   flex-shrink: 0;
 }
+
+/* Every thumbnail on this page opens full size in a new tab. The wrapper
+   keeps the flex layout honest; the image keeps its own box class. */
+.thumb-link { display: block; flex-shrink: 0; }
 .rev-card-body {
   flex: 1;
   display: flex;
@@ -3290,9 +3311,13 @@ body:has(#ib-bulk-bar:not([hidden])) { padding-bottom: 88px; }
   padding: 10px;
 }
 .pcc-rev-deleted { background: rgba(255, 80, 80, 0.04); border-color: rgba(255, 80, 80, 0.25); }
+/* The box was 110x154 with crop-to-fill — right when every image was a
+   portrait movie poster, wrong for travel where most photos are LANDSCAPE:
+   they were cropped to a sliver (owner's find, 2026-09-13). The box is
+   landscape now and the image FITS inside it whole, whatever its shape. */
 .pcc-rev-thumb {
-  width: 110px; height: 154px;
-  object-fit: cover;
+  width: 190px; height: 130px;
+  object-fit: contain;
   border-radius: 3px;
   background: var(--card);
   flex-shrink: 0;

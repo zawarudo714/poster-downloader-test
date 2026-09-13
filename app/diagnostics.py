@@ -1396,7 +1396,18 @@ def check_orphaned_upload_rows(db: Session, scope: Scope) -> CheckResult:
 
 
 def check_open_revisions_on_deleted(db: Session, scope: Scope) -> CheckResult:
-    """Change requests still open against a poster that's already gone."""
+    """
+    Change requests still open against a poster that's already gone.
+
+    Since round 12 (2026-09-13) this state is IMPOSSIBLE by design, so any
+    hit is a real defect: a worker delete resolves its flags on the way
+    out, and a grid swap moves them onto the successor image. Between
+    rounds 11 and 12 the delete flow deliberately parked flags on deleted
+    posters, which put this check at odds with normal operation — a red
+    light on the designed path. Rows from that window read as findings
+    here until approved once by hand, which is correct: they really are
+    waiting on nothing.
+    """
     q = (
         db.query(Revision, SavedPoster)
           .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)

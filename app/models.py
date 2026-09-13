@@ -318,6 +318,15 @@ class SavedPoster(Base):
 
 # ── Revisions ────────────────────────────────────────────────────────────────
 
+# The verdict prefix stamped on a flag when the worker answers it by
+# DELETING the image (round 12, 2026-09-13). One spelling on purpose: the
+# writer in routes/worker.py and both readers in routes/admin.py (the
+# RECENT DELETIONS panel and the dashboard's pending-deletions count) all
+# build from this constant, so the record and the screens that watch for
+# it cannot drift apart. Match with:  like(DELETION_VERDICT_PREFIX + "%")
+DELETION_VERDICT_PREFIX = "auto-resolved: file deleted"
+
+
 class Revision(Base):
     """
     Admin flags a specific SavedPoster for redo. Stable through filename changes

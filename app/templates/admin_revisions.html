@@ -44,8 +44,13 @@
                   <img class="pcc-rev-thumb pcc-rev-thumb-placeholder"
                        src="/static/img/deleted-poster.svg" alt="deleted">
                 {% else %}
-                  <img class="pcc-rev-thumb"
-                       src="/admin/file/{{ sp.id }}?v={{ vbust }}" alt="" loading="lazy">
+                  {# Clickable: judging needs the full picture, and the full
+                     picture must not require a trip to Worker Images. #}
+                  <a class="thumb-link" href="/admin/file/{{ sp.id }}?v={{ vbust }}"
+                     target="_blank" rel="noopener" title="Click for full size">
+                    <img class="pcc-rev-thumb"
+                         src="/admin/file/{{ sp.id }}?v={{ vbust }}" alt="" loading="lazy">
+                  </a>
                 {% endif %}
                 <div class="pcc-rev-body">
                   <div class="pcc-rev-action mono">
@@ -72,6 +77,23 @@
               </div>
             {% endfor %}
           </div>
+          {% endif %}
+
+          {# What you are actually approving: the images the title holds
+             NOW. The flag cards above tell the story of what changed; this
+             strip is the outcome, so no trip to Worker Images is needed. #}
+          <div class="pcc-section-head">THE TITLE NOW HOLDS</div>
+          {% if blk.current %}
+          <div class="pcc-current-strip">
+            {% for cp in blk.current %}
+              <a class="pcc-current-thumb" href="/admin/file/{{ cp.id }}?v={{ cp.file_size or 0 }}"
+                 target="_blank" rel="noopener" title="{{ cp.filename }} — click for full size">
+                <img src="/admin/file/{{ cp.id }}?v={{ cp.file_size or 0 }}" alt="" loading="lazy">
+              </a>
+            {% endfor %}
+          </div>
+          {% else %}
+          <p class="muted">No live image on this title right now — everything on it was deleted.</p>
           {% endif %}
 
           <div class="pcc-actions">
@@ -110,7 +132,10 @@
                 {% if sp.deleted_at %}
                   <img class="rev-card-thumb rev-card-thumb-placeholder" src="/static/img/deleted-poster.svg" alt="deleted">
                 {% else %}
-                  <img class="rev-card-thumb" src="/admin/file/{{ sp.id }}?v={{ sp.file_size or 0 }}" alt="" loading="lazy">
+                  <a class="thumb-link" href="/admin/file/{{ sp.id }}?v={{ sp.file_size or 0 }}"
+                     target="_blank" rel="noopener" title="Click for full size">
+                    <img class="rev-card-thumb" src="/admin/file/{{ sp.id }}?v={{ sp.file_size or 0 }}" alt="" loading="lazy">
+                  </a>
                 {% endif %}
               {% endif %}
               <div class="rev-card-body">
@@ -164,7 +189,10 @@
                   {% endfor %}
                 </div>
               {% else %}
-                <img class="rev-card-thumb" src="/admin/file/{{ sp.id }}?v={{ sp.file_size or 0 }}" alt="" loading="lazy">
+                <a class="thumb-link" href="/admin/file/{{ sp.id }}?v={{ sp.file_size or 0 }}"
+                   target="_blank" rel="noopener" title="Click for full size">
+                  <img class="rev-card-thumb" src="/admin/file/{{ sp.id }}?v={{ sp.file_size or 0 }}" alt="" loading="lazy">
+                </a>
               {% endif %}
               <div class="rev-card-body">
                 <div class="rev-card-title">
@@ -212,6 +240,21 @@
                 {% else %}
                   <div class="rev-card-worker-note muted"><em>No deletion reason given.</em></div>
                 {% endif %}
+                {# Did they re-do the title? The answer belongs on this card. #}
+                {% set now_holds = deletion_current.get(mt.id, []) if mt else [] %}
+                <div class="rev-card-current">
+                  <strong>The title now holds:</strong>
+                  {% if now_holds %}
+                    {% for cp in now_holds %}
+                      <a class="rev-current-mini" href="/admin/file/{{ cp.id }}?v={{ cp.file_size or 0 }}"
+                         target="_blank" rel="noopener" title="{{ cp.filename }} — click for full size">
+                        <img src="/admin/file/{{ cp.id }}?v={{ cp.file_size or 0 }}" alt="" loading="lazy">
+                      </a>
+                    {% endfor %}
+                  {% else %}
+                    <span class="muted">nothing yet — the title went back to the pool</span>
+                  {% endif %}
+                </div>
                 <div class="rev-card-meta mono muted">deleted {{ rev.resolved_at | local_dt('%Y-%m-%d %H:%M') }}</div>
                 <div class="rev-card-actions">
                   <input type="text" placeholder="(optional for ACK; required for SEND BACK) note for the user" data-deletion-note>

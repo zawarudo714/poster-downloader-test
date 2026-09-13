@@ -45,7 +45,8 @@ from ..config import (
     SOFT_LIMIT_PER_TITLE,
 )
 from ..db import get_db
-from ..models import ActivityLog, MasterTitle, Project, Revision, SavedPoster, User
+from ..models import (ActivityLog, DELETION_VERDICT_PREFIX, MasterTitle,
+                      Project, Revision, SavedPoster, User)
 # `get_setting` IS IMPORTED HERE, AT MODULE LEVEL, AND ON PURPOSE.
 #
 # Four functions used to import it locally instead. A local import binds the
@@ -916,6 +917,7 @@ def api_search_save(
     project = resolve_project(db, t.project_id)
     soft_limit = int(project.images_per_title or SOFT_LIMIT_PER_TITLE)
     live = count_live_posters_for_master(db, t.id)
+    replaced_ids: list[int] = []
     if live >= soft_limit:
         # ── CHANGING YOUR MIND IS NORMAL, SO LET IT REPLACE ──────────────
         # Picking a better image from the same grid used to be refused with
@@ -953,6 +955,9 @@ def api_search_save(
                 log_activity(db, user=user, action="poster_replaced",
                              target_type="saved_poster", target_id=sp.id,
                              details={"master_id": t.id, "via": "search_save"})
+            # Remembered so the new row (created below) can take over any
+            # flags still pinned to the rows this swap just stood down.
+            replaced_ids = [sp.id for sp in existing]
             db.flush()
             live = count_live_posters_for_master(db, t.id)
         else:
@@ -1031,6 +1036,58 @@ def api_search_save(
     )
     db.add(sp)
     db.flush()
+
+    # ── A SWAP THAT ANSWERS A FLAG IS A REPLACEMENT ──────────────────────
+    # The swap above stands down the old row and this new row takes its
+    # place — but a flag pinned to the old row used to just sit there,
+    # open, on a picture that no longer existed. The admin's card then
+    # showed a REPLACED pill over a deleted-file placeholder while the
+    # real new image lived on a row no screen rendered (owner's find,
+    # 2026-09-13, the Toronto card). So the flag MOVES to the successor
+    # row and is submitted for approval, exactly as the paste-replacement
+    # flow does: the admin judges the image the decision is about, and
+    # the worker's card reads "your replacement is awaiting approval".
+    flag_submitted = False
+    if replaced_ids:
+        moved = (
+            db.query(Revision)
+              .filter(Revision.saved_poster_id.in_(replaced_ids),
+                      Revision.status.in_(("open", "awaiting_approval")))
+              .all()
+        )
+        for r in moved:
+            r.saved_poster_id = sp.id
+            r.status = "awaiting_approval"
+            r.submitted_at = datetime.utcnow()
+            r.worker_action = "replaced"
+            flag_submitted = True
+        # A similar-pair flag names its posters in a list; a dead id there
+        # would leave the pair half-pointing at nothing, so it is swapped
+        # for the successor too.
+        import json as _json
+        sims = (
+            db.query(Revision)
+              .filter(Revision.status.in_(("open", "awaiting_approval")),
+                      Revision.revision_type == "similar")
+              .all()
+        )
+        for r in sims:
+            try:
+                related = _json.loads(r.related_poster_ids or "[]")
+            except Exception:
+                related = []
+            changed = False
+            for old_id in replaced_ids:
+                if old_id in related:
+                    related[related.index(old_id)] = sp.id
+                    changed = True
+            if changed:
+                r.related_poster_ids = _json.dumps(related)
+                r.status = "awaiting_approval"
+                r.submitted_at = datetime.utcnow()
+                r.worker_action = "replaced"
+                flag_submitted = True
+
     log_activity(db, user=user, action="saved", target_type="saved_poster",
                  target_id=sp.id,
                  details={"via": "search", "source": image_source, "url": url})
@@ -1043,6 +1100,7 @@ def api_search_save(
         "count": new_live,
         "soft_limit": soft_limit,
         "at_limit": new_live >= soft_limit,
+        "flag_submitted": flag_submitted,
     })
 
 
@@ -1853,18 +1911,32 @@ def delete_poster(
       (a) The poster has NO active revisions. Plain deletion — soft-delete
           the row, unlink the file. No admin involvement.
       (b) The poster HAS active revisions (open or awaiting_approval), OR
-          is a participant in a similar-pair revision. We do NOT auto-
-          resolve those revisions anymore — instead each such revision is
-          set to (or stays at) `awaiting_approval` with the worker's note,
-          so admin must explicitly approve the deletion. This is a change
-          from round 9 (which auto-resolved on delete). The motivation:
-          a silent auto-resolve let workers accidentally bypass admin
-          review of intentional deletions of flagged content.
+          is a participant in a similar-pair revision. Each such revision
+          RESOLVES itself with a recorded verdict, and the record lands in
+          the admin's RECENT DELETIONS panel, which has ACKNOWLEDGE and
+          SEND BACK buttons and its own dashboard count.
+
+          The history matters here, because this flow has now swung twice:
+
+          · Round 9 auto-resolved silently — a worker could make a flagged
+            image vanish and the admin never learned whether the complaint
+            was answered or buried. Bad.
+          · Round 11 fixed that by parking the flag at awaiting_approval.
+            But the file is unlinked ABOVE, before any of this — so the
+            admin was being asked to "approve" something that had already
+            happened and could not be refused. A question with one answer
+            is a keystroke, not a decision, and the worker's screen said
+            "awaiting approval" about nothing (owner's find, 2026-09-13).
+          · Round 12 (this): resolve WITH the record. The admin still sees
+            every deletion of flagged work — the panel is the protection
+            round 11 wanted — but nobody is asked a question that has no
+            answer. Same design as skip_acked_at: store what happened,
+            not a gate that pretends to hold it.
 
     Response:
       {ok: true}                         — plain delete (case a)
-      {ok: true, submitted_for_approval: true,
-       revision_ids: [...]}              — admin approval needed (case b)
+      {ok: true, flag_closed: true,
+       revision_ids: [...]}              — flags recorded closed (case b)
     """
     sp = _load_my_poster(db, user, poster_id)
     fs_path = saved_poster_path(sp)
@@ -1887,14 +1959,16 @@ def delete_poster(
           .all()
     )
     for r in revs:
-        # Push to awaiting_approval regardless of current state. If it was
-        # already awaiting_approval (e.g. they replaced then deleted), we
-        # refresh the submitted_at and worker_note so admin sees the latest.
-        r.status = "awaiting_approval"
-        r.submitted_at = datetime.utcnow()
+        # Resolve with the record — see the docstring for why this is not
+        # awaiting_approval. The verdict below is the EXACT prefix the
+        # RECENT DELETIONS panel and the dashboard digest match on
+        # ("auto-resolved: file deleted…"), which is what puts the record
+        # in front of the admin with nothing for anyone to wait on.
+        r.status = "resolved"
+        r.resolved_by = user.username
+        r.resolved_at = datetime.utcnow()
+        r.admin_verdict = DELETION_VERDICT_PREFIX + " by worker"
         r.worker_note = (note.strip() or r.worker_note or "")
-        # Mark this revision as resolved-via-delete so admin UI can show
-        # the right action label ("Approve deletion" vs "Approve fix").
         r.worker_action = "deleted"
         submitted_revision_ids.append(r.id)
 
@@ -1916,18 +1990,20 @@ def delete_poster(
         except Exception:
             related = []
         if sp.id in related and r.id not in submitted_revision_ids:
-            r.status = "awaiting_approval"
-            r.submitted_at = datetime.utcnow()
+            # Same treatment as the direct flags above, same verdict prefix.
+            r.status = "resolved"
+            r.resolved_by = user.username
+            r.resolved_at = datetime.utcnow()
+            r.admin_verdict = DELETION_VERDICT_PREFIX + " by worker"
             r.worker_note = (note.strip() or r.worker_note or "")
             r.worker_action = "deleted"
             submitted_revision_ids.append(r.id)
 
-    # `needs_revision` on the master title — recompute counting any active
-    # revisions (open OR awaiting_approval) on ANY of the master's posters,
-    # INCLUDING the just-deleted one. We intentionally drop the
-    # `SavedPoster.deleted_at.is_(None)` filter here: now that deletes can
-    # be pending review, a soft-deleted poster with an awaiting_approval
-    # revision still counts as "flagged".
+    # `needs_revision` on the master title — recompute counting any still-
+    # active revisions (open OR awaiting_approval) on ANY of the master's
+    # posters. The flags on the poster just deleted resolved above, so they
+    # no longer count; what can still hold the title flagged is a separate
+    # open flag on one of its OTHER images.
     mt = db.query(MasterTitle).filter_by(id=sp.master_title_id).first()
     if mt:
         any_active = (
@@ -1986,7 +2062,7 @@ def delete_poster(
 
     payload = {"ok": True}
     if submitted_revision_ids:
-        payload["submitted_for_approval"] = True
+        payload["flag_closed"] = True
         payload["revision_ids"] = submitted_revision_ids
     return JSONResponse(payload)
 

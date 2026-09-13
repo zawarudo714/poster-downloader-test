@@ -56,6 +56,7 @@ from ..config import WORKSPACE_DIR
 from ..db import SessionLocal, get_db
 from ..models import (
     ActivityLog, AppSetting, ChatMessage, ChatReadState,
+    DELETION_VERDICT_PREFIX,
     ImportJob, MasterTitle, PaymentRun, ProcessedImage, Project, Revision,
     SavedPoster, UploadAccount, UploadTracking, User, UserProject,
 )
@@ -519,7 +520,7 @@ def admin_dashboard(request: Request, admin: User = Depends(require_admin), db: 
         db.query(Revision)
           .filter(
               Revision.status == "resolved",
-              Revision.admin_verdict.like("auto-resolved: %file deleted%"),
+              Revision.admin_verdict.like(DELETION_VERDICT_PREFIX + "%"),
               Revision.admin_acked_at.is_(None),
           )
           .count()
@@ -1091,10 +1092,10 @@ def master_set_status(
 
     if status == "complete":
         # Resolve all active revisions on posters of this master, INCLUDING
-        # revisions on soft-deleted posters (pending deletions count). The
-        # old deleted_at filter was a defensive guard from when delete
-        # auto-resolved; with the round-11 rework, delete leaves revisions
-        # in awaiting_approval state.
+        # revisions on soft-deleted posters. Since round 12 a worker delete
+        # resolves its own flags on the way out, so deleted posters rarely
+        # still carry an active one — but a flag left open by the DONE
+        # flow's passive path still can, and this sweep is what closes it.
         active = (
             db.query(Revision)
               .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
@@ -2507,11 +2508,14 @@ def revisions_page(
       3. OPEN — WAITING ON USER — revisions in 'open'. Admin flagged,
          worker hasn't acted. Unchanged from before.
 
-      4. RECENT MISTAKE DELETIONS — auto-resolved deletions on
-         non-flagged posters. After the round-11 rework, this section
-         only catches "worker downloaded the wrong image and deleted it"
-         cases. (Flagged-poster deletions now go through pending
-         completions or awaiting approval instead.)
+      4. RECENT DELETIONS — the record of every flagged image a worker
+         deleted. Since round 12 (2026-09-13) a delete closes its flags
+         itself and files the record here, where ACKNOWLEDGE clears it
+         and SEND BACK reopens the matter with a note. This panel is the
+         protection: the admin always SEES that a flag was answered by
+         deletion — without being asked to "approve" a file that was
+         already gone, which round 11 did and which was a keystroke, not
+         a decision.
 
       5. RESOLVED — history.
     """
@@ -2542,25 +2546,23 @@ def revisions_page(
               .order_by(Revision.created_at.asc())
               .all()
         )
-        # Activity log entries that show what the worker did since the title
-        # was last in 'pending' or 'in_progress' — additions, deletions,
-        # replacements. Used by admin to scan a diff before approving.
-        title_changes = (
-            db.query(ActivityLog)
-              .join(SavedPoster, ActivityLog.target_id == SavedPoster.id, isouter=True)
-              .filter(
-                  ActivityLog.target_type == "saved_poster",
-                  ActivityLog.action.in_(("saved", "deleted", "replaced")),
-                  SavedPoster.master_title_id == t.id,
-              )
-              .order_by(ActivityLog.created_at.desc())
-              .limit(50)
+        # WHAT THE TITLE HOLDS RIGHT NOW — the live images, thumbnails and
+        # all, so approving never means going to Worker Images to cross-
+        # check what the worker actually left behind (owner's ask,
+        # 2026-09-13). This REPLACED a per-title activity-log query that
+        # the template never rendered: fifty rows fetched per card, shown
+        # nowhere — dead weight since the page was built.
+        current_posters = (
+            db.query(SavedPoster)
+              .filter(SavedPoster.master_title_id == t.id,
+                      SavedPoster.deleted_at.is_(None))
+              .order_by(SavedPoster.id.asc())
               .all()
         )
         pending_complete_blocks.append({
             "title": t,
             "revisions": revs_for_title,
-            "changes": title_changes,
+            "current": current_posters,
         })
         pending_title_ids.add(t.id)
 
@@ -2588,10 +2590,11 @@ def revisions_page(
           .filter(Revision.status == "open")
     ), proj).order_by(Revision.created_at.desc()).all()
 
-    # ── Recent mistake-deletions (legacy round-9 round-trip path) ────────────
-    # After round 11 these only catch deletions on NON-flagged posters
-    # (worker accidentally saved wrong image and deleted it). The
-    # auto-resolve admin_verdict pattern is preserved for these.
+    # ── Recent deletions — the record of flagged images workers deleted ──
+    # Since round 12 (2026-09-13) worker deletes of flagged posters resolve
+    # themselves with this exact verdict prefix, so this panel is once
+    # again the ONE place every such deletion surfaces. Un-acknowledged
+    # rows also drive the dashboard's "pending deletions" count.
     deletion_rows = scope_titles((
         db.query(Revision, SavedPoster, MasterTitle)
           .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
@@ -2599,9 +2602,24 @@ def revisions_page(
           .filter(
               Revision.status == "resolved",
               Revision.admin_acked_at.is_(None),
-              Revision.admin_verdict.like("auto-resolved: file deleted%"),
+              Revision.admin_verdict.like(DELETION_VERDICT_PREFIX + "%"),
           )
     ), proj).order_by(Revision.resolved_at.desc()).limit(50).all()
+
+    # What each deleted-image title holds NOW, so "did they re-do it?" is
+    # answered on the card instead of on the Worker Images page. A plain
+    # dict keyed by title id; a title with nothing live shows the honest
+    # "nothing yet" line in the template.
+    deletion_current: dict[int, list] = {}
+    for _rev, _sp, _mt in deletion_rows:
+        if _mt.id not in deletion_current:
+            deletion_current[_mt.id] = (
+                db.query(SavedPoster)
+                  .filter(SavedPoster.master_title_id == _mt.id,
+                          SavedPoster.deleted_at.is_(None))
+                  .order_by(SavedPoster.id.asc())
+                  .all()
+            )
 
     # ── Resolved history ────────────────────────────────────────────────────
     resolved_rows = scope_titles((
@@ -2618,6 +2636,7 @@ def revisions_page(
             "pending_complete_blocks": pending_complete_blocks,
             "open_rows": open_rows, "awaiting_rows": awaiting_rows,
             "deletion_rows": deletion_rows,
+            "deletion_current": deletion_current,
             "resolved_rows": resolved_rows,
             "active_tab": "revisions",
         },

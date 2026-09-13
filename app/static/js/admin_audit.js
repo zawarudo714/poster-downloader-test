@@ -69,7 +69,12 @@
       return title;
     }
     if (row.target_type === 'saved_poster') {
-      return d.filename || `saved#${row.target_id}`;
+      const name = d.filename || `saved#${row.target_id}`;
+      // Where the picture came from, when the save recorded it. Old
+      // entries have no source and simply show the name alone.
+      const src = { brave: 'found on Brave', google: 'found on Google',
+                    pasted: 'pasted link' }[d.source] || '';
+      return src ? `${name} · ${src}` : name;
     }
     if (row.target_type === 'revision') {
       return `rev#${row.target_id}` + (d.poster_filename ? ` · ${d.poster_filename}` : '');

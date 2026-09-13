@@ -201,6 +201,13 @@
     return (img.versions && img.versions.length) ? img.versions : [img];
   }
 
+  // The human word for where the worker found the photograph. Empty in,
+  // empty out — an old save with no record must show nothing, not a guess.
+  function sourceWord(src) {
+    return { brave: 'found on Brave', google: 'found on Google',
+             pasted: 'pasted link' }[src] || '';
+  }
+
   // ══════════════════════════════════════════════════════════════════════
   //  KEEPING WHAT YOU DID — asked for on 2026-09-09
   // ══════════════════════════════════════════════════════════════════════
@@ -796,12 +803,16 @@
       // painted the place the worker actually found, or wandered off and
       // invented a grander building of the same type. That cannot be judged
       // from the poster alone — you have to see what it was given.
+      // Where the worker found it — 'found on Google', 'found on Brave',
+      // 'pasted link'. Empty for saves made before this was recorded, and
+      // then the caption reads exactly as it always did.
+      const foundVia = sourceWord(img.image_source);
       const source = `
         <figure class="review-img review-img-source">
           <img loading="lazy" src="${img.source_url}" alt=""
                data-zoom-open="${img.poster_id}"
                title="Click to compare side by side, full screen">
-          <figcaption><span class="muted mono">what the worker found · click to enlarge</span></figcaption>
+          <figcaption><span class="muted mono">what the worker found${foundVia ? ' · ' : ''}${foundVia ? `<span class="img-source-word">${foundVia}</span>` : ''} · click to enlarge</span></figcaption>
         </figure>`;
 
       // THE POSTER, SITTING ON ITS COLOUR.
@@ -1116,6 +1127,12 @@
     $('[data-zoom-title]').textContent = `${t.external_id ?? '–'}. ${t.title}`;
     $('[data-zoom-pos]').textContent = `${index + 1} / ${titles.length}`;
     $('[data-zoom-source]').src = img.source_url;
+    // "found on Google" beside WHAT THE WORKER FOUND; blank for old saves.
+    const zoomSrc = $('[data-zoom-imgsource]');
+    if (zoomSrc) {
+      const word = sourceWord(img.image_source);
+      zoomSrc.textContent = word ? `· ${word}` : '';
+    }
     const poster = $('[data-zoom-poster]');
     poster.src = v.can_recolor ? v.master_url : v.preview_url;
     poster.dataset.pid = v.processed_id;

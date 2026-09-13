@@ -154,7 +154,10 @@
   </div>
   <div class="review-zoom-body">
     <div class="review-zoom-cell">
-      <span class="zoom-label">WHAT THE WORKER FOUND</span>
+      {# The source word ("found on Google") rides on the same label; the
+         span stays empty for saves that predate the recording. #}
+      <span class="zoom-label">WHAT THE WORKER FOUND
+        <span class="img-source-word" data-zoom-imgsource></span></span>
       <img data-zoom-source alt="">
     </div>
     <div class="review-zoom-cell">

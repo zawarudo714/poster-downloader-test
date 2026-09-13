@@ -3041,6 +3041,49 @@ def check_noun_fallbacks_agree() -> None:
                          f"template) instead of naming one.")
 
 
+def check_saved_posters_declare_their_source() -> None:
+    """
+    Every place in app/ that CREATES a SavedPoster row must say where the
+    picture came from (image_source=...).
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY
+    ════════════════════════════════════════════════════════════════════════
+    The source word ('brave' / 'google' / 'pasted') was added 2026-09-13 so
+    the owner can see which search actually finds the pictures. Three save
+    doors were stamped by hand — and the admin-add door was nearly missed,
+    found only by grepping every constructor (rule 3c: fix the class, not
+    the instances pointed at). A FOURTH door added next month would ship
+    unstamped and its saves would silently read as "unknown" for ever, in
+    a column whose whole point is completeness from here on.
+
+    Deliberately narrow: AST-only, app/ only (dev_setup's demo seeder is
+    exempt — fake rows truthfully carry no source), and it asks one
+    question: does the constructor call pass the image_source keyword?
+    """
+    for path in sorted((ROOT / "app").rglob("*.py")):
+        rel = path.relative_to(ROOT).as_posix()
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue                # check_python_compiles owns that
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = (node.func.id if isinstance(node.func, ast.Name)
+                    else node.func.attr if isinstance(node.func, ast.Attribute)
+                    else "")
+            if name != "SavedPoster":
+                continue
+            kwargs = {k.arg for k in node.keywords}
+            if "image_source" not in kwargs:
+                fail(f"{rel}:{node.lineno} — a SavedPoster is created "
+                     f"without image_source. Every save door must say "
+                     f"where the picture came from ('brave', 'google' or "
+                     f"'pasted'), or the owner's source column quietly "
+                     f"grows holes.")
+
+
 CHECKS = [
     ("python compiles",           check_python_compiles),
     ("no undefined names",        check_undefined_names),
@@ -3079,6 +3122,8 @@ CHECKS = [
     ("every badge has a card", check_every_badge_has_a_card),
     ("workspace assets are underscored", check_workspace_assets_are_underscored),
     ("no dead niche vocabulary", check_noun_fallbacks_agree),
+    ("saved posters declare their source",
+     check_saved_posters_declare_their_source),
 ]
 
 

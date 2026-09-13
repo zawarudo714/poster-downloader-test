@@ -707,6 +707,16 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 .review-loading { color: var(--skip, #d8a24a); margin-left: 8px; font-size: 12px; }
 .review-loading[hidden] { display: none; }
 
+/* Where the worker found the picture — 'Google', 'Brave' or 'pasted'.
+   Informational, not a warning: neutral tint on the gallery pill, and a
+   quiet inline word on the review captions and the zoom label. */
+.status-pill.status-img-source {
+  background: rgba(122, 162, 247, .15);
+  color: var(--accent, #7aa2f7);
+  border: 1px solid rgba(122, 162, 247, .35);
+}
+.img-source-word { color: var(--accent, #7aa2f7); }
+
 /* The banner shown when the last SAVE AND RELEASE was cut short. One
    sentence for the whole remainder, dismissed by its own button or by the
    next completed save. Amber, not red: nothing is broken or lost. */

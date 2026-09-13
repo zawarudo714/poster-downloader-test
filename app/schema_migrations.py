@@ -59,6 +59,9 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("master_titles", "greenlit_by",      "VARCHAR(64)"),
     ("master_titles", "pipeline_status",  "VARCHAR(24)"),
     ("saved_posters", "pipeline_status",  "VARCHAR(24)"),
+    # Which search found the picture — see the comment in models.py.
+    # Nullable: rows from before this column truthfully read as "unknown".
+    ("saved_posters", "image_source",     "VARCHAR(16)"),
     ("saved_posters", "process_attempts", "INTEGER NOT NULL DEFAULT 0"),
     ("saved_posters", "process_error",    "TEXT"),
     ("saved_posters", "claimed_at",       "DATETIME"),

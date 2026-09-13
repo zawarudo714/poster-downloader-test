@@ -296,6 +296,26 @@ around 22:00 could kill an earnings read halfway.
 
 ---
 
+## 52. THE SCREENS SAY WHICH SEARCH FOUND EACH IMAGE — v195
+
+Do one save each way, then look for the word in four places:
+
+- Save one image from the in-page grid (SAVE SELECTED), one from the phone
+  add-on (SEND TO SITE on Google), and one by pasting a link.
+- Activity Log: the three "saved" lines should read "found on Brave",
+  "found on Google" and "pasted link" beside the filename.
+- Review Posters gallery: each card should carry a small blue pill —
+  Brave, Google or pasted. Click a card: the lightbox line at the bottom
+  should say the same.
+- Approve Artwork (after the three are painted): the caption under "what
+  the worker found" should carry the word, on the card AND in the zoom
+  compare view.
+- Images saved BEFORE this deploy show no word anywhere. That is correct —
+  the record simply does not exist for them, and a blank is honest where a
+  guess is not.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

@@ -2050,6 +2050,10 @@ function wireSearch(box, title) {
         const send = async (replace) => {
           const fd = new FormData();
           fd.append('url', url);
+          // Announce the door: this save came from the in-page Brave grid.
+          // The phone add-on posts to the same endpoint WITHOUT this field,
+          // which is how the server tells the two searches apart.
+          fd.append('source', 'brave');
           if (replace) fd.append('replace', '1');
           const r = await fetch(`/api/search_save/${title.id}`,
                                 { method: 'POST', body: fd });

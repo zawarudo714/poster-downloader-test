@@ -3478,6 +3478,10 @@ def api_review_queue(
             **_version(processed),
             "poster_id": poster.id,
             "source_url": f"/admin/file/{poster.id}",
+            # Which search found the photograph — 'brave', 'google' or
+            # 'pasted'. Empty for saves that predate the column, and the
+            # screen then says nothing rather than guessing.
+            "image_source": poster.image_source or "",
             "versions": versions,
         })
 

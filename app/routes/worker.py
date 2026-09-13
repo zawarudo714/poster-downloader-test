@@ -893,6 +893,7 @@ def api_search_save(
     master_id: int,
     url: str = Form(...),
     replace: int = Form(0),
+    source: str = Form(""),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -1007,6 +1008,13 @@ def api_search_save(
             status_code=409,
         )
 
+    # WHICH SEARCH FOUND IT. The site's own grid announces itself
+    # ('brave'); the only other caller of this endpoint is the phone
+    # add-on, which ships separately and says nothing — so silence at this
+    # door means Google. If a third client ever calls it, give that client
+    # its own word rather than letting it inherit 'google'.
+    image_source = "brave" if source == "brave" else "google"
+
     sp = SavedPoster(
         master_title_id    = t.id,
         user_id            = user.id,
@@ -1019,11 +1027,13 @@ def api_search_save(
         file_size          = written,
         image_width        = img_w,
         image_height       = img_h,
+        image_source       = image_source,
     )
     db.add(sp)
     db.flush()
     log_activity(db, user=user, action="saved", target_type="saved_poster",
-                 target_id=sp.id, details={"via": "search", "url": url})
+                 target_id=sp.id,
+                 details={"via": "search", "source": image_source, "url": url})
     db.commit()
 
     new_live = count_live_posters_for_master(db, t.id)
@@ -1785,6 +1795,10 @@ def save_image(
         low_quality_url    = 1 if small else 0,
         image_width        = img_w,
         image_height       = img_h,
+        # A hand-pasted address. Whether the worker copied it from Google,
+        # Brave or anywhere else is not knowable from here, so the honest
+        # word is "pasted", not a guess at where the copy happened.
+        image_source       = "pasted",
         # Deferred: content_hash on a follow-up worker — keep save_image fast.
     )
     db.add(sp)
@@ -1795,7 +1809,7 @@ def save_image(
         details={
             "master_id": t.id, "filename": target_name,
             "title_folder": t.title_folder_path, "url": src_url,
-            "size": written,
+            "size": written, "source": "pasted",
         },
     )
     db.commit()

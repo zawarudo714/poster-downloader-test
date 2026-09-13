@@ -263,6 +263,18 @@
       pill.textContent = 'LQ URL bypassed';
       pillsHost.appendChild(pill);
     }
+    // Where the worker found the picture. Old saves carry no source and
+    // show no pill — absence, not a guess.
+    if (p.image_source) {
+      const pill = document.createElement('span');
+      pill.className = 'status-pill status-img-source';
+      pill.textContent = { brave: 'Brave', google: 'Google',
+                           pasted: 'pasted' }[p.image_source] || p.image_source;
+      pill.title = { brave: 'Found with the in-page Brave search',
+                     google: 'Sent from Google by the phone add-on',
+                     pasted: 'Pasted as a link by hand' }[p.image_source] || '';
+      pillsHost.appendChild(pill);
+    }
     if (p.added_by) {
       const pill = document.createElement('span');
       pill.className = 'status-pill status-admin-added';
@@ -462,8 +474,10 @@
     lbImg.alt = p.filename;
     const dims = (p.image_width && p.image_height) ? ` · ${p.image_width}×${p.image_height}` : '';
     const lq   = p.low_quality_url ? ' · ⚠ LQ-URL bypassed' : '';
+    const from = { brave: ' · found on Brave', google: ' · found on Google',
+                   pasted: ' · pasted link' }[p.image_source] || '';
     lbMeta.textContent =
-      `${t.title}${t.year ? ` (${t.year})` : ''} — ${p.filename}${dims}${lq}`;
+      `${t.title}${t.year ? ` (${t.year})` : ''} — ${p.filename}${dims}${lq}${from}`;
     if (p.flagged) {
       lbFlag.hidden = false;
       const pill = lbFlag.querySelector('.lb-status-pill');

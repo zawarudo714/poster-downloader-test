@@ -256,6 +256,11 @@ class SavedPoster(Base):
     low_quality_url    = Column(Integer, nullable=False, default=0)  # 1 = LQ warning was bypassed
     image_width        = Column(Integer, nullable=True)              # actual pixel width (sub-800 highlight)
     image_height       = Column(Integer, nullable=True)
+    # WHICH SEARCH FOUND THE PICTURE: 'brave' (the in-page grid), 'google'
+    # (the phone add-on's SEND TO SITE) or 'pasted' (the paste-a-URL box).
+    # NULL means the save predates this column — an absence, never a word,
+    # so old rows show nothing rather than a wrong claim.
+    image_source       = Column(String(16), nullable=True)
     # Worker's reason if this poster was deleted from a revision context.
     delete_note        = Column(Text, nullable=True)
     # If this poster was added by an admin (not the worker), stores the

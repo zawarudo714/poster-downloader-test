@@ -1641,6 +1641,9 @@ def api_browse(
             "low_quality_url": bool(sp.low_quality_url),
             "image_width":  sp.image_width,
             "image_height": sp.image_height,
+            # 'brave' / 'google' / 'pasted', or empty for saves that
+            # predate the column — the screen then says nothing.
+            "image_source": sp.image_source or "",
             "added_by":     sp.added_by or None,
             "flagged": rev is not None,
             "revision_id": rev.id if rev else None,
@@ -1980,6 +1983,9 @@ def admin_add_poster(
         low_quality_url    = 0,
         image_width        = img_w,
         image_height       = img_h,
+        # The admin pasted this address by hand; where the copy came from
+        # is unknowable here, same as the worker's paste box.
+        image_source       = "pasted",
         added_by           = admin.username,
     )
     db.add(sp)

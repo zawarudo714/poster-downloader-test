@@ -878,7 +878,11 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 .rev-flagged { font-size: 11px; color: var(--subtext); margin-top: 4px; }
 .rev-actions { display: flex; gap: 6px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
 .rev-thumb {
-  width: 60px; height: 90px; object-fit: cover;
+  /* Was a 60x90 portrait crop — a movie-poster shape. Travel photos are
+     mostly landscape and were cropped to slivers; now the whole image
+     fits in a landscape box, whatever its shape (2026-09-13 sweep). */
+  width: 96px; height: 72px; object-fit: contain;
+  background: #0008;
   border: 1px solid var(--border); border-radius: 2px;
 }
 .rev-thumb-placeholder {
@@ -2879,8 +2883,10 @@ html.theme-light .env-banner-name {
 }
 .catalog-poster-img {
   width: 100%;
-  aspect-ratio: 2/3;
-  object-fit: cover;
+  /* 2/3 portrait crop was the movie shape; 4/3 with the whole image
+     shown suits photographs of places (2026-09-13 sweep). */
+  aspect-ratio: 4/3;
+  object-fit: contain;
   border-radius: 3px;
   background: var(--card);
 }
@@ -3661,9 +3667,10 @@ body:has(#ib-bulk-bar:not([hidden])) { padding-bottom: 88px; }
 }
 .peek-rev:last-child { border-bottom: none; }
 .peek-rev-thumb {
-  width: 60px;
-  height: 90px;
-  object-fit: cover;
+  /* Same 2026-09-13 sweep as .rev-thumb: landscape box, whole image. */
+  width: 96px;
+  height: 72px;
+  object-fit: contain;
   border-radius: 3px;
   flex-shrink: 0;
   background: #111;
@@ -4655,7 +4662,9 @@ label.inline-check {
 /* Style reference preview on the GPT project's Pipeline page. */
 .gpt-style-row { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
 .gpt-style-img {
-  width: 160px; height: 160px; object-fit: cover;
+  /* contain, not cover: a preview that crops the reference misrepresents
+     the very file it exists to show (2026-09-13 sweep). */
+  width: 160px; height: 160px; object-fit: contain;
   border: 1px solid var(--border); border-radius: 4px; background: var(--bg);
 }
 

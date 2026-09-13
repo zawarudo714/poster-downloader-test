@@ -1,23 +1,26 @@
 # Not yet deployed
 
-**v197 — Approve Artwork: a remembered queue order, and coming back walks
-straight back in, zoom and all.**
+**v198 — Worker Images gets the same memory as Approve Artwork, plus a
+sweep of the "shows one thing, means another" family.**
 
-- **Order picker on the review start screen** — oldest saved first (the
-  old behaviour, still the default), freshest painted first, or by sheet
-  number. The choice is remembered in the browser and applies to every
-  door: the big button, a single day, a range, the reruns. Batches take
-  the first N of the chosen order.
-- **An interrupted session resumes by itself.** If you leave the page
-  mid-review without pressing CLOSE, opening Approve Artwork again goes
-  straight back in: same door, same design, and the zoom compare view
-  reopened if it was open. Pressing CLOSE, or finishing a save, clears
-  that — after either, the page opens on the picker as it always did.
-  That split is what keeps the memory honest: it only repeats a sitting
-  YOU left unfinished, never a state something else put you in.
+- **Worker Images order picker, remembered:** by sheet number (default),
+  newest saved first, or flagged first. This also FIXES a quiet ordering
+  fault: the server sorts folder names as text, so title "10." came
+  before "2." — the numeric sort now shows the sheet order anyone would
+  expect.
+- **Worker Images walks back in:** leave the page with the enlarged view
+  open, and the next visit reopens on that exact image. Close the
+  enlarged view on purpose, and the next visit opens the plain gallery.
+  (Worker, date and position were already remembered; the enlarged view
+  now is too.)
+- **The crop sweep** — four more places showed travel photos through a
+  movie-poster-shaped crop, same defect as the Changes Requested cards:
+  the worker's flag-card thumbnail, the Peek page's flag thumbnail, the
+  worker catalogue's saved-image thumbnail, and the style-reference
+  preview (which cropped the very file it exists to show). All four now
+  show the whole image.
 
-Files: routes/pipeline_admin.py, admin_review_images.js,
-admin_review_images.html, config.py.
+Files: admin.js, admin_image_browser.html, style.css, config.py.
 The node was NOT changed — no worker_service copy needed.
 
 Whoever changes code writes here what is waiting and why; the deploy tool

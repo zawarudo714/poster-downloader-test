@@ -373,6 +373,24 @@ Also in v196, the full back-and-forth on Changes Requested:
 
 ---
 
+## 55. WORKER IMAGES: ORDER PICKER, WALK-BACK-IN, AND NO MORE CROPPED
+## THUMBNAILS — v198
+
+- Worker Images now has an "order" dropdown: by sheet number / newest
+  saved first / flagged first. The numbers must come in real numeric
+  order (2 before 10 — before this fix the text sort put 10 first).
+  Reload: the dropdown keeps your pick.
+- Click an image so the enlarged view opens, then leave the page. Coming
+  back to Worker Images must reopen that same image enlarged. Close the
+  enlarged view with ✕ first instead, and coming back shows the plain
+  gallery.
+- Thumbnails across the app now show the WHOLE photo instead of a
+  portrait crop: the worker's flag card, the Peek page flags, the
+  worker's own catalogue list, and the style-reference preview on the
+  Pipeline page. A landscape photo must be letterboxed, never cropped.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

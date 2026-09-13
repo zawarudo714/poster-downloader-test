@@ -67,6 +67,16 @@
         <button class="btn btn-ghost" id="ib-next-title">NEXT TITLE ›</button>
         <span class="muted">Use ← / → keys</span>
         <span class="gallery-controls-spacer"></span>
+        {# How this day's titles are ordered. The choice is remembered. #}
+        <label class="muted mono" style="display:flex; align-items:center; gap:6px">
+          order
+          <select id="ib-sort"
+                  title="How this day's titles are ordered. Your choice is remembered.">
+            <option value="number">by sheet number</option>
+            <option value="newest">newest saved first</option>
+            <option value="flagged">flagged first</option>
+          </select>
+        </label>
         <button class="btn btn-ghost" id="ib-density-toggle"
                 data-tooltip="Switch between 1-column and 2-column title layout. Preference is saved locally.">⊞ 1-UP</button>
         <span class="muted small ib-help">Tick 2 or more to mark them similar — the action bar appears at the bottom.</span>

@@ -148,6 +148,11 @@
   let titles = [];
   let titleIdx = 0;
   let currentLightbox = null;
+  // Which poster the lightbox is showing, for the resume memory — 0 when
+  // it is closed. Written into the saved state on every open and close,
+  // so leaving mid-look reopens exactly here, while a deliberate close
+  // is remembered as closed.
+  let lbOpenPoster = 0;
   // Multi-select state for "mark similar". Set of poster IDs. Selection
   // is single-title — moving between titles prompts to clear.
   const selected = new Set();
@@ -172,12 +177,59 @@
     // The project decides its own quality threshold; 0 means "don't warn".
     if (typeof data.min_width === 'number') MIN_WIDTH = data.min_width;
     titles = data.titles || [];
+    sortTitles();
     // Restore title index from URL if available and valid, else 0.
     titleIdx = (restoredIdx > 0 && restoredIdx < titles.length) ? restoredIdx : 0;
     clearSelection();
     $('ib-summary').textContent = `${data.title_count} title(s) · ${data.poster_count} ${data.poster_count === 1 ? PD.noun : PD.nouns} total`;
     renderGallery();
     saveStateToUrl();
+    // Resume into the lightbox the last visit left open. One-shot, and
+    // self-healing: an image that was released or deleted since is simply
+    // not found, and the page stays on the normal gallery.
+    if (pendingLightbox) {
+      const pid = pendingLightbox;
+      pendingLightbox = 0;
+      for (let i = 0; i < titles.length; i++) {
+        const p = (titles[i].posters || []).find((x) => x.poster_id === pid);
+        if (p) {
+          titleIdx = i;
+          renderGallery();
+          openLightbox(titles[i], p);
+          break;
+        }
+      }
+    }
+  }
+
+  // ── HOW THE DAY'S TITLES ARE ORDERED — the admin's choice, remembered.
+  // 'number' is the default and it FIXES a quiet fault: the server sorts
+  // by folder NAME, and as text "10. Foo" comes before "2. Bar", so the
+  // sheet order looked shuffled (found 2026-09-13 while adding this).
+  // Sorting numerically here is what anyone reading the numbers expects.
+  const BROWSE_SORT_KEY = 'pd-browse-sort';
+
+  function currentBrowseSort() {
+    try {
+      const v = localStorage.getItem(BROWSE_SORT_KEY) || 'number';
+      return ['number', 'newest', 'flagged'].includes(v) ? v : 'number';
+    } catch (e) { return 'number'; }
+  }
+
+  function sortTitles() {
+    const numOf = (t) => (t.external_id == null ? Infinity : Number(t.external_id));
+    const newestOf = (t) => Math.max(0, ...(t.posters || []).map((p) => p.poster_id || 0));
+    const mode = currentBrowseSort();
+    if (mode === 'newest') {
+      // Row ids only ever grow, so the biggest id is the latest save.
+      titles.sort((a, b) => newestOf(b) - newestOf(a));
+    } else if (mode === 'flagged') {
+      titles.sort((a, b) =>
+        ((b.needs_revision ? 1 : 0) - (a.needs_revision ? 1 : 0))
+        || (numOf(a) - numOf(b)));
+    } else {
+      titles.sort((a, b) => numOf(a) - numOf(b));
+    }
   }
 
   function renderGallery() {
@@ -499,11 +551,18 @@
     }
     lbComment.value = '';
     lightbox.hidden = false;
+    // Remembered open, so an interrupted visit reopens right here.
+    lbOpenPoster = p.poster_id;
+    saveStateToUrl();
   }
 
   function closeLightbox() {
     lightbox.hidden = true;
     currentLightbox = null;
+    // A deliberate close is remembered as closed — the next visit opens
+    // the plain gallery, not a lightbox nobody asked for.
+    lbOpenPoster = 0;
+    saveStateToUrl();
   }
 
   document.querySelectorAll('[data-lightbox-close]').forEach((el) => {
@@ -575,6 +634,9 @@
         worker: $('ib-worker').value,
         date: dateInput.value,
         idx: titleIdx,
+        // Which poster the lightbox is on, or 0 for closed — see
+        // lbOpenPoster. This is what "walk back in where I was" reads.
+        lb: lbOpenPoster,
       }));
     } catch (e) {}
   }
@@ -596,6 +658,30 @@
       return (saved && saved.idx) || 0;
     } catch (e) { return 0; }
   })();
+
+  // The lightbox the last visit left open (poster id, 0 = none). Consumed
+  // once by the first loadList; a poster that no longer exists is simply
+  // not found, and nothing opens.
+  let pendingLightbox = (function () {
+    try {
+      const saved = JSON.parse(localStorage.getItem(BROWSE_STATE_KEY) || 'null');
+      return (saved && saved.lb) || 0;
+    } catch (e) { return 0; }
+  })();
+
+  // The order dropdown: reflect the remembered choice, re-sort on change.
+  const sortSel = $('ib-sort');
+  if (sortSel) {
+    sortSel.value = currentBrowseSort();
+    sortSel.addEventListener('change', () => {
+      try { localStorage.setItem(BROWSE_SORT_KEY, sortSel.value); }
+      catch (e) { /* a blocked store must never break the screen */ }
+      sortTitles();
+      titleIdx = 0;
+      renderGallery();
+      saveStateToUrl();
+    });
+  }
 
   // ── Date navigation (prev/next + calendar modal) ────────────────────────
 

@@ -110,6 +110,24 @@ _PERMANENT_MARKERS = (
 )
 
 _CATEGORY_RE = re.compile(r"safety_violations\s*=\s*\[([^\]]*)\]", re.I)
+_STAGE_RE = re.compile(r'"moderation_stage"\s*:\s*"(input|output)"', re.I)
+
+
+def extract_moderation_stage(body: str) -> str:
+    """
+    WHERE the safety filter refused, read out of the stored error.
+
+    'input'  — the worker's PHOTO tripped the filter. The same photo trips
+               it every time, so repainting repeats the refusal; the fix
+               is a different photo.
+    'output' — the model's OWN painting tripped it. A repaint is a fresh
+               roll of the dice and can pass — observed 2026-09-14: the
+               same source painted cleanly once, and its RERUN was refused
+               at output.
+    ''       — the message named no stage (older refusals, other shapes).
+    """
+    m = _STAGE_RE.search(body or "")
+    return m.group(1).lower() if m else ""
 
 
 def extract_categories(body: str) -> list[str]:

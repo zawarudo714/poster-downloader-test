@@ -1947,7 +1947,10 @@
     // the worker is already PAID by the time anything reaches these
     // lists, so nothing ever goes back. The admin replaces the photo
     // himself (Worker Images → paste a URL) or retires the image.
-    rejected:      ['unusable'],
+    // 'retry_rejected' added 2026-09-14 at the owner's word: an OUTPUT-
+    // stage refusal is the model's own painting tripping the filter, and
+    // a repaint often passes — he decides how many tries are enough.
+    rejected:      ['retry_rejected', 'unusable'],
     process_failed:['retry_process', 'unusable'],
     config_blocked:['retry_process_all'],
     title_held:    ['retitle'],
@@ -1961,6 +1964,7 @@
 
   const ACTION_LABEL = {
     retry_process:      'RETRY',
+    retry_rejected:     'SEND BACK TO PAINTING',
     retry_process_all:  'RETRY ALL AFFECTED',
     retry_upload:       'RETRY',
     unusable:           'MARK UNUSABLE',
@@ -2138,9 +2142,13 @@
           <td><input type="checkbox" data-attn-pick="${i.poster_id}" data-attn-kind="poster"></td>
           <td>${esc(i.title)}</td>
           <td class="mono">${esc(i.filename || '')}</td>
-          <td class="mono">${i.attempts == null ? '' : i.attempts}</td>
+          <td class="mono">${i.attempts == null ? ''
+            : (i.attempts >= 999 ? 'refused' : i.attempts)}</td>
           <td class="mono pipe-error-cell">
-            ${(i.categories && i.categories.length)
+            ${i.stage ? `<span class="status-pill ${i.stage === 'output' ? '' : 'status-error'}"
+              title="${i.stage === 'output'
+                ? 'The model’s own painting tripped the filter — a repaint rolls fresh dice and often passes.'
+                : 'The photo itself tripped the filter — repainting the same photo repeats the refusal.'}">refused at ${esc(i.stage)}</span> ` : ''}${(i.categories && i.categories.length)
               ? i.categories.map((c) => `<span class="status-pill status-error">${esc(c)}</span>`).join(' ') + ' '
               : ''}${esc(i.error || '')}</td>
         </tr>`).join('')}
@@ -2234,6 +2242,16 @@
         const d = await postJSON(API + '/failures/retry',
                                  { kind: 'processing', poster_ids: posters });
         toast(`Requeued ${d.requeued}.`);
+      } else if (action === 'retry_rejected') {
+        // Same requeue as an ordinary retry — the honesty is in the
+        // confirm: a repaint costs a generation and may be refused again.
+        if (!confirm(`Send ${posters.length} image(s) back to painting?\n\n`
+                   + `Each repaint costs one generation, and the safety `
+                   + `filter may refuse it again — you decide how many `
+                   + `tries are enough before MARK UNUSABLE.`)) return;
+        const d = await postJSON(API + '/failures/retry',
+                                 { kind: 'processing', poster_ids: posters });
+        toast(`Sent ${d.requeued} back to painting.`);
       } else if (action === 'retry_upload') {
         const d = await postJSON(API + '/failures/retry',
                                  { kind: 'upload', tracking_ids: trackings });

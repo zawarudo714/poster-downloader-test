@@ -1671,6 +1671,12 @@ def api_retry_failures(
             title = db.query(MasterTitle).filter_by(id=poster.master_title_id).first()
             if title:
                 P.recompute_title_status(db, title)
+        # This branch used to return without a log line, while the upload
+        # branch below has always written one — a state change with no
+        # record (found 2026-09-14 while adding the repaint button).
+        log_activity(db, user=admin, action="pipeline_retry", target_type="pipeline",
+                     details={"kind": "processing", "count": len(posters),
+                              "poster_ids": poster_ids})
         db.commit()
         return JSONResponse({"ok": True, "requeued": len(posters)})
 
@@ -2689,7 +2695,7 @@ def api_attention(
     )
     rejected_count = rejected_q.count()
     if rejected_count:
-        from ..gpt_images import extract_categories
+        from ..gpt_images import extract_categories, extract_moderation_stage
         items = []
         for poster, t in rejected_q.order_by(SavedPoster.id.desc()).limit(limit).all():
             items.append({
@@ -2697,16 +2703,26 @@ def api_attention(
                 "filename": poster.filename,
                 "error": poster.process_error,
                 "categories": extract_categories(poster.process_error or ""),
+                # WHERE it was refused decides whether a repaint can work —
+                # see extract_moderation_stage for the two cases.
+                "stage": extract_moderation_stage(poster.process_error or ""),
                 "attempts": poster.process_attempts,
             })
         findings.append(_attention_finding(
             "rejected",
             "Refused by the image model",
-            "The source image tripped a content rule. Retrying spends again "
-            "and is refused again unless the SOURCE changes — so the real "
-            "choices are send it back to a worker for a different photo, or "
-            "retire it.",
-            "Replace the photo yourself (Worker Images → paste a new URL on the title), or MARK UNUSABLE. Nothing goes back to the worker — they were paid when they saved it.",
+            "The safety filter refused this, and WHERE it refused decides "
+            "whether trying again can work. 'refused at output' means the "
+            "model's OWN painting tripped the filter — repainting rolls "
+            "fresh dice and often passes. 'refused at input' means the "
+            "worker's photo itself tripped it — the same photo is refused "
+            "every time, so only a different photo fixes it.",
+            "SEND BACK TO PAINTING repaints the ticked rows — each try "
+            "costs one generation, and you decide how many tries are "
+            "enough. MARK UNUSABLE retires them. For an 'input' refusal, "
+            "replace the photo yourself (Worker Images → paste a new URL "
+            "on the title). Nothing goes back to the worker — they were "
+            "paid when they saved it.",
             items=items,
             note=(f"Showing {len(items)} of {rejected_count}." if rejected_count > len(items) else ""),
         ))

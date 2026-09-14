@@ -391,6 +391,22 @@ Also in v196, the full back-and-forth on Changes Requested:
 
 ---
 
+## 56. A REFUSED PAINTING CAN BE SENT BACK TO PAINTING — v199
+
+- Open Pipeline → NEEDS ATTENTION. The San Francisco row should now
+  carry a "refused at output" pill (hover it for the explanation), say
+  "refused" instead of "999" under TRIES, and offer SEND BACK TO
+  PAINTING next to MARK UNUSABLE.
+- Tick it and press SEND BACK TO PAINTING. After the confirm, the row
+  leaves the list and the painter picks it up on its next pass — watch
+  it arrive in Approve Artwork if the repaint passes, or return to this
+  panel if the filter refuses again. Repeat as many times as you deem
+  worth the cost; MARK UNUSABLE when done trying.
+- The Activity Log should show a "pipeline retry" line for the send-back
+  (this was silently unlogged before).
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

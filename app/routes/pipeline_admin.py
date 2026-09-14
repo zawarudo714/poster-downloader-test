@@ -4212,6 +4212,36 @@ def api_review_heal(
         healed = _Image.fromarray(
             _cv2.inpaint(arr, mask, 3, _cv2.INPAINT_TELEA), "RGB")
 
+    row, label = _store_variant_row(db, admin=admin, project=project,
+                                    title=title, poster=poster,
+                                    processed=processed, image=healed,
+                                    tool="healed",
+                                    detail={"strokes": len(strokes)})
+    db.commit()
+    return JSONResponse({"ok": True, "label": label, "processed_id": row.id})
+
+
+def _store_variant_row(db, *, admin, project, title, poster, processed,
+                       image, tool, detail):
+    """
+    File and record a FREE edited derivative of a generation — the shared
+    tail of the heal brush and the Photopea save-back.
+
+    The rule for what the edit BECOMES: if the parent has a transparent
+    master, the edit is the new MASTER whatever its mode — an editor that
+    flattened the picture still hands back the thing the print file is
+    built from, so a flattened edit becomes a fully opaque master rather
+    than a small "print file" that would upload at editing size. A parent
+    with no master (an opaque generation) gets its full-size file replaced
+    under the lettered name instead.
+
+    Returns (row, label). Commits nothing — the caller owns the commit.
+    """
+    from ..imagefetch import flatten_onto, make_preview, DEFAULT_BACKGROUND
+    from ..storage_remote import StorageError, write_bytes
+    from ..pipeline import storage_path_for
+    from ..config import WORKSPACE_DIR
+
     # ── The letter: next unused in this attempt's family ────────────────
     siblings = (db.query(ProcessedImage.variant)
                   .filter(ProcessedImage.saved_poster_id == poster.id,
@@ -4222,7 +4252,7 @@ def api_review_heal(
     while letter in used:
         letter = chr(ord(letter) + 1)
     if letter > "z":
-        raise HTTPException(400, "This generation has been healed 25 times — "
+        raise HTTPException(400, "This generation has been edited 25 times — "
                                  "rerun it instead.")
 
     # ── Files: the family's deterministic paths, plus the letter ────────
@@ -4240,37 +4270,40 @@ def api_review_heal(
               or str(P.get_setting(db, "gpt_background_color", project=project)
                      or DEFAULT_BACKGROUND))
 
-    from ..config import WORKSPACE_DIR
+    as_master = bool(processed.master_path)
+    if as_master and image.mode != "RGBA":
+        image = image.convert("RGBA")
+
     tmp_dir = WORKSPACE_DIR / "_gpt_tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
-    healed_tmp = tmp_dir / f"heal_{processed.id}_{letter}.png"
-    flat_tmp = tmp_dir / f"heal_{processed.id}_{letter}_flat.png"
-    prev_tmp = tmp_dir / f"heal_{processed.id}_{letter}_prev.jpg"
-    healed_size = 0
+    edit_tmp = tmp_dir / f"variant_{processed.id}_{letter}.png"
+    flat_tmp = tmp_dir / f"variant_{processed.id}_{letter}_flat.png"
+    prev_tmp = tmp_dir / f"variant_{processed.id}_{letter}_prev.jpg"
+    stored_size = 0
     try:
-        healed.save(healed_tmp, "PNG")
-        healed_size = healed_tmp.stat().st_size
+        image.save(edit_tmp, "PNG")
+        stored_size = edit_tmp.stat().st_size
         master_rel = None
         storage_rel = ""
-        if had_alpha:
+        if as_master:
             # Same deferred shape as generation: the print file is built at
-            # approval, from this healed master, with colour and signature.
+            # approval, from this master, with colour and signature.
             master_rel = f"{stem}{letter}_master.png"
-            flatten_onto(healed_tmp, flat_tmp, colour)
+            flatten_onto(edit_tmp, flat_tmp, colour)
             make_preview(flat_tmp, prev_tmp)
-            write_bytes(db, master_rel, healed_tmp.read_bytes(), project=project)
+            write_bytes(db, master_rel, edit_tmp.read_bytes(), project=project)
         else:
-            # An opaque parent has no master; the healed full-size file IS
+            # An opaque parent has no master; the edited full-size file IS
             # the picture, saved under the family path with its letter.
             storage_rel = f"{stem}{letter}.{ext}"
-            healed.convert("RGB").save(flat_tmp, "PNG")
+            image.convert("RGB").save(flat_tmp, "PNG")
             make_preview(flat_tmp, prev_tmp)
             write_bytes(db, storage_rel, flat_tmp.read_bytes(), project=project)
         write_bytes(db, preview_rel, prev_tmp.read_bytes(), project=project)
     except StorageError as e:
-        raise HTTPException(502, f"Healed, but could not store the result: {e}")
+        raise HTTPException(502, f"Edited, but could not store the result: {e}")
     finally:
-        healed_tmp.unlink(missing_ok=True)
+        edit_tmp.unlink(missing_ok=True)
         flat_tmp.unlink(missing_ok=True)
         prev_tmp.unlink(missing_ok=True)
 
@@ -4280,15 +4313,16 @@ def api_review_heal(
         ProcessedImage.is_current == 1,
     ).update({ProcessedImage.is_current: 0}, synchronize_session=False)
 
-    healed_row = ProcessedImage(
+    label = f"v{processed.attempt}{letter}"
+    row = ProcessedImage(
         saved_poster_id=poster.id,
         project_id=processed.project_id,
         storage_path=storage_rel,
         filename=filename,
-        file_size=healed_size,
+        file_size=stored_size,
         output_width=processed.output_width,
         output_height=processed.output_height,
-        script_version=f"healed from #{processed.id}",
+        script_version=f"{tool} from #{processed.id}",
         processed_by="server",
         is_current=1,
         attempt=processed.attempt,
@@ -4297,19 +4331,174 @@ def api_review_heal(
         preview_path=preview_rel,
         review_status="pending" if processed.review_status else None,
         master_path=master_rel,
-        background_color=(colour if had_alpha else None),
+        background_color=(colour if as_master else None),
         signature_json=processed.signature_json,
     )
-    db.add(healed_row)
+    db.add(row)
     db.flush()
 
-    log_activity(db, user=admin, action="healed", target_type="processed_image",
-                 target_id=healed_row.id,
-                 details={"from": processed.id, "strokes": len(strokes),
-                          "label": f"v{processed.attempt}{letter}"})
+    log_activity(db, user=admin, action=tool, target_type="processed_image",
+                 target_id=row.id,
+                 details={"from": processed.id, "label": label, **(detail or {})})
+    return row, label
+
+
+def _variant_parent_checked(request, admin, db, processed_id):
+    """
+    Load a generation row and prove it belongs to the admin's project —
+    the shared front door of every variant endpoint (heal, edited, full,
+    delete), reached by an id from the page.
+    """
+    processed = db.query(ProcessedImage).filter_by(id=processed_id).first()
+    if processed is None:
+        raise HTTPException(404, "No such image.")
+    project = _project(request, admin, db)
+    poster = db.query(SavedPoster).filter_by(id=processed.saved_poster_id).first()
+    title = (db.query(MasterTitle).filter_by(id=poster.master_title_id).first()
+             if poster else None)
+    if title is None or P.project_for_title(db, title) is None \
+            or P.project_for_title(db, title).id != project.id:
+        raise HTTPException(404, "That image is not in this project.")
+    return processed, poster, title, project
+
+
+@router.get("/review/full/{processed_id}")
+def serve_review_full(
+    processed_id: int,
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Stream a generation's FULL-SIZE opaque file — for the editor overlay.
+
+    Only needed when a version has no transparent master (those go out
+    through /review/master?full=1): editing the web-sized preview would
+    hand a small picture back and quietly downgrade the print.
+    """
+    from ..storage_remote import StorageError, read_bytes
+
+    processed, _poster, _title, project = \
+        _variant_parent_checked(request, admin, db, processed_id)
+    if not processed.storage_path:
+        raise HTTPException(404, "This version has no full-size file — "
+                                 "use its transparent master instead.")
+    try:
+        data = read_bytes(db, processed.storage_path, project=project)
+    except StorageError as e:
+        raise HTTPException(502, f"Could not fetch the file: {e}")
+    media = "image/png" if processed.storage_path.lower().endswith(".png") \
+        else "image/jpeg"
+    from fastapi.responses import Response
+    return Response(content=data, media_type=media)
+
+
+@router.post("/api/review/edited")
+async def api_review_edited(
+    request: Request,
+    processed_id: int = Form(...),
+    file: UploadFile = File(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    File a picture edited in the Photopea overlay as a lettered version.
+
+    Same rails as the heal brush: v1 edited becomes v1b, free, sorted in
+    its family, losing files cleaned by the ordinary approval sweep. The
+    editor is fluent-Photoshop territory — pen-tool selections, clone
+    stamp — so this door accepts whatever PNG it hands back and applies
+    the master-or-opaque rule in _store_variant_row.
+    """
+    from PIL import Image as _Image
+    import io as _io
+
+    processed, poster, title, project = \
+        _variant_parent_checked(request, admin, db, processed_id)
+    if (processed.review_status or "") == "discarded":
+        raise HTTPException(409, "That version's picture was already deleted "
+                                 "by an approval.")
+
+    raw = await file.read()
+    if len(raw) > 60 * 1024 * 1024:
+        raise HTTPException(413, "That file is over 60 MB — export a PNG of "
+                                 "the artwork itself, not a layered project file.")
+    try:
+        image = _Image.open(_io.BytesIO(raw))
+        image.load()
+    except Exception:
+        raise HTTPException(400, "That is not an image the server can read — "
+                                 "export as PNG and try again.")
+
+    row, label = _store_variant_row(db, admin=admin, project=project,
+                                    title=title, poster=poster,
+                                    processed=processed, image=image,
+                                    tool="edited",
+                                    detail={"bytes": len(raw)})
     db.commit()
-    return JSONResponse({"ok": True, "label": f"v{processed.attempt}{letter}",
-                         "processed_id": healed_row.id})
+    return JSONResponse({"ok": True, "label": label, "processed_id": row.id})
+
+
+@router.post("/api/review/variant/delete")
+def api_review_variant_delete(
+    request: Request,
+    payload: dict = Body(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Delete a LETTERED version outright — row and files.
+
+    A botched heal or edit used to squat on the version bar until an
+    approval swept it (owner's find, 2026-09-14: "if i had healed wrongly
+    i am stuck with it"). A lettered version cost nothing and proves
+    nothing, so unlike a paid generation — whose row is the record of
+    money spent and is never deleted — it can simply go.
+
+    Two refusals keep the record straight: a PAID generation (no letter)
+    is never deletable here, and a version that something else was edited
+    FROM must outlive its children — delete v1c before v1b — or the
+    provenance chain would dangle (the Diagnostics check
+    healed_versions_are_sound watches exactly that).
+    """
+    from ..storage_remote import delete_paths
+
+    processed, poster, _title, project = \
+        _variant_parent_checked(request, admin, db, payload.get("processed_id"))
+    if not processed.variant:
+        raise HTTPException(400, "Only lettered versions can be deleted — "
+                                 "a paid generation is the record of money spent.")
+    child = (db.query(ProcessedImage)
+               .filter(ProcessedImage.healed_from == processed.id).first())
+    if child is not None:
+        raise HTTPException(409, f"v{child.attempt}{child.variant or ''} was "
+                                 f"made from this one — delete that first.")
+
+    label = f"v{processed.attempt}{processed.variant}"
+    removed = delete_paths(db, [processed.storage_path, processed.preview_path,
+                                processed.master_path], project=project)
+
+    was_current = bool(processed.is_current)
+    parent = (db.query(ProcessedImage).filter_by(id=processed.healed_from).first()
+              if processed.healed_from else None)
+    db.delete(processed)
+    db.flush()
+    if was_current:
+        # The spotlight goes back to the parent it was edited from, or to
+        # the newest survivor if the parent is somehow gone.
+        heir = parent or (db.query(ProcessedImage)
+                            .filter(ProcessedImage.saved_poster_id == poster.id)
+                            .order_by(ProcessedImage.attempt.desc(),
+                                      ProcessedImage.id.desc()).first())
+        if heir is not None:
+            heir.is_current = 1
+
+    log_activity(db, user=admin, action="variant_deleted",
+                 target_type="processed_image", target_id=payload.get("processed_id"),
+                 details={"label": label, "files_removed": removed,
+                          "poster_id": poster.id})
+    db.commit()
+    return JSONResponse({"ok": True, "label": label, "files_removed": removed})
 
 
 @router.post("/api/review/decide")

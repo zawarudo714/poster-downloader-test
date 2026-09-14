@@ -431,6 +431,28 @@ Also in v196, the full back-and-forth on Changes Requested:
 
 ---
 
+## 58. PHOTOPEA IN THE ZOOM VIEW, AND DELETING LETTERED VERSIONS — v201
+
+- In the zoom view press 🖌 EDIT IN PHOTOPEA. The editor should open
+  over the page with your picture already loaded a moment later (it
+  needs the internet in your browser; expect their ad panel). Fix a
+  smear with your usual tools — pen selection, spot heal, clone stamp.
+- Press SAVE BACK AS NEW VERSION. The overlay closes, the screen lands
+  back on the same title, and the generations bar shows the new letter
+  (v1b, or v1c if v1b existed). The colour and signature controls must
+  still work on it, and approving it must build the print file as usual.
+- If you flattened the image in Photopea, saving must still work and
+  the print must come out full size — say if anything looks small.
+- Pick a lettered version and press 🗑 DELETE. It should vanish from the
+  bar, the parent version takes its place, and Diagnostics stays clean.
+  Trying to delete v1b while a v1c made from it exists must refuse with
+  a sentence naming v1c. There is no delete on paid generations —
+  correct, not missing.
+- Close the editor WITHOUT saving: it must ask first, and nothing
+  changes on the site.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

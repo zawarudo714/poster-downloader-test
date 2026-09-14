@@ -181,6 +181,20 @@
   </div>
   <div class="review-zoom-controls" data-zoom-controls></div>
 </div>
+
+{# The Photopea overlay — a third-party editor in an iframe. The picture
+   is handed IN as bytes and comes BACK as bytes over postMessage, so no
+   address, cookie or session ever crosses the boundary. #}
+<div class="pea-overlay" data-pea hidden>
+  <div class="pea-bar">
+    <span class="mono muted" data-pea-title></span>
+    <span class="pea-bar-spacer"></span>
+    <button class="btn btn-accent btn-tiny" data-action="pea-save">SAVE BACK AS NEW VERSION</button>
+    <button class="btn btn-ghost btn-tiny" data-action="pea-close">CLOSE WITHOUT SAVING</button>
+  </div>
+  <iframe data-pea-frame title="Photopea image editor"
+          allow="clipboard-read; clipboard-write"></iframe>
+</div>
 {% endblock %}
 
 {% block scripts %}

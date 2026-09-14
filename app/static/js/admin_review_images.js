@@ -833,6 +833,11 @@
             v${v.attempt}${esc(v.variant || '')}${i < 9 ? ` <span class="mono">(${i + 1})</span>` : ''}
           </button>`).join('')}
         <span class="muted">press 1-9, or V to step through</span>
+        ${showing.variant ? `
+          <button class="btn btn-ghost btn-tiny" data-action="variant-delete"
+                  data-pid="${showing.processed_id}"
+                  title="Delete this edited version and its files — paid generations are never deletable">
+            🗑 DELETE v${showing.attempt}${esc(showing.variant)}</button>` : ''}
       </div>`;
   }
 
@@ -1398,6 +1403,110 @@
     }
   }
 
+  // ══════════════════════════════════════════════════════════════════════
+  //  THE PHOTOPEA OVERLAY — the full editor, for what a brush cannot fix
+  // ══════════════════════════════════════════════════════════════════════
+  //
+  // A third-party editor in an iframe. The picture goes IN as bytes and
+  // comes BACK as bytes over postMessage — no URL, no cookie and no CORS
+  // ever crosses the boundary, and Photopea's editing runs inside this
+  // browser. The save lands through the same door as the heal brush
+  // (/api/review/edited), so an edit becomes v1b with the same letter
+  // rules, the same cleanup and the same Diagnostics watchdog.
+  const PEA_ORIGIN = 'https://www.photopea.com';
+  const pea = { open: false, pid: 0, waitingSave: false, saveBtn: null };
+
+  function peaFrame() { return document.querySelector('[data-pea-frame]'); }
+
+  async function peaOpen() {
+    const t = current();
+    if (!t || !t.images.length) return;
+    const v = shownVersion(t.images[0]);
+    // The FULL-SIZE picture, never the web preview: the transparent
+    // master when there is one, else the full opaque file. Editing the
+    // preview would quietly downgrade the print.
+    const url = v.master_url ? `${v.master_url}?full=1`
+                             : `/admin/pipeline/review/full/${v.processed_id}`;
+    let buf;
+    try {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error('the server refused the picture');
+      buf = await r.arrayBuffer();
+    } catch (e) {
+      toast('Could not load the picture for editing: ' + e.message, 'error');
+      return;
+    }
+    pea.pid = v.processed_id;
+    $('[data-pea-title]').textContent =
+      `editing v${v.attempt}${v.variant || ''} — SAVE files it as a new lettered version`;
+    $('[data-pea]').hidden = false;
+    pea.open = true;
+    const frame = peaFrame();
+    // A fresh load every time, so an earlier sitting's document cannot
+    // leak into this one.
+    frame.src = `${PEA_ORIGIN}/#${encodeURIComponent(JSON.stringify({ environment: {} }))}`;
+    frame.addEventListener('load', () => {
+      // Hand the picture in as bytes once the editor is up. The small
+      // delay lets Photopea finish booting; if it ever misses, CLOSE and
+      // reopen costs two clicks.
+      setTimeout(() => {
+        try { frame.contentWindow.postMessage(buf, PEA_ORIGIN); }
+        catch (err) { toast('Could not hand the picture to the editor: ' + err.message, 'error'); }
+      }, 1200);
+    }, { once: true });
+  }
+
+  function peaClose() {
+    const overlay = $('[data-pea]');
+    if (overlay) overlay.hidden = true;
+    const frame = peaFrame();
+    if (frame) frame.src = 'about:blank';
+    pea.open = false;
+    pea.waitingSave = false;
+    pea.saveBtn = null;
+  }
+
+  function peaSave(btn) {
+    if (!pea.open) return;
+    pea.waitingSave = true;
+    pea.saveBtn = btn;
+    if (btn) { btn.disabled = true; btn.textContent = 'SAVING…'; }
+    // Ask Photopea to export the current document as a PNG; the bytes
+    // arrive in the message listener below.
+    peaFrame().contentWindow.postMessage(
+      'app.activeDocument.saveToOE("png");', PEA_ORIGIN);
+  }
+
+  window.addEventListener('message', async (e) => {
+    // Only Photopea's own messages, only while the overlay is open, and
+    // only the binary reply to a save we asked for — its "done" strings
+    // and progress notes fall through harmlessly.
+    if (e.origin !== PEA_ORIGIN || !pea.open) return;
+    if (!(e.data instanceof ArrayBuffer) || !pea.waitingSave) return;
+    pea.waitingSave = false;
+    const btn = pea.saveBtn;
+    try {
+      const fd = new FormData();
+      fd.append('processed_id', String(pea.pid));
+      fd.append('file', new Blob([e.data], { type: 'image/png' }), 'edited.png');
+      const r = await fetch(`${API}/review/edited`, { method: 'POST', body: fd });
+      const d = await r.json();
+      if (!r.ok) { toast(d.detail || 'Could not save the edit.', 'error'); return; }
+      toast(`Saved as ${d.label}. No generation was spent; the original `
+            + `is still there as its own version.`);
+      peaClose();
+      if (lastDoor) {
+        await openRange(lastDoor.start, lastDoor.end, lastDoor.status,
+                        { quiet: true });
+      }
+    } catch (err) {
+      toast('Could not save the edit: ' + err.message, 'error');
+    } finally {
+      // Every busy state leaves on every path.
+      if (btn) { btn.disabled = false; btn.textContent = 'SAVE BACK AS NEW VERSION'; }
+    }
+  });
+
   function healBarHtml() {
     if (!healing.active) {
       return `
@@ -1405,7 +1514,10 @@
           <button class="btn btn-ghost btn-tiny" data-action="heal-start"
                   title="Brush small smudges out of this version — computed locally, no generation spent">
             🩹 HEAL SMUDGES</button>
-          <span class="muted">free — no generation</span>
+          <button class="btn btn-ghost btn-tiny" data-action="pea-open"
+                  title="Open this version in Photopea — the full editor, in an overlay. Saving files it as a new lettered version.">
+            🖌 EDIT IN PHOTOPEA</button>
+          <span class="muted">both free — no generation</span>
         </div>`;
     }
     const n = healing.strokes.length;
@@ -1560,6 +1672,34 @@
         break;
       case 'heal-apply':
         await healApply(el);
+        break;
+      case 'variant-delete': {
+        if (!confirm('Delete this edited version and its files?\n\n'
+                   + 'The paid generations are untouched — this only '
+                   + 'removes the lettered edit.')) return;
+        try {
+          const r = await fetch(`${API}/review/variant/delete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ processed_id: Number(el.dataset.pid) }),
+          });
+          const d = await r.json();
+          if (!r.ok) { toast(d.detail || 'Could not delete.', 'error'); break; }
+          toast(`Deleted ${d.label}.`);
+          if (lastDoor) {
+            await openRange(lastDoor.start, lastDoor.end, lastDoor.status,
+                            { quiet: true });
+          }
+        } catch (err) {
+          toast('Could not delete: ' + err.message, 'error');
+        }
+        break;
+      }
+      case 'pea-open':  await peaOpen(); break;
+      case 'pea-save':  peaSave(el); break;
+      case 'pea-close':
+        if (!confirm('Close the editor? Anything not saved back is lost.')) return;
+        peaClose();
         break;
       case 'review-reruns':
         await openRange('', '', 'rerun');

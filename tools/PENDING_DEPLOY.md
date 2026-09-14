@@ -1,32 +1,30 @@
 # Not yet deployed
 
-**v200 — the heal brush: brush smudges out of a painting for free.**
+**v201 — Photopea in an overlay, and lettered versions can be deleted.**
 
-On the Approve Artwork ZOOM view there is now a HEAL SMUDGES button.
-Click or drag over the smudges (brush sizes S/M/L), UNDO STROKE steps
-back one gesture at a time, CLEAR wipes the sitting, Escape cancels.
-APPLY computes the fill-in on the Linux server — no OpenAI call, no
-money — and the result arrives as a LETTERED version: healing v1 makes
-v1b, sorted inside its family (v1 · v1b · v2). Healing v1b again makes
-v1c. Nothing is overwritten, so a heal that smudged a detail is undone
-by picking the parent version back. When a version is approved, the
-files of every version nobody chose are deleted by the existing sweep,
-so no useless files pile up. New Diagnostics check: every healed
-version must trace to its parent.
+- **EDIT IN PHOTOPEA** sits beside HEAL SMUDGES in the zoom view. It
+  opens the full editor over the page, hands it the full-size picture
+  (the transparent master when there is one), and SAVE BACK files the
+  result as a lettered version through the exact same door as the heal
+  brush — v1 edited becomes v1b, free, same letter rules, same cleanup,
+  same Diagnostics watchdog. The picture travels in and out as bytes;
+  no address or cookie ever reaches the third-party page. If Photopea
+  is unreachable, only this button suffers — the heal brush is the
+  built-in fallback.
+- **🗑 DELETE on lettered versions.** A botched heal or edit no longer
+  squats on the version bar: deleting removes its row and files on the
+  spot, and the spotlight returns to the version it was made from. Two
+  refusals keep the record honest: paid generations can never be
+  deleted here, and a version something else was edited FROM must
+  outlive its children (delete v1c before v1b).
+- Under the hood the heal endpoint and the new edited-upload endpoint
+  now share one variant-filing helper, so the letter rules cannot drift
+  between the two doors. A flattened edit of a transparent parent is
+  stored as an opaque MASTER — never as a small "print file" that would
+  have uploaded at editing size.
 
-Also fixed while building: a rerun numbered itself by COUNTING rows, so
-after v1 and v1b the next paid generation would have been called v3
-with no v2 existing. It now takes the highest number plus one.
-
-**THE CONTAINER MUST REBUILD for the healing maths** — the deploy's
-normal `docker compose up -d --build` does this by itself; the first
-press of APPLY proves it. If it ever says the healing library is
-missing, the build did not pick up requirements.txt.
-
-Files: models.py, schema_migrations.py (two new nullable columns, added
-automatically at startup), routes/pipeline_admin.py, gpt_worker.py,
-gpt_images-adjacent requirements.txt, diagnostics.py,
-admin_review_images.js/.html, style.css, config.py.
+Files: routes/pipeline_admin.py, admin_review_images.js/.html,
+style.css, config.py.
 The node was NOT changed — no worker_service copy needed.
 
 Whoever changes code writes here what is waiting and why; the deploy tool

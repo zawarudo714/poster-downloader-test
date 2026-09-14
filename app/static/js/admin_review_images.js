@@ -837,6 +837,9 @@
     // Every design shown is remembered, so leaving and coming back reopens
     // on this one rather than at the start.
     rememberSeen(t);
+    // …and it counts as SEEN, which is what lets the release approve it
+    // by silence. A title never rendered is never silently approved.
+    seenTitles.add(Number(t.title_id));
 
     $('[data-review-pair]').innerHTML = t.images.map((img) => {
       const d = decisions.get(img.poster_id);
@@ -995,21 +998,55 @@
     }
   }
 
-  function totalImages() {
-    return titles.reduce((n, t) => n + t.images.length, 0);
-  }
-
-  // HOW MANY WILL ACTUALLY BE RELEASED. Not `totalImages() - decisions.size`,
+  // HOW MANY WILL ACTUALLY BE RELEASED. Not `total - decisions.size`,
   // which is what it used to be: KEEP records a decision of 'approve', so
   // every KEEP was being subtracted from the number about to be released.
   // Press KEEP on three and RERUN on one and the button said four fewer when
   // the true answer was one. Counted from what the decisions SAY rather than
   // from how many there are.
+  // ── SILENCE ONLY MEANS APPROVAL FOR WHAT WAS IN FRONT OF YOUR EYES ──
+  //
+  // SAVE AND RELEASE approves every UNMARKED image — that is the screen's
+  // whole design. But the loaded batch can GROW mid-sitting: a Photopea
+  // save, a version delete or a page refresh reloads the queue, and a
+  // rerun that finished painting meanwhile slips in, often behind your
+  // position. On 2026-09-14 that combination released freshly repainted
+  // images the owner had never looked at, and the node uploaded them.
+  //
+  // So the screen keeps a set of titles that have actually been RENDERED
+  // this page-lifetime, and the untouched-means-approved rule applies to
+  // those alone. An unseen title's unmarked images are simply NOT SENT —
+  // they keep waiting for the next batch. Explicit marks (which require
+  // having seen the thing, or were made in an earlier sitting and
+  // restored) are always sent. Never reset: "I saw it" stays true, and a
+  // refresh clearing it only errs toward holding work back.
+  const seenTitles = new Set();
+
+  // The three-way split of one image, used by the count, the tally and
+  // the commit — ONE spelling, so the number on the button is always the
+  // number that happens.
+  //   'send'  — explicit mark, or unmarked on a title you have seen
+  //   'hold'  — unmarked on a title you have NOT seen; stays pending
+  function imageFate(t, img) {
+    if (decisions.get(img.poster_id)) return 'send';
+    return seenTitles.has(Number(t.title_id)) ? 'send' : 'hold';
+  }
+
   function releasedCount() {
-    let out = totalImages();
-    decisions.forEach((d) => {
-      if (d.action === 'rerun' || d.action === 'unusable') out -= 1;
-    });
+    let out = 0;
+    titles.forEach((t) => t.images.forEach((img) => {
+      const d = decisions.get(img.poster_id);
+      if (d && (d.action === 'rerun' || d.action === 'unusable')) return;
+      if (imageFate(t, img) === 'send') out += 1;
+    }));
+    return out;
+  }
+
+  function heldCount() {
+    let out = 0;
+    titles.forEach((t) => t.images.forEach((img) => {
+      if (imageFate(t, img) === 'hold') out += 1;
+    }));
     return out;
   }
 
@@ -1020,8 +1057,10 @@
     // out is the whole safety of an approve-by-default screen: you should be
     // able to read what is about to happen before you press the button.
     const approving = releasedCount();
+    const held = heldCount();
     $('[data-review-tally]').textContent =
-      `${approving} will be released · ${marked.rerun} rerun · ${marked.unusable} retired`;
+      `${approving} will be released · ${marked.rerun} rerun · ${marked.unusable} retired`
+      + (held ? ` · ${held} arrived unseen, staying` : '');
   }
 
   function decide(posterId, action, reason) {
@@ -1520,12 +1559,17 @@
       case 'review-prev':    move(-1); break;
       case 'review-next':    move(1);  break;
       case 'review-clear-marks': clearTitleMarks(); break;
-      case 'review-approve-all':
+      case 'review-approve-all': {
+        const held = heldCount();
         if (!confirm(
             `Release everything in this range that you have not marked?\n\n`
-            + `${releasedCount()} images will go to the upload queue.`)) return;
+            + `${releasedCount()} images will go to the upload queue.`
+            + (held ? `\n${held} image(s) arrived during this sitting and `
+                    + `were never on your screen — they stay waiting for `
+                    + `the next batch.` : ''))) return;
         await commit();
         break;
+      }
       case 'review-exit':
         if (!confirm('Leave without saving? Nothing in this range will be released.')) return;
         stage.hidden = true; picker.hidden = false; closeZoom();
@@ -1626,16 +1670,19 @@
     if (!titles.length) { status.textContent = 'nothing loaded'; return; }
     status.textContent = 'saving…';
 
-    // Send an explicit decision for EVERY poster in the range — approvals for
-    // the untouched ones included. The server never infers "approved" from
-    // absence: a dropped request or a half-loaded page would otherwise
-    // release work nobody looked at.
+    // Send an explicit decision for every poster the admin MARKED, plus
+    // approvals for the untouched ones he actually SAW. The server never
+    // infers "approved" from absence — and since 2026-09-14 neither does
+    // this screen for a title that slipped into the batch unseen (a
+    // mid-sitting reload can grow the list; see the note on seenTitles).
+    // Held images are simply not sent and keep waiting.
     //
     // `processed_id` is the generation ON SCREEN, which is what makes
     // choosing v2 mean anything. The server moves is_current to whichever
     // one arrives here.
     const payload = { decisions: [] };
     titles.forEach((t) => t.images.forEach((img) => {
+      if (imageFate(t, img) === 'hold') return;
       const d = decisions.get(img.poster_id);
       const v = shownVersion(img);
       payload.decisions.push({

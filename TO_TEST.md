@@ -450,6 +450,25 @@ Added in v203:
 
 ---
 
+## 59. RELEASE ONLY APPROVES WHAT YOU SAW — v204
+
+- Open a review batch, look at a few designs, then (as the worker or by
+  waiting for a rerun) let a new image become pending. Trigger a reload
+  mid-sitting — save a Photopea edit, or refresh the page and let it
+  walk back in. The tally at the bottom should now say "… · N arrived
+  unseen, staying".
+- Press SAVE AND RELEASE: the confirmation must repeat that the unseen
+  ones stay waiting. After the save, they must still be pending — check
+  the WAITING ON YOU count and the next batch.
+- Step through every design in a batch and release: nothing should be
+  held — "arrived unseen" only ever names images that were never on
+  your screen.
+- The cleanup from the incident: recall or accept today's uploads whose
+  filename carries _v2 or higher (they are the repaints released before
+  this fix).
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

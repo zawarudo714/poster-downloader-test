@@ -2591,6 +2591,21 @@ any "waiting on you" number: for each thing it counts, name the action that
 makes it stop counting.** If the only actions are "do the work" and
 nothing, the count is a treadmill, not a to-do list.
 
+**AN IMPLICIT DECISION MUST RANGE OVER WHAT WAS SEEN, NEVER OVER A LIST
+THAT CAN GROW.** The review screen's SAVE approves every unmarked image
+in the loaded batch — safe while the batch was frozen at load. Then
+mid-sitting reloads arrived (an edit saves, a version is deleted, the
+page refreshes and resumes), each one re-fetching the queue — and a
+rerun that finished painting meanwhile slipped into the batch behind the
+owner's position. SAVE silently approved and UPLOADED repaints he had
+never looked at (his find, 2026-09-14). The fix: the screen records
+which titles were actually RENDERED, and silence only means approval for
+those; an unseen arrival is not sent at all and keeps waiting. The
+general shape: wherever absence-of-a-mark carries meaning, pin down the
+set it ranges over — any mechanism that can add members between the
+person's look and their commit turns their silence into a decision they
+never made.
+
 **Creating all the work up front is what makes stopping impossible.** The
 five deactivation jobs — one per account — were queued together, so
 STOP THIS RUN ended the run, released the pipeline, and did nothing at all

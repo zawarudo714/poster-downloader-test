@@ -547,6 +547,19 @@
     layer.style.top = (ir.top - pr.top) + 'px';
     layer.style.width = ir.width + 'px';
     layer.style.height = ir.height + 'px';
+    // The heal canvas is pinned by the SAME measurement — one copy of the
+    // box arithmetic, so the brush and the signature can never disagree
+    // about where the picture is.
+    const heal = plate.querySelector('[data-heal-layer]');
+    if (heal) {
+      heal.style.left = (ir.left - pr.left) + 'px';
+      heal.style.top = (ir.top - pr.top) + 'px';
+      heal.style.width = ir.width + 'px';
+      heal.style.height = ir.height + 'px';
+      heal.width = Math.round(ir.width);
+      heal.height = Math.round(ir.height);
+      healDraw();
+    }
     const pid = Number(imgEl.dataset.pid);
     if (pid) paintSig(pid);      // the bottom margin is in pixels of THIS box
   }
@@ -752,6 +765,12 @@
         || defaultBackground;
   }
 
+  document.addEventListener('change', (e) => {
+    if (e.target.matches('[data-heal-size]')) {
+      healing.radius = HEAL_SIZES[e.target.value] || HEAL_SIZES.M;
+    }
+  });
+
   document.addEventListener('input', (e) => {
     if (e.target.matches('[data-color-input]')) {
       setColor(Number(e.target.dataset.pid), e.target.value);
@@ -810,8 +829,8 @@
                     ? 'btn-accent' : 'btn-ghost'}"
                   data-pick-version="${v.processed_id}"
                   data-poster="${img.poster_id}"
-                  title="${esc(v.filename)}${v.is_current ? ' · newest' : ''}">
-            v${v.attempt}${i < 9 ? ` <span class="mono">(${i + 1})</span>` : ''}
+                  title="${esc(v.filename)}${v.variant ? ' · healed by brush, no generation spent' : ''}${v.is_current ? ' · newest' : ''}">
+            v${v.attempt}${esc(v.variant || '')}${i < 9 ? ` <span class="mono">(${i + 1})</span>` : ''}
           </button>`).join('')}
         <span class="muted">press 1-9, or V to step through</span>
       </div>`;
@@ -1202,8 +1221,10 @@
     }
     const d = decisions.get(img.poster_id);
     $('[data-zoom-state]').textContent = d ? d.action.toUpperCase() : '';
-    $('[data-zoom-controls]').innerHTML =
-      versionBarHtml(img) + colorBarHtml(v, 'zoom') + sigBarHtml(v, 'zoom');
+    // Switching versions mid-heal would aim the strokes at a different
+    // picture than the one they were drawn on — the sitting is discarded.
+    if (healing.active && healing.pid !== v.processed_id) healCancel();
+    syncZoomControls();
     box.hidden = false;
     zoomOpen = true;
     // AFTER the overlay is shown, never before. A hidden element has no size,
@@ -1213,17 +1234,200 @@
     // matters on the path where everything is working.
     if (v.signature) paintSig(v.processed_id);
     fitAllSigLayers();
+    healRefresh();
     // The memory notes the zoom is open, so an interrupted session
     // reopens straight into this view.
     rememberSeen(t);
+  }
+
+  // The zoom's control strip, rebuilt in one place so the heal bar can
+  // refresh its counts without resyncing the pictures.
+  function syncZoomControls() {
+    const t = current();
+    if (!t || !t.images.length) return;
+    const img = t.images[0];
+    const v = shownVersion(img);
+    $('[data-zoom-controls]').innerHTML =
+      versionBarHtml(img) + colorBarHtml(v, 'zoom') + sigBarHtml(v, 'zoom')
+      + healBarHtml();
   }
 
   function closeZoom() {
     const box = $('[data-review-zoom]');
     if (box) box.hidden = true;
     zoomOpen = false;
+    healCancel();             // strokes belong to a view that just closed
     const t = current();
     if (t) rememberSeen(t);   // the memory notes the zoom is closed again
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  THE HEAL BRUSH — free spot repair, in the zoom view only
+  // ══════════════════════════════════════════════════════════════════════
+  //
+  // Dabs are collected here and sent in ONE apply; the true fill-in is
+  // computed on the server (deliberately not duplicated in the browser —
+  // two copies of one rule drift), and the result arrives as a lettered
+  // version: heal v1, get v1b. UNDO here removes the last brush GESTURE
+  // before applying; after applying, "undo" is simply picking the parent
+  // version back — nothing is ever overwritten.
+  //
+  // COORDINATES, both sides agreeing on the denominator: x is % of the
+  // image's own WIDTH, y of its HEIGHT, r of its WIDTH. The canvas is
+  // pinned exactly over the picture by the same measurement the signature
+  // layer uses (fitSigLayer), so a percentage here is a percentage of the
+  // PICTURE, never of the plate around it.
+  const HEAL_SIZES = { S: 1.2, M: 2.5, L: 5.0 };   // radius, % of image width
+  const healing = { active: false, strokes: [], radius: HEAL_SIZES.M, pid: 0 };
+  let healDrag = null;   // dabs of the gesture in progress
+
+  function healCanvasEl() { return document.querySelector('[data-heal-layer]'); }
+
+  function healStart() {
+    const t = current();
+    if (!t || !t.images.length) return;
+    healing.active = true;
+    healing.strokes = [];
+    healing.pid = shownVersion(t.images[0]).processed_id;
+    healRefresh();
+  }
+
+  function healCancel() {
+    if (!healing.active) return;
+    healing.active = false;
+    healing.strokes = [];
+    healDrag = null;
+    healRefresh();
+  }
+
+  // Redraw the dab markers and keep the bar's counts honest.
+  function healRefresh() {
+    const c = healCanvasEl();
+    if (c) {
+      c.hidden = !healing.active;
+      healDraw();
+    }
+    if (zoomOpen) syncZoomControls();
+  }
+
+  function healDraw() {
+    const c = healCanvasEl();
+    if (!c || c.hidden) return;
+    const ctx = c.getContext('2d');
+    ctx.clearRect(0, 0, c.width, c.height);
+    const all = healing.strokes.flat().concat(healDrag || []);
+    all.forEach((d) => {
+      const x = d.x / 100 * c.width;
+      const y = d.y / 100 * c.height;
+      const r = d.r / 100 * c.width;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(122, 162, 247, 0.30)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(122, 162, 247, 0.9)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    });
+  }
+
+  function healAddDab(c, e) {
+    const rect = c.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const x = (e.clientX - rect.left) / rect.width * 100;
+    const y = (e.clientY - rect.top) / rect.height * 100;
+    const last = healDrag[healDrag.length - 1];
+    // While dragging, a new dab only every half-radius — enough for a
+    // continuous stroke without hundreds of circles.
+    if (last && Math.hypot(x - last.x, y - last.y) < healing.radius / 2) return;
+    healDrag.push({ x, y, r: healing.radius });
+    healDraw();
+  }
+
+  document.addEventListener('pointerdown', (e) => {
+    if (!healing.active) return;
+    const c = e.target.closest && e.target.closest('[data-heal-layer]');
+    if (!c) return;
+    e.preventDefault();
+    healDrag = [];
+    healAddDab(c, e);
+  });
+  document.addEventListener('pointermove', (e) => {
+    if (!healing.active || !healDrag) return;
+    const c = healCanvasEl();
+    if (c) healAddDab(c, e);
+  });
+  document.addEventListener('pointerup', () => {
+    if (!healing.active || !healDrag) return;
+    if (healDrag.length) healing.strokes.push(healDrag);
+    healDrag = null;
+    healRefresh();
+  });
+
+  async function healApply(btn) {
+    const dabs = healing.strokes.flat();
+    if (!dabs.length) { toast('Brush over a smudge first.', 'error'); return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'HEALING…'; }
+    try {
+      const r = await fetch(`${API}/review/heal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ processed_id: healing.pid, strokes: dabs }),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        toast(d.detail || 'Healing failed.', 'error');
+        return;
+      }
+      healing.active = false;
+      healing.strokes = [];
+      toast(`Healed — saved as ${d.label}. No generation was spent; the `
+            + `original is still there as its own version.`);
+      // Reload through the same door; the position memory lands back on
+      // this title, and render reopens the zoom, now showing the healed
+      // version (it arrives as the newest, which is the default shown).
+      if (lastDoor) {
+        await openRange(lastDoor.start, lastDoor.end, lastDoor.status,
+                        { quiet: true });
+      }
+    } catch (err) {
+      toast('Healing failed: ' + err.message, 'error');
+    } finally {
+      // Every busy state leaves on every path.
+      if (btn) { btn.disabled = false; btn.textContent = 'APPLY'; }
+      healRefresh();
+    }
+  }
+
+  function healBarHtml() {
+    if (!healing.active) {
+      return `
+        <div class="review-heal-bar">
+          <button class="btn btn-ghost btn-tiny" data-action="heal-start"
+                  title="Brush small smudges out of this version — computed locally, no generation spent">
+            🩹 HEAL SMUDGES</button>
+          <span class="muted">free — no generation</span>
+        </div>`;
+    }
+    const n = healing.strokes.length;
+    const sizeName = Object.keys(HEAL_SIZES)
+      .find((k) => HEAL_SIZES[k] === healing.radius) || 'M';
+    return `
+      <div class="review-heal-bar review-heal-active">
+        <span class="mono">healing</span>
+        <span class="muted">click or drag over the smudges</span>
+        brush
+        <select data-heal-size title="Brush size">
+          ${Object.keys(HEAL_SIZES).map((k) =>
+            `<option value="${k}" ${k === sizeName ? 'selected' : ''}>${k}</option>`).join('')}
+        </select>
+        <button class="btn btn-ghost btn-tiny" data-action="heal-undo"
+                ${n ? '' : 'disabled'}>UNDO STROKE (${n})</button>
+        <button class="btn btn-ghost btn-tiny" data-action="heal-clear"
+                ${n ? '' : 'disabled'}>CLEAR</button>
+        <button class="btn btn-accent btn-tiny" data-action="heal-apply"
+                ${n ? '' : 'disabled'}>APPLY</button>
+        <button class="btn btn-ghost btn-tiny" data-action="heal-cancel">CANCEL</button>
+      </div>`;
   }
 
   // ── The honest colour bar ────────────────────────────────────────────
@@ -1344,6 +1548,19 @@
       case 'zoom-close':
         closeZoom();
         break;
+      case 'heal-start':  healStart();  break;
+      case 'heal-cancel': healCancel(); break;
+      case 'heal-undo':
+        healing.strokes.pop();
+        healRefresh();
+        break;
+      case 'heal-clear':
+        healing.strokes = [];
+        healRefresh();
+        break;
+      case 'heal-apply':
+        await healApply(el);
+        break;
       case 'review-reruns':
         await openRange('', '', 'rerun');
         break;
@@ -1387,6 +1604,13 @@
     if (e.metaKey || e.ctrlKey || e.altKey) return;
 
     if (e.key === 'Escape') {
+      // Healing first: Escape mid-brush means "stop healing", not "close
+      // the zoom under my cursor".
+      if (healing.active) {
+        healCancel();
+        e.preventDefault();
+        return;
+      }
       if (eyedropFor !== null) {
         document.querySelectorAll('.is-picking').forEach(
           (el) => el.classList.remove('is-picking'));

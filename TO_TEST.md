@@ -407,6 +407,30 @@ Also in v196, the full back-and-forth on Changes Requested:
 
 ---
 
+## 57. THE HEAL BRUSH — v200
+
+- Open a painted image in the ZOOM view. A "🩹 HEAL SMUDGES" button
+  should sit under the other controls, marked "free — no generation".
+- Press it, then click or drag over a smudge (like the Everest smear).
+  Blue circles mark what you brushed. UNDO STROKE removes the last
+  gesture; CLEAR wipes all; Escape cancels the whole sitting.
+- Press APPLY. A few seconds later the screen reloads on the same title
+  showing the healed picture, and the generations bar reads v1 · v1b —
+  the letter is your receipt that no generation was spent. THE FIRST
+  APPLY ALSO PROVES THE CONTAINER REBUILT — if it says the healing
+  library is missing, tell the session.
+- Compare v1 and v1b with the version buttons. If the heal smudged
+  something, pick v1 back — nothing was overwritten.
+- Heal v1b again: the result must be v1c. Rerun the poster after
+  healing: the new paid generation must be v2 (not v3).
+- Approve whichever version you like and release: Diagnostics should
+  stay clean ("every healed version traces to its parent"), and the
+  losing versions' files are deleted as usual.
+- Judge the healing quality on a sky smudge first — flat areas are its
+  strength; near sharp letter edges expect a slight softness.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

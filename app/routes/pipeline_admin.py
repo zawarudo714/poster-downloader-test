@@ -3454,6 +3454,10 @@ def api_review_queue(
         return {
             "processed_id": p.id,
             "attempt": p.attempt or 1,
+            # 'b', 'c', … for a healed (brush-edited) derivative; '' for an
+            # ordinary generation. The screen shows it as v1b, sorted inside
+            # its family.
+            "variant": p.variant or "",
             "filename": p.filename,
             "width": p.output_width,
             "height": p.output_height,
@@ -4098,6 +4102,214 @@ def api_review_remember(
 
     db.commit()
     return JSONResponse({"ok": True, "saved": changed})
+
+
+@router.post("/api/review/heal")
+def api_review_heal(
+    request: Request,
+    payload: dict = Body(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Brush small smudges out of a generation — a FREE local edit, no OpenAI.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHAT ARRIVES, AND WHAT EACH NUMBER IS A PERCENTAGE OF
+    ════════════════════════════════════════════════════════════════════════
+    `strokes` is a list of dabs: {x, y, r}. x is a percentage of the image's
+    own WIDTH, y of its HEIGHT, r (the brush radius) of its WIDTH. The zoom
+    screen measures against the picture's rendered box, which the sig-layer
+    work already pins exactly over the picture — both sides name their
+    denominator, because the signature bug of 2026-09-09 came from two
+    sides silently picking different boxes.
+
+    ════════════════════════════════════════════════════════════════════════
+    THE RESULT IS A NEW VERSION, NEVER AN EDIT IN PLACE (owner's design)
+    ════════════════════════════════════════════════════════════════════════
+    Healing V1 produces V1b — same attempt number, a letter — sorted inside
+    its family (V1 · V1b · V2). Healing V1b again produces V1c. Nothing is
+    overwritten, so a heal that smudged an important detail is undone by
+    simply picking the parent again. The letter is also the receipt that no
+    generation was paid for. Files of the versions nobody chose are deleted
+    by the ordinary approval sweep, exactly like rerun generations.
+    """
+    from ..imagefetch import flatten_onto, make_preview, DEFAULT_BACKGROUND
+    from ..storage_remote import StorageError, read_bytes, write_bytes
+    from ..pipeline import storage_path_for
+    from PIL import Image as _Image
+    import io as _io
+
+    # The fill-in maths. Lazy so a container built before the requirement
+    # was added fails THIS button with a plain sentence, not the whole app.
+    # numpy rides in the same try: it arrives WITH opencv, so on an old
+    # container both are missing and either import would be the crash.
+    try:
+        import cv2 as _cv2
+        import numpy as _np
+    except Exception:
+        raise HTTPException(
+            500, "The healing library is not installed on the server yet — "
+                 "redeploy so the container rebuilds with opencv-python-headless.")
+
+    pid = payload.get("processed_id")
+    strokes = payload.get("strokes") or []
+    if not strokes:
+        raise HTTPException(400, "No strokes — brush at least one spot.")
+    if len(strokes) > 200:
+        raise HTTPException(400, "Too many strokes in one sitting — apply, then continue.")
+
+    processed = db.query(ProcessedImage).filter_by(id=pid).first()
+    if processed is None:
+        raise HTTPException(404, "No such image.")
+    if (processed.review_status or "") == "discarded":
+        raise HTTPException(409, "That version's picture was already deleted "
+                                 "by an approval — heal a version that still has one.")
+
+    # SCOPED, same as every endpoint reached by an id from the page.
+    project = _project(request, admin, db)
+    poster = db.query(SavedPoster).filter_by(id=processed.saved_poster_id).first()
+    title = (db.query(MasterTitle).filter_by(id=poster.master_title_id).first()
+             if poster else None)
+    if title is None or P.project_for_title(db, title) is None \
+            or P.project_for_title(db, title).id != project.id:
+        raise HTTPException(404, "That image is not in this project.")
+
+    # ── The source picture: the transparent master when there is one ────
+    src_rel = processed.master_path or processed.storage_path
+    if not src_rel:
+        raise HTTPException(409, "This version has no picture on the Storage "
+                                 "Box to heal — its print file is not built yet "
+                                 "and it has no master.")
+    try:
+        src_bytes = read_bytes(db, src_rel, project=project)
+    except StorageError as e:
+        raise HTTPException(502, f"Could not fetch the picture to heal: {e}")
+
+    img = _Image.open(_io.BytesIO(src_bytes))
+    had_alpha = (img.mode == "RGBA")
+    if not had_alpha:
+        img = img.convert("RGB")
+    W, H = img.size
+
+    # ── The mask: white where he brushed, black elsewhere ────────────────
+    mask = _np.zeros((H, W), dtype=_np.uint8)
+    for s in strokes:
+        try:
+            cx = int(round(float(s["x"]) / 100.0 * W))
+            cy = int(round(float(s["y"]) / 100.0 * H))
+            cr = max(2, int(round(float(s["r"]) / 100.0 * W)))
+        except (KeyError, TypeError, ValueError):
+            raise HTTPException(400, "A stroke arrived without x, y and r.")
+        _cv2.circle(mask, (cx, cy), cr, 255, -1)
+
+    arr = _np.array(img)
+    if had_alpha:
+        rgb = _cv2.inpaint(arr[:, :, :3], mask, 3, _cv2.INPAINT_TELEA)
+        alpha = _cv2.inpaint(arr[:, :, 3], mask, 3, _cv2.INPAINT_TELEA)
+        healed = _Image.fromarray(_np.dstack([rgb, alpha]), "RGBA")
+    else:
+        healed = _Image.fromarray(
+            _cv2.inpaint(arr, mask, 3, _cv2.INPAINT_TELEA), "RGB")
+
+    # ── The letter: next unused in this attempt's family ────────────────
+    siblings = (db.query(ProcessedImage.variant)
+                  .filter(ProcessedImage.saved_poster_id == poster.id,
+                          ProcessedImage.attempt == processed.attempt,
+                          ProcessedImage.variant.isnot(None)).all())
+    used = {v for (v,) in siblings if v}
+    letter = "b"
+    while letter in used:
+        letter = chr(ord(letter) + 1)
+    if letter > "z":
+        raise HTTPException(400, "This generation has been healed 25 times — "
+                                 "rerun it instead.")
+
+    # ── Files: the family's deterministic paths, plus the letter ────────
+    base_rel, base_name = storage_path_for(db, title, poster, project=project,
+                                           attempt=processed.attempt)
+    stem, ext = base_rel.rsplit(".", 1)
+    name_stem, name_ext = base_name.rsplit(".", 1)
+    filename = f"{name_stem}{letter}.{name_ext}"
+    parts = f"{stem}{letter}.{ext}".rsplit("/", 1)
+    preview_rel = (parts[0] + "/previews/" + parts[1]) if len(parts) == 2 \
+        else f"previews/{parts[0]}"
+
+    # The flatten colour for the preview: what the parent shows right now.
+    colour = (processed.background_chosen or processed.background_color
+              or str(P.get_setting(db, "gpt_background_color", project=project)
+                     or DEFAULT_BACKGROUND))
+
+    from ..config import WORKSPACE_DIR
+    tmp_dir = WORKSPACE_DIR / "_gpt_tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    healed_tmp = tmp_dir / f"heal_{processed.id}_{letter}.png"
+    flat_tmp = tmp_dir / f"heal_{processed.id}_{letter}_flat.png"
+    prev_tmp = tmp_dir / f"heal_{processed.id}_{letter}_prev.jpg"
+    healed_size = 0
+    try:
+        healed.save(healed_tmp, "PNG")
+        healed_size = healed_tmp.stat().st_size
+        master_rel = None
+        storage_rel = ""
+        if had_alpha:
+            # Same deferred shape as generation: the print file is built at
+            # approval, from this healed master, with colour and signature.
+            master_rel = f"{stem}{letter}_master.png"
+            flatten_onto(healed_tmp, flat_tmp, colour)
+            make_preview(flat_tmp, prev_tmp)
+            write_bytes(db, master_rel, healed_tmp.read_bytes(), project=project)
+        else:
+            # An opaque parent has no master; the healed full-size file IS
+            # the picture, saved under the family path with its letter.
+            storage_rel = f"{stem}{letter}.{ext}"
+            healed.convert("RGB").save(flat_tmp, "PNG")
+            make_preview(flat_tmp, prev_tmp)
+            write_bytes(db, storage_rel, flat_tmp.read_bytes(), project=project)
+        write_bytes(db, preview_rel, prev_tmp.read_bytes(), project=project)
+    except StorageError as e:
+        raise HTTPException(502, f"Healed, but could not store the result: {e}")
+    finally:
+        healed_tmp.unlink(missing_ok=True)
+        flat_tmp.unlink(missing_ok=True)
+        prev_tmp.unlink(missing_ok=True)
+
+    # ── The row: same family, one letter on, current from this moment ───
+    db.query(ProcessedImage).filter(
+        ProcessedImage.saved_poster_id == poster.id,
+        ProcessedImage.is_current == 1,
+    ).update({ProcessedImage.is_current: 0}, synchronize_session=False)
+
+    healed_row = ProcessedImage(
+        saved_poster_id=poster.id,
+        project_id=processed.project_id,
+        storage_path=storage_rel,
+        filename=filename,
+        file_size=healed_size,
+        output_width=processed.output_width,
+        output_height=processed.output_height,
+        script_version=f"healed from #{processed.id}",
+        processed_by="server",
+        is_current=1,
+        attempt=processed.attempt,
+        variant=letter,
+        healed_from=processed.id,
+        preview_path=preview_rel,
+        review_status="pending" if processed.review_status else None,
+        master_path=master_rel,
+        background_color=(colour if had_alpha else None),
+        signature_json=processed.signature_json,
+    )
+    db.add(healed_row)
+    db.flush()
+
+    log_activity(db, user=admin, action="healed", target_type="processed_image",
+                 target_id=healed_row.id,
+                 details={"from": processed.id, "strokes": len(strokes),
+                          "label": f"v{processed.attempt}{letter}"})
+    db.commit()
+    return JSONResponse({"ok": True, "label": f"v{processed.attempt}{letter}",
+                         "processed_id": healed_row.id})
 
 
 @router.post("/api/review/decide")

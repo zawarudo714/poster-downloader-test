@@ -175,7 +175,15 @@ def process_one(db: Session, poster, title, project) -> bool:
     # number is part of the path, so a rerun writes `..._v2.jpg` beside the
     # first one instead of on top of it — see storage_path_for() for why the
     # old behaviour quietly destroyed the picture it claimed to be keeping.
-    prior = db.query(ProcessedImage).filter_by(saved_poster_id=poster.id).count()
+    #
+    # MAX + 1, not COUNT + 1 (2026-09-14). Healed brush edits share their
+    # parent's number and add a letter — v1b is a ROW but not a GENERATION.
+    # Counting rows would have named the rerun after v1 and v1b "v3", a
+    # number with no v2 behind it, and its files likewise.
+    from sqlalchemy import func as _func
+    prior = (db.query(_func.max(ProcessedImage.attempt))
+               .filter(ProcessedImage.saved_poster_id == poster.id)
+               .scalar() or 0)
     attempt = prior + 1
     rel_path, filename = storage_path_for(db, title, poster, project=project,
                                           attempt=attempt)

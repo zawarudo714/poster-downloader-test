@@ -730,6 +730,25 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 }
 .img-source-word { color: var(--accent, #7aa2f7); }
 
+/* ── The heal brush (zoom view only) ──────────────────────────────────
+   The canvas is positioned over the picture by fitSigLayer — the same
+   measurement as the signature layer, one copy of the box arithmetic. */
+.heal-layer {
+  position: absolute;
+  cursor: crosshair;
+  z-index: 6;              /* above the picture and the signature mark */
+  touch-action: none;      /* a drag is a brush stroke, not a scroll */
+}
+.heal-layer[hidden] { display: none; }
+.review-heal-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 6px; font-size: 12px;
+}
+.review-heal-active {
+  border: 1px solid var(--accent, #7aa2f7); border-radius: 6px;
+  padding: 6px 10px;
+}
+
 /* The banner shown when the last SAVE AND RELEASE was cut short. One
    sentence for the whole remainder, dismissed by its own button or by the
    next completed save. Amber, not red: nothing is broken or lost. */

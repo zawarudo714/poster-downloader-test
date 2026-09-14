@@ -2547,7 +2547,55 @@ def check_number_settings_hold_numbers(db: Session, scope: Scope) -> CheckResult
     )
 
 
+def check_healed_versions_are_sound(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: a brush-healed version can always be traced to its parent.
+
+    A `variant` letter with no `healed_from`, a parent that is not on the
+    same poster, or two siblings wearing the same letter would each make
+    the version bar lie — a v1b nobody can say where it came from, or two
+    buttons reading v1b for different pictures. The heal endpoint cannot
+    write these states; this watches for anything that arrives another way
+    (an import, a hand edit).
+    """
+    from .models import ProcessedImage
+    rows: list = []
+    total = 0
+    healed = (db.query(ProcessedImage)
+                .filter(ProcessedImage.variant.isnot(None)).all())
+    seen: dict[tuple, int] = {}
+    for p in healed:
+        problems = []
+        if not p.healed_from:
+            problems.append("has a letter but no parent recorded")
+        else:
+            parent = db.query(ProcessedImage).filter_by(id=p.healed_from).first()
+            if parent is None:
+                problems.append("its parent row does not exist")
+            elif parent.saved_poster_id != p.saved_poster_id:
+                problems.append("its parent belongs to a different image")
+        fam = (p.saved_poster_id, p.attempt, p.variant)
+        seen[fam] = seen.get(fam, 0) + 1
+        if seen[fam] == 2:
+            problems.append(f"two versions wear the letter v{p.attempt}{p.variant}")
+        if problems:
+            total += 1
+            if len(rows) < MAX_ROWS:
+                rows.append(Finding(f"healed version #{p.id} (v{p.attempt}{p.variant})",
+                                    "; ".join(problems), "/admin/pipeline"))
+    return _result(
+        "healed_versions_are_sound",
+        f"{total} healed version(s) cannot be traced properly"
+        if total else "Every healed version traces to its parent",
+        "A healed version is a free brush edit of a generation. Its letter "
+        "and its parent link are what let the screen show v1 · v1b honestly; "
+        "a broken link means the version bar could mislabel pictures.",
+        "error" if total else "ok", rows, total,
+    )
+
+
 CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
+    check_healed_versions_are_sound,
     check_number_settings_hold_numbers,
     check_approved_without_a_print_file,
     check_current_image_was_discarded,

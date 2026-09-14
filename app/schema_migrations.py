@@ -62,6 +62,11 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     # Which search found the picture — see the comment in models.py.
     # Nullable: rows from before this column truthfully read as "unknown".
     ("saved_posters", "image_source",     "VARCHAR(16)"),
+    # The heal brush (2026-09-14): a brushed derivative carries a letter
+    # ('b', 'c') and points at the generation it was edited from. Nullable:
+    # every ordinary generation truthfully has neither.
+    ("processed_images", "variant",       "VARCHAR(4)"),
+    ("processed_images", "healed_from",   "INTEGER"),
     ("saved_posters", "process_attempts", "INTEGER NOT NULL DEFAULT 0"),
     ("saved_posters", "process_error",    "TEXT"),
     ("saved_posters", "claimed_at",       "DATETIME"),

@@ -1010,6 +1010,16 @@ class ProcessedImage(Base):
     preview_path    = Column(String(768), nullable=True)
     # Which generation this was, for an image that has been rerun.
     attempt         = Column(Integer, nullable=False, default=1)
+    # ── A HEALED (brush-edited) DERIVATIVE, not a fresh generation ───────
+    # variant: a letter — 'b', 'c', … — marking a FREE local edit of a
+    # generation, displayed as V1b and sorted inside its family (V1 · V1b
+    # · V2), never as the next paid number. NULL = an ordinary generation.
+    # healed_from: the ProcessedImage id this was brushed from — the
+    # provenance that lets a screen say "edited from v1". Both or neither:
+    # a letter with no parent is a record nobody can trace, and the
+    # Diagnostics check healed_versions_are_sound watches for it.
+    variant         = Column(String(4), nullable=True)
+    healed_from     = Column(Integer, nullable=True)
 
     # ── THIS POSTER'S OWN SIGNATURE ADJUSTMENTS ─────────────────────────
     #

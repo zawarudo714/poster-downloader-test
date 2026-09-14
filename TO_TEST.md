@@ -407,36 +407,20 @@ Also in v196, the full back-and-forth on Changes Requested:
 
 ---
 
-## 57. THE HEAL BRUSH — v200
+## 58. PHOTOPEA EVERYWHERE, AND DELETING LETTERED VERSIONS — v201/v202
 
-- Open a painted image in the ZOOM view. A "🩹 HEAL SMUDGES" button
-  should sit under the other controls, marked "free — no generation".
-- Press it, then click or drag over a smudge (like the Everest smear).
-  Blue circles mark what you brushed. UNDO STROKE removes the last
-  gesture; CLEAR wipes all; Escape cancels the whole sitting.
-- Press APPLY. A few seconds later the screen reloads on the same title
-  showing the healed picture, and the generations bar reads v1 · v1b —
-  the letter is your receipt that no generation was spent. THE FIRST
-  APPLY ALSO PROVES THE CONTAINER REBUILT — if it says the healing
-  library is missing, tell the session.
-- Compare v1 and v1b with the version buttons. If the heal smudged
-  something, pick v1 back — nothing was overwritten.
-- Heal v1b again: the result must be v1c. Rerun the poster after
-  healing: the new paid generation must be v2 (not v3).
-- Approve whichever version you like and release: Diagnostics should
-  stay clean ("every healed version traces to its parent"), and the
-  losing versions' files are deleted as usual.
-- Judge the healing quality on a sky smudge first — flat areas are its
-  strength; near sharp letter edges expect a slight softness.
+(The v200 heal brush was REMOVED in v202 before anyone tested it —
+Photopea does its whole job better. Its old test item is gone with it;
+the lettered-version machinery it introduced lives on underneath
+Photopea and is tested here.)
 
----
-
-## 58. PHOTOPEA IN THE ZOOM VIEW, AND DELETING LETTERED VERSIONS — v201
-
-- In the zoom view press 🖌 EDIT IN PHOTOPEA. The editor should open
-  over the page with your picture already loaded a moment later (it
-  needs the internet in your browser; expect their ad panel). Fix a
-  smear with your usual tools — pen selection, spot heal, clone stamp.
+- The 🖌 EDIT IN PHOTOPEA button must appear BOTH on the normal review
+  card and in the zoom view. There is no HEAL SMUDGES button anywhere
+  any more — gone on purpose, not broken.
+- Press it. The editor should open over the page with your picture
+  already loaded a moment later (it needs the internet in your browser;
+  expect their ad panel). Fix a smear with your usual tools — pen
+  selection, spot heal, clone stamp.
 - Press SAVE BACK AS NEW VERSION. The overlay closes, the screen lands
   back on the same title, and the generations bar shows the new letter
   (v1b, or v1c if v1b existed). The colour and signature controls must
@@ -450,6 +434,9 @@ Also in v196, the full back-and-forth on Changes Requested:
   correct, not missing.
 - Close the editor WITHOUT saving: it must ask first, and nothing
   changes on the site.
+- Numbering after an edit: with v1 and v1b on a poster, press RERUN —
+  the new paid generation must arrive as v2, not v3. (An edit is a row
+  but not a generation; the counter was fixed to know the difference.)
 
 ---
 

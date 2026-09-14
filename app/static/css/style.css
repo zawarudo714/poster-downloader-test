@@ -746,23 +746,10 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 .pea-bar-spacer { flex: 1; }
 .pea-overlay iframe { flex: 1; border: 0; background: #1c1c1c; }
 
-/* ── The heal brush (zoom view only) ──────────────────────────────────
-   The canvas is positioned over the picture by fitSigLayer — the same
-   measurement as the signature layer, one copy of the box arithmetic. */
-.heal-layer {
-  position: absolute;
-  cursor: crosshair;
-  z-index: 6;              /* above the picture and the signature mark */
-  touch-action: none;      /* a drag is a brush stroke, not a scroll */
-}
-.heal-layer[hidden] { display: none; }
-.review-heal-bar {
+/* ── The edit bar (EDIT IN PHOTOPEA) — on the card and in the zoom ──── */
+.review-edit-bar {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   margin-top: 6px; font-size: 12px;
-}
-.review-heal-active {
-  border: 1px solid var(--accent, #7aa2f7); border-radius: 6px;
-  padding: 6px 10px;
 }
 
 /* The banner shown when the last SAVE AND RELEASE was cut short. One

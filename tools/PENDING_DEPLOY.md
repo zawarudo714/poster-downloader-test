@@ -1,30 +1,21 @@
 # Not yet deployed
 
-**v201 — Photopea in an overlay, and lettered versions can be deleted.**
+**v202 — Photopea on the card too, and the heal brush is REMOVED.**
 
-- **EDIT IN PHOTOPEA** sits beside HEAL SMUDGES in the zoom view. It
-  opens the full editor over the page, hands it the full-size picture
-  (the transparent master when there is one), and SAVE BACK files the
-  result as a lettered version through the exact same door as the heal
-  brush — v1 edited becomes v1b, free, same letter rules, same cleanup,
-  same Diagnostics watchdog. The picture travels in and out as bytes;
-  no address or cookie ever reaches the third-party page. If Photopea
-  is unreachable, only this button suffers — the heal brush is the
-  built-in fallback.
-- **🗑 DELETE on lettered versions.** A botched heal or edit no longer
-  squats on the version bar: deleting removes its row and files on the
-  spot, and the spotlight returns to the version it was made from. Two
-  refusals keep the record honest: paid generations can never be
-  deleted here, and a version something else was edited FROM must
-  outlive its children (delete v1c before v1b).
-- Under the hood the heal endpoint and the new edited-upload endpoint
-  now share one variant-filing helper, so the letter rules cannot drift
-  between the two doors. A flattened edit of a transparent parent is
-  stored as an opaque MASTER — never as a small "print file" that would
-  have uploaded at editing size.
+- 🖌 EDIT IN PHOTOPEA now sits on the normal review card as well as in
+  the zoom, so editing never requires zooming first.
+- The v200 heal brush is gone at the owner's word — Photopea does its
+  whole job better, and a tool nobody will use is a control that only
+  confuses. Removed entirely, not hidden: the brush UI, its canvas, the
+  /api/review/heal endpoint, and the opencv requirement (the container
+  slims back down on rebuild). What SURVIVES of it is the
+  lettered-version machinery underneath — v1b/v1c, the DELETE button,
+  the provenance watchdog and the rerun-numbering fix — because that is
+  what Photopea saves through.
 
 Files: routes/pipeline_admin.py, admin_review_images.js/.html,
-style.css, config.py.
+style.css, requirements.txt, comment updates in models.py,
+schema_migrations.py, gpt_worker.py, diagnostics.py, config.py.
 The node was NOT changed — no worker_service copy needed.
 
 Whoever changes code writes here what is waiting and why; the deploy tool

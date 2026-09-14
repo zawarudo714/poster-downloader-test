@@ -4104,128 +4104,16 @@ def api_review_remember(
     return JSONResponse({"ok": True, "saved": changed})
 
 
-@router.post("/api/review/heal")
-def api_review_heal(
-    request: Request,
-    payload: dict = Body(...),
-    admin: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    """
-    Brush small smudges out of a generation — a FREE local edit, no OpenAI.
-
-    ════════════════════════════════════════════════════════════════════════
-    WHAT ARRIVES, AND WHAT EACH NUMBER IS A PERCENTAGE OF
-    ════════════════════════════════════════════════════════════════════════
-    `strokes` is a list of dabs: {x, y, r}. x is a percentage of the image's
-    own WIDTH, y of its HEIGHT, r (the brush radius) of its WIDTH. The zoom
-    screen measures against the picture's rendered box, which the sig-layer
-    work already pins exactly over the picture — both sides name their
-    denominator, because the signature bug of 2026-09-09 came from two
-    sides silently picking different boxes.
-
-    ════════════════════════════════════════════════════════════════════════
-    THE RESULT IS A NEW VERSION, NEVER AN EDIT IN PLACE (owner's design)
-    ════════════════════════════════════════════════════════════════════════
-    Healing V1 produces V1b — same attempt number, a letter — sorted inside
-    its family (V1 · V1b · V2). Healing V1b again produces V1c. Nothing is
-    overwritten, so a heal that smudged an important detail is undone by
-    simply picking the parent again. The letter is also the receipt that no
-    generation was paid for. Files of the versions nobody chose are deleted
-    by the ordinary approval sweep, exactly like rerun generations.
-    """
-    from ..imagefetch import flatten_onto, make_preview, DEFAULT_BACKGROUND
-    from ..storage_remote import StorageError, read_bytes, write_bytes
-    from ..pipeline import storage_path_for
-    from PIL import Image as _Image
-    import io as _io
-
-    # The fill-in maths. Lazy so a container built before the requirement
-    # was added fails THIS button with a plain sentence, not the whole app.
-    # numpy rides in the same try: it arrives WITH opencv, so on an old
-    # container both are missing and either import would be the crash.
-    try:
-        import cv2 as _cv2
-        import numpy as _np
-    except Exception:
-        raise HTTPException(
-            500, "The healing library is not installed on the server yet — "
-                 "redeploy so the container rebuilds with opencv-python-headless.")
-
-    pid = payload.get("processed_id")
-    strokes = payload.get("strokes") or []
-    if not strokes:
-        raise HTTPException(400, "No strokes — brush at least one spot.")
-    if len(strokes) > 200:
-        raise HTTPException(400, "Too many strokes in one sitting — apply, then continue.")
-
-    processed = db.query(ProcessedImage).filter_by(id=pid).first()
-    if processed is None:
-        raise HTTPException(404, "No such image.")
-    if (processed.review_status or "") == "discarded":
-        raise HTTPException(409, "That version's picture was already deleted "
-                                 "by an approval — heal a version that still has one.")
-
-    # SCOPED, same as every endpoint reached by an id from the page.
-    project = _project(request, admin, db)
-    poster = db.query(SavedPoster).filter_by(id=processed.saved_poster_id).first()
-    title = (db.query(MasterTitle).filter_by(id=poster.master_title_id).first()
-             if poster else None)
-    if title is None or P.project_for_title(db, title) is None \
-            or P.project_for_title(db, title).id != project.id:
-        raise HTTPException(404, "That image is not in this project.")
-
-    # ── The source picture: the transparent master when there is one ────
-    src_rel = processed.master_path or processed.storage_path
-    if not src_rel:
-        raise HTTPException(409, "This version has no picture on the Storage "
-                                 "Box to heal — its print file is not built yet "
-                                 "and it has no master.")
-    try:
-        src_bytes = read_bytes(db, src_rel, project=project)
-    except StorageError as e:
-        raise HTTPException(502, f"Could not fetch the picture to heal: {e}")
-
-    img = _Image.open(_io.BytesIO(src_bytes))
-    had_alpha = (img.mode == "RGBA")
-    if not had_alpha:
-        img = img.convert("RGB")
-    W, H = img.size
-
-    # ── The mask: white where he brushed, black elsewhere ────────────────
-    mask = _np.zeros((H, W), dtype=_np.uint8)
-    for s in strokes:
-        try:
-            cx = int(round(float(s["x"]) / 100.0 * W))
-            cy = int(round(float(s["y"]) / 100.0 * H))
-            cr = max(2, int(round(float(s["r"]) / 100.0 * W)))
-        except (KeyError, TypeError, ValueError):
-            raise HTTPException(400, "A stroke arrived without x, y and r.")
-        _cv2.circle(mask, (cx, cy), cr, 255, -1)
-
-    arr = _np.array(img)
-    if had_alpha:
-        rgb = _cv2.inpaint(arr[:, :, :3], mask, 3, _cv2.INPAINT_TELEA)
-        alpha = _cv2.inpaint(arr[:, :, 3], mask, 3, _cv2.INPAINT_TELEA)
-        healed = _Image.fromarray(_np.dstack([rgb, alpha]), "RGBA")
-    else:
-        healed = _Image.fromarray(
-            _cv2.inpaint(arr, mask, 3, _cv2.INPAINT_TELEA), "RGB")
-
-    row, label = _store_variant_row(db, admin=admin, project=project,
-                                    title=title, poster=poster,
-                                    processed=processed, image=healed,
-                                    tool="healed",
-                                    detail={"strokes": len(strokes)})
-    db.commit()
-    return JSONResponse({"ok": True, "label": label, "processed_id": row.id})
 
 
 def _store_variant_row(db, *, admin, project, title, poster, processed,
                        image, tool, detail):
     """
-    File and record a FREE edited derivative of a generation — the shared
-    tail of the heal brush and the Photopea save-back.
+    File and record a FREE edited derivative of a generation — the tail of
+    the Photopea save-back. (A home-made heal brush shared this tail for
+    one version, v200–v201, and was removed at the owner's word once
+    Photopea covered it better; the lettered-version machinery is what
+    survives of it.)
 
     The rule for what the edit BECOMES: if the parent has a transparent
     master, the edit is the new MASTER whatever its mode — an editor that

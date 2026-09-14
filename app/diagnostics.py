@@ -2549,7 +2549,7 @@ def check_number_settings_hold_numbers(db: Session, scope: Scope) -> CheckResult
 
 def check_healed_versions_are_sound(db: Session, scope: Scope) -> CheckResult:
     """
-    INVARIANT: a brush-healed version can always be traced to its parent.
+    INVARIANT: an edited version can always be traced to its parent.
 
     A `variant` letter with no `healed_from`, a parent that is not on the
     same poster, or two siblings wearing the same letter would each make
@@ -2587,7 +2587,7 @@ def check_healed_versions_are_sound(db: Session, scope: Scope) -> CheckResult:
         "healed_versions_are_sound",
         f"{total} healed version(s) cannot be traced properly"
         if total else "Every healed version traces to its parent",
-        "A healed version is a free brush edit of a generation. Its letter "
+        "An edited (lettered) version is a free Photopea edit. Its letter "
         "and its parent link are what let the screen show v1 · v1b honestly; "
         "a broken link means the version bar could mislabel pictures.",
         "error" if total else "ok", rows, total,

@@ -3979,6 +3979,12 @@ def api_recall(
         poster.unusable_reason = None
         poster.unusable_at = None
         poster.unusable_by = None
+        # DELIBERATELY NOT reset: poster.times_listed. It counts how many times
+        # this listing has already gone live on the marketplace, and a recall
+        # is precisely the moment we need that memory kept — the next send has
+        # to carry the next letter ("Kyoto B", then "Kyoto C") so FAA does not
+        # silently renumber it. Clearing it here would send the bare name again
+        # and reintroduce the exact drift this counter exists to prevent.
         touched_titles.add(poster.master_title_id)
 
     for tid in touched_titles:

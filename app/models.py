@@ -305,6 +305,27 @@ class SavedPoster(Base):
     claimed_at         = Column(DateTime, nullable=True)
     claimed_by         = Column(String(64), nullable=True)
 
+    # ── How many times this poster's listing has already gone live ─────────
+    # FineArtAmerica spends a title name for the life of the account the first
+    # time it is used, and RENAMES a second use to "Kyoto #2" — which lives at
+    # an address we never computed, so the listing check then reads the first
+    # one as missing. See the FineArtAmerica title rules in CLAUDE.md.
+    #
+    # So when a title is recalled and sent AGAIN, we pick the new name
+    # ourselves instead of letting FAA renumber. This counter is how the
+    # renderer knows which name to pick: it counts the times this poster has
+    # been fully uploaded, and the next send carries the letter for that count
+    # (0 → the bare name, 1 → "<name> B", 2 → "<name> C", …). See
+    # render_remote_title() and report_uploaded() in pipeline.py.
+    #
+    # It is stored HERE, on the row the recall keeps, and recall deliberately
+    # does NOT reset it — that is the whole point, so the next send is marked.
+    # It counts one per FULL go-live, so it assumes one upload account per
+    # project (true for travel today). A project uploading the SAME poster to
+    # two accounts would burn its name once per account and would need this to
+    # be per (poster, account); revisit before adding a second upload account.
+    times_listed       = Column(Integer, nullable=False, default=0)
+
     master_title = relationship("MasterTitle", back_populates="saved_posters")
 
     __table_args__ = (

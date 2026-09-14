@@ -160,6 +160,12 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("processed_images", "signature_json", "TEXT"),
     ("processed_images", "signature_applied", "TEXT"),
     ("processed_images", "background_chosen", "VARCHAR(16)"),
+    # ── Re-listing a recalled title (2026-09-14) ────────────────────────
+    # How many times this poster has gone fully live. The renderer reads it
+    # to mark a re-sent title ("Kyoto B", "Kyoto C") so FAA does not silently
+    # renumber it. Existing rows read 0, which is the truthful count for a
+    # poster uploaded at most once under its bare name. See models.py.
+    ("saved_posters", "times_listed", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 # ════════════════════════════════════════════════════════════════════════════

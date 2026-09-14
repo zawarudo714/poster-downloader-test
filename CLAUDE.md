@@ -914,6 +914,23 @@ non-ASCII characters from the celebrity database and reading back what saved:
   same title again then lands as `#2`. **A title is spent for the life of
   the account the first time it is used.**
 
+  **WE MARK A RE-SENT TITLE OURSELVES SO FAA NEVER RENUMBERS IT.** `BUILT
+  v205, 2026-09-14`, at the owner's request. When a recalled title is
+  uploaded again, `render_remote_title` appends the next letter — `Kyoto`,
+  then `Kyoto B`, then `Kyoto C` — so FAA sees a new name and does not add a
+  `#2` we cannot address. A plain letter, not `#N`, on purpose: this way we
+  choose the name and never depend on FAA's own numbering, which we cannot
+  read. The count lives in `SavedPoster.times_listed`, added by
+  `report_uploaded` once per full go-live and read by the renderer;
+  `letter_for_index(times_listed)` gives the letter, shown only when
+  `times_listed >= 1`. **Recall deliberately does NOT reset it** — a recall
+  is the exact moment the memory must survive. It is per-poster and assumes
+  ONE upload account per project (true for travel); a second account spends
+  the name once per account and would need this per `(poster, account)`.
+  Watched by `check_live_titles_are_unique_per_account` in `diagnostics.py`:
+  if the letter ever fails to advance, two live listings would share a name
+  and it goes red.
+
   This matters because the owner is REUSING an account that carried the
   movie catalogue, rebranded for travel (see `OPEN_ISSUES.md`). Every film
   title ever listed on it is permanently taken, deletions included.

@@ -1732,20 +1732,45 @@ def render_remote_title(
     template = get_setting(db, "title_template", project=project)
     vars_ = _title_vars(title, poster, index)
 
+    # ── Mark a title that is being sent AGAIN so the marketplace can't ──────
+    # FAA spends a title name for the life of the account the first time it is
+    # used. If a recalled title is re-sent under the SAME name, FAA silently
+    # renames it "Kyoto #2", which lives at an address we never computed and
+    # reads as missing for ever. So on the second send we pick the new name
+    # ourselves: a plain letter, no "#", because FAA keeps the letter but the
+    # marker still reads cleanly. The first send is the bare name; the second
+    # is "<name> B"; the third "<name> C". poster.times_listed counts the
+    # go-lives so far, so the letter is letter_for_index(times_listed).
+    #
+    # A plain letter is used rather than "#N" on purpose: we control the name
+    # this way and never depend on FAA's own numbering, which we cannot see.
+    #
+    # NOTE: this appends after the template renders, so it sits OUTSIDE any
+    # per-image {letter} suffix. Travel is one image per title, so the two
+    # never meet. A future multi-image project would need the re-send letter
+    # woven into the per-image letters instead — see the column comment.
+    resend = ""
+    gen = int(getattr(poster, "times_listed", 0) or 0)
+    if gen >= 1:
+        resend = " " + letter_for_index(gen)   # 1 → " B", 2 → " C", …
+
     # ── The 100-character budget belongs to the NAME, not the suffix ────────
     # FAA truncates at 100 silently. Letting it cut wherever it lands can eat
     # the " - 1994 A" that distinguishes one image from another — two listings
-    # would end up with the same title and nothing to tell them apart.
+    # would end up with the same title and nothing to tell them apart. The
+    # re-send letter is part of the suffix for the same reason: it must never
+    # be the thing that gets truncated away.
     #
     # So: render the template with an empty title to measure what the suffix
     # costs, give the name whatever is left, and assemble.
     suffix_only = clean_for_marketplace(
-        _render(template, {**vars_, "title": ""}), max_length=MARKETPLACE_TITLE_MAX)
+        _render(template, {**vars_, "title": ""}) + resend,
+        max_length=MARKETPLACE_TITLE_MAX)
     budget = max(8, MARKETPLACE_TITLE_MAX - len(suffix_only))
 
     trimmed = clean_for_marketplace(str(vars_.get("title") or ""), max_length=budget)
     return tidy_separators(
-        clean_for_marketplace(_render(template, {**vars_, "title": trimmed})))
+        clean_for_marketplace(_render(template, {**vars_, "title": trimmed}) + resend))
 
 
 def render_keywords(
@@ -3370,6 +3395,11 @@ def report_uploaded(
     if tracking is None:
         return
 
+    # Was this row ALREADY uploaded? Captured before we overwrite the status,
+    # so a node that reports the same success twice cannot advance the re-send
+    # counter twice. See the counter increment near the end of this function.
+    was_uploaded = tracking.status == "uploaded"
+
     tracking.status = "uploaded"
     tracking.uploaded_at = datetime.utcnow()
     tracking.attempts = (tracking.attempts or 0) + 1
@@ -3417,7 +3447,17 @@ def report_uploaded(
                   UploadTracking.status.in_(("pending", "uploading", "failed")))
           .scalar() or 0
     )
-    poster.pipeline_status = "uploaded" if outstanding == 0 else "uploading"
+    fully_live = outstanding == 0
+    poster.pipeline_status = "uploaded" if fully_live else "uploading"
+
+    # One name has now been spent on the marketplace. Count it exactly once
+    # per FULL go-live, so the NEXT send after a recall carries the next
+    # letter ("Kyoto" → "Kyoto B" → "Kyoto C"). `was_uploaded` stops a
+    # repeated success report from advancing it, and recall deliberately
+    # leaves this number alone — that is what makes the mark survive. See
+    # render_remote_title() and the column comment in models.py.
+    if fully_live and not was_uploaded:
+        poster.times_listed = (poster.times_listed or 0) + 1
 
     title = db.query(MasterTitle).filter_by(id=poster.master_title_id).first()
     if title:

@@ -1776,6 +1776,60 @@ def check_generations_share_a_file(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def check_live_titles_are_unique_per_account(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: no two LIVE listings on one account share a name.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS EXISTS
+    ════════════════════════════════════════════════════════════════════════
+    FineArtAmerica spends a title name for the life of the account. To re-send
+    a recalled title we mark it ourselves with the next letter — "Kyoto",
+    then "Kyoto B", then "Kyoto C" — so the marketplace never renumbers it and
+    the stored name always equals the live one (see render_remote_title and
+    SavedPoster.times_listed). If that letter ever FAILS to advance, two sends
+    would land on the same name: FAA would rename the second to "Kyoto #2",
+    its address would be one we never computed, and the listing check would
+    read the first as missing for ever.
+
+    This is stated about STATE — two uploaded rows on one account with one
+    name — so it holds whatever future code writes a title, and it needs no
+    knowledge of how the letter is chosen. Two different titles that fold to
+    the same name are a separate finding (check_titles_collide_after_folding);
+    this one is about the SAME name going live twice on one account.
+    """
+    name = func.lower(func.trim(UploadTracking.remote_title))
+    dup_q = (db.query(UploadTracking.account_id, name.label("nm"),
+                      func.count(UploadTracking.id).label("n"))
+               .filter(UploadTracking.status == "uploaded",
+                       UploadTracking.remote_title.isnot(None),
+                       func.trim(UploadTracking.remote_title) != "")
+               .group_by(UploadTracking.account_id, name)
+               .having(func.count(UploadTracking.id) > 1))
+    if scope.project_id:
+        dup_q = dup_q.filter(UploadTracking.project_id == scope.project_id)
+    found = dup_q.limit(MAX_ROWS).all()
+    total = len(dup_q.all())
+
+    names = _account_names(db)
+    rows = [Finding(f"{names.get(acct, f'account #{acct}')} · \"{nm}\"",
+                    f"{n} live listings share this exact name",
+                    "/admin/pipeline")
+            for acct, nm, n in found]
+    return _result(
+        "live_titles_unique_per_account",
+        f"{total} account(s) have a name live twice"
+        if total else "Every live listing on each account has its own name",
+        "Two listings on one account went up under the same name. The "
+        "marketplace renames the second to \"Name #2\", which lives at an "
+        "address we never computed, so the listing check reads the first as "
+        "missing. This should be impossible: a re-sent title is given the "
+        "next letter automatically. A finding here means that letter did not "
+        "advance — worth a look before the next upload run.",
+        "warn" if total else "ok", rows, total,
+    )
+
+
 def check_approved_without_a_print_file(db: Session, scope: Scope) -> CheckResult:
     """
     INVARIANT: an APPROVED image must have a print file to upload.
@@ -2600,6 +2654,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_approved_without_a_print_file,
     check_current_image_was_discarded,
     check_generations_share_a_file,
+    check_live_titles_are_unique_per_account,
     check_chosen_colour_was_painted,
     check_upload_gap_is_holding,
     check_failure_evidence_is_pruned,

@@ -469,6 +469,27 @@ Added in v203:
 
 ---
 
+## 60. A RE-SENT TITLE GETS THE NEXT LETTER — v205
+
+- Take a title that is already live on FineArtAmerica. Send it back with the
+  recall panel, let the machine repaint it, and let it upload again. The new
+  listing should go up as "<name> B", not "<name>". For example, "Kyoto"
+  becomes "Kyoto B".
+- Send that same title back a second time and let it upload again. It should
+  now go up as "<name> C".
+- Check the address matches: the listing check should find "<name> B" live
+  and should NOT report the title as missing. If it reports missing, the name
+  we stored and the name FAA shows have drifted apart — that is the whole
+  thing this was built to stop.
+- The clean case: a title that was painted but NEVER uploaded, then sent
+  back, should still go up under its plain name with no letter. The letter
+  only appears for a place that has actually been live before.
+- Panel wording: open the SEND TITLES BACK panel and read the note. It should
+  now say a live title is safe to send back, and that the old listing stays
+  live on FineArtAmerica until you delete it there.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

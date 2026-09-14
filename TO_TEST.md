@@ -438,6 +438,16 @@ Photopea and is tested here.)
   the new paid generation must arrive as v2, not v3. (An edit is a row
   but not a generation; the counter was fixed to know the difference.)
 
+Added in v203:
+
+- The Approve Artwork badge in the sidebar must NOT go up when you make
+  an edit — it counts decisions waiting, and an edit does not add one.
+  (Before the fix each edit added one; your current inflated number
+  corrects itself the moment the page reloads after deploy.)
+- Double-click EDIT IN PHOTOPEA fast: exactly one editor must open.
+- In the generations bar, v1b/v1c must be GREEN while v1/v2 keep the
+  normal colour — paid and free telling apart at a glance.
+
 ---
 
 ## NOT ON THIS LIST, ON PURPOSE

@@ -746,6 +746,19 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 .pea-bar-spacer { flex: 1; }
 .pea-overlay iframe { flex: 1; border: 0; background: #1c1c1c; }
 
+/* ── Lettered version buttons (v1b, v1c — free edits) ─────────────────
+   Green, so a paid generation and a free edit read differently at a
+   glance in the generations bar (owner's ask, 2026-09-14). */
+.review-versions .btn-lettered {
+  color: var(--success);
+  border-color: var(--success);
+}
+.review-versions .btn-lettered.btn-accent {
+  background: var(--success);
+  color: var(--bg);
+  border-color: var(--success);
+}
+
 /* ── The edit bar (EDIT IN PHOTOPEA) — on the card and in the zoom ──── */
 .review-edit-bar {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;

@@ -321,6 +321,14 @@ def api_pulse(request: Request, admin: User = Depends(require_admin),
         review_art = (db.query(func.count(ProcessedImage.id))
                         .join(SavedPoster, ProcessedImage.saved_poster_id == SavedPoster.id)
                         .filter(ProcessedImage.review_status == "pending",
+                                # CURRENT rows only — the same spelling as the
+                                # review screen's own counts. Without it every
+                                # Photopea edit added one to this badge: the
+                                # parent v1 and its v1b both read 'pending'
+                                # while you choose between them, but they are
+                                # ONE decision, not two (owner's find,
+                                # 2026-09-14: "the number keeps going up").
+                                ProcessedImage.is_current == 1,
                                 SavedPoster.deleted_at.is_(None),
                                 SavedPoster.master_title_id.in_(title_ids))
                         .scalar() or 0)

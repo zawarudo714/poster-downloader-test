@@ -807,7 +807,7 @@
         <span class="muted mono">generations</span>
         ${list.map((v, i) => `
           <button class="btn btn-tiny ${v.processed_id === showing.processed_id
-                    ? 'btn-accent' : 'btn-ghost'}"
+                    ? 'btn-accent' : 'btn-ghost'}${v.variant ? ' btn-lettered' : ''}"
                   data-pick-version="${v.processed_id}"
                   data-poster="${img.poster_id}"
                   title="${esc(v.filename)}${v.variant ? ' · edited — no generation spent' : ''}${v.is_current ? ' · newest' : ''}">
@@ -1253,13 +1253,18 @@
   // v1 edited becomes v1b, same letter rules, same cleanup at approval,
   // same Diagnostics watchdog on the provenance chain.
   const PEA_ORIGIN = 'https://www.photopea.com';
-  const pea = { open: false, pid: 0, waitingSave: false, saveBtn: null };
+  const pea = { open: false, loading: false, pid: 0,
+                waitingSave: false, saveBtn: null };
 
   function peaFrame() { return document.querySelector('[data-pea-frame]'); }
 
   async function peaOpen() {
+    // One editor, once. A double-click used to start two fetches and two
+    // boots of the iframe racing each other (owner's find, 2026-09-14).
+    if (pea.open || pea.loading) return;
     const t = current();
     if (!t || !t.images.length) return;
+    pea.loading = true;
     const v = shownVersion(t.images[0]);
     // The FULL-SIZE picture, never the web preview: the transparent
     // master when there is one, else the full opaque file. Editing the
@@ -1274,6 +1279,10 @@
     } catch (e) {
       toast('Could not load the picture for editing: ' + e.message, 'error');
       return;
+    } finally {
+      // The guard flag leaves on every path — success continues into
+      // pea.open below, failure returns to a clickable button.
+      pea.loading = false;
     }
     pea.pid = v.processed_id;
     $('[data-pea-title]').textContent =

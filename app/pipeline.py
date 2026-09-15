@@ -1005,8 +1005,18 @@ def _reject_a_value_the_key_cannot_hold(key: str, value) -> None:
     door, because a guard at the door cannot clean what is already inside.
     """
     default = DEFAULTS.get(key)
-    # bool is a subclass of int in Python; a 0/1 key validates as int fine.
     if not isinstance(default, (int, float)) or isinstance(default, bool):
+        return
+    # A real true/false from a checkbox IS a valid 0/1 — set_setting turns it
+    # into "1"/"0" two functions down. The guard must let it through, and the
+    # test for that is the VALUE being a bool, not the DEFAULT. The first
+    # version checked the default, but every 0/1 default is written as an int
+    # (`1`), never a Python bool, so that exemption never fired — and
+    # `int(str(True))` is `int("True")`, which raised. So untucking ANY on/off
+    # box (signature, review, this place check) was refused with "needs a
+    # whole number, not 'False'" (owner hit it on the place-check box,
+    # 2026-09-15). The bool value is the thing that is genuinely fine.
+    if isinstance(value, bool):
         return
     text = str(value).strip()
     try:

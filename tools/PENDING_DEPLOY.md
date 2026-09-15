@@ -1,42 +1,43 @@
 # Not yet deployed
 
-## v210 — images in chat
+## v211 — a hard 350px floor on every side, no override
 
-Waiting to deploy. The node does NOT need copying. Version 210 (live is 209).
+Waiting to deploy. The node does NOT need copying, and NOTHING in the Chrome
+extension changes — the size is measured on the server. Version 211 (live is
+210).
 
-You and workers can now send images in chat, both directions. Two ways to
-attach, chosen with the image button by the message box:
+The rule for a saved worker image changed, at the owner's instruction:
 
-- CHOOSE FILE — upload a picture from your computer or phone (a screenshot,
-  an example shot). JPG, PNG, GIF or WebP, up to 12 MB.
-- or paste an image link — an address to a picture already online.
+- A picture is now REFUSED when it is under 350px on ANY side. Every saved
+  image is therefore at least 350 on both width and height.
+- It is a HARD reject on every door — the in-page grid, the phone add-on, the
+  paste-a-link box and the replace flow. There is no "save anyway" anywhere
+  any more.
 
-Either can go with text or on its own. Images show inline in the thread and
-click to open full in a new tab.
+This is stricter than before. The old rule only refused a picture that was
+small on BOTH sides (a thumbnail) and let a tall banner or a wide panorama
+through. The owner chose the strict floor knowing it will turn away the
+occasional genuine wide vista whose short side is under 350.
 
-How it works underneath, for a future session:
+What changed, for a future session:
 
-- Two new columns on chat_messages: image_path (an UPLOADED file, stored
-  under WORKSPACE_DIR/_chat with a UUID name) and image_url (a pasted link
-  the browser loads directly). A message with neither is text-only, exactly
-  as before; body may now be "" when an image is the whole message.
-- Uploads are served through auth'd routes: /admin/api/chat/image/{id} for
-  the admin, /api/chat/image/{id} for a worker — and the worker route only
-  serves an image from that worker's OWN thread, so a guessed id cannot pull
-  another worker's picture. Pasted links are loaded straight from their URL.
-- save_chat_image() in chat.py validates type and size and writes the file;
-  send_message() now needs text OR an image, not text alone.
+- `_too_small` in worker.py flipped from "both sides" (AND) to "either side"
+  (OR). One shared test, read by all four size gates.
+- The number is the existing dashboard setting min_image_px, default raised
+  300 → 350. If a value is already stored on the dashboard it wins, so set it
+  to 350 there too (the box is now labelled "Reject below this size").
+- The "save anyway" override is gone: the paste and replace gates no longer
+  consult confirm_low_quality, and the worker page (user.js) no longer offers
+  the confirm — it just shows why the image was refused.
+- "We could not measure it" still never rejects (unknown dimensions), same as
+  before — only a measured, too-small picture is refused.
 
-Neighbour fixed in the same change (rule 2): the Diagnostics orphan-files
-sweep is taught that ChatMessage.image_path claims a file. Without that, every
-uploaded chat image would have been listed as an unknown file the owner is
-invited to delete — the exact one-of-N reference trap that check already
-carries a long comment about.
+Why the extension is untouched: the add-on only sends a picture's address;
+the server downloads it, measures it and refuses it, and the add-on already
+handles that refusal. Nothing about size lives in the extension.
 
-Verified: the JavaScript parses, both templates balance, the page hooks
-exist, nothing is stuck behind a hidden ancestor, no undefined names, calls
-pass the right arguments, and the workspace-underscore rule still holds
-(_chat follows it). Run in isolation because the full preflight suite runs
-longer than the sandbox allows; the deploy tool runs it in full before
-shipping. Not testable here: a real file upload round trip — that is the
-owner's first click (TO_TEST 62).
+Verified: JS parses, Python compiles, no undefined names (this caught a
+leftover `small` reference in the replace flow, now fixed), calls pass the
+right arguments, every setting is still reachable and read. The full
+preflight suite runs longer than the sandbox allows; the deploy tool runs it
+in full before shipping.

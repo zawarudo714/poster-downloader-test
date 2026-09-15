@@ -440,9 +440,9 @@ def _active_revisions_for_user(db: Session, user: User, project=None):
 def _safe_min_px(db: Session, project) -> int:
     """The too-small threshold, or its default if the stored value is bad."""
     try:
-        return int(get_setting(db, "min_image_px", project=project) or 300)
+        return int(get_setting(db, "min_image_px", project=project) or 350)
     except Exception:
-        return 300
+        return 350
 
 
 def _state_payload(db: Session, user: User, project=None) -> dict:
@@ -993,23 +993,20 @@ def api_search_save(
         return JSONResponse({"ok": False, "message": str(e)}, status_code=422)
 
     # ── TOO SMALL? THE SAME HARD FLOOR THE PASTE FLOW USES ───────────────
-    # The paste endpoint refuses a picture under `min_image_px` on BOTH
-    # sides; this endpoint did not, so a tiny image sent from the phone
-    # add-on would have saved (owner's find, 2026-09-11). The in-page grid
+    # Every door refuses a picture under `min_image_px` on ANY side (2026-
+    # 09-15). This endpoint once had its own both-sides test; it now shares
+    # `_too_small`, so the grid, the phone add-on and the paste box all apply
+    # one rule from one place. The in-page grid
     # also lands here, but its pictures are pre-filtered above the Brave
     # minimum, so this only ever catches a genuinely tiny Google pick — no
     # confirm, a plain refuse, which is what was asked for.
-    min_px = 300
-    try:
-        min_px = int(get_setting(db, "min_image_px", project=project) or 300)
-    except Exception:
-        pass
-    if img_w and img_h and img_w < min_px and img_h < min_px:
+    min_px = _safe_min_px(db, project)
+    if _too_small(img_w, img_h, min_px):
         target_path.unlink(missing_ok=True)
         return JSONResponse(
             {"ok": False, "reason": "low_quality",
              "message": f"That picture is too small ({img_w}×{img_h}). "
-                        f"Pick one at least {min_px}px on one side."},
+                        f"Every side must be at least {min_px}px."},
             status_code=409,
         )
 
@@ -1604,24 +1601,33 @@ def _validate_image_url(url: str, db: Optional[Session] = None,
 # genuinely was a thumbnail gets confirmed by reflex too.
 #
 # The honest question is about the PICTURE, so it is asked of the picture,
-# after it is downloaded and its real size is known. The owner's rule
-# (2026-09-09): warn only when BOTH sides are under the limit. A tall narrow
-# banner 200 wide and 1400 high is not a thumbnail.
+# after it is downloaded and its real size is known.
+#
+# THE RULE CHANGED ON 2026-09-15, at the owner's instruction: reject when
+# ANY side is under the limit — every side must be at least `min_image_px`
+# (350). The earlier rule warned only when BOTH sides were small, so a tall
+# narrow banner or a wide panorama passed. The owner chose the stricter
+# floor knowing it turns away the occasional genuine wide vista, and chose
+# it as a HARD reject with NO "save anyway" on any door. So this returns
+# True far more often now, and every caller REFUSES rather than warns.
+#
+# `_too_small` is the wrong name for "any side is small" — kept only because
+# renaming it touches four call sites for no behaviour change; the docstring
+# is the source of truth.
 
 def _too_small(width: Optional[int], height: Optional[int],
                limit: int) -> bool:
     """
-    True only when the picture is small in BOTH directions.
+    True when the picture is under `limit` on EITHER side.
 
     Unknown dimensions mean we could not measure it, which is not the same
     as measuring it and finding it small — so an unreadable header never
-    produces a warning. Same rule as 404 against 403 on the listing check:
-    "we could not look" is its own answer and must never be presented as
-    evidence.
+    rejects. Same rule as 404 against 403 on the listing check: "we could
+    not look" is its own answer and must never be presented as evidence.
     """
     if not width or not height:
         return False
-    return width < limit and height < limit
+    return width < limit or height < limit
 
 
 def _download_to(url: str, target_path: Path) -> int:
@@ -1821,22 +1827,17 @@ def save_image(
     # The file is deleted on refusal. Leaving it would put an unreferenced
     # picture in the worker's folder that no database row points at, which
     # Diagnostics would later report as an orphan.
-    min_px = 300
-    try:
-        min_px = int(get_setting(db, "min_image_px", project=project) or 300)
-    except Exception:
-        pass
-    small = _too_small(img_w, img_h, min_px)
-    if small and not confirm_low_quality:
+    # A HARD floor on every side, no override (2026-09-15). confirm_low_quality
+    # is no longer consulted — there is no "save anyway" any more.
+    min_px = _safe_min_px(db, project)
+    if _too_small(img_w, img_h, min_px):
         target_path.unlink(missing_ok=True)
         return JSONResponse(
             {"ok": False, "reason": "low_quality",
              "message": (
-                 f"That picture is only {img_w} by {img_h} pixels, which is "
-                 f"smaller than {min_px} on both sides. It is almost "
-                 f"certainly a thumbnail rather than the real image. Open "
-                 f"the picture at full size first, then copy ITS address. "
-                 f"Save this one anyway?"
+                 f"That picture is only {img_w} by {img_h} pixels. Every side "
+                 f"must be at least {min_px}px, so this one cannot be saved. "
+                 f"Open the picture at full size first, then copy ITS address."
              ),
              "width": img_w, "height": img_h, "min_px": min_px},
             status_code=409,
@@ -1852,10 +1853,10 @@ def save_image(
         filename           = target_name,
         source_url         = src_url,
         file_size          = written,
-        # 1 only when the worker was warned it was small and went ahead. It
-        # is the record of a judgement, so it must not be set for a picture
-        # nobody was warned about.
-        low_quality_url    = 1 if small else 0,
+        # Always 0 now: a too-small picture is refused outright above, so a
+        # saved one is never low-quality. The column stays for the history it
+        # already holds and for the admin gallery pill that reads it.
+        low_quality_url    = 0,
         image_width        = img_w,
         image_height       = img_h,
         # A hand-pasted address. Whether the worker copied it from Google,
@@ -2131,24 +2132,18 @@ def replace_poster(
         dims = read_file_dimensions(tmp_target)
         img_w, img_h = (dims if dims else (None, None))
 
-        min_px = 300
-        try:
-            min_px = int(get_setting(
-                db, "min_image_px",
-                project=resolve_project(db, _mt.project_id if _mt else None))
-                or 300)
-        except Exception:
-            pass
-        small = _too_small(img_w, img_h, min_px)
-        if small and not confirm_low_quality:
+        # Same hard floor, no override (2026-09-15).
+        min_px = _safe_min_px(
+            db, resolve_project(db, _mt.project_id if _mt else None))
+        if _too_small(img_w, img_h, min_px):
             tmp_target.unlink(missing_ok=True)
             return JSONResponse(
                 {"ok": False, "reason": "low_quality",
                  "message": (
-                     f"That picture is only {img_w} by {img_h} pixels, which "
-                     f"is smaller than {min_px} on both sides. It is almost "
-                     f"certainly a thumbnail rather than the real image. "
-                     f"Replace with it anyway?"
+                     f"That picture is only {img_w} by {img_h} pixels. Every "
+                     f"side must be at least {min_px}px, so it cannot replace "
+                     f"the current one. Open it at full size and copy ITS "
+                     f"address."
                  ),
                  "width": img_w, "height": img_h, "min_px": min_px},
                 status_code=409,
@@ -2166,7 +2161,9 @@ def replace_poster(
     sp.filename        = new_name
     sp.source_url      = src_url
     sp.file_size       = written
-    sp.low_quality_url = 1 if small else 0
+    # Always 0: a too-small replacement is refused above, so what lands here
+    # is never low-quality.
+    sp.low_quality_url = 0
     sp.image_width     = img_w
     sp.image_height    = img_h
 

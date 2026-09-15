@@ -2949,8 +2949,16 @@ So, before shipping any figure or label:
   fired on EVERY save, and its advice named a film database nothing in this
   system has used for weeks. Once a confirmation is answered by reflex, the
   one save that genuinely WAS a thumbnail gets confirmed by reflex too — so
-  a warning nobody can act on is worse than none. It now measures the
-  picture instead, and only speaks when it is small on both sides.
+  a warning nobody can act on is worse than none. It measures the picture
+  instead of the address. It began as a warn-only test that fired when the
+  picture was small on BOTH sides. On 2026-09-15 the owner turned it into a
+  HARD floor: refuse when a picture is under `min_image_px` (350) on ANY
+  side, on every door, with no "save anyway". That is stricter than the
+  "fires on the normal case" lesson would suggest — a real wide vista whose
+  short side is under 350 is now refused — but it is a deliberate quality
+  floor the owner asked for, not an accidental over-warning, and it does not
+  fire on an ordinary full-size photo. The shared test is `_too_small` in
+  `worker.py` (now "either side"), read by all three save doors.
 
   Before shipping any guard, ask **how often it will fire when nothing is
   wrong.** If the answer is "most of the time", it is not a guard. Same

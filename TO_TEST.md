@@ -541,6 +541,28 @@ Added in v203:
 
 ---
 
+## 63. HARD 350px SIZE FLOOR ON EVERY SIDE — v211
+
+- First, if you ever set the size box on the Pipeline page by hand, open it
+  and confirm it reads 350 (the label now says "Reject below this size"). A
+  stored value wins over the new default.
+- Save a small image (under 350 on a side) from the in-page grid — it should
+  be refused outright, no "save anyway".
+- Do the same from the phone add-on (Google) — also refused, and the add-on
+  should show the refusal, not save it. The extension itself needs no update.
+- Paste a small image link — refused, with a plain message and NO "save
+  anyway" button or prompt.
+- Replace an existing image with a small one — refused the same way, and the
+  original image should stay untouched.
+- The deliberate strict case: try a genuine wide, short picture (for example
+  1600 wide but 320 tall). It WILL be refused now, because one side is under
+  350. Confirm that is what you want; if it is too strict, the number is on
+  the dashboard.
+- A normal full-size photo (well over 350 both ways) should save exactly as
+  before.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

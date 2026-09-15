@@ -1475,10 +1475,8 @@
       return;
     }
     if (r.status === 409 && r.data && r.data.reason === 'low_quality') {
-      if (confirm(r.data.message + '\n\nClick OK to save it anyway, or Cancel to go back and copy the full-size link.')) {
-        return doSave(urlInput, msgEl, flashEl, { ...opts, confirm_low_quality: true });
-      }
-      msgEl.textContent = 'Cancelled.'; msgEl.className = 'save-msg';
+      // No override any more — the size floor is a hard reject. Just show why.
+      msgEl.textContent = r.data.message; msgEl.className = 'save-msg err';
       return;
     }
     if (r.status === 409 && r.data && r.data.reason === 'duplicate') {
@@ -1686,9 +1684,8 @@
       return;
     }
     if (r.status === 409 && r.data && r.data.reason === 'low_quality') {
-      if (confirm(r.data.message + '\n\nClick OK to use it anyway, or Cancel to go back and copy the full-size link.')) {
-        return replacePoster(posterId, urlInput, { ...opts, confirm_low_quality: true });
-      }
+      // No override — hard reject. Show the reason, do not offer to proceed.
+      alert(r.data.message);
       return;
     }
     let msg = 'Replace failed: ' + (r.data && r.data.detail || r.status);

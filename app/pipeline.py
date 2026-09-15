@@ -449,16 +449,19 @@ DEFAULTS: dict[str, Any] = {
     #
     # A saved image is questioned only when it measures under this on BOTH
     # width and height, which is what a thumbnail looks like. A tall narrow
-    # banner, or a wide short panorama, passes — one small side is a shape,
-    # not a quality.
+    # THE HARD SIZE FLOOR. A picture is REFUSED — on every door, with no
+    # "save anyway" — when it is under this on ANY side. So a saved image is
+    # at least this many pixels on both width and height (owner, 2026-09-15).
     #
-    # This replaced a test that asked whether the address was on
-    # one particular image host and called everything else low quality.
-    # Travel workers
-    # paste Google addresses, so the warning fired on every save until they
-    # stopped reading it (owner, 2026-09-09). Set to 0 to switch the
-    # question off entirely.
-    "min_image_px": 300,
+    # This is stricter than the rule before it, which only refused a picture
+    # small on BOTH sides (a thumbnail) and let a tall banner or wide
+    # panorama through. The owner chose the strict floor knowing it turns
+    # away the occasional genuine wide vista. Set to 0 to switch it off.
+    #
+    # (The even older test asked whether the address was on one image host
+    # and called everything else low quality; travel workers paste Google
+    # addresses, so it fired on every save until they stopped reading it.)
+    "min_image_px": 350,
 
     # ── The place check ──────────────────────────────────────────────────
     # Every saved worker image is shown to Google web detection and

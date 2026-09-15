@@ -139,10 +139,16 @@
     // time — so a glance answers "is anyone actually working" without
     // opening the activity log. Clicking it opens the full log.
     if (d.last_worker_action) {
+      // The action text is capped by CSS (.pulse-action-text ellipsis) so a
+      // long title cannot blow the chip out of line with its neighbours;
+      // the full sentence lives in the hover tooltip. The timestamp gets
+      // its own muted span so the eye separates WHAT from WHEN.
       bits.push(chip('idle', 'last worker action',
-        esc(d.last_worker_action.text) + ' · ' + esc(d.last_worker_action.when),
+        '<span class="pulse-action-text">' + esc(d.last_worker_action.text) + '</span>'
+        + '<span class="pulse-when">· ' + esc(d.last_worker_action.when) + '</span>',
         { href: '/admin/audit',
-          title: 'The newest activity-log entry made by a worker. '
+          title: d.last_worker_action.text + ' · ' + d.last_worker_action.when
+                 + ' — the newest activity-log entry made by a worker. '
                  + 'Click to open the full activity log.' }));
     }
 

@@ -292,13 +292,39 @@ def api_pulse(request: Request, admin: User = Depends(require_admin),
                    "chat_sent": "sent a chat message",
                    "receipt_ack": "confirmed a receipt"}
             verb = SAY.get(act.action, (act.action or "").replace("_", " "))
-            detail = ""
             try:
                 dd = _json.loads(act.details or "{}")
-                detail = str(dd.get("filename") or dd.get("title")
-                             or dd.get("title_folder") or "")
             except Exception:
-                detail = ""
+                dd = {}
+            # THE TITLE FIRST, because "humphrey completed" answers nothing
+            # — the owner wants to see WHICH place was worked on (his ask,
+            # 2026-09-15). Many log rows carry no name in their details
+            # (completed, claimed, skipped point at a title by id only), so
+            # the name is looked up from the row the action points at.
+            detail = str(dd.get("title") or "")
+            if not detail and act.target_id:
+                try:
+                    if act.target_type == "master_title":
+                        detail = (db.query(MasterTitle.title)
+                                    .filter_by(id=act.target_id).scalar() or "")
+                    elif act.target_type == "saved_poster":
+                        detail = (db.query(MasterTitle.title)
+                                    .join(SavedPoster,
+                                          SavedPoster.master_title_id == MasterTitle.id)
+                                    .filter(SavedPoster.id == act.target_id)
+                                    .scalar() or "")
+                    elif act.target_type == "revision":
+                        detail = (db.query(MasterTitle.title)
+                                    .join(SavedPoster,
+                                          SavedPoster.master_title_id == MasterTitle.id)
+                                    .join(Revision,
+                                          Revision.saved_poster_id == SavedPoster.id)
+                                    .filter(Revision.id == act.target_id)
+                                    .scalar() or "")
+                except Exception:
+                    detail = ""
+            if not detail:
+                detail = str(dd.get("filename") or dd.get("title_folder") or "")
             text = f"{act.username or 'a worker'} {verb}"
             if detail:
                 text += f" {detail}"

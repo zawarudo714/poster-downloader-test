@@ -621,6 +621,20 @@ Added in v203:
 
 ---
 
+## 67. THE CHIP NAMES THE TITLE AND LINES UP — v214
+
+- On any admin screen, look at the "last worker action" chip after a worker
+  completes a title. It should now name the place, like "humphrey completed
+  Cortina d'Ampezzo, Italy · 09-15 09:16" — before this it just said
+  "humphrey completed" with nothing after it. Claiming and skipping should
+  name the place too.
+- The chip should sit neatly in line with its neighbours. A very long title
+  is cut off with "…" — hover over the chip to read the whole sentence.
+- The date and time part should look smaller and greyer than the action
+  itself.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

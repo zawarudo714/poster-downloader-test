@@ -1913,6 +1913,16 @@ form field name, a header, an ID format:
    literal. Two copies of one fact are two chances to drift, and the copy
    that breaks is always the newer one, silently.
 
+   **In CSS the two copies are two rules for ONE selector, and the LATER
+   one wins — so a fix applied to the earlier one silently loses.** The
+   v213 "REPLACE FILE beside the paste box on a phone" fix edited the
+   `.rev-actions` phone rule near its desktop rules, while a second phone
+   rule for the same selector 900 lines further down still stacked the
+   controls into a column; the owner's screenshot found it (2026-09-15).
+   `.pulse-row` is defined twice the same way. Before changing any style,
+   grep the stylesheet for EVERY rule on that selector and edit the one
+   that actually wins — or better, collapse them into one.
+
    **The same applies to a value DERIVED in two places, and that version is
    harder to spot** because neither copy looks like a hardcoded constant.
    The Chrome profile folder was computed as "the account's setting, or this

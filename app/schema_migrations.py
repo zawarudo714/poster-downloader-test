@@ -166,6 +166,14 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     # renumber it. Existing rows read 0, which is the truthful count for a
     # poster uploaded at most once under its bare name. See models.py.
     ("saved_posters", "times_listed", "INTEGER NOT NULL DEFAULT 0"),
+    # ── The place check (2026-09-15) ────────────────────────────────────
+    # Google web detection's answer per worker image, and the owner's ack.
+    # All nullable: existing rows truthfully read "never checked".
+    ("saved_posters", "place_check_status",   "VARCHAR(16)"),
+    ("saved_posters", "place_check_guess",    "TEXT"),
+    ("saved_posters", "place_check_at",       "DATETIME"),
+    ("saved_posters", "place_check_error",    "TEXT"),
+    ("saved_posters", "place_check_acked_at", "DATETIME"),
 ]
 
 # ════════════════════════════════════════════════════════════════════════════

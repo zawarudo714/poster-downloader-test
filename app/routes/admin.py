@@ -1653,6 +1653,16 @@ def api_browse(
             # 'brave' / 'google' / 'pasted', or empty for saves that
             # predate the column — the screen then says nothing.
             "image_source": sp.image_source or "",
+            # The place check. status None means not answered yet — either
+            # never tried, or the last try failed (place_error True then).
+            # acked is derived by comparing the two timestamps, the
+            # skip_acked_at design: an ack only silences the check it
+            # answered.
+            "place_status": sp.place_check_status,
+            "place_guess":  sp.place_check_guess or "",
+            "place_error":  bool(sp.place_check_error),
+            "place_acked":  bool(sp.place_check_acked_at and sp.place_check_at
+                                 and sp.place_check_acked_at >= sp.place_check_at),
             "added_by":     sp.added_by or None,
             "flagged": rev is not None,
             "revision_id": rev.id if rev else None,
@@ -1663,19 +1673,144 @@ def api_browse(
         })
 
     from ..pipeline import get_setting
+    project = current_project(request, admin, db)
     try:
-        min_width = int(get_setting(db, "review_min_width_px",
-                                    project=current_project(request, admin, db)) or 0)
+        min_width = int(get_setting(db, "review_min_width_px", project=project) or 0)
     except Exception:
         min_width = 800
+
+    # What the PLACE CHECK panel needs to explain itself: whether the
+    # feature is on, whether a key exists (a toggle with no key must SAY so,
+    # not silently do nothing), and the month's usage so the spend is
+    # visible where the feature lives. The count is derived from the rows,
+    # never maintained.
+    month_start = datetime(local_today().year, local_today().month, 1)
+    place_check = {
+        "enabled": bool(int(get_setting(db, "place_check_enabled", project=project) or 0)),
+        "key_present": bool(str(get_setting(db, "google_vision_api_key", project=project) or "").strip()),
+        "checked_this_month": int(
+            db.query(func.count(SavedPoster.id))
+              .filter(SavedPoster.place_check_status.isnot(None),
+                      SavedPoster.place_check_at >= month_start)
+              .scalar() or 0),
+    }
 
     return JSONResponse({
         "worker": worker, "date": date,
         "min_width": min_width,
+        "place_check": place_check,
         "title_count": len(titles),
         "poster_count": sum(len(t["posters"]) for t in titles.values()),
         "titles": list(titles.values()),
     })
+
+
+# ── The place check: fill and acknowledge ────────────────────────────────────
+
+# How many images one press of the fill loop checks before answering. Each
+# Google call is a network round trip, so a small chunk keeps every request
+# short and the STOP free: the browser simply stops asking, and there is
+# nothing queued anywhere that would need cancelling.
+PLACE_CHECK_CHUNK = 6
+
+
+@router.post("/api/place_check/run")
+def api_place_check_run(
+    request: Request,
+    payload: dict = Body(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Check a CHUNK of this worker-day's unchecked images and say how many
+    remain. The browser keeps calling while remaining > 0; closing the
+    panel just stops the calls. The stop signal rides the reply and no
+    work is ever queued up front — the two lessons every long job here has
+    already paid for.
+
+    "Unchecked" includes rows whose last attempt FAILED — so a fixed key
+    heals the backlog by pressing the same button, with no separate retry
+    machinery to remember.
+    """
+    from ..place_check import check_poster
+    from ..pipeline import get_setting
+
+    worker = str(payload.get("worker") or "").strip()
+    try:
+        d = date_type.fromisoformat(str(payload.get("date") or ""))
+    except ValueError:
+        raise HTTPException(400, "Bad date.")
+
+    project = current_project(request, admin, db)
+    if not bool(int(get_setting(db, "place_check_enabled", project=project) or 0)):
+        return JSONResponse({"ok": False, "detail":
+                             "The place check is switched off on the Pipeline settings page."})
+    if not str(get_setting(db, "google_vision_api_key", project=project) or "").strip():
+        return JSONResponse({"ok": False, "detail":
+                             "No Google Vision key. Paste one into the KEYS panel on the Pipeline page."})
+
+    base = (
+        db.query(SavedPoster)
+          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+          .filter(SavedPoster.username == worker,
+                  SavedPoster.original_save_date == d,
+                  SavedPoster.deleted_at.is_(None),
+                  SavedPoster.place_check_status.is_(None))
+    )
+    base = scope_titles(base, project)
+
+    todo = base.order_by(SavedPoster.id.asc()).limit(PLACE_CHECK_CHUNK).all()
+    results = []
+    for sp in todo:
+        status = check_poster(db, sp)
+        results.append({"poster_id": sp.id, "status": sp.place_check_status,
+                        "guess": sp.place_check_guess or "",
+                        "error": sp.place_check_error or ""})
+        if status == "error":
+            # One failure usually means they all fail the same way (bad
+            # key, quota, network). Stopping the chunk at the first error
+            # reports it once instead of stamping it onto six rows.
+            break
+    db.commit()
+
+    remaining = base.count()
+    if results:
+        log_activity(db, user=admin, action="place_check_run", target_type="saved_poster",
+                     details={"worker": worker, "date": str(d),
+                              "checked": len(results), "remaining": remaining})
+        db.commit()
+    return JSONResponse({"ok": True, "checked": len(results),
+                         "remaining": remaining, "results": results})
+
+
+@router.post("/api/place_check/ack")
+def api_place_check_ack(
+    request: Request,
+    payload: dict = Body(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    "Checked it, it's fine" on one image — or taking that back. Stored as
+    a timestamp compared against the check's own, so the ack only ever
+    silences the observation it answered.
+    """
+    poster_id = int(payload.get("poster_id") or 0)
+    on = bool(payload.get("on"))
+
+    q = (db.query(SavedPoster)
+           .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+           .filter(SavedPoster.id == poster_id,
+                   SavedPoster.deleted_at.is_(None)))
+    sp = scope_titles(q, current_project(request, admin, db)).first()
+    if sp is None:
+        raise HTTPException(404, "No such image in this project.")
+
+    sp.place_check_acked_at = datetime.utcnow() if on else None
+    log_activity(db, user=admin, action="place_check_ack", target_type="saved_poster",
+                 target_id=sp.id, details={"on": on})
+    db.commit()
+    return JSONResponse({"ok": True, "acked": on})
 
 
 @router.get("/api/poster/{poster_id}/timeline")
@@ -2013,6 +2148,12 @@ def admin_add_poster(
                  "url": src_url, "title": f"{t.title} ({t.year})"},
     )
     db.commit()
+
+    # Third of the three doors an image can arrive through — the place
+    # check covers an admin-added picture the same as a worker's.
+    from ..place_check import launch_check
+    launch_check(sp.id)
+
     return JSONResponse({"ok": True, "filename": target_name, "poster_id": sp.id})
 
 

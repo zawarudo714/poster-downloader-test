@@ -728,6 +728,119 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
   color: var(--accent, #7aa2f7);
   border: 1px solid rgba(122, 162, 247, .35);
 }
+
+/* ── The place check ─────────────────────────────────────────────────────
+   A DOT-shaped marker, deliberately a different shape from the rectangular
+   status pills beside it: "found via Google" (source pill) and "Google says
+   it is the right place" (this) are two different facts, and shape is what
+   keeps them apart at a glance. One colour per state, sharing one spelling
+   with the panel rows via placeVerdict() in admin.js:
+     match       calm green  — the common case, must not shout
+     mismatch    loud amber  — the one the owner needs to look at
+     no read     quiet grey  — Google looked and had no opinion
+     checked ✓   faint green — the owner acknowledged a flagged one
+     failed      red-tinted  — WE could not ask; never dressed as normal
+     not checked dashed grey — waiting for the fill button               */
+.place-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: .03em;
+  white-space: nowrap;
+}
+.place-pill::before {
+  content: '';
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.place-pill.place-ok {
+  color: var(--success);
+  background: rgba(79, 221, 161, .10);
+  border: 1px solid rgba(79, 221, 161, .30);
+}
+.place-pill.place-warn {
+  color: var(--skip);
+  background: rgba(240, 180, 94, .18);
+  border: 1px solid var(--skip);
+  font-weight: 700;
+}
+.place-pill.place-none {
+  color: var(--subtext);
+  background: rgba(128, 128, 128, .12);
+  border: 1px solid rgba(128, 128, 128, .30);
+}
+.place-pill.place-acked {
+  color: var(--success);
+  background: transparent;
+  border: 1px dashed rgba(79, 221, 161, .45);
+}
+.place-pill.place-err {
+  color: var(--error);
+  background: rgba(240, 90, 90, .12);
+  border: 1px solid rgba(240, 90, 90, .40);
+}
+.place-pill.place-wait {
+  color: var(--subtext);
+  background: transparent;
+  border: 1px dashed var(--border);
+}
+
+/* The panel: this day's images beside Google's words, worst first. */
+.place-card {
+  width: min(860px, 94vw);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+}
+.place-head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.place-list {
+  overflow-y: auto;
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.place-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px 6px 6px;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 6px;
+  background: var(--card);
+}
+.place-row.place-warn { border-left-color: var(--skip); }
+.place-row.place-ok,
+.place-row.place-acked { border-left-color: var(--success); }
+.place-row.place-err { border-left-color: var(--error); }
+/* Landscape-friendly: contain, never crop — the recurring thumbnail rule. */
+.place-row img {
+  width: 84px;
+  height: 60px;
+  object-fit: contain;
+  background: rgba(0, 0, 0, .25);
+  border-radius: 4px;
+  flex: none;
+}
+.place-row-body { flex: 1; min-width: 0; }
+.place-row-title { font-weight: 600; }
+.place-row-guess {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .img-source-word { color: var(--accent, #7aa2f7); }
 
 /* ── The Photopea overlay ─────────────────────────────────────────────

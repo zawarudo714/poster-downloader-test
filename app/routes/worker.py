@@ -1093,6 +1093,11 @@ def api_search_save(
                  details={"via": "search", "source": image_source, "url": url})
     db.commit()
 
+    # The place check runs on its own thread AFTER the commit, so the
+    # worker never waits on Google. Gated (toggle, key) inside the thread.
+    from ..place_check import launch_check
+    launch_check(sp.id)
+
     new_live = count_live_posters_for_master(db, t.id)
     return JSONResponse({
         "ok": True,
@@ -1871,6 +1876,11 @@ def save_image(
         },
     )
     db.commit()
+
+    # Same as the search door: the place check runs after the commit on its
+    # own thread, so this save answers at once.
+    from ..place_check import launch_check
+    launch_check(sp.id)
 
     new_live = count_live_posters_for_master(db, t.id)
     return JSONResponse({

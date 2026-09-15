@@ -147,6 +147,11 @@
 
   let titles = [];
   let titleIdx = 0;
+  // The place check's page-level facts, delivered by /admin/api/browse:
+  // whether it is on, whether a key exists, and this month's usage. The
+  // per-image verdicts ride on each poster in `titles`, so the pills and
+  // the panel read ONE set of data and can never disagree.
+  let placeCheck = { enabled: false, key_present: false, checked_this_month: 0 };
   let currentLightbox = null;
   // Which poster the lightbox is showing, for the resume memory — 0 when
   // it is closed. Written into the saved state on every open and close,
@@ -177,6 +182,8 @@
     // The project decides its own quality threshold; 0 means "don't warn".
     if (typeof data.min_width === 'number') MIN_WIDTH = data.min_width;
     titles = data.titles || [];
+    placeCheck = data.place_check || placeCheck;
+    updatePlaceButton();
     sortTitles();
     // Restore title index from URL if available and valid, else 0.
     titleIdx = (restoredIdx > 0 && restoredIdx < titles.length) ? restoredIdx : 0;
@@ -325,6 +332,18 @@
       pill.title = { brave: 'Found with the in-page Brave search',
                      google: 'Sent from Google by the phone add-on',
                      pasted: 'Pasted as a link by hand' }[p.image_source] || '';
+      pillsHost.appendChild(pill);
+    }
+    // The place check's verdict. A DOT marker rather than a rectangle, so
+    // at a glance it cannot be confused with the source pill beside it —
+    // "found via Google" and "Google says it is the right place" are two
+    // different facts. Absent entirely when the feature is off.
+    if (placeCheck.enabled) {
+      const pv = placeVerdict(p);
+      const pill = document.createElement('span');
+      pill.className = 'place-pill ' + pv.cls;
+      pill.textContent = pv.word;
+      pill.title = pv.tip;
       pillsHost.appendChild(pill);
     }
     if (p.added_by) {
@@ -614,6 +633,226 @@
   });
   $('ib-prev-title').addEventListener('click', () => navTitle(-1));
   $('ib-next-title').addEventListener('click', () => navTitle(1));
+
+  // ── The place check ─────────────────────────────────────────────────────
+  // Each saved image was shown to Google, and Google's words are compared
+  // to the title. The pill on each box and the rows in this panel read the
+  // SAME per-poster fields off `titles`, so they cannot disagree. The fill
+  // loop below asks the server for one small chunk at a time and the stop
+  // signal is simply not asking again — nothing is ever queued server-side,
+  // so closing the panel IS the stop button.
+
+  // One spelling of each state's word, colour class and explanation, shared
+  // by the pill and the panel row.
+  function placeVerdict(p) {
+    if (p.place_status === 'match') {
+      return { cls: 'place-ok', word: 'place ✓', rank: 4,
+               tip: 'Google sees: ' + (p.place_guess || '(nothing)') };
+    }
+    if (p.place_status === 'mismatch' || p.place_status === 'no_opinion') {
+      if (p.place_acked) {
+        return { cls: 'place-acked', word: 'checked ✓', rank: 3,
+                 tip: 'You looked at this one and marked it fine. Google saw: '
+                      + (p.place_guess || 'nothing') };
+      }
+      if (p.place_status === 'mismatch') {
+        return { cls: 'place-warn', word: 'CHECK PLACE', rank: 0,
+                 tip: 'Google\'s words share nothing with the title. Google sees: '
+                      + (p.place_guess || '(nothing)') };
+      }
+      return { cls: 'place-none', word: 'no read', rank: 1,
+               tip: 'Google had no opinion on this picture — not a fault, just no answer.' };
+    }
+    if (p.place_error) {
+      return { cls: 'place-err', word: 'check failed', rank: 2,
+               tip: 'The check could not run. Open PLACE CHECK THIS DAY to see why and retry.' };
+    }
+    return { cls: 'place-wait', word: 'not checked', rank: 2,
+             tip: 'Not checked yet. Press PLACE CHECK THIS DAY to fill it in.' };
+  }
+
+  function updatePlaceButton() {
+    const btn = $('ib-place-btn');
+    if (btn) btn.hidden = !placeCheck.enabled;
+  }
+
+  const placeModal = $('ib-place-modal');
+  let placeRunning = false;
+
+  function allPosters() {
+    const out = [];
+    titles.forEach((t) => (t.posters || []).forEach((p) => out.push({ t, p })));
+    return out;
+  }
+
+  function renderPlacePanel() {
+    if (!placeModal) return;
+    const rows = allPosters();
+    const unchecked = rows.filter((r) => r.p.place_status == null).length;
+    const worry = rows.filter((r) => placeVerdict(r.p).rank === 0).length;
+
+    $('ib-place-day').textContent = `${$('ib-worker').value} · ${$('ib-date').value}`;
+    $('ib-place-month').textContent =
+      `${placeCheck.checked_this_month} image(s) checked this month across all days · Google's first 1,000 each month are free`;
+
+    let summary;
+    if (!placeCheck.key_present) {
+      summary = 'No Google Vision key yet, so nothing can be checked. '
+        + 'Paste the key into the KEYS panel on the Pipeline page first.';
+    } else if (rows.length === 0) {
+      summary = 'Nothing saved on this day.';
+    } else {
+      summary = `${rows.length} image(s) on this day · ${worry} worth a look · ${unchecked} not checked yet. `
+        + 'Rows are ordered by how much they need you: Google disagreeing first, '
+        + 'then no answer, then the rest.';
+    }
+    $('ib-place-summary').textContent = summary;
+
+    const runBtn = $('ib-place-run');
+    runBtn.textContent = placeRunning
+      ? 'CHECKING…'
+      : `CHECK THE ${unchecked} UNCHECKED ON THIS DAY`;
+    runBtn.disabled = placeRunning || unchecked === 0 || !placeCheck.key_present;
+
+    const list = $('ib-place-list');
+    list.innerHTML = '';
+    rows
+      .map((r) => ({ ...r, v: placeVerdict(r.p) }))
+      .sort((a, b) => (a.v.rank - b.v.rank)
+        || ((a.t.external_id == null ? Infinity : a.t.external_id)
+          - (b.t.external_id == null ? Infinity : b.t.external_id)))
+      .forEach(({ t, p, v }) => {
+        const row = document.createElement('div');
+        row.className = 'place-row ' + v.cls;
+
+        const img = document.createElement('img');
+        img.src = fileUrl(p.poster_id, p.size || p.filename);
+        img.loading = 'lazy';
+        img.alt = '';
+        row.appendChild(img);
+
+        const body = document.createElement('div');
+        body.className = 'place-row-body';
+        const name = document.createElement('div');
+        name.className = 'place-row-title';
+        name.textContent = (t.external_id != null ? t.external_id + '. ' : '') + t.title;
+        body.appendChild(name);
+        const guess = document.createElement('div');
+        guess.className = 'place-row-guess muted';
+        if (p.place_status != null) {
+          guess.textContent = p.place_guess
+            ? 'Google sees: ' + p.place_guess
+            : 'Google had no opinion.';
+        } else if (p.place_error) {
+          guess.textContent = 'Check failed — press the button above to retry.';
+        } else {
+          guess.textContent = 'Not checked yet.';
+        }
+        body.appendChild(guess);
+        row.appendChild(body);
+
+        const chip = document.createElement('span');
+        chip.className = 'place-pill ' + v.cls;
+        chip.textContent = v.word;
+        row.appendChild(chip);
+
+        // The way OUT of the worth-a-look list, on the same screen as the
+        // flag — otherwise the count only ever climbs and stops being read.
+        if (p.place_status === 'mismatch' || p.place_status === 'no_opinion') {
+          const ack = document.createElement('button');
+          ack.type = 'button';
+          ack.className = 'btn btn-ghost btn-tiny';
+          ack.textContent = p.place_acked ? 'UNDO' : 'CHECKED, IT\'S FINE';
+          ack.addEventListener('click', async () => {
+            ack.disabled = true;
+            try {
+              const r = await fetch('/admin/api/place_check/ack', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ poster_id: p.poster_id, on: !p.place_acked }),
+              });
+              const d = await r.json();
+              if (r.ok && d.ok) { p.place_acked = d.acked; renderPlacePanel(); }
+              else alert('Could not save that: ' + (d.detail || r.status));
+            } finally { ack.disabled = false; }
+          });
+          row.appendChild(ack);
+        }
+        list.appendChild(row);
+      });
+  }
+
+  async function placeRunLoop() {
+    if (placeRunning) return;
+    placeRunning = true;
+    renderPlacePanel();
+    const statusEl = $('ib-place-status');
+    let done = 0;
+    try {
+      while (placeRunning) {
+        const r = await fetch('/admin/api/place_check/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ worker: $('ib-worker').value, date: $('ib-date').value }),
+        });
+        const d = await r.json();
+        if (!r.ok || !d.ok) {
+          statusEl.textContent = d.detail || ('The server answered ' + r.status + '.');
+          break;
+        }
+        let failed = '';
+        (d.results || []).forEach((res) => {
+          for (const { p } of allPosters()) {
+            if (p.poster_id === res.poster_id) {
+              p.place_status = res.status;
+              p.place_guess = res.guess;
+              p.place_error = !!res.error;
+              if (res.status != null) placeCheck.checked_this_month += 1;
+              if (res.error) failed = res.error;
+              break;
+            }
+          }
+        });
+        done += (d.results || []).length;
+        renderPlacePanel();
+        if (failed) {
+          // The server stops a chunk at the first failure so one broken
+          // key reports once instead of stamping every row. Stopping the
+          // loop too keeps the message on screen instead of repeating it.
+          statusEl.textContent = 'Stopped: ' + failed;
+          break;
+        }
+        if (!d.remaining) {
+          statusEl.textContent = `Done — ${done} checked just now.`;
+          break;
+        }
+        statusEl.textContent = `${done} checked · ${d.remaining} to go…`;
+      }
+    } catch (e) {
+      statusEl.textContent = 'Stopped: ' + (e && e.message ? e.message : e);
+    } finally {
+      // Whatever entered the busy state leaves it on every path.
+      placeRunning = false;
+      renderPlacePanel();
+    }
+  }
+
+  if ($('ib-place-btn') && placeModal) {
+    $('ib-place-btn').addEventListener('click', () => {
+      placeModal.hidden = false;
+      $('ib-place-status').textContent = '';
+      renderPlacePanel();
+    });
+    placeModal.querySelectorAll('[data-place-close]').forEach((el) => {
+      el.addEventListener('click', () => {
+        placeRunning = false;          // closing the panel IS the stop button
+        placeModal.hidden = true;
+        renderGallery();               // pills catch up with what was checked
+      });
+    });
+    $('ib-place-run').addEventListener('click', placeRunLoop);
+    updatePlaceButton();
+  }
 
   // ── Date data (must come before saved-state restore) ────────────────────
   const dates = window.__dates || [];

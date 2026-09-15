@@ -90,6 +90,8 @@
       ['brave_exclude_words', 'text', 'Words that mean "not a photo of the place"', 'Comma-separated. A result whose own title contains one of these is dropped before the worker sees it — maps, flags, clipart and so on. Brave ignores the minus operator (measured), so this is the only way to do it. Whole words only, so "mapping" is not a map. The count dropped is shown under the grid.'],
       ['min_image_px', 'number', 'Warn below this size (px)',
        'A saved picture is questioned only when it measures under this on BOTH sides, which is what a thumbnail looks like. A tall narrow banner or a wide panorama passes, because one small side is a shape rather than a fault. The worker can still save it after confirming, and the picture is marked so you can find it later. Set to 0 to stop asking.'],
+      ['place_check_enabled', 'bool', 'Check each image is the right place',
+       'Every saved image is shown to Google (web detection) and Google\'s words are compared to the title, so a photo of the wrong place gets a loud pill on the Worker Images screen. Needs the Google Vision key in the KEYS panel. About $3.50 per 1,000 images after Google\'s free 1,000 a month; each image is only ever paid for once. The worker never waits on it — the check runs just after the save.'],
     ],
     gpt: [
       ['openai_model',    'text',   'Model',    'gpt-image-2 unless you have a reason.'],
@@ -139,6 +141,7 @@
       ['brave_api_key_free', 'password','Brave key — free plan', 'Used for NORMAL searches. 1 request/second, 2,000 a month.'],
       ['brave_api_key_paid', 'password','Brave key — paid plan', 'Used for DEEP searches, which fire two queries at once and would trip the free key\'s 1/second limit. Also the fallback when the free quota runs out.'],
       ['openai_api_key',     'password','OpenAI key',            'Generates the images.'],
+      ['google_vision_api_key','password','Google Vision key',   'For the place check on worker images. Make it in Google Cloud with the Vision API turned on, then paste it here.'],
     ],
     upload: [
       ['upload_batch_size',   'number', 'Batch size',        'Images per upload run, capped by the account\'s remaining daily quota.'],

@@ -326,6 +326,37 @@ class SavedPoster(Base):
     # be per (poster, account); revisit before adding a second upload account.
     times_listed       = Column(Integer, nullable=False, default=0)
 
+    # ── The place check: does the photo show the place the title names? ────
+    # Google web detection is asked once per image (the file is immutable —
+    # a swap creates a successor row — so a row needs one verdict, ever).
+    # See app/place_check.py for the whole design.
+    #
+    #   place_check_status   'match' | 'mismatch' | 'no_opinion' | NULL.
+    #                        NULL = not answered yet: either never tried, or
+    #                        the last try failed (then place_check_error says
+    #                        why). "Google had no opinion" is no_opinion and
+    #                        is a real answer; "we could not ask" is NULL +
+    #                        error. Collapsing those two is how a dead API
+    #                        key hides inside a normal-looking grey pill.
+    #   place_check_guess    Google's own words, ';'-joined — best-guess
+    #                        label first, then top entity names. A fact
+    #                        about the IMAGE, so a duplicate image (same
+    #                        content_hash) reuses it without paying Google
+    #                        again; the verdict is then recomputed against
+    #                        the new row's own title.
+    #   place_check_at       when the last attempt happened.
+    #   place_check_error    why the last attempt failed, else NULL.
+    #   place_check_acked_at the owner's "checked, it's fine" on a flagged
+    #                        row. Valid only while it is newer than
+    #                        place_check_at — the skip_acked_at design: the
+    #                        ack answers one observation, and a newer check
+    #                        brings the row back on its own.
+    place_check_status   = Column(String(16), nullable=True, index=True)
+    place_check_guess    = Column(Text, nullable=True)
+    place_check_at       = Column(DateTime, nullable=True)
+    place_check_error    = Column(Text, nullable=True)
+    place_check_acked_at = Column(DateTime, nullable=True)
+
     master_title = relationship("MasterTitle", back_populates="saved_posters")
 
     __table_args__ = (

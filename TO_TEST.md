@@ -490,6 +490,36 @@ Added in v203:
 
 ---
 
+## 61. THE PLACE CHECK — v206
+
+- First, the key: make an API key in Google Cloud with the Vision API
+  turned on, and paste it into the KEYS panel on the Pipeline page
+  ("Google Vision key"). This is the one step only you can do.
+- Save a fresh image as a worker. The save itself should feel exactly as
+  fast as before. Refresh the Worker Images screen a few seconds later:
+  the new box should carry a small round dot — green "place ✓" if Google
+  agrees with the title, amber "CHECK PLACE" if it does not.
+- Press PLACE CHECK THIS DAY on the Worker Images screen. The panel should
+  list the day's images beside "Google sees: …", with the amber ones at
+  the top. Press the CHECK THE N UNCHECKED button and watch older images
+  on that day fill in a few at a time; closing the panel stops it.
+- On an amber row, press CHECKED, IT'S FINE — the row should drop down the
+  list and the box's dot should turn to a dashed green "checked ✓" after
+  you close the panel.
+- The honest failure: with the key box EMPTY and the toggle on, a fresh
+  save should show a red "check failed" dot (hover it), the panel should
+  say plainly that the key is missing, and Diagnostics should carry a
+  warning called "place check(s) could not run". Nothing anywhere should
+  pretend it is fine.
+- The wrong-place case that started this: save a picture of one city on a
+  different city's title — it should come up amber with Google naming the
+  real place, which is the whole feature.
+- The bill: the panel header should count "images checked this month" as
+  you go. Google's first 1,000 each month are free, then about $3.50 per
+  1,000.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

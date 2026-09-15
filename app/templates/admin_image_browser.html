@@ -29,6 +29,8 @@
         </div>
         <button type="button" class="btn btn-ghost" id="ib-load">LOAD</button>
         <button type="button" class="btn btn-accent" id="ib-zip">ZIP THIS DAY {{ info("Builds a single ZIP of every file under {user}/{date}/ for download.") }}</button>
+        <button type="button" class="btn btn-ghost" id="ib-place-btn" hidden
+                title="Each image on this day beside what Google thinks the place is — the ones Google disagrees with at the top.">PLACE&nbsp;CHECK&nbsp;THIS&nbsp;DAY</button>
         <span class="muted mono" id="ib-zip-status"></span>
       </form>
 
@@ -98,6 +100,26 @@
     <input type="text" id="ib-bulk-comment" placeholder="(optional) comment for the worker" maxlength="500">
     <button class="btn btn-error" id="ib-bulk-mark-similar" disabled>MARK SIMILAR</button>
     <button class="btn btn-ghost" id="ib-bulk-cancel">CANCEL</button>
+  </div>
+</div>
+
+{# The place check panel — this day's images beside what Google thinks each
+   place is, ordered by how much they need the admin's eye. The rows read
+   the same data as the pills on the boxes, so the two can never disagree. #}
+<div id="ib-place-modal" class="lightbox" hidden>
+  <div class="lightbox-bg" data-place-close></div>
+  <div class="lightbox-card place-card">
+    <button class="lightbox-close" data-place-close aria-label="Close">×</button>
+    <div class="place-head">
+      <strong>PLACE CHECK — <span id="ib-place-day" class="mono"></span></strong>
+      <span class="muted small" id="ib-place-month"></span>
+    </div>
+    <p class="muted small" id="ib-place-summary"></p>
+    <div class="filter-row">
+      <button type="button" class="btn btn-accent" id="ib-place-run">CHECK THE UNCHECKED</button>
+      <span class="muted mono" id="ib-place-status"></span>
+    </div>
+    <div id="ib-place-list" class="place-list"></div>
   </div>
 </div>
 

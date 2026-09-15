@@ -1830,6 +1830,57 @@ def check_live_titles_are_unique_per_account(db: Session, scope: Scope) -> Check
     )
 
 
+def check_place_check_is_answering(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: while the place check is ON, "we could not ask Google" must
+    never sit quietly. A failed attempt leaves status NULL and an error on
+    the row (see app/place_check.py); those rows are invisible on the
+    screens except as a small "check failed" pill, so a dead API key or a
+    spent quota could otherwise go unnoticed for weeks while every new
+    image silently misses its check. This is the watcher every outside
+    number needs on day one — a cross-check that has gone blind reports
+    agreement for ever.
+
+    Findings are grouped by the ERROR TEXT: one broken key produces one
+    finding with a count, not a page of identical rows.
+    """
+    from .pipeline import get_setting
+    try:
+        enabled = bool(int(get_setting(db, "place_check_enabled", project=None) or 0))
+    except Exception:
+        enabled = False
+    if not enabled:
+        return _skipped(
+            "place_check_answering", "The place check is answering",
+            "The place check is switched off on the Pipeline settings page, "
+            "so there is nothing to watch.")
+
+    q = (db.query(SavedPoster.place_check_error,
+                  func.count(SavedPoster.id).label("n"))
+           .filter(SavedPoster.deleted_at.is_(None),
+                   SavedPoster.place_check_status.is_(None),
+                   SavedPoster.place_check_error.isnot(None))
+           .group_by(SavedPoster.place_check_error)
+           .order_by(func.count(SavedPoster.id).desc()))
+    grouped = q.limit(MAX_ROWS).all()
+    total = sum(n for _, n in q.all())
+
+    rows = [Finding(f"{n} image(s)", f"failed with: {err}", "/admin/browse")
+            for err, n in grouped]
+    return _result(
+        "place_check_answering",
+        f"{total} place check(s) could not run"
+        if total else "Every attempted place check got an answer",
+        "These images were sent for the place check and the check itself "
+        "failed — a missing or refused Google key, a spent quota, or a "
+        "network fault. This is different from Google having no opinion, "
+        "which is a normal answer. Fix the cause (usually the key on the "
+        "Pipeline page), then press PLACE CHECK THIS DAY on the Worker "
+        "Images screen — the same button retries everything that failed.",
+        "warn" if total else "ok", rows, total,
+    )
+
+
 def check_approved_without_a_print_file(db: Session, scope: Scope) -> CheckResult:
     """
     INVARIANT: an APPROVED image must have a print file to upload.
@@ -2655,6 +2706,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_current_image_was_discarded,
     check_generations_share_a_file,
     check_live_titles_are_unique_per_account,
+    check_place_check_is_answering,
     check_chosen_colour_was_painted,
     check_upload_gap_is_holding,
     check_failure_evidence_is_pruned,

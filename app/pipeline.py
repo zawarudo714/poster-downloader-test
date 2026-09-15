@@ -460,6 +460,16 @@ DEFAULTS: dict[str, Any] = {
     # question off entirely.
     "min_image_px": 300,
 
+    # ── The place check ──────────────────────────────────────────────────
+    # Every saved worker image is shown to Google web detection and
+    # Google's words are compared to the title, so a photo of the wrong
+    # place gets a loud pill on the Worker Images screen. On by default at
+    # the owner's instruction (2026-09-15). Needs google_vision_api_key
+    # below; with the toggle on and no key, attempts fail LOUDLY into
+    # place_check_error rather than quietly doing nothing. ~$3.50 per
+    # 1,000 images after Google's free 1,000 a month. See app/place_check.py.
+    "place_check_enabled": 1,
+
     # ── Brave image search ───────────────────────────────────────────────
     # Two keys. Searches use the free key; the paid one is the FALLBACK for
     # when the free key is inside its one-per-second window or has spent its
@@ -565,6 +575,10 @@ DEFAULTS: dict[str, Any] = {
 
     # ── OpenAI image generation ──────────────────────────────────────────
     "openai_api_key":     "",
+    # The place check's key (see place_check_enabled above). An API key
+    # from Google Cloud with the Vision API turned on — pasted once, like
+    # the keys around it.
+    "google_vision_api_key": "",
     "openai_model":       "gpt-image-2",
     # 1024x1536 is the owner's production choice (2026-09-11): portrait,
     # matching the poster shape, rather than letting the model pick.

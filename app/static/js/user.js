@@ -1084,7 +1084,7 @@
         if (r.search_mode === 'inpage') {
           const findBtn = document.createElement('button');
           findBtn.type = 'button';
-          findBtn.className = 'btn btn-accent btn-tiny';
+          findBtn.className = 'btn btn-accent btn-tiny rev-find-btn';
           findBtn.textContent = '🔍 FIND A REPLACEMENT';
           findBtn.title = 'Open this title and search for a different image';
           findBtn.addEventListener('click', async () => {

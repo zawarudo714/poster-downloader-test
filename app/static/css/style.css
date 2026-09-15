@@ -1985,9 +1985,12 @@ html.theme-light .env-banner-name {
      box on a phone (2026-09-15). A second phone rule for .rev-actions also
      lives near its desktop rules (~line 1070) — the two must agree, because
      the later one in this file wins. The input shrinks (min-width: 0) and
-     the button keeps its natural size on the same row. */
+     the button keeps its natural size on the same row. FIND A REPLACEMENT
+     gets its own full row BELOW (also the owner, same day — three controls
+     in one phone row starved the paste box of space). */
   .rev-actions { gap: 6px; }
   .rev-actions input { min-width: 0; }
+  .rev-actions .rev-find-btn { flex-basis: 100%; }
   .rev-similar-grid { grid-template-columns: 1fr; }
 
   /* Tables: horizontal scroll instead of overflowing the page */

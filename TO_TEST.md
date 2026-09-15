@@ -599,7 +599,9 @@ Added in v203:
   Send it back to admin with a note." Clicking it asks for a note and sends
   the flag back to you unchanged.
 - On a phone, REPLACE FILE should sit beside the paste box on the same row,
-  not below it.
+  not below it. FIND A REPLACEMENT sits on its own full row below the pair
+  (fixed in v215 — in v214 all three crowded one row and the paste box had
+  almost no space).
 - Delete a flagged image from the saved-images panel (via FIND A REPLACEMENT
   or GO TO TITLE) — the flag should resolve with a record, same as before.
 - The fixed defect: after a worker deletes a flagged image, their card

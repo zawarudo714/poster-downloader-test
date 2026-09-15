@@ -36,19 +36,51 @@
   let highestId = 0;       // last message id we've shown
   let myRoleMatch = viewerRole;  // for "is this MY message" comparison: "admin" or "worker"
 
+  // Where an uploaded image is fetched from — the role-scoped serve route.
+  // A pasted link (m.image_url) is loaded directly instead.
+  function imageSrc(m) {
+    if (m.image_url) return m.image_url;
+    if (m.image_upload) {
+      return viewerRole === 'admin'
+        ? `/admin/api/chat/image/${m.id}`
+        : `/api/chat/image/${m.id}`;
+    }
+    return null;
+  }
+
   // ── Render ──────────────────────────────────────────────────────────────
   function appendMessage(m) {
     const isMine = (m.sender_role === myRoleMatch);
     const wrap = document.createElement('div');
     wrap.className = 'chat-msg ' + (isMine ? 'chat-msg-mine' : 'chat-msg-theirs');
     wrap.dataset.msgId = m.id;
-    wrap.innerHTML = `
-      <div class="chat-msg-bubble"></div>
-      <div class="chat-msg-meta mono muted"></div>
-    `;
-    wrap.querySelector('.chat-msg-bubble').textContent = m.body;
-    wrap.querySelector('.chat-msg-meta').textContent =
-      (isMine ? 'you · ' : (m.sender_role + ' · ')) + m.created_at;
+    const bubble = document.createElement('div');
+    bubble.className = 'chat-msg-bubble';
+    // Text first, if any — an image-only message has an empty body.
+    if (m.body) {
+      const t = document.createElement('div');
+      t.className = 'chat-msg-text';
+      t.textContent = m.body;
+      bubble.appendChild(t);
+    }
+    // Then the image, if any. Click to open it full in a new tab.
+    const src = imageSrc(m);
+    if (src) {
+      const a = document.createElement('a');
+      a.href = src; a.target = '_blank'; a.rel = 'noopener';
+      const img = document.createElement('img');
+      img.className = 'chat-img';
+      img.src = src;
+      img.loading = 'lazy';
+      img.alt = 'shared image';
+      a.appendChild(img);
+      bubble.appendChild(a);
+    }
+    const meta = document.createElement('div');
+    meta.className = 'chat-msg-meta mono muted';
+    meta.textContent = (isMine ? 'you · ' : (m.sender_role + ' · ')) + m.created_at;
+    wrap.appendChild(bubble);
+    wrap.appendChild(meta);
     stream.appendChild(wrap);
     if (m.id > highestId) highestId = m.id;
   }
@@ -96,19 +128,56 @@
     stream.scrollTop = stream.scrollHeight;
   }
 
+  // ── Attach an image: a file OR a pasted link ─────────────────────────────
+  const attachBtn   = document.getElementById('chat-attach-btn');
+  const attachRow   = document.getElementById('chat-attach-row');
+  const fileInput   = document.getElementById('chat-file');
+  const linkInput   = document.getElementById('chat-link');
+  const attachName  = document.getElementById('chat-attach-name');
+  const attachClear = document.getElementById('chat-attach-clear');
+
+  function clearAttach() {
+    if (fileInput) fileInput.value = '';
+    if (linkInput) linkInput.value = '';
+    if (attachName) attachName.textContent = '';
+    if (attachRow) attachRow.hidden = true;
+  }
+  if (attachBtn && attachRow) {
+    attachBtn.addEventListener('click', () => {
+      attachRow.hidden = !attachRow.hidden;
+      if (!attachRow.hidden && linkInput) linkInput.focus();
+    });
+  }
+  if (fileInput) {
+    fileInput.addEventListener('change', () => {
+      const f = fileInput.files[0];
+      // A file and a link are two answers to one question; picking a file
+      // clears any half-typed link so only one is ever sent.
+      if (f && linkInput) linkInput.value = '';
+      if (attachName) attachName.textContent = f ? f.name : '';
+    });
+  }
+  if (attachClear) attachClear.addEventListener('click', clearAttach);
+
   // ── Send ────────────────────────────────────────────────────────────────
   if (formEl) {
     formEl.addEventListener('submit', async (e) => {
       e.preventDefault();
       const body = (inputEl.value || '').trim();
-      if (!body) return;
+      const file = fileInput && fileInput.files[0];
+      const link = (linkInput && linkInput.value.trim()) || '';
+      // Nothing to send is nothing to do — text, a file or a link is enough.
+      if (!body && !file && !link) return;
       inputEl.disabled = true;
       const fd = new FormData();
       fd.append('body', body);
+      if (file) fd.append('file', file);
+      else if (link) fd.append('image_url', link);
       const r = await fetch(urlSend(), { method: 'POST', body: fd });
       inputEl.disabled = false;
       if (r.ok) {
         inputEl.value = '';
+        clearAttach();
         await poll();
         scrollToBottom();
         inputEl.focus();

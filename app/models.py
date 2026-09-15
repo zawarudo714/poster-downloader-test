@@ -609,7 +609,15 @@ class ChatMessage(Base):
     worker_id     = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     sender_id     = Column(Integer, ForeignKey("users.id"), nullable=False)
     sender_role   = Column(String(16), nullable=False)  # 'admin' | 'worker' (denorm for fast filter)
-    body          = Column(Text, nullable=False)
+    body          = Column(Text, nullable=False)   # may be "" when an image is the whole message
+    # An image can ride along with (or instead of) the text. Two columns
+    # because there are two genuinely different sources: an UPLOADED file
+    # (image_path, relative to WORKSPACE_DIR, served through an auth'd route
+    # that scopes a worker to their own thread) and a PASTED link
+    # (image_url, an external address the browser loads directly). A message
+    # with neither is text-only, exactly as before.
+    image_path    = Column(String(512), nullable=True)
+    image_url     = Column(String(1024), nullable=True)
     created_at    = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 
     __table_args__ = (

@@ -25,28 +25,73 @@ from .timeutil import fmt_local
 
 # ─── Send / list ──────────────────────────────────────────────────────────
 
+import uuid
+
+# What an uploaded chat image may be, and how big. Kept small and explicit
+# rather than trusting the filename — the content_type decides.
+_CHAT_IMAGE_EXT = {
+    "image/jpeg": "jpg", "image/pjpeg": "jpg",
+    "image/png": "png", "image/gif": "gif", "image/webp": "webp",
+}
+_CHAT_IMAGE_MAX_BYTES = 12 * 1024 * 1024
+
+
+def save_chat_image(upload) -> str:
+    """
+    Store an uploaded chat image under WORKSPACE_DIR/_chat and return its
+    path relative to WORKSPACE_DIR. The name is a fresh UUID, so there is no
+    collision and nothing about the uploader's filename reaches the disk.
+    Raises ValueError with a plain-words reason the caller shows the user.
+    """
+    from .config import WORKSPACE_DIR
+    ext = _CHAT_IMAGE_EXT.get((getattr(upload, "content_type", "") or "").lower())
+    if not ext:
+        raise ValueError("That file is not an image I can send. Use JPG, PNG, GIF or WebP.")
+    data = upload.file.read()
+    if not data:
+        raise ValueError("That image was empty.")
+    if len(data) > _CHAT_IMAGE_MAX_BYTES:
+        raise ValueError("That image is too big. Keep it under 12 MB.")
+    rel = f"_chat/{uuid.uuid4().hex}.{ext}"
+    dest = WORKSPACE_DIR / rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(data)
+    return rel
+
+
 def send_message(
     db: Session,
     *,
     worker_id: int,
     sender: User,
     body: str,
+    image_path: Optional[str] = None,
+    image_url: Optional[str] = None,
 ) -> ChatMessage:
     """
     Append a message to the (admin, worker_id) thread. Sender can be either
     role; sender_role is captured denormalized for fast filtering.
+
+    A message needs SOMETHING — text, an uploaded image, or a pasted link.
+    An image-only message carries an empty body, which is why body is
+    nullable-in-spirit ("") rather than required here.
     """
     body = (body or "").strip()
-    if not body:
-        raise ValueError("Empty message.")
     if len(body) > 2000:
         body = body[:2000]
+    image_url = (image_url or "").strip() or None
+    if image_url and len(image_url) > 1024:
+        raise ValueError("That image link is too long.")
+    if not body and not image_path and not image_url:
+        raise ValueError("Empty message.")
 
     msg = ChatMessage(
         worker_id   = worker_id,
         sender_id   = sender.id,
         sender_role = "admin" if sender.role == "admin" else "worker",
         body        = body,
+        image_path  = image_path,
+        image_url   = image_url,
     )
     db.add(msg)
     db.flush()
@@ -78,6 +123,13 @@ def serialize_message(msg: ChatMessage) -> dict:
         "sender_id":   msg.sender_id,
         "sender_role": msg.sender_role,
         "body":        msg.body,
+        # An external link the browser loads directly, or a flag that this
+        # message has an UPLOADED image the client fetches through the
+        # role-scoped serve route (/admin/api/chat/image/{id} or
+        # /api/chat/image/{id}). serialize stays role-agnostic; the client
+        # knows its own role and builds that URL.
+        "image_url":    msg.image_url or None,
+        "image_upload": bool(msg.image_path),
         "created_at":  fmt_local(msg.created_at, "%Y-%m-%d %H:%M:%S"),
         "created_at_iso": msg.created_at.isoformat() + "Z",
     }

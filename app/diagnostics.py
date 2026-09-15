@@ -434,6 +434,15 @@ def _claimed_by_columns(db: Session) -> set[str]:
                 UploadTracking.last_screenshot.isnot(None)).all():
             if shot:
                 out.add((WORKSPACE_DIR / shot).resolve().as_posix())
+        # Uploaded chat images live under _chat and are named by
+        # ChatMessage.image_path. Without this they would read as unknown
+        # files the owner is invited to delete — the one-of-N reference trap
+        # this whole function exists to avoid.
+        from .models import ChatMessage
+        for (p,) in db.query(ChatMessage.image_path).filter(
+                ChatMessage.image_path.isnot(None)).all():
+            if p:
+                out.add((WORKSPACE_DIR / p).resolve().as_posix())
     except Exception:      # noqa: BLE001
         pass
     return out

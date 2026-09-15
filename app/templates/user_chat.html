@@ -13,8 +13,20 @@
       <div class="empty-hint">Loading messages…</div>
     </div>
     <form class="chat-composer" id="chat-form">
-      <textarea id="chat-input" placeholder="Type a message…" rows="2" maxlength="2000"></textarea>
-      <button type="submit" class="btn btn-accent">SEND</button>
+      <div class="chat-attach-row" id="chat-attach-row" hidden>
+        <label class="btn btn-ghost btn-tiny">CHOOSE FILE
+          <input type="file" id="chat-file" accept="image/*" hidden>
+        </label>
+        <input type="url" id="chat-link" class="chat-link-input" placeholder="…or paste an image link">
+        <span class="chat-attach-name mono muted" id="chat-attach-name"></span>
+        <button type="button" class="btn btn-ghost btn-tiny" id="chat-attach-clear">CLEAR</button>
+      </div>
+      <div class="chat-composer-main">
+        <button type="button" class="btn btn-ghost" id="chat-attach-btn"
+                title="Attach an image — a file or a link">🖼</button>
+        <textarea id="chat-input" placeholder="Type a message…" rows="2" maxlength="2000"></textarea>
+        <button type="submit" class="btn btn-accent">SEND</button>
+      </div>
     </form>
   </main>
 </div>

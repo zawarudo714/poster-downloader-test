@@ -174,6 +174,11 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("saved_posters", "place_check_at",       "DATETIME"),
     ("saved_posters", "place_check_error",    "TEXT"),
     ("saved_posters", "place_check_acked_at", "DATETIME"),
+    # ── Images in chat (2026-09-15) ─────────────────────────────────────
+    # A chat message can carry an uploaded image (image_path) or a pasted
+    # link (image_url). Nullable: every existing message is text-only.
+    ("chat_messages", "image_path", "VARCHAR(512)"),
+    ("chat_messages", "image_url",  "VARCHAR(1024)"),
 ]
 
 # ════════════════════════════════════════════════════════════════════════════

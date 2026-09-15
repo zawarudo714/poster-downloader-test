@@ -3541,22 +3541,46 @@ def chat_thread(
 @router.post("/api/chat/{worker_id}/send")
 def chat_admin_send(
     worker_id: int,
-    body: str = Form(...),
+    body: str = Form(""),
+    image_url: str = Form(""),
+    file: Optional[UploadFile] = File(None),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    from ..chat import send_message, serialize_message
+    from ..chat import send_message, serialize_message, save_chat_image
     # Validate recipient exists.
     if not db.query(User).filter_by(id=worker_id, role="worker").first():
         raise HTTPException(404, "Worker not found.")
     try:
-        msg = send_message(db, worker_id=worker_id, sender=admin, body=body)
+        image_path = save_chat_image(file) if (file and file.filename) else None
+        msg = send_message(db, worker_id=worker_id, sender=admin, body=body,
+                           image_path=image_path, image_url=image_url)
     except ValueError as e:
         raise HTTPException(400, str(e))
     log_activity(db, user=admin, action="chat_sent", target_type="chat", target_id=msg.id,
-                 details={"to_worker_id": worker_id})
+                 details={"to_worker_id": worker_id,
+                          "image": bool(msg.image_path or msg.image_url)})
     db.commit()
     return JSONResponse({"ok": True, "message": serialize_message(msg)})
+
+
+@router.get("/api/chat/image/{message_id}")
+def chat_admin_image(
+    message_id: int,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Serve an uploaded chat image. Admin sees every thread."""
+    from fastapi.responses import FileResponse
+    from ..config import WORKSPACE_DIR
+    from ..models import ChatMessage
+    msg = db.query(ChatMessage).filter_by(id=message_id).first()
+    if msg is None or not msg.image_path:
+        raise HTTPException(404, "No image.")
+    path = (WORKSPACE_DIR / msg.image_path)
+    if not path.exists():
+        raise HTTPException(404, "Image file missing.")
+    return FileResponse(str(path))
 
 
 @router.post("/api/chat/{worker_id}/mark_read")

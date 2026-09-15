@@ -520,6 +520,27 @@ Added in v203:
 
 ---
 
+## 62. IMAGES IN CHAT — v210
+
+- On the admin chat, open a worker thread, press the image button (🖼) by the
+  message box, press CHOOSE FILE, pick a screenshot, and send. It should show
+  inline in the thread, and clicking it should open the full image in a new
+  tab.
+- Send one with a typed message too — both the text and the image should
+  appear together.
+- Paste an image link into the "…or paste an image link" box and send — it
+  should render inline the same way.
+- As a worker (log in as a worker, or have one do it), send you an image back.
+  It should appear on your admin side.
+- The privacy check that matters: a worker must only see images from their
+  OWN thread. This is enforced in code, but worth one look — nothing in a
+  worker's chat should ever show another worker's picture.
+- Bad input: try sending a non-image file (a PDF) — it should refuse with a
+  plain message, not break. Try a very large image (over 12 MB) — it should
+  refuse for size.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

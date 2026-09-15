@@ -32,7 +32,7 @@ from typing import Optional
 from urllib.parse import urlparse
 
 import requests
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
@@ -2583,18 +2583,45 @@ def chat_poll(
 
 @router.post("/api/chat/send")
 def chat_send(
-    body: str = Form(...),
+    body: str = Form(""),
+    image_url: str = Form(""),
+    file: Optional[UploadFile] = File(None),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    from ..chat import send_message, serialize_message
+    from ..chat import send_message, serialize_message, save_chat_image
     try:
-        msg = send_message(db, worker_id=user.id, sender=user, body=body)
+        image_path = save_chat_image(file) if (file and file.filename) else None
+        msg = send_message(db, worker_id=user.id, sender=user, body=body,
+                           image_path=image_path, image_url=image_url)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    log_activity(db, user=user, action="chat_sent", target_type="chat", target_id=msg.id)
+    log_activity(db, user=user, action="chat_sent", target_type="chat", target_id=msg.id,
+                 details={"image": bool(msg.image_path or msg.image_url)})
     db.commit()
     return JSONResponse({"ok": True, "message": serialize_message(msg)})
+
+
+@router.get("/api/chat/image/{message_id}")
+def chat_image(
+    message_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Serve an uploaded chat image to the worker — ONLY from their own thread.
+    A worker must never be able to pull an image out of another worker's
+    conversation by guessing a message id, so the thread is checked here.
+    """
+    from ..config import WORKSPACE_DIR
+    from ..models import ChatMessage
+    msg = db.query(ChatMessage).filter_by(id=message_id).first()
+    if msg is None or not msg.image_path or msg.worker_id != user.id:
+        raise HTTPException(404, "No image.")
+    path = (WORKSPACE_DIR / msg.image_path)
+    if not path.exists():
+        raise HTTPException(404, "Image file missing.")
+    return FileResponse(str(path))
 
 
 @router.post("/api/chat/mark_read")

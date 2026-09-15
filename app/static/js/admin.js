@@ -664,22 +664,59 @@
   if (lbPrev) lbPrev.addEventListener('click', () => lightboxStep(-1));
   if (lbNext) lbNext.addEventListener('click', () => lightboxStep(1));
 
+  // Rebuild ONE card in place — no full reload, so the gallery keeps its
+  // scroll position and the zoom stays open. Flagging used to close the zoom
+  // and reload the whole day, which threw the owner back to the top and
+  // broke stepping to the next image (2026-09-15).
+  function rerenderPosterCard(t, p) {
+    const old = gallery.querySelector(`.g-poster[data-poster-id="${p.poster_id}"]`);
+    if (old) old.replaceWith(buildPosterCell(t, p));
+  }
+
   lbFlagBtn.addEventListener('click', async () => {
     if (!currentLightbox) return;
-    const { poster } = currentLightbox;
-    const fd = new FormData();
-    fd.append('comment', lbComment.value || '');
-    const r = await fetch(`/admin/poster/${poster.poster_id}/flag`, { method: 'POST', body: fd });
-    if (r.ok) { closeLightbox(); loadList(); }
-    else { alert('Flag failed.'); }
+    const { master, poster } = currentLightbox;
+    lbFlagBtn.disabled = true;
+    try {
+      const fd = new FormData();
+      fd.append('comment', lbComment.value || '');
+      const r = await fetch(`/admin/poster/${poster.poster_id}/flag`, { method: 'POST', body: fd });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { alert('Flag failed: ' + (d.detail || r.status)); return; }
+      // Update the data in place, then refresh just this card and the zoom.
+      // The zoom stays open on the same image, so ← / → still step to the
+      // next one — flagged or not — without a reload.
+      poster.flagged = true;
+      poster.revision_id = d.id ?? poster.revision_id;
+      poster.revision_status = 'open';
+      poster.revision_type = null;
+      poster.comment = lbComment.value || '';
+      master.needs_revision = true;
+      rerenderPosterCard(master, poster);
+      openLightbox(master, poster);
+    } finally {
+      lbFlagBtn.disabled = false;
+    }
   });
 
   lbUnflagBtn.addEventListener('click', async () => {
     if (!currentLightbox) return;
-    const { poster } = currentLightbox;
-    const r = await fetch(`/admin/poster/${poster.poster_id}/unflag`, { method: 'POST' });
-    if (r.ok) { closeLightbox(); loadList(); }
-    else { alert('Unflag failed.'); }
+    const { master, poster } = currentLightbox;
+    lbUnflagBtn.disabled = true;
+    try {
+      const r = await fetch(`/admin/poster/${poster.poster_id}/unflag`, { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { alert('Unflag failed: ' + (d.detail || r.status)); return; }
+      poster.flagged = false;
+      poster.revision_id = null;
+      poster.revision_status = null;
+      poster.revision_type = null;
+      poster.comment = '';
+      rerenderPosterCard(master, poster);
+      openLightbox(master, poster);
+    } finally {
+      lbUnflagBtn.disabled = false;
+    }
   });
 
   // Acknowledge the place check from inside the zoom, so you can arrow

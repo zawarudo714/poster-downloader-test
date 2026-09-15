@@ -563,6 +563,34 @@ Added in v203:
 
 ---
 
+## 64. FLAGGING NO LONGER RELOADS OR CLOSES THE ZOOM — v212
+
+- On Review Images, scroll well down a day, open an image in the zoom, and
+  press FLAG FOR CHANGES. The page should NOT reload and should NOT jump to
+  the top. The zoom should stay open on the same image, now showing CLEAR
+  FLAG.
+- Press → (or the next arrow) straight after flagging — you should move to
+  the next image with no reload, whether the next one is flagged or not.
+- Close the zoom. The image you flagged should show its red flag border and
+  "flagged" pill, and the page should still be where you left it.
+- Press CLEAR FLAG on an already-flagged image — it should clear in place,
+  the pill and border should go, and again no reload.
+- Flag several in a row and confirm you never have to scroll back down.
+
+---
+
+## 65. CHAT FILLS THE PHONE SCREEN — v212
+
+- Open the chat on your phone. The message area should reach down near the
+  bottom of the screen, with the SEND box just above the bottom edge — no
+  large band of empty black space below it.
+- Check it with only one worker in the list (a short list) and with the
+  keyboard open — the chat should still fill the space, not stop short.
+- Check the worker's own chat page on a phone too (log in as a worker).
+- On a desktop, the chat should look exactly as before.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

@@ -2389,16 +2389,27 @@ html.theme-light .env-banner-name {
 
 /* ── Mobile rules for new pages ──────────────────────────────────────── */
 @media (max-width: 900px) {
+  /* Fill the screen instead of guessing a fixed height. The grid is one
+     column of two rows: the workers list takes what it needs, the chat
+     takes ALL the rest. Without this the chat was a fixed height that
+     stopped short of the bottom, leaving dead space (owner, 2026-09-15).
+     dvh, not vh, so the phone's address bar is accounted for. */
   .chat-grid {
     grid-template-columns: 1fr;
-    height: auto;
+    grid-template-rows: auto 1fr;
+    height: calc(100dvh - 120px);
+    min-height: 0;
+  }
+  /* The worker page has no sidebar — one row, and it fills. */
+  .chat-grid-worker {
+    grid-template-rows: 1fr;
   }
   .chat-sidebar {
     max-height: 240px;
   }
   .chat-main {
-    height: calc(100vh - 240px - 200px);
-    min-height: 400px;
+    height: auto;      /* the 1fr grid row governs the height now */
+    min-height: 0;     /* lets the inner stream scroll instead of growing */
   }
   .pay-filter-row { gap: 8px; }
   .pay-filter-row input[type="date"] { min-width: 130px; }

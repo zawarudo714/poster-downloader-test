@@ -3084,6 +3084,45 @@ def check_saved_posters_declare_their_source() -> None:
                      f"grows holes.")
 
 
+def check_password_fields_are_secret() -> None:
+    """
+    Every settings field rendered as a password box must be in SECRET_KEYS.
+
+    Two lists, two files, and they must agree: admin_pipeline.js decides a
+    field is a password box, and routes/pipeline_admin.py's SECRET_KEYS
+    decides a key is a credential. A key that is one but not the other breaks
+    four ways at once — the "saved" badge reads "not set" for ever, the value
+    is sent to the browser, a re-save with a blank box wipes it, and it is
+    stored unencrypted. google_vision_api_key shipped as a password box and
+    was left out of SECRET_KEYS, and the owner hit all four (2026-09-15).
+    Same shape as check_colour_names_have_rules: when one file names something
+    another file must provide, a script compares the two lists in a second.
+    """
+    js = (ROOT / "app" / "static" / "js" / "admin_pipeline.js").read_text(encoding="utf-8")
+    password_fields = set(re.findall(r"\[\s*'([a-z0-9_]+)'\s*,\s*'password'", js))
+    if not password_fields:
+        fail("no password fields could be read out of admin_pipeline.js — "
+             "this check is blind")
+        return
+
+    src = (ROOT / "app" / "routes" / "pipeline_admin.py").read_text(encoding="utf-8")
+    m = re.search(r"SECRET_KEYS\s*=\s*\{(.*?)\}", src, re.DOTALL)
+    if not m:
+        fail("SECRET_KEYS could not be read out of pipeline_admin.py — "
+             "this check is blind")
+        return
+    # SECRET_KEYS uses double quotes; the JS field rows use single. Accept
+    # either, or the set reads as empty and every field false-fails (found by
+    # sabotage-testing this very check, 2026-09-15).
+    secret_keys = set(re.findall(r"""['"]([a-z0-9_]+)['"]""", m.group(1)))
+
+    for key in sorted(password_fields - secret_keys):
+        fail(f"'{key}' is a password box in admin_pipeline.js but is not in "
+             f"SECRET_KEYS in pipeline_admin.py. Add it there, or its saved "
+             f"badge lies, its value leaks to the browser, a re-save wipes "
+             f"it, and it is stored unencrypted")
+
+
 CHECKS = [
     ("python compiles",           check_python_compiles),
     ("no undefined names",        check_undefined_names),
@@ -3124,6 +3163,7 @@ CHECKS = [
     ("no dead niche vocabulary", check_noun_fallbacks_agree),
     ("saved posters declare their source",
      check_saved_posters_declare_their_source),
+    ("password fields are secret", check_password_fields_are_secret),
 ]
 
 

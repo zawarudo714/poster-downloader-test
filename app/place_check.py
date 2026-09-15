@@ -219,9 +219,12 @@ def check_poster(db: Session, poster: SavedPoster) -> str:
         if twin is not None:
             guess = twin.place_check_guess or ""
         else:
-            from .pipeline import get_setting, project_for_title
+            from .pipeline import get_secret, project_for_title
             project = project_for_title(db, mt) if mt else None
-            key = str(get_setting(db, "google_vision_api_key", project=project) or "").strip()
+            # get_secret decrypts, and tolerates a plaintext value — so a key
+            # saved before it was a secret still reads, and one saved after is
+            # decrypted properly.
+            key = get_secret(db, "google_vision_api_key", project=project).strip()
             if not key:
                 raise RuntimeError("no Google Vision key on the dashboard")
             guess = _ask_google(_prepared_image(path), key)

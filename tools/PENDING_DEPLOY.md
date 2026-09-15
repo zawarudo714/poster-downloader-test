@@ -1,28 +1,39 @@
 # Not yet deployed
 
-## v207 — on/off boxes save again
+## v208 — the Google Vision key now saves and shows "saved"
 
-Waiting to deploy. The node does NOT need copying. Version 207 (live is 206).
+Waiting to deploy. The node does NOT need copying. Version 208 (live is 207).
 
-The bug, in plain words: the settings safety-check that stops letters going
-into a number box was also refusing a plain on/off box when it was UNticked.
-Unticking a box sends true/false, and the check turned "false" into the text
-"False" and then complained it was not a number. The owner hit it on the new
-"Check each image is the right place" box (2026-09-15), but the same fault
-sat under every on/off box on the Pipeline settings page — the signature
-toggle, the review toggle, and the rest. None of them could be switched off
-and saved.
+The bug, in plain words: the Google Vision key box always read "not set" even
+after saving, because the key was never added to the list of "secret" keys
+in routes/pipeline_admin.py. Four things hang off that one list, and all four
+were wrong for this key:
 
-The fix is one place: the check now lets a real true/false through, because
-a ticked or unticked box is always a valid 1 or 0 and is stored as such two
-steps later. Garbage in a real number box is still refused exactly as
-before.
+- the "saved / not set" badge could only ever say "not set";
+- the value was sent back to the browser instead of being kept on the server;
+- saving that panel again with the box blank would have WIPED the key;
+- it was stored unencrypted, unlike the other keys.
 
-Why it hid: the first version of the check tried to exempt on/off settings
-by looking at the DEFAULT value, but every on/off default is written as the
-number 1, not as a true/false, so the exemption never actually fired. The
-right thing to look at is the value being saved.
+The fix is to add google_vision_api_key to SECRET_KEYS, and to read it back
+through get_secret (which decrypts, and tolerates a plaintext value — so the
+key already saved still works and one saved from now on is encrypted).
 
-Verified: preflight green, and the check itself was run against eight cases
-against the shipped file — a box switched off now saves, a box switched on
-saves, and "abc" or an empty string in a number box is still refused.
+What the owner will see after deploy: the box flips to "saved" on its own,
+because a value was already stored. No re-paste is strictly needed for it to
+work, but re-pasting once and saving is worth doing so the key is stored
+encrypted rather than as the plaintext the old path left behind.
+
+The mechanical net so this class cannot recur: check_password_fields_are_
+secret in preflight.py compares the password boxes in admin_pipeline.js
+against SECRET_KEYS in pipeline_admin.py and fails the deploy on any key that
+is one but not the other. Same two-lists-must-agree shape as the colour-name
+check. Sabotage-tested: removing the key from SECRET_KEYS turns it red on
+exactly that key, and building the check surfaced a bug IN the check itself
+(SECRET_KEYS uses double quotes, the JS rows single) that was fixed before it
+shipped.
+
+Verified: py_compile passes on every changed file, and the new check was run
+in isolation — green on the real code, red on the sabotage. The full
+preflight suite runs longer than this sandbox allows, so it was not run end
+to end here; the deploy tool runs it in full before it will ship, which is
+the real gate.

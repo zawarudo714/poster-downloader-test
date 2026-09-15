@@ -162,7 +162,15 @@ SECRET_KEYS = {
     "storage_sftp_password",
     "openai_api_key",
     "brave_api_key_free", "brave_api_key_paid",
+    "google_vision_api_key",
 }
+# EVERY setting rendered as a password box on the Pipeline page must be in
+# the set above, or four things break at once: the "saved" badge reads "not
+# set" forever, the value is sent to the browser, a re-save with a blank box
+# wipes it, and it is stored unencrypted. google_vision_api_key was left out
+# when the place check shipped and hit all four (owner, 2026-09-15). The two
+# lists are compared by check_password_fields_are_secret in preflight.py so a
+# new key field cannot be added to one and forgotten in the other.
 
 
 def _project(request: Request, admin: User, db: Session, explicit=None):

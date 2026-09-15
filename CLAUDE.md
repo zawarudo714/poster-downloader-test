@@ -1180,7 +1180,14 @@ exists or a marketplace catalogue that has been taken down.
   the image the decision was about lived on a row no screen rendered.
   **When one thing replaces another, enumerate what still points at the
   old one and move each pointer** — records, flags, list memberships —
-  in the same transaction as the swap.
+  in the same transaction as the swap. It struck a third time on
+  2026-09-15: the paste-REPLACE flow swaps the picture on the SAME row,
+  and the place check (built believing a row's file was immutable) kept
+  showing Google's verdict for the previous picture. The 09-15 audit
+  caught it; the replace flow now clears every fact about the old bytes
+  — place-check fields and content_hash — and re-checks. The question to
+  ask any new per-image fact: "what happens to me when replace_poster
+  swaps the file under my row?"
 * **"No tool is needed" was a judgement about cost, written in the same voice
   as the measured figures around it.** Nothing on the page distinguished
   them. That is what the provenance tags are for.

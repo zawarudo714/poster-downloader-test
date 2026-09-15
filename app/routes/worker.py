@@ -2166,6 +2166,19 @@ def replace_poster(
     sp.low_quality_url = 0
     sp.image_width     = img_w
     sp.image_height    = img_h
+    # DIFFERENT BYTES VOID EVERY FACT ABOUT THE OLD ONES — the place check
+    # and the content fingerprint included, not only the pipeline verdict
+    # below. This flow is the ONE place a row's picture changes in place
+    # (everywhere else a swap makes a successor row), and the place check
+    # shipped believing a row's file was immutable — so a replaced image
+    # kept showing Google's verdict for a picture that no longer existed
+    # (2026-09-15 audit). Cleared here, and re-checked after the commit.
+    sp.content_hash          = None
+    sp.place_check_status    = None
+    sp.place_check_guess     = None
+    sp.place_check_error     = None
+    sp.place_check_at        = None
+    sp.place_check_acked_at  = None
 
     # ── These are DIFFERENT BYTES, so any post-production verdict on the old
     # ones is void. Without this, a poster that reached failed_processing and
@@ -2234,6 +2247,13 @@ def replace_poster(
                  "url": src_url, "size": written, "submitted_revisions": submitted_ids},
     )
     db.commit()
+
+    # The new picture gets its own place check, same as a fresh save — the
+    # fourth door an image can arrive through, missed when the first three
+    # were hooked (2026-09-15 audit).
+    from ..place_check import launch_check
+    launch_check(sp.id)
+
     return JSONResponse({
         "ok": True,
         "poster_id": sp.id,

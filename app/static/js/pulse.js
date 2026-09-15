@@ -134,6 +134,18 @@
       { title: 'Paid workers whose screen has spoken to the site in the '
                + 'last 5 minutes.' }));
 
+    // ── THE LAST THING A WORKER DID ───────────────────────────────────
+    // One entry, the newest across all workers, with month-day and the
+    // time — so a glance answers "is anyone actually working" without
+    // opening the activity log. Clicking it opens the full log.
+    if (d.last_worker_action) {
+      bits.push(chip('idle', 'last worker action',
+        esc(d.last_worker_action.text) + ' · ' + esc(d.last_worker_action.when),
+        { href: '/admin/audit',
+          title: 'The newest activity-log entry made by a worker. '
+                 + 'Click to open the full activity log.' }));
+    }
+
     var stamp = new Date().toLocaleTimeString();
     var alarms = d.alarms || [];
     var alarmHtml = alarms.map(function (a) {

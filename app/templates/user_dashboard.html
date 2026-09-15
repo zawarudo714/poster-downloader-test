@@ -327,14 +327,21 @@
     <div class="rev-comment"></div>
     <div class="rev-flagged"></div>
 
-    <!-- 'simple' single-image controls -->
+    <!-- 'simple' single-image controls. DELETE FILE and the big SEND FOR
+         APPROVAL button were removed 2026-09-15 (owner): deleting happens
+         from the saved-images panel (FIND A REPLACEMENT / GO TO TITLE takes
+         you there, and a delete there answers the flag the same way), and a
+         replacement submits itself. The one thing those buttons did that
+         nothing else does — answering "no change needed" — lives on as the
+         small link below, out of the way of the normal fix-it flow. -->
     <div class="rev-actions" data-mode="simple">
       <img class="rev-thumb" alt="" loading="lazy">
       <input type="url" placeholder="Paste replacement image URL" data-replace-url>
       <button class="btn btn-accent" data-action="replace">REPLACE FILE</button>
-      <button class="btn btn-error"  data-action="delete-revision">DELETE FILE</button>
-      <button class="btn btn-ghost"  data-action="resolve">SEND FOR APPROVAL</button>
     </div>
+    <button type="button" class="rev-resolve-link" data-action="resolve">
+      Nothing to change? Send it back to admin with a note
+    </button>
 
     <!-- 'similar' multi-image controls (worker picks one to redo) -->
     <div class="rev-similar-grid" data-mode="similar" hidden></div>

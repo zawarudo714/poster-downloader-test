@@ -14,9 +14,14 @@ owner's eye on the Worker Images screen, never an automatic reject.
 ═══════════════════════════════════════════════════════════════════════════
 THE DESIGN CONTRACT
 ═══════════════════════════════════════════════════════════════════════════
-· One verdict per row, forever. A SavedPoster's file is immutable — a swap
-  or replacement creates a SUCCESSOR row — so a row is checked once and the
-  answer never goes stale. There is deliberately no re-check machinery.
+· One verdict per picture. A row is checked once and the answer stays good
+  for as long as the row keeps its picture. NEARLY every change of picture
+  makes a successor row (the grid swap) — but the paste-REPLACE flow swaps
+  the file on the SAME row, and the first version of this header claimed
+  that was impossible. It is not: replace_poster in routes/worker.py clears
+  every place_check_* field plus content_hash and re-runs the check when
+  the bytes change (2026-09-15 audit). If any OTHER path ever mutates a
+  row's file in place, it owes the same clearing.
 
 · Google's answer is a fact about the IMAGE; the verdict is a fact about
   the PAIR (image, title). So a duplicate image (same content_hash) reuses

@@ -1,40 +1,70 @@
 # Not yet deployed
 
-## v212 — flagging no longer reloads the page or kicks you out of the zoom
+## v213 — cleaner flag card for workers, and the strip shows the last worker action
 
-Waiting to deploy. The node does NOT need copying. Version 212 (live is 211).
+Waiting to deploy. The node does NOT need copying. Version 213 (live is 212).
 
-The problem, in plain words: on the Review Images zoom, pressing FLAG FOR
-CHANGES (or CLEAR FLAG) closed the zoom and reloaded the whole day. That
-threw you back to the top of the page, so after flagging you had to scroll
-all the way down to where you were. It also meant a flagged image kicked you
-out while an unflagged one you were just looking at did not — which is why it
-felt like you "could only click on unflagged ones".
+Two changes, both the owner's ask (2026-09-15):
 
-The fix: flagging and clearing a flag now happen in place.
+1. The worker's Changes Requested card is decluttered.
+   - DELETE FILE is gone: deleting happens in the saved-images panel (FIND A
+     REPLACEMENT or GO TO TITLE takes the worker there), and a delete there
+     answers the flag with a record exactly the same way.
+   - The big SEND FOR APPROVAL button is gone from the row. Its one unique
+     ability — answering a flag with "no change needed" — survives as a
+     small text link under the card: "Nothing to change? Send it back to
+     admin with a note." Option (b), chosen by the owner.
+   - On a phone, REPLACE FILE now sits beside the paste box on the same row
+     (the box's 200px minimum width was what pushed the button down).
+   - The link is removed on similar-pair cards (where it was never wired)
+     and on deleted-image cards (the deletion already answered the flag).
 
-- The zoom STAYS OPEN on the same image after you flag it. So you can flag,
-  then press → to go straight to the next image — flagged or not — without a
-  reload and without losing your place.
-- Only the one card is redrawn, to show its new red flag border and pill.
-  The rest of the page does not move, so your scroll position is kept.
-- The flag panel in the zoom refreshes itself, so FLAG FOR CHANGES becomes
-  CLEAR FLAG (and back) without a round trip through a reload.
+2. The status strip gains one entry: the newest activity-log action made by
+   a WORKER (never the admin's own), in plain words with month-day and time,
+   for example "humphrey saved Cortina 1.jpg · 09-15 09:16". One entry
+   across all workers; clicking it opens the full activity log. It rides in
+   the existing /admin/api/pulse poll — no new timer, per that file's own
+   rule.
 
-Nothing else changed: the same flag and unflag endpoints are called, and the
-worker still gets the flag exactly as before.
+A defect found and fixed while working here (5e, honestly): when a worker
+deleted a flagged image, their card was supposed to show a placeholder thumb
+and "admin is reviewing the deletion" — but the code removed the container
+and then wrote the note into the node it had just detached, so the worker
+saw a bare card with nothing to read. Nothing mechanical could have caught
+it (the hook existed, the JS parsed; the write went to a detached element,
+which only a rendered page shows). Found by reading the function while
+changing its neighbours; fixed so the thumb stays and the note appears.
 
-Verified: the JavaScript parses, the page hooks exist, the private helpers
-are in scope, and the click-target check passes. Run in isolation because
-the full preflight suite runs longer than the sandbox allows; the deploy tool
-runs it in full before shipping. Only you can confirm the feel — flag a few
-in a row and check the page never jumps (TO_TEST 64).
+## v213 also — two fixes from the audit of v195–v212
 
-## v212 also — chat fills the phone screen
+The audit walked every change since 2026-09-11 against its neighbours and
+found two real defects, both at the seam where one mechanism changes a
+thing another mechanism remembers. Both are fixed in this version:
 
-CSS only, same version. On a phone the chat used to stop short of the bottom
-and leave a band of empty space, because its height was a fixed guess. It now
-fills the screen: the workers list takes what it needs and the message area
-takes all the rest, measured with dvh so the phone's address bar is counted.
-Both the admin chat (workers list on top) and the worker chat (no list) are
-handled. Nothing on desktop changed. (TO_TEST 65.)
+1. STALE PLACE CHECK AFTER A PASTE-REPLACE. The replace flow swaps the
+   picture on the SAME row — the one place a row's file changes in place —
+   and the place check was built believing that never happens. So after a
+   worker replaced a flagged image by URL, the card kept showing Google's
+   verdict (and the fingerprint) for the OLD picture. The replace flow now
+   clears every place-check field plus content_hash and re-runs the check
+   on the new picture, the same way it already voided the old pipeline
+   verdict. The place-check module's own header claimed the file was
+   immutable; that stale claim is corrected too.
+
+2. THE ADMIN + ADD BOX SKIPPED THE 350px FLOOR. "No save-anyway on any
+   front" now genuinely covers every front: the admin's own add-by-URL
+   door was the fourth door and the only one without the size gate. It now
+   refuses a picture under 350 on any side with the same shared test.
+
+Also fixed while in there (found reading, not reported): when a worker
+deleted a flagged image, their card was meant to show a placeholder and
+"admin is reviewing the deletion", but the code wrote the note into a
+container it had just removed, so the worker saw a bare card. The note and
+placeholder now actually show.
+
+Verified: both JS files parse, worker.py/admin.py/place_check.py compile
+with no undefined names, calls pass the right arguments, local imports come
+before use, guards are called, templates balance, hooks exist, every button
+has a handler, colour names have rules, and helpers are in scope. The full
+preflight suite exceeds the sandbox time limit; the deploy tool runs it in
+full before shipping.

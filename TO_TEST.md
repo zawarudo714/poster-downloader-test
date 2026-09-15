@@ -591,6 +591,36 @@ Added in v203:
 
 ---
 
+## 66. THE SLIMMED FLAG CARD AND THE LAST-WORKER-ACTION CHIP — v213
+
+- As a worker, open Changes Requested. Each card should show the thumb, the
+  paste box and REPLACE FILE side by side — no DELETE FILE, no big SEND FOR
+  APPROVAL. Under the card is a small underlined line: "Nothing to change?
+  Send it back to admin with a note." Clicking it asks for a note and sends
+  the flag back to you unchanged.
+- On a phone, REPLACE FILE should sit beside the paste box on the same row,
+  not below it.
+- Delete a flagged image from the saved-images panel (via FIND A REPLACEMENT
+  or GO TO TITLE) — the flag should resolve with a record, same as before.
+- The fixed defect: after a worker deletes a flagged image, their card
+  should show the dashed placeholder picture AND the line "You deleted this
+  image. Admin will review the deletion…" — before this it showed a bare
+  card with nothing.
+- On any admin screen, the status strip should show "last worker action"
+  with the newest thing a worker did, like "humphrey saved Cortina 1.jpg ·
+  09-15 09:16" — never your own admin actions. Clicking it opens the
+  Activity Log. Have a worker save something and watch it update within ~15
+  seconds.
+- The two audit fixes, same version:
+  · Replace a flagged image by pasting a URL. A few seconds later its
+    place-check dot should reflect the NEW picture (it re-checks), not the
+    verdict the old picture had.
+  · Try adding a small image (under 350 on a side) through YOUR own + ADD
+    box on Worker Images. It should refuse with the size message — the
+    admin door now has the same floor as every worker door.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

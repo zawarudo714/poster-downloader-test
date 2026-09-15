@@ -268,6 +268,47 @@ def api_pulse(request: Request, admin: User = Depends(require_admin),
                                 User.last_seen_at > now - timedelta(minutes=5))
                         .scalar() or 0)
 
+    # ── THE LAST THING A WORKER DID (owner's ask, 2026-09-15) ───────────
+    # The newest activity-log row made by a WORKER — never the admin's own
+    # actions — as one readable line with month-day and time, no year. One
+    # entry across all workers, so a glance at the strip answers "is anyone
+    # actually working" without opening the log. Joined on the user's ROLE
+    # rather than trusting the denormalised username, because the role is
+    # the fact this filter is actually about.
+    last_worker_action = None
+    try:
+        import json as _json
+        from ..models import ActivityLog
+        act = (db.query(ActivityLog)
+                 .join(User, ActivityLog.user_id == User.id)
+                 .filter(User.role == "worker")
+                 .order_by(ActivityLog.id.desc())
+                 .first())
+        if act is not None:
+            SAY = {"saved": "saved", "deleted": "deleted",
+                   "replaced": "replaced", "resolved": "answered a flag on",
+                   "claimed": "claimed", "released": "released",
+                   "completed": "completed", "skipped": "skipped",
+                   "chat_sent": "sent a chat message",
+                   "receipt_ack": "confirmed a receipt"}
+            verb = SAY.get(act.action, (act.action or "").replace("_", " "))
+            detail = ""
+            try:
+                dd = _json.loads(act.details or "{}")
+                detail = str(dd.get("filename") or dd.get("title")
+                             or dd.get("title_folder") or "")
+            except Exception:
+                detail = ""
+            text = f"{act.username or 'a worker'} {verb}"
+            if detail:
+                text += f" {detail}"
+            last_worker_action = {
+                "text": text[:120],
+                "when": fmt_local(act.created_at, "%m-%d %H:%M"),
+            }
+    except Exception:      # noqa: BLE001 — the strip must never 500
+        last_worker_action = None
+
     # ── Alarms: red things from ANYWHERE, in words with a link ──────────
     alarms = []
     if nodes and offline:
@@ -392,6 +433,7 @@ def api_pulse(request: Request, admin: User = Depends(require_admin),
         "scope": "project" if proj is not None else "master",
         "project": ({"id": proj.id, "name": proj.name, "slug": proj.slug}
                     if proj is not None else None),
+        "last_worker_action": last_worker_action,
         # THE NUMBERS RAW, THE SENTENCE BUILT ON THE SCREEN.
         #
         # `busy` used to be a pre-baked string and the strip printed it. That
@@ -2126,6 +2168,18 @@ def admin_add_poster(
     written = _download_to(src_url, target_path)
     dims = read_file_dimensions(target_path)
     img_w, img_h = (dims if dims else (None, None))
+
+    # The same hard size floor as every worker door, because "no save-anyway
+    # override on any front" (owner, 2026-09-15) includes the admin's own
+    # + ADD box — this was the fourth door and the only one without the
+    # gate (2026-09-15 audit). Same shared test, same no-override.
+    from .worker import _too_small, _safe_min_px
+    min_px = _safe_min_px(db, resolve_project(db, t.project_id))
+    if _too_small(img_w, img_h, min_px):
+        target_path.unlink(missing_ok=True)
+        raise HTTPException(
+            400, f"That picture is {img_w}×{img_h}. Every side must be at "
+                 f"least {min_px}px, so it cannot be added.")
 
     sp = SavedPoster(
         master_title_id    = t.id,

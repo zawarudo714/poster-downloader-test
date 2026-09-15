@@ -1032,6 +1032,11 @@
 
     if (r.revision_type === 'similar' && r.related && r.related.length >= 2) {
       simpleControls.remove();
+      // The "nothing to change?" link belongs to the simple card only — on
+      // a similar pair it is never wired, and a visible control that does
+      // nothing reads as a dead page.
+      const lonelyResolve = wrap.querySelector('[data-action="resolve"]');
+      if (lonelyResolve) lonelyResolve.remove();
       r.related.forEach((p) => similarControls.appendChild(buildSimilarCard(r, p)));
     } else if (r.revision_type === 'similar' && r.poster_deleted) {
       // Edge case: a similar-pair revision where the primary poster was
@@ -1050,7 +1055,10 @@
         thumb.src    = fileUrl(r.poster_id, r.filename);
         const urlInp = wrap.querySelector('[data-replace-url]');
         const replaceBtn = wrap.querySelector('[data-action="replace"]');
-        const deleteBtn  = wrap.querySelector('[data-action="delete-revision"]');
+        // The resolve control is the small "nothing to change?" link under
+        // the row — the only way to answer a flag WITHOUT changing anything.
+        // DELETE FILE is gone from this card on purpose: deleting happens in
+        // the saved-images panel, and a delete there answers the flag too.
         const resolveBtn = wrap.querySelector('[data-action="resolve"]');
         if (r.status === 'awaiting_approval') resolveBtn.hidden = true;
         // REPLACING BY URL BELONGS TO THE OUTSIDE LINK, not to the absence
@@ -1090,7 +1098,6 @@
           (replaceBtn.parentNode || wrap.querySelector('.rev-actions'))
             .insertBefore(findBtn, replaceBtn.nextSibling || null);
         }
-        deleteBtn.addEventListener('click',  () => deletePoster(r.poster_id, { fromRevision: true }));
         resolveBtn.addEventListener('click', () => resolveRevision(r.revision_id));
       }
     }
@@ -1108,14 +1115,15 @@
       thumb.alt = `${PD.noun} deleted`;
       thumb.classList.add('rev-thumb-placeholder');
     }
-    // Remove the URL input + action buttons row entirely — there's nothing
-    // to replace or re-delete; the worker just waits.
-    const urlRow = wrap.querySelector('.rev-actions');
-    if (urlRow) urlRow.remove();
-    // Add a minimal "info-only" status line in place of the controls so the
-    // worker has something to read.
-    const simpleControls = wrap.querySelector('[data-mode="simple"]');
-    if (simpleControls) {
+    // Strip the CONTROLS but keep the row: the placeholder thumb and the
+    // status line below both live in it. The first version removed the
+    // whole .rev-actions container and then tried to write the status line
+    // into it — a node it had just detached — so a worker who deleted a
+    // flagged image saw a bare card with no picture and no explanation
+    // (found 2026-09-15 while reworking these buttons).
+    const row = wrap.querySelector('.rev-actions');
+    if (row) {
+      row.querySelectorAll('input, button').forEach((el) => el.remove());
       const info = document.createElement('div');
       info.className = 'rev-deleted-info muted';
       if (r.status === 'awaiting_approval') {
@@ -1127,8 +1135,12 @@
       } else {
         info.textContent = `${PD.Noun} deleted — admin reviewing.`;
       }
-      simpleControls.appendChild(info);
+      row.appendChild(info);
     }
+    // "Nothing to change?" makes no sense on a deleted image — the answer
+    // was the deletion itself.
+    const resolveLink = wrap.querySelector('[data-action="resolve"]');
+    if (resolveLink) resolveLink.remove();
   }
 
   function buildSimilarCard(rev, p) {

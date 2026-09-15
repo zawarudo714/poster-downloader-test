@@ -1057,6 +1057,21 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
   border: 1px solid var(--border); border-radius: 2px;
   font-family: inherit; font-size: 12px;
 }
+/* The quiet "nothing to change?" answer — a text link, not a button, so it
+   never competes with the real fix-it flow. It is the ONLY way to answer a
+   flag without changing anything (owner chose to keep it tucked away,
+   2026-09-15). */
+.rev-resolve-link {
+  background: none; border: none; padding: 2px 0; margin-top: 6px;
+  color: var(--subtext); font-size: 11px; text-decoration: underline;
+  cursor: pointer; display: inline-block; font-family: inherit;
+}
+.rev-resolve-link:hover { color: var(--text); }
+@media (max-width: 640px) {
+  /* Keep REPLACE FILE beside the box on a phone: the 200px minimum above is
+     what used to push the button onto its own row (owner, 2026-09-15). */
+  .rev-actions input[type="url"] { min-width: 0; }
+}
 
 /* ── Master tables (browse + admin) ────────────────────────────────────── */
 .master-table-wrap { max-height: 65vh; overflow: auto; border: 1px solid var(--border); border-radius: 2px; margin: 8px 0; }

@@ -1,39 +1,47 @@
 # Not yet deployed
 
-## v208 — the Google Vision key now saves and shows "saved"
+## v209 — sort by problems, and judge the place from the zoom
 
-Waiting to deploy. The node does NOT need copying. Version 208 (live is 207).
+Waiting to deploy. The node does NOT need copying. Version 209 (the deploy
+log shows 208 live). This one bundle TWO changes to the Worker Images
+screen, because neither shows as deployed — if your deploy tool says 209 is
+already used, tell me and I will bump it.
 
-The bug, in plain words: the Google Vision key box always read "not set" even
-after saving, because the key was never added to the list of "secret" keys
-in routes/pipeline_admin.py. Four things hang off that one list, and all four
-were wrong for this key:
+1. A new order in the dropdown: "place check: problems first". It puts the
+   images that need your eye at the top of the grid — the ones Google
+   disagrees with first, then no-opinion, then not-checked, then the fine
+   ones. Same ranking as the PLACE CHECK panel, so the two agree. The option
+   is hidden while the place check is off, and the menu always shows the
+   order actually in use.
 
-- the "saved / not set" badge could only ever say "not set";
-- the value was sent back to the browser instead of being kept on the server;
-- saving that panel again with the box blank would have WIPED the key;
-- it was stored unencrypted, unlike the other keys.
+2. The zoom (lightbox) now carries the same pills as the grid box — the
+   source pill (Brave / Google / pasted) and the place-check verdict — and a
+   "CHECKED, IT'S FINE" button. So you can open one image, arrow through the
+   whole day, and clear each problem in place without going back to the grid.
+   Pressing the button stays in the zoom and keeps you moving; it writes the
+   same acknowledgement the grid and panel read, so all three agree.
 
-The fix is to add google_vision_api_key to SECRET_KEYS, and to read it back
-through get_secret (which decrypts, and tolerates a plaintext value — so the
-key already saved still works and one saved from now on is encrypted).
+3. The zoom also gets a CHECK GOOGLE button. It opens Google Images for this
+   place in a new tab — the same search the worker's own GOOGLE button uses
+   (google_query, which for travel is "{title} {kind} view", plus the
+   source_search_url address), so it stays editable on the dashboard and
+   matches what the worker searched. This is for eyeballing whether the
+   picture is the real place and the most scenic view, without leaving the
+   zoom. Built once per title in /admin/api/browse by reusing
+   worker._source_search_url; empty (button hidden) when the project has no
+   source link.
 
-What the owner will see after deploy: the box flips to "saved" on its own,
-because a value was already stored. No re-paste is strictly needed for it to
-work, but re-pasting once and saving is worth doing so the key is stored
-encrypted rather than as the plaintext the old path left behind.
+Design notes for a future session:
 
-The mechanical net so this class cannot recur: check_password_fields_are_
-secret in preflight.py compares the password boxes in admin_pipeline.js
-against SECRET_KEYS in pipeline_admin.py and fails the deploy on any key that
-is one but not the other. Same two-lists-must-agree shape as the colour-name
-check. Sabotage-tested: removing the key from SECRET_KEYS turns it red on
-exactly that key, and building the check surfaced a bug IN the check itself
-(SECRET_KEYS uses double quotes, the JS rows single) that was fixed before it
-shipped.
+- The source pill and the place pill are now built by sourcePillNode() and
+  placePillNode() in admin.js, used by the grid, the panel and the zoom — one
+  spelling, so they cannot drift.
+- The lightbox ack posts to the existing /admin/api/place_check/ack and
+  updates the poster object in place, so no reload is needed and the grid
+  behind reflects it on close.
 
-Verified: py_compile passes on every changed file, and the new check was run
-in isolation — green on the real code, red on the sabotage. The full
-preflight suite runs longer than this sandbox allows, so it was not run end
-to end here; the deploy tool runs it in full before it will ship, which is
-the real gate.
+Verified: the JavaScript parses, the template balances, the page-hook check
+passes (the new ib-lb-pills and ib-lb-place-ack hooks exist on both sides),
+nothing is stuck behind a hidden ancestor, and every colour name has a rule.
+Run in isolation because the full preflight suite runs longer than the
+sandbox allows; the deploy tool runs it in full before shipping.

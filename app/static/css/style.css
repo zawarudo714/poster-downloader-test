@@ -841,6 +841,17 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* The source + place-check pills, shown in the zoom under the picture so a
+   title can be judged and acknowledged without leaving the lightbox. */
+.lightbox-pills {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  margin-top: 8px;
+}
 .img-source-word { color: var(--accent, #7aa2f7); }
 
 /* ── The Photopea overlay ─────────────────────────────────────────────

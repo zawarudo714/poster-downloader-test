@@ -77,6 +77,7 @@
             <option value="number">by sheet number</option>
             <option value="newest">newest saved first</option>
             <option value="flagged">flagged first</option>
+            <option value="place" data-place-sort hidden>place check: problems first</option>
           </select>
         </label>
         <button class="btn btn-ghost" id="ib-density-toggle"
@@ -138,6 +139,7 @@
     <button class="lightbox-arrow lightbox-arrow-next" id="ib-lb-next"
             aria-label="Next title" title="Next (→)">›</button>
     <img id="ib-lb-img" alt="">
+    <div class="lightbox-pills" id="ib-lb-pills"></div>
     <div class="lightbox-meta mono" id="ib-lb-meta"></div>
     <div class="lightbox-flag" id="ib-lb-flag" hidden>
       <strong>CURRENTLY FLAGGED:</strong>
@@ -149,6 +151,9 @@
       <input type="text" id="ib-lb-comment" placeholder="(optional) comment for the user">
       <button class="btn btn-error" id="ib-lb-flag-btn">FLAG FOR CHANGES</button>
       <button class="btn btn-ghost" id="ib-lb-unflag-btn" hidden>CLEAR FLAG</button>
+      <button class="btn btn-ghost" id="ib-lb-place-ack" hidden>CHECKED, IT'S FINE</button>
+      <button class="btn btn-info" id="ib-lb-google" hidden
+              title="Open Google Images for this place in a new tab, to confirm the picture and judge whether it is the most scenic view.">CHECK&nbsp;GOOGLE</button>
     </div>
   </div>
 </div>

@@ -1614,11 +1614,21 @@ def api_browse(
     # carry no project of their own, and deliberately so — a title's project
     # is the one fact, and duplicating it onto every poster would be a second
     # copy to keep in sync through renames, replacements and reassignments.
+    project = current_project(request, admin, db)
     rows = (
-        scope_titles(rows, current_project(request, admin, db))
+        scope_titles(rows, project)
           .order_by(SavedPoster.title_folder_path.asc(), SavedPoster.filename.asc())
           .all()
     )
+
+    # The GOOGLE-images link for the zoom's CHECK GOOGLE button, built from
+    # the SAME google_query and address the worker's own GOOGLE button uses
+    # (worker._source_search_url), so the admin and the worker search for the
+    # same thing and it stays editable on the dashboard. Once per TITLE, not
+    # per poster, and a worker-day is a small bounded set. Empty when the
+    # project has no source link, which hides the button.
+    from .worker import _source_search_url
+    from ..pipeline import search_text
 
     # Group by master title (preserve folder-name ordering)
     from collections import OrderedDict
@@ -1640,6 +1650,10 @@ def api_browse(
                 "external_id": mt.external_id if mt else None,
                 "title_folder": sp.title_folder_path,
                 "needs_revision": bool(mt.needs_revision) if mt else False,
+                # Google-images search for this place, or "" for no button.
+                "google_url": (_source_search_url(
+                    db, search_text(mt), mt.content_type, project,
+                    kind=(mt.description or "")) if mt else ""),
                 "posters": [],
             }
         titles[key]["posters"].append({
@@ -1673,7 +1687,6 @@ def api_browse(
         })
 
     from ..pipeline import get_setting
-    project = current_project(request, admin, db)
     try:
         min_width = int(get_setting(db, "review_min_width_px", project=project) or 0)
     except Exception:

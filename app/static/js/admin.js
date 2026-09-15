@@ -219,8 +219,45 @@
   function currentBrowseSort() {
     try {
       const v = localStorage.getItem(BROWSE_SORT_KEY) || 'number';
-      return ['number', 'newest', 'flagged'].includes(v) ? v : 'number';
+      const ok = ['number', 'newest', 'flagged', 'place'].includes(v) ? v : 'number';
+      // 'place' only means anything while the place check is on. If it is
+      // off, fall back to number rather than offering an order that cannot
+      // sort by anything — a control that does nothing is worse than absent.
+      if (ok === 'place' && !placeCheck.enabled) return 'number';
+      return ok;
     } catch (e) { return 'number'; }
+  }
+
+  // The worst (most-urgent) place verdict among a title's images, as a rank
+  // — lower is more urgent. Reuses placeVerdict() so this order and the
+  // PLACE CHECK panel's order are the SAME ordering read from one place, and
+  // cannot drift apart. A title with no images sorts as "no problem".
+  function worstPlaceRank(t) {
+    const ranks = (t.posters || []).map((p) => placeVerdict(p).rank);
+    return ranks.length ? Math.min(...ranks) : 99;
+  }
+
+  // One spelling of each pill, so the grid box and the zoomed view show the
+  // same thing. The source pill (Brave/Google/pasted) and the place-check
+  // pill both live here and are reused in both places.
+  function sourcePillNode(p) {
+    if (!p.image_source) return null;
+    const s = document.createElement('span');
+    s.className = 'status-pill status-img-source';
+    s.textContent = { brave: 'Brave', google: 'Google',
+                      pasted: 'pasted' }[p.image_source] || p.image_source;
+    s.title = { brave: 'Found with the in-page Brave search',
+                google: 'Sent from Google by the phone add-on',
+                pasted: 'Pasted as a link by hand' }[p.image_source] || '';
+    return s;
+  }
+  function placePillNode(p) {
+    const v = placeVerdict(p);
+    const s = document.createElement('span');
+    s.className = 'place-pill ' + v.cls;
+    s.textContent = v.word;
+    s.title = v.tip;
+    return s;
   }
 
   function sortTitles() {
@@ -233,6 +270,12 @@
     } else if (mode === 'flagged') {
       titles.sort((a, b) =>
         ((b.needs_revision ? 1 : 0) - (a.needs_revision ? 1 : 0))
+        || (numOf(a) - numOf(b)));
+    } else if (mode === 'place') {
+      // Problems on top: worth-a-look, then no-read, then not-checked, then
+      // the fine ones — the same order as the PLACE CHECK panel. Sheet
+      // number breaks ties so the top group is still in a stable order.
+      titles.sort((a, b) => (worstPlaceRank(a) - worstPlaceRank(b))
         || (numOf(a) - numOf(b)));
     } else {
       titles.sort((a, b) => numOf(a) - numOf(b));
@@ -549,6 +592,36 @@
                    pasted: ' · pasted link' }[p.image_source] || '';
     lbMeta.textContent =
       `${t.title}${t.year ? ` (${t.year})` : ''} — ${p.filename}${dims}${lq}${from}`;
+
+    // The same pills the grid box carries, so you can judge the place from
+    // the zoom without going back — the source pill, and the place-check
+    // verdict when the check is on.
+    const pillsHost = $('ib-lb-pills');
+    if (pillsHost) {
+      pillsHost.innerHTML = '';
+      const src = sourcePillNode(p);
+      if (src) pillsHost.appendChild(src);
+      if (placeCheck.enabled) pillsHost.appendChild(placePillNode(p));
+    }
+    // The "checked, it's fine" button, right here in the zoom — shown only
+    // for a verdict that CAN be acknowledged (Google disagreed, or had no
+    // opinion). It reads the same p.place_acked the grid does, so pressing
+    // it here and reopening the grid agree.
+    const ackBtn = $('ib-lb-place-ack');
+    if (ackBtn) {
+      const ackable = placeCheck.enabled
+        && (p.place_status === 'mismatch' || p.place_status === 'no_opinion');
+      ackBtn.hidden = !ackable;
+      ackBtn.textContent = p.place_acked ? 'UNDO — MARK IT A PROBLEM AGAIN'
+                                         : "CHECKED, IT'S FINE";
+    }
+    // CHECK GOOGLE — opens Google Images for this place in a new tab, so the
+    // scenic view can be confirmed without leaving the zoom. The URL is built
+    // by the server the same way the worker's GOOGLE button is; "" means the
+    // project has no source link, so the button stays hidden.
+    const gBtn = $('ib-lb-google');
+    if (gBtn) gBtn.hidden = !(t && t.google_url);
+
     if (p.flagged) {
       lbFlag.hidden = false;
       const pill = lbFlag.querySelector('.lb-status-pill');
@@ -608,6 +681,43 @@
     if (r.ok) { closeLightbox(); loadList(); }
     else { alert('Unflag failed.'); }
   });
+
+  // Acknowledge the place check from inside the zoom, so you can arrow
+  // through the flagged ones and clear each without going back to the grid.
+  // Stays in the lightbox afterward — the point is to keep moving. The
+  // underlying poster object is updated in place, so the pill and the grid
+  // behind agree the moment you look at them.
+  const lbGoogle = $('ib-lb-google');
+  if (lbGoogle) {
+    lbGoogle.addEventListener('click', () => {
+      if (!currentLightbox || !currentLightbox.master.google_url) return;
+      // A new tab, so the zoom stays open behind it and you can keep arrowing.
+      window.open(currentLightbox.master.google_url, '_blank', 'noopener');
+    });
+  }
+
+  const lbPlaceAck = $('ib-lb-place-ack');
+  if (lbPlaceAck) {
+    lbPlaceAck.addEventListener('click', async () => {
+      if (!currentLightbox) return;
+      const { master, poster } = currentLightbox;
+      lbPlaceAck.disabled = true;
+      try {
+        const r = await fetch('/admin/api/place_check/ack', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ poster_id: poster.poster_id, on: !poster.place_acked }),
+        });
+        const d = await r.json();
+        if (r.ok && d.ok) {
+          poster.place_acked = d.acked;   // same object the grid renders
+          openLightbox(master, poster);   // refresh the pill and the button
+        } else {
+          alert('Could not save that: ' + (d.detail || r.status));
+        }
+      } finally { lbPlaceAck.disabled = false; }
+    });
+  }
 
   // Keyboard nav
   document.addEventListener('keydown', (e) => {
@@ -674,6 +784,17 @@
   function updatePlaceButton() {
     const btn = $('ib-place-btn');
     if (btn) btn.hidden = !placeCheck.enabled;
+    // The "problems first" order only appears while the place check is on.
+    const opt = document.querySelector('[data-place-sort]');
+    if (opt) opt.hidden = !placeCheck.enabled;
+    // Keep the visible dropdown showing the order actually in use. The
+    // dropdown is first set at page load, before this page knows whether the
+    // place check is on, so a remembered 'place' choice could otherwise show
+    // 'number' in the menu while the grid really is sorted by place (or the
+    // reverse once it turns off). currentBrowseSort() is the one source of
+    // truth for both the menu and the sort.
+    const sel = $('ib-sort');
+    if (sel) sel.value = currentBrowseSort();
   }
 
   const placeModal = $('ib-place-modal');

@@ -76,6 +76,11 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     # not carry them leaves every caller on its existing path.
     ("master_titles", "search_query",      "TEXT"),
     ("master_titles", "marketplace_title", "VARCHAR(512)"),
+    # Queue priority (2026-09-17): higher is handed out first, ties fall back
+    # to external_id. Default 0 so every existing row keeps today's order; the
+    # late-added famous landmarks are set above 0 so they are worked next
+    # without renumbering. See MasterTitle.queue_priority and pull_next().
+    ("master_titles", "queue_priority",    "INTEGER NOT NULL DEFAULT 0"),
     # ── Fair sharing between projects / rotation between accounts ───────
     ("projects",        "process_weight", "INTEGER NOT NULL DEFAULT 1"),
     ("upload_accounts", "rotation_order", "INTEGER NOT NULL DEFAULT 100"),

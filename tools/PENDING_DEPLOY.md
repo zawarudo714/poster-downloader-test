@@ -1,25 +1,15 @@
 # Not yet deployed
 
-**v217 — "Edit in Photopea" responds at once, and opens faster.**
-
-The button downloaded the full-size picture BEFORE showing anything, so on a
-slow link it looked dead for several seconds. While it looked dead you could
-step to the next image and click again, and when the first download finished
-the editor opened the image you had ORIGINALLY clicked — the off-by-one you
-reported. Two changes:
-
-1. The editor overlay now appears the instant you click, with a spinner
-   reading "Loading the picture into the editor…". It covers the screen, so
-   there is nothing to step to while it loads, and the picture that opens is
-   always the one you clicked. SAVE is disabled until the picture is in.
-
-2. The editor now boots at the SAME TIME as the picture downloads, instead of
-   one after the other, so the wait is the longer of the two rather than their
-   sum.
-
-Server only — the node needs no copy. NOTE: the sandbox shell is still down,
-so node --check / preflight could NOT be run here by hand; the deploy tool's
-preflight suite is the gate.
+**v218 — queue priority for the worker (waiting to deploy).**
+- New column `master_titles.queue_priority` (default 0), added by
+  `schema_migrations.py`. Additive and nullable-safe: every existing row is 0,
+  so today's order is unchanged.
+- `pull_next()` in `routes/worker.py` now orders by `queue_priority DESC` then
+  `external_id ASC`. Lets late-added rows be worked early without renumbering.
+- Purpose: the 146 famous landmarks added on the end of the sheet (Eiffel
+  Tower, Colosseum…) get a high priority so the worker picks them up next.
+- Server only. The Windows node is NOT affected (no `worker_service/` change,
+  no AGENT_VERSION bump).
 
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.

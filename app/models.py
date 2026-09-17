@@ -148,6 +148,16 @@ class MasterTitle(Base):
     # send. Keep the distinction — one is a record, the other an intention.
     marketplace_title = Column(String(512), nullable=True)
 
+    # WHICH ORDER THE QUEUE HANDS TITLES OUT. Higher goes first; ties fall
+    # back to external_id ascending, which is the popularity order the sheet
+    # was built in. Almost every row is 0. It exists so a title added LATE
+    # can still be worked EARLY without renumbering — the famous landmarks
+    # added 2026-09-17 (Eiffel Tower, Colosseum…) got new numbers on the end
+    # of the sheet, far past where the worker is, yet belong near the top by
+    # fame. Setting their priority above 0 lets the worker pick them up next
+    # while their external_id — the folder key — stays put. See pull_next().
+    queue_priority    = Column(Integer, nullable=False, default=0, index=True)
+
     # Workflow state
     status            = Column(String(32), nullable=False, default="pending", index=True)
     # 'pending' | 'in_progress' | 'complete_pending' | 'complete' | 'skipped'

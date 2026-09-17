@@ -1114,7 +1114,14 @@ def pull_next(
     db: Session = Depends(get_db),
 ):
     """
-    Claim the next N pending master rows (in external_id order).
+    Claim the next N pending master rows.
+
+    Order is queue_priority first (higher = sooner), then external_id
+    ascending, which is the popularity order the sheet was built in. Almost
+    every row is priority 0, so this is normally plain external_id order; the
+    late-added famous landmarks carry a higher priority so they are handed out
+    next without their numbers having to change. See MasterTitle.queue_priority.
+
     Atomic-ish: SQLite gives us per-statement atomicity; we re-check status
     inside the transaction before flipping.
     """
@@ -1129,7 +1136,8 @@ def pull_next(
               MasterTitle.status == "pending",
               MasterTitle.claimed_by_id.is_(None),
           )
-          .order_by(MasterTitle.external_id.asc().nullslast(), MasterTitle.id.asc())
+          .order_by(MasterTitle.queue_priority.desc(),
+                    MasterTitle.external_id.asc().nullslast(), MasterTitle.id.asc())
           .limit(n)
           .all()
     )

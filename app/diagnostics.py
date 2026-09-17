@@ -1839,6 +1839,79 @@ def check_live_titles_are_unique_per_account(db: Session, scope: Scope) -> Check
     )
 
 
+def check_needs_revision_matches_open_flags(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: MasterTitle.needs_revision agrees with the live Revision rows.
+
+    ════════════════════════════════════════════════════════════════════════
+    WHY THIS EXISTS
+    ════════════════════════════════════════════════════════════════════════
+    Three title-level "flag" indicators — the Title List pill/tint, the Worker
+    Images title outline, and the worker dashboard pill — all read ONE stored
+    0/1 column, needs_revision, NOT the live revision rows. That column is kept
+    in step BY HAND: every approve, reject, delete and unflag path recomputes
+    it. Anything kept in step by hand can drift, and this one drifts in the way
+    the owner reported on 2026-09-17: "I approve it and it still shows flagged."
+    A stale 1 leaves the red tag lit with no open flag behind it. The opposite
+    drift — an open flag while the column reads 0 — HIDES a real flag from
+    those same tags.
+
+    This is stated about STATE (the column versus the live rows), so it holds
+    whatever code writes either side, and it is the watcher that would have
+    caught this class without the owner noticing first. Live = a Revision whose
+    status is 'open' or 'awaiting_approval' on a poster that is not soft-deleted.
+    """
+    flagged_ids = set(
+        r[0] for r in db.query(MasterTitle.id)
+                        .filter(scope.titles, MasterTitle.needs_revision == 1).all()
+    )
+    active_ids = set(
+        r[0] for r in (
+            db.query(SavedPoster.master_title_id)
+              .join(MasterTitle, MasterTitle.id == SavedPoster.master_title_id)
+              .join(Revision, Revision.saved_poster_id == SavedPoster.id)
+              .filter(scope.titles,
+                      SavedPoster.deleted_at.is_(None),
+                      Revision.status.in_(("open", "awaiting_approval")))
+              .distinct().all()
+        )
+    )
+    stale  = flagged_ids - active_ids     # tag lit, nothing behind it
+    hidden = active_ids - flagged_ids     # a real flag the tag does not show
+    ids = list(stale | hidden)
+    names: dict[int, tuple[str, Optional[int]]] = {}
+    if ids:
+        for tid, title, year, pid in db.query(
+                MasterTitle.id, MasterTitle.title, MasterTitle.year,
+                MasterTitle.project_id).filter(MasterTitle.id.in_(ids)).all():
+            names[tid] = (f"{title} ({year})" if year else (title or ""), pid)
+
+    rows = []
+    for tid in stale:
+        nm, pid = names.get(tid, (f"title #{tid}", None))
+        rows.append(Finding(nm, "still marked flagged, but no open flag remains",
+                            None, scope.label(pid)))
+    for tid in hidden:
+        nm, pid = names.get(tid, (f"title #{tid}", None))
+        rows.append(Finding(nm, "has an open flag its title tag is not showing",
+                            None, scope.label(pid)))
+    total = len(stale) + len(hidden)
+    return _result(
+        "needs_revision_matches_open_flags",
+        f"{total} title(s) whose flag tag disagrees with their flags"
+        if total else "Every title's flag tag matches its open flags",
+        "The red \"flag\" tag on the Title List, the Worker Images title "
+        "outline and the worker dashboard all read one stored yes/no on the "
+        "title, kept in step by hand. A title listed here has that stored flag "
+        "set the wrong way. Either it still reads flagged after the last flag "
+        "was resolved, so the tag lingers with nothing behind it — which is "
+        "what \"I approved it and it still shows flagged\" looks like — or it "
+        "has a live flag the tag is not showing at all. Every approve, reject, "
+        "delete and unflag path is meant to keep these two in step.",
+        "warn" if total else "ok", rows[:MAX_ROWS], total,
+    )
+
+
 def check_place_check_is_answering(db: Session, scope: Scope) -> CheckResult:
     """
     INVARIANT: while the place check is ON, "we could not ask Google" must
@@ -2715,6 +2788,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_current_image_was_discarded,
     check_generations_share_a_file,
     check_live_titles_are_unique_per_account,
+    check_needs_revision_matches_open_flags,
     check_place_check_is_answering,
     check_chosen_colour_was_painted,
     check_upload_gap_is_holding,

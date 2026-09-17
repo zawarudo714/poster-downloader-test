@@ -1714,7 +1714,18 @@
   }
 
   async function resolveRevision(id) {
-    const note = prompt('Optional note for the admin (e.g. "redownloaded HD version"). Leave blank to send anyway.');
+    // A REAL confirmation, not a soft note box. This sends the flagged image
+    // to the admin UNCHANGED, and the old "optional note" prompt let a stray
+    // tap fire it (owner, 2026-09-17). The worker is NOT locked out afterwards —
+    // Replace File and Find a Replacement still work while it waits — but a
+    // misclick still costs a wasted trip to the admin and back, so make the
+    // intent explicit. The note stays optional (owner's choice).
+    if (!confirm(
+      'Send this image to the admin with NO change?\n\n'
+      + 'Only do this if the flagged image is already correct. '
+      + 'If it needs a better picture, use REPLACE FILE or FIND A REPLACEMENT instead.'
+    )) return;
+    const note = prompt('Optional note for the admin (e.g. "the size is fine, it is a wide shot"). Leave blank to send.');
     if (note === null) return;
     const r = await postForm(`/revisions/${id}/resolve`, { worker_note: note });
     if (r.ok) await refreshState();

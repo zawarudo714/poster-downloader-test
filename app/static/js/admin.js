@@ -673,6 +673,20 @@
     if (old) old.replaceWith(buildPosterCell(t, p));
   }
 
+  // The title's red outline (.g-title.flagged) is set once at render from
+  // needs_revision. Flagging or clearing a flag inside the zoom rebuilds only
+  // the ONE image card, so without this the title outline lingered after the
+  // last flag was cleared — the admin resolved a flag and the title was still
+  // ringed red until a full reload (owner, 2026-09-17). Recompute the title's
+  // flag state from the posters we already hold and toggle the class live.
+  function refreshTitleFlagOutline(master, poster) {
+    const anyFlagged = (master.posters || []).some((pp) => pp.flagged);
+    master.needs_revision = anyFlagged;
+    const card = gallery.querySelector(`.g-poster[data-poster-id="${poster.poster_id}"]`);
+    const section = card ? card.closest('.g-title') : null;
+    if (section) section.classList.toggle('flagged', anyFlagged);
+  }
+
   lbFlagBtn.addEventListener('click', async () => {
     if (!currentLightbox) return;
     const { master, poster } = currentLightbox;
@@ -691,8 +705,8 @@
       poster.revision_status = 'open';
       poster.revision_type = null;
       poster.comment = lbComment.value || '';
-      master.needs_revision = true;
       rerenderPosterCard(master, poster);
+      refreshTitleFlagOutline(master, poster);
       openLightbox(master, poster);
     } finally {
       lbFlagBtn.disabled = false;
@@ -713,6 +727,7 @@
       poster.revision_type = null;
       poster.comment = '';
       rerenderPosterCard(master, poster);
+      refreshTitleFlagOutline(master, poster);
       openLightbox(master, poster);
     } finally {
       lbUnflagBtn.disabled = false;

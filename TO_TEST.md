@@ -637,6 +637,26 @@ Added in v203:
 
 ---
 
+## 68. FLAG TAGS CLEAR, AND SUBMIT-AS-IS ASKS FIRST — v216
+
+- On Worker Images, open a flagged title's image in the zoom and clear the
+  flag. The image's own red border goes, AND the title's red left-outline
+  should go too if that was its last flag — with no page reload. If the title
+  has another flagged image, the outline should stay. Flagging the first image
+  of a clean title should add the outline live as well.
+- As a worker, on a Changes Requested card, click "Nothing to change? Send it
+  back to admin". It should now ask you to confirm before it sends, so a stray
+  tap cannot fire it. The note is still optional.
+- Was the "still flagged after I approve" problem really the Worker Images
+  outline lingering? If you ever approve a flag and STILL see the red tag on a
+  FRESHLY loaded Title List or Worker Images page, tell me — that would point
+  at a different cause, and the new Diagnostics check below is there to catch it.
+- Open Diagnostics. There is a new check, "Every title's flag tag matches its
+  open flags". It should read green. If it ever lists a title, that title's
+  stored flag is out of step with its real flags.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

@@ -1188,6 +1188,20 @@ exists or a marketplace catalogue that has been taken down.
   — place-check fields and content_hash — and re-checks. The question to
   ask any new per-image fact: "what happens to me when replace_poster
   swaps the file under my row?"
+  A FOURTH cousin, 2026-09-17, is the same shape in the BROWSER: an
+  in-place re-render that rebuilds one small node must recompute every
+  DERIVED thing that depended on the changed data — including PARENT-level
+  state the small render never touches. `rerenderPosterCard` rebuilt one
+  image cell on flag/unflag, but the title's red outline (`.g-title.flagged`,
+  set once from `needs_revision`) was a parent the cell rebuild did not
+  reach, so a resolved flag left the title ringed red until a full reload.
+  When you replace part of a rendered tree in place, list what the OLD render
+  computed from the same data and redo each — the parent indicator, the
+  counter, the summary — not only the node you swapped. And a DENORMALISED
+  flag like `needs_revision`, kept in step by hand across many paths, earns a
+  Diagnostics watcher that compares it against the live rows it summarises
+  (`check_needs_revision_matches_open_flags`), because "kept in step by hand"
+  is the definition of a thing that drifts.
 * **"No tool is needed" was a judgement about cost, written in the same voice
   as the measured figures around it.** Nothing on the page distinguished
   them. That is what the provenance tags are for.

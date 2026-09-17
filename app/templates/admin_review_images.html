@@ -191,6 +191,13 @@
   </div>
   <iframe data-pea-frame title="Photopea image editor"
           allow="clipboard-read; clipboard-write"></iframe>
+  {# Shown the instant the editor is asked for, and hidden once the picture
+     is handed in. Before this the overlay only appeared AFTER the full-size
+     download, so on a slow link the button looked dead (owner, 2026-09-17). #}
+  <div class="pea-loading" data-pea-busy hidden>
+    <div class="pea-spinner" aria-hidden="true"></div>
+    <div class="pea-loading-text" data-pea-busy-text>Loading the picture into the editor…</div>
+  </div>
 </div>
 {% endblock %}
 

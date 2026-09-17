@@ -657,6 +657,23 @@ Added in v203:
 
 ---
 
+## 69. "EDIT IN PHOTOPEA" RESPONDS AT ONCE — v217
+
+- On Review Images, click EDIT IN PHOTOPEA. The editor overlay should appear
+  straight away with a spinner reading "Loading the picture into the editor…",
+  even before the picture has finished downloading. It should not sit there
+  looking dead.
+- Because the overlay covers the screen, you cannot step to another image
+  while it loads. The picture that opens should always be the one you clicked
+  — the old "it opens the previous image I clicked" behaviour should be gone.
+- The SAVE button should be greyed out until the picture is actually in the
+  editor, then become clickable.
+- It should feel a bit quicker to open, because the editor now boots while the
+  picture is still downloading. On a slow connection the download itself is
+  still the floor — but now you can see it is working.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** The database still holds 88,970 places and

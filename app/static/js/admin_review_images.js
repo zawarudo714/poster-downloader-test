@@ -1297,53 +1297,91 @@
 
   function peaFrame() { return document.querySelector('[data-pea-frame]'); }
 
+  // Show or hide the loading veil, and keep SAVE unclickable until the
+  // picture is actually in the editor — saving an empty document would just
+  // overwrite the version with nothing.
+  function setPeaBusy(on, msg) {
+    const el = $('[data-pea-busy]');
+    if (el) {
+      if (msg) {
+        const tx = el.querySelector('[data-pea-busy-text]');
+        if (tx) tx.textContent = msg;
+      }
+      el.hidden = !on;
+    }
+    const saveBtn = $('[data-action="pea-save"]');
+    if (saveBtn) saveBtn.disabled = on;
+  }
+
   async function peaOpen() {
     // One editor, once. A double-click used to start two fetches and two
     // boots of the iframe racing each other (owner's find, 2026-09-14).
     if (pea.open || pea.loading) return;
     const t = current();
     if (!t || !t.images.length) return;
-    pea.loading = true;
     const v = shownVersion(t.images[0]);
-    // The FULL-SIZE picture, never the web preview: the transparent
-    // master when there is one, else the full opaque file. Editing the
-    // preview would quietly downgrade the print.
-    const url = v.master_url ? `${v.master_url}?full=1`
-                             : `/admin/pipeline/review/full/${v.processed_id}`;
-    let buf;
-    try {
-      const r = await fetch(url);
-      if (!r.ok) throw new Error('the server refused the picture');
-      buf = await r.arrayBuffer();
-    } catch (e) {
-      toast('Could not load the picture for editing: ' + e.message, 'error');
-      return;
-    } finally {
-      // The guard flag leaves on every path — success continues into
-      // pea.open below, failure returns to a clickable button.
-      pea.loading = false;
-    }
+
+    // ── OPEN THE OVERLAY FIRST, DOWNLOAD SECOND ─────────────────────────
+    // The full-size picture can be several megabytes, and the old order
+    // downloaded it BEFORE showing anything — so on a slow link the button
+    // looked dead for seconds, and while it looked dead the owner stepped to
+    // the next image and clicked again. When the first download finally
+    // finished, the editor opened the image he had ORIGINALLY clicked, not
+    // the one now on screen (2026-09-17). The overlay now appears at once
+    // with a spinner, and it covers the whole screen, so the picture that
+    // opens is always the one under the click and there is nothing to step
+    // to while it loads. The image is captured here in `v` and never re-read.
+    pea.loading = true;
+    pea.open = true;
     pea.pid = v.processed_id;
     $('[data-pea-title]').textContent =
       `editing v${v.attempt}${v.variant || ''} — SAVE files it as a new lettered version`;
     $('[data-pea]').hidden = false;
-    pea.open = true;
+    setPeaBusy(true, 'Loading the picture into the editor…');
+
+    // ── BOOT THE EDITOR AND DOWNLOAD THE PICTURE AT THE SAME TIME ────────
+    // These used to run one after the other. Booting Photopea takes about a
+    // second; overlapping it with the download makes the wait the LONGER of
+    // the two rather than their sum. The picture is handed in only once BOTH
+    // are ready, and only while the overlay is still open. The FULL-SIZE
+    // picture, never the web preview: the transparent master when there is
+    // one, else the full opaque file — editing the preview would quietly
+    // downgrade the print.
+    const url = v.master_url ? `${v.master_url}?full=1`
+                             : `/admin/pipeline/review/full/${v.processed_id}`;
+    let bytes = null, booted = false;
+    const handToEditor = () => {
+      if (!bytes || !booted || !pea.open) return;
+      setPeaBusy(false);
+      try { peaFrame().contentWindow.postMessage(bytes, PEA_ORIGIN); }
+      catch (err) { toast('Could not hand the picture to the editor: ' + err.message, 'error'); }
+    };
+
     const frame = peaFrame();
     // A fresh load every time, so an earlier sitting's document cannot
     // leak into this one.
     frame.src = `${PEA_ORIGIN}/#${encodeURIComponent(JSON.stringify({ environment: {} }))}`;
     frame.addEventListener('load', () => {
-      // Hand the picture in as bytes once the editor is up. The small
-      // delay lets Photopea finish booting; if it ever misses, CLOSE and
-      // reopen costs two clicks.
-      setTimeout(() => {
-        try { frame.contentWindow.postMessage(buf, PEA_ORIGIN); }
-        catch (err) { toast('Could not hand the picture to the editor: ' + err.message, 'error'); }
-      }, 1200);
+      // The small delay lets Photopea finish booting after its page loads.
+      setTimeout(() => { booted = true; handToEditor(); }, 1200);
     }, { once: true });
+
+    try {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error('the server refused the picture');
+      bytes = await r.arrayBuffer();
+    } catch (e) {
+      toast('Could not load the picture for editing: ' + e.message, 'error');
+      peaClose();
+      return;
+    } finally {
+      pea.loading = false;
+    }
+    handToEditor();
   }
 
   function peaClose() {
+    setPeaBusy(false);
     const overlay = $('[data-pea]');
     if (overlay) overlay.hidden = true;
     const frame = peaFrame();

@@ -49,6 +49,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -482,6 +483,11 @@ class DeployApp:
             row=0, column=4, padx=(18, 6))
         ttk.Button(btns, text="Check live",
                    command=self._start_version_check).grid(row=0, column=5)
+        # Its only job is to say whether the link to the server is fast right
+        # now. The link — not the server — has been the real slow-down more
+        # than once, so this answers "is it the connection again?" at a glance.
+        ttk.Button(btns, text="Check speed",
+                   command=self._start_speed_check).grid(row=0, column=6, padx=(6, 0))
         self._refresh_local_version()
         row += 1
 
@@ -892,6 +898,106 @@ class DeployApp:
                    "ok" if version == local_app_version(
                        Path(self.repo_var.get())) else "err")
         self._refresh_local_version(live=version)
+
+    # ── Server link speed ────────────────────────────────────────────────
+    # The link between this laptop and the server has been the real
+    # bottleneck more than once (see the SPEED note in CLAUDE.md): the site
+    # and the Photopea editor feel slow not because the server is busy but
+    # because the connection to it is crawling. This button measures how fast
+    # the server can send data to this laptop right now, and colours the
+    # answer — green good, amber a bit slow, red slow — so a bad link is
+    # obvious at a glance. It changes nothing on the server.
+    #
+    # The thresholds are a starting point; change the three numbers below to
+    # taste. GOOD means full-size pictures and pages load snappily; SLOW means
+    # they will crawl (the worst measured link in this project's history was
+    # about 0.012 MB/s, which is deep red).
+    SPEED_GOOD_MBPS = 2.0     # at or above this → green
+    SPEED_OK_MBPS = 0.3       # at or above this (but below good) → amber
+    SPEED_SECONDS = 6.0       # stop timing the download after about this long
+    SPEED_MAX_MB = 40         # never pull more than this, however fast the link
+
+    def _start_speed_check(self) -> None:
+        threading.Thread(target=self._check_server_speed, daemon=True).start()
+
+    def _check_server_speed(self) -> None:
+        """Measure how fast the server can send data to this laptop. Read-only."""
+        try:
+            import paramiko
+        except ImportError:
+            self._emit("\nparamiko is not installed. Run:  pip install paramiko",
+                       "err")
+            return
+        try:
+            user, host, port = parse_ssh_target(self.ssh_var.get())
+        except ValueError as e:
+            self._emit(f"\n{e}", "err")
+            return
+
+        self._emit("\nMeasuring how fast the server can send data to this "
+                   "laptop…", "dim")
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        start = None
+        got = 0
+        ping_ms = 0.0
+        try:
+            client.connect(hostname=host, port=port, username=user,
+                           password=self.pw_var.get(), timeout=30,
+                           allow_agent=False, look_for_keys=False)
+
+            # Round trip for a no-op command — a rough "how far away is it".
+            t0 = time.time()
+            _in, out, _err = client.exec_command("true", timeout=30)
+            out.channel.recv_exit_status()
+            ping_ms = (time.time() - t0) * 1000.0
+
+            # Pour zeros down the pipe and time how fast they arrive. Zeros
+            # are used because this SSH channel is not compressed, so they
+            # travel at the true link speed and cost the server nothing to
+            # produce. Reading stops at the time budget OR the size cap,
+            # whichever comes first — a slow link finishes in a few seconds
+            # with a small sample, a fast one sends the whole cap.
+            blocks = int(self.SPEED_MAX_MB * 1024 * 1024 / 65536)
+            _in2, out2, _err2 = client.exec_command(
+                f"dd if=/dev/zero bs=65536 count={blocks} 2>/dev/null",
+                timeout=60)
+            chan = out2.channel
+            chan.settimeout(15)
+            while True:
+                try:
+                    chunk = chan.recv(65536)
+                except Exception:
+                    break
+                if not chunk:
+                    break
+                if start is None:
+                    start = time.time()   # start timing at the FIRST byte
+                got += len(chunk)
+                if time.time() - start >= self.SPEED_SECONDS:
+                    break
+        except Exception as e:
+            self._emit(f"\ncould not measure the speed: {e}", "err")
+            return
+        finally:
+            client.close()
+
+        elapsed = (time.time() - start) if start else 0
+        if got <= 0 or elapsed <= 0:
+            self._emit("\nThe server sent no data, so the speed could not be "
+                       "measured. Try again.", "err")
+            return
+
+        mbps = (got / (1024 * 1024)) / elapsed
+        if mbps >= self.SPEED_GOOD_MBPS:
+            tag, word = "ok", "GOOD"
+        elif mbps >= self.SPEED_OK_MBPS:
+            tag, word = "step", "OK — a bit slow"
+        else:
+            tag, word = "err", "SLOW"
+        self._emit(f"Server speed: {mbps:.2f} MB/s  ({word})", tag)
+        self._emit(f"  downloaded {got / 1024 / 1024:.1f} MB in {elapsed:.1f}s"
+                   f" · round-trip {ping_ms:.0f} ms", "dim")
 
     def _run_local(self) -> bool:
         repo = Path(self.repo_var.get())

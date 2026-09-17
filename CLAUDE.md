@@ -2755,6 +2755,23 @@ Two rules came out of it, and both generalise past this button:
     so that is where the spinner belongs. A control that renames itself
     mid-press is a control the person can no longer identify, and the owner
     called it "finicky" for exactly that reason (2026-09-09).
+  * **The feedback comes BEFORE the slow step, never after it — and a
+    control that opens a view must open that view FIRST, then load into
+    it.** "Edit in Photopea" downloaded a several-megabyte picture and only
+    THEN revealed the editor overlay, so on a slow link the button looked
+    dead for seconds. Worse, while it looked dead the owner stepped to the
+    next image and clicked again, and the click that finally landed opened
+    the image he had ORIGINALLY clicked — because the handler had captured
+    that image up front (2026-09-17). Two shapes generalise. First, if a
+    handler does a slow thing before showing anything, put the container and
+    its spinner on screen at the very start; a full-screen overlay also
+    stops the person navigating onto a different target mid-load. Second,
+    when a slow action captures WHICH thing it acts on at click time, show
+    that thing at once so what the person sees cannot drift from what will
+    happen — same family as "an implicit decision must range over what was
+    seen". And overlap independent waits (here the editor boot ran AFTER the
+    download; booting them together makes the wait the longer of the two,
+    not their sum).
 
 **AND A CONTROL THAT REFUSES MUST SAY SO — SILENCE IS INDISTINGUISHABLE FROM
 A DEAD PAGE.** The search grid greys out every picture once a title has its

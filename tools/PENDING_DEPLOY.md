@@ -1,25 +1,25 @@
 # Not yet deployed
 
-**v216 — flag indicators, submit-as-is confirmation, and a flag watcher.**
+**v217 — "Edit in Photopea" responds at once, and opens faster.**
 
-1. Worker Images: clearing a flag in the zoom rebuilt only the one image box
-   and left the title's red outline behind until a full reload. Now the title
-   outline recomputes live from the title's images, both when the last flag is
-   cleared and when the first is added.
+The button downloaded the full-size picture BEFORE showing anything, so on a
+slow link it looked dead for several seconds. While it looked dead you could
+step to the next image and click again, and when the first download finished
+the editor opened the image you had ORIGINALLY clicked — the off-by-one you
+reported. Two changes:
 
-2. Worker's "Nothing to change?" link now asks a real confirmation before it
-   sends the image to the admin unchanged, so a stray tap cannot fire it. The
-   note stays optional.
+1. The editor overlay now appears the instant you click, with a spinner
+   reading "Loading the picture into the editor…". It covers the screen, so
+   there is nothing to step to while it loads, and the picture that opens is
+   always the one you clicked. SAVE is disabled until the picture is in.
 
-3. New Diagnostics check "needs_revision_matches_open_flags": catches any title
-   whose stored flag disagrees with its live flags — a lingering red tag with
-   nothing behind it, or a real flag the tag is hiding. This is the watcher for
-   the "I approved it and it still shows flagged" class.
+2. The editor now boots at the SAME TIME as the picture downloads, instead of
+   one after the other, so the wait is the longer of the two rather than their
+   sum.
 
-Server only — the node needs no copy. NOTE: the sandbox shell was down this
-session, so node --check / py_compile / preflight could NOT be run here by hand;
-the deploy tool's own preflight suite is the gate and will refuse if anything
-is wrong.
+Server only — the node needs no copy. NOTE: the sandbox shell is still down,
+so node --check / preflight could NOT be run here by hand; the deploy tool's
+preflight suite is the gate.
 
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.

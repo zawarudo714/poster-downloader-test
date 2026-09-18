@@ -1735,6 +1735,9 @@ def api_browse(
             # 'brave' / 'google' / 'pasted', or empty for saves that
             # predate the column — the screen then says nothing.
             "image_source": sp.image_source or "",
+            # The admin's K mark — green outline + sinks to the bottom on
+            # the next sort. Cosmetic by design; see models.py.
+            "reviewed": sp.reviewed_at is not None,
             # The place check. status None means not answered yet — either
             # never tried, or the last try failed (place_error True then).
             # acked is derived by comparing the two timestamps, the
@@ -2123,6 +2126,34 @@ def admin_delete_poster(
     )
     db.commit()
     return JSONResponse({"ok": True})
+
+
+@router.post("/poster/{poster_id}/reviewed")
+def admin_toggle_reviewed(
+    poster_id: int,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Toggle the admin's "I have looked at this one" mark (the K key on the
+    Worker Images screen). A place-keeper for a review interrupted halfway,
+    nothing more: it gates no pipeline step, no approval and no payment —
+    see the column comment in models.py. Toggling, not setting, because a
+    mis-press must be undoable with the same key.
+    """
+    sp = db.query(SavedPoster).filter_by(id=poster_id).first()
+    if not sp or sp.deleted_at is not None:
+        raise HTTPException(404, "Image not found.")
+    now_reviewed = sp.reviewed_at is None
+    sp.reviewed_at = datetime.utcnow() if now_reviewed else None
+    log_activity(
+        db, user=admin,
+        action="reviewed" if now_reviewed else "unreviewed",
+        target_type="saved_poster", target_id=sp.id,
+        details={"filename": sp.filename, "master_id": sp.master_title_id},
+    )
+    db.commit()
+    return JSONResponse({"ok": True, "reviewed": now_reviewed})
 
 
 @router.post("/poster/add")
@@ -2871,12 +2902,45 @@ def revisions_page(
           .filter(Revision.status == "resolved")
     ), proj).order_by(Revision.resolved_at.desc()).limit(50).all()
 
+    # ── Which pictures on this page have LOST their file on disk? ──────────
+    # The database can say a picture exists while the workspace no longer
+    # holds it (Atlanta, found 2026-09-18: the file vanished outside the app
+    # sometime on the 15th). A card then shows a broken thumbnail neither
+    # side can act on: the worker has nothing to fix, so he submits as-is;
+    # the admin sees nothing, so he rejects — and that loop ran for three
+    # days across four submissions. Naming the state on the card, with the
+    # one action that ends it, is the fix. Diagnostics already detects this,
+    # but on a screen nobody is standing on when they hit it.
+    # Cost: one file-exists question per picture shown; the page renders a
+    # few dozen at most.
+    missing_ids: set[int] = set()
+
+    def _note_missing(sp) -> None:
+        if sp is None or sp.deleted_at is not None:
+            return
+        try:
+            if not saved_poster_path(sp).is_file():
+                missing_ids.add(sp.id)
+        except Exception:
+            missing_ids.add(sp.id)      # an unreadable path is as good as gone
+
+    for _blk in pending_complete_blocks:
+        for _rev, _sp in _blk["revisions"]:
+            _note_missing(_sp)
+        for _sp in _blk["current"]:
+            _note_missing(_sp)
+    for _rev, _sp, _mt in awaiting_rows:
+        _note_missing(_sp)
+    for _rev, _sp, _mt in open_rows:
+        _note_missing(_sp)
+
     return templates.TemplateResponse(
         request,
         "admin_revisions.html",
         {"user": admin, "admin": admin,
             "pending_complete_blocks": pending_complete_blocks,
             "open_rows": open_rows, "awaiting_rows": awaiting_rows,
+            "missing_ids": missing_ids,
             "deletion_rows": deletion_rows,
             "deletion_current": deletion_current,
             "resolved_rows": resolved_rows,

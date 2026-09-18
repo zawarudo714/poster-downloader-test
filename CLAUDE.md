@@ -1113,6 +1113,17 @@ tool needs, add it to `REQUIRED_MODULES` in `dev_setup.py` too.
   or one of the `scope_titles` helpers. Now enforced by the GUARDED table in
   `preflight.py`, so a new one fails before deploy. Sorting by it is fine —
   it is equality lookups that pick a row.
+
+  **AND IT IS AN IDENTITY, NOT A WORK ORDER — `queue_priority` is the work
+  order.** Added 2026-09-17, when 146 famous landmarks (Eiffel Tower,
+  Colosseum…) had to join a catalogue whose worker was already 250 rows in.
+  They belong at the FRONT of the queue by fame and at the BACK of the sheet
+  by number, and the answer is never to renumber or to reuse a freed number:
+  new rows take fresh numbers on the end and a `queue_priority` above 0, and
+  `pull_next()` orders by priority first, then external_id. Watched by
+  `check_claim_queue_orders_by_priority` in `preflight.py`, because dropping
+  that one clause has no other symptom — the priority rows just quietly go
+  to the back of an 83,000-row queue.
 - **`Base.metadata.create_all()` does not ALTER existing tables, and a wipe
   that deletes ROWS keeps the old columns.** New columns need an explicit
   migration in `schema_migrations.py` (`NEW_COLUMNS`). **So does a change to

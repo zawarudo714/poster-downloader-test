@@ -1053,6 +1053,19 @@
         // Simple single-poster row, live file.
         const thumb  = wrap.querySelector('.rev-thumb');
         thumb.src    = fileUrl(r.poster_id, r.filename);
+        // …unless the FILE has vanished from the workspace while the record
+        // lived on. Then the address above would render a broken icon the
+        // worker cannot act on — he has nothing to fix, sends the flag back
+        // unchanged, and the admin rejects it again (the Atlanta loop,
+        // 2026-09-15..18). Say it plainly and leave REPLACE FILE in place:
+        // replacing writes a brand-new file, so it works with nothing there.
+        if (r.file_missing) {
+          thumb.src = '/static/img/deleted-poster.svg';
+          thumb.alt = 'file missing';
+          thumb.classList.add('rev-thumb-placeholder');
+          const mb = wrap.querySelector('.rev-missing-banner');
+          if (mb) mb.hidden = false;
+        }
         const urlInp = wrap.querySelector('[data-replace-url]');
         const replaceBtn = wrap.querySelector('[data-action="replace"]');
         // The resolve control is the small "nothing to change?" link under

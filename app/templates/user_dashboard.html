@@ -324,6 +324,16 @@
       <strong>⚠ ADMIN REJECTED YOUR FIX — please look again.</strong>
       <span class="rev-verdict-text"></span>
     </div>
+    <!-- Shown when the picture's FILE has vanished from the workspace.
+         Without this sentence the worker sees only a broken thumbnail,
+         has nothing to fix, sends the flag back unchanged, and the admin
+         rejects it again — a loop that ran for three days on Atlanta
+         before anyone could see why (2026-09-18). -->
+    <div class="rev-missing-banner" hidden>
+      <strong>⚠ THE PICTURE FILE IS MISSING.</strong>
+      <span>Sending this back cannot fix it. Paste a new image address below
+      and press REPLACE FILE — the replacement becomes the picture.</span>
+    </div>
     <div class="rev-comment"></div>
     <div class="rev-flagged"></div>
 

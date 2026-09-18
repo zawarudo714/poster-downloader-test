@@ -188,7 +188,7 @@
     // Restore title index from URL if available and valid, else 0.
     titleIdx = (restoredIdx > 0 && restoredIdx < titles.length) ? restoredIdx : 0;
     clearSelection();
-    $('ib-summary').textContent = `${data.title_count} title(s) · ${data.poster_count} ${data.poster_count === 1 ? PD.noun : PD.nouns} total`;
+    refreshSummary();
     renderGallery();
     saveStateToUrl();
     // Resume into the lightbox the last visit left open. One-shot, and
@@ -260,6 +260,30 @@
     return s;
   }
 
+  // A title is DONE when every live picture on it carries the admin's K
+  // mark. Derived from the pictures, never stored on the title — so a new
+  // picture arriving on a finished title un-greens it by itself, with no
+  // second record to keep in step.
+  function titleReviewed(t) {
+    const ps = t.posters || [];
+    return ps.length > 0 && ps.every((p) => p.reviewed);
+  }
+
+  // The day's headline: titles, pictures — and how many still owed an eye,
+  // because a fast scroll can miss a green outline and the number cannot
+  // be missed (owner's ask, 2026-09-18). Recomputed from the list, so a K
+  // press updates it live.
+  function refreshSummary() {
+    const nT = titles.length;
+    const nP = titles.reduce((n, t) => n + (t.posters || []).length, 0);
+    const un = titles.reduce(
+      (n, t) => n + (t.posters || []).filter((p) => !p.reviewed).length, 0);
+    const tail = nP === 0 ? ''
+      : (un === 0 ? ' · all reviewed ✓' : ` · ${un} NOT YET REVIEWED`);
+    $('ib-summary').textContent =
+      `${nT} title(s) · ${nP} ${nP === 1 ? PD.noun : PD.nouns} total${tail}`;
+  }
+
   function sortTitles() {
     const numOf = (t) => (t.external_id == null ? Infinity : Number(t.external_id));
     const newestOf = (t) => Math.max(0, ...(t.posters || []).map((p) => p.poster_id || 0));
@@ -280,6 +304,13 @@
     } else {
       titles.sort((a, b) => numOf(a) - numOf(b));
     }
+    // REVIEWED SINKS, whatever the dropdown says: the ones still owed an
+    // eye float to the top in the chosen order, the finished ones follow in
+    // the same order (owner's ask, 2026-09-18). A stable sort keeps both
+    // groups internally ordered. Applied at SORT time only — pressing K
+    // never reorders the page under the cursor; the mark sinks on the next
+    // load or dropdown change.
+    titles.sort((a, b) => (titleReviewed(a) ? 1 : 0) - (titleReviewed(b) ? 1 : 0));
   }
 
   function renderGallery() {
@@ -294,7 +325,9 @@
       const section = node.querySelector('.g-title');
       section.id = `g-title-${i}`;
       if (i === titleIdx) section.classList.add('current');
+      // Red outranks green: a flag needs him, the K mark is only memory.
       if (t.needs_revision) section.classList.add('flagged');
+      else if (titleReviewed(t)) section.classList.add('reviewed');
       // Projects without a year render the name alone rather than "(N/A)".
       node.querySelector('.g-title-name').textContent =
         t.year ? `${t.title} (${t.year})` : t.title;
@@ -341,6 +374,8 @@
     const node = tplPoster.content.cloneNode(true);
     const btn = node.querySelector('.g-poster');
     btn.dataset.posterId = p.poster_id;
+    // The K mark — same green outline the Approve Artwork keep uses.
+    if (p.reviewed) btn.classList.add('reviewed');
     btn.querySelector('.g-poster-img').src = fileUrl(p.poster_id, p.size || p.filename);
     btn.querySelector('.g-poster-img').alt = p.filename;
     btn.querySelector('.g-poster-name').textContent = p.filename;
@@ -603,6 +638,8 @@
       if (src) pillsHost.appendChild(src);
       if (placeCheck.enabled) pillsHost.appendChild(placePillNode(p));
     }
+    // The K mark, so the zoom agrees with the grid about what you have seen.
+    renderLbReviewed(p);
     // The "checked, it's fine" button, right here in the zoom — shown only
     // for a verdict that CAN be acknowledged (Google disagreed, or had no
     // opinion). It reads the same p.place_acked the grid does, so pressing
@@ -655,6 +692,60 @@
     // the plain gallery, not a lightbox nobody asked for.
     lbOpenPoster = 0;
     saveStateToUrl();
+  }
+
+  // ── THE K MARK — "I have looked at this one" ──────────────────────────
+  // A place-keeper for a review interrupted halfway: green outline here,
+  // in the grid and on the title box, and the day header counts what is
+  // still owed an eye. It decides nothing — see the column comment in
+  // models.py. Same key as Approve Artwork's keep, on purpose (muscle
+  // memory), and the same key undoes it.
+  function renderLbReviewed(p) {
+    lightbox.classList.toggle('lb-reviewed', !!p.reviewed);
+    const host = $('ib-lb-pills');
+    if (!host) return;
+    let pill = host.querySelector('.status-reviewed');
+    if (p.reviewed && !pill) {
+      pill = document.createElement('span');
+      pill.className = 'status-pill status-reviewed';
+      pill.textContent = 'REVIEWED ✓';
+      pill.title = 'You marked this one as looked-at (K). Press K again to undo.';
+      host.appendChild(pill);
+    } else if (!p.reviewed && pill) {
+      pill.remove();
+    }
+  }
+
+  async function toggleReviewed(t, p) {
+    const r = await fetch(`/admin/poster/${p.poster_id}/reviewed`, { method: 'POST' });
+    if (!r.ok) { alert('Could not save the mark: ' + r.status); return; }
+    const d = await r.json();
+    p.reviewed = !!d.reviewed;
+    // Everything DERIVED from the mark gets redone — the grid cell, the
+    // title outline, the day count, and the zoom if it shows this one.
+    // Deliberately NOT re-sorted here: the page must never reorder under
+    // the cursor mid-review; reviewed ones sink on the next load or when
+    // the order dropdown is touched.
+    renderGallery();
+    refreshSummary();
+    if (currentLightbox && currentLightbox.poster.poster_id === p.poster_id) {
+      renderLbReviewed(p);
+    }
+  }
+
+  async function toggleReviewedTitle(t) {
+    // K on a title in the grid: if anything on it is still unmarked, mark
+    // it all — otherwise unmark it all. One intention per press, never a
+    // mixed flip. (Travel holds one picture per title, so this is simply
+    // a toggle there.)
+    const ps = (t && t.posters) || [];
+    if (!ps.length) return;
+    const marking = ps.some((p) => !p.reviewed);
+    for (const p of ps) {
+      if (!!p.reviewed !== marking) {
+        await toggleReviewed(t, p);
+      }
+    }
   }
 
   document.querySelectorAll('[data-lightbox-close]').forEach((el) => {
@@ -779,10 +870,21 @@
       if (e.key === 'Escape') closeLightbox();
       if (e.key === 'ArrowLeft')  lightboxStep(-1);
       if (e.key === 'ArrowRight') lightboxStep(1);
+      // K = "I have looked at this one", K again undoes — the same key
+      // Approve Artwork uses for keep, so the hand already knows it.
+      if ((e.key === 'k' || e.key === 'K') && currentLightbox) {
+        toggleReviewed(currentLightbox.master, currentLightbox.poster);
+      }
       return;
     }
     if (e.key === 'ArrowLeft')  navTitle(-1);
     if (e.key === 'ArrowRight') navTitle(1);
+    // K in the plain gallery marks the CURRENT title — the one the arrows
+    // stand on and the outline highlights — so arrow-arrow-K works the
+    // same here as in the zoom.
+    if ((e.key === 'k' || e.key === 'K') && titles[titleIdx]) {
+      toggleReviewedTitle(titles[titleIdx]);
+    }
   });
 
   $('ib-load').addEventListener('click', loadList);

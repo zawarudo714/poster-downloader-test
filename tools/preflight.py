@@ -3123,8 +3123,47 @@ def check_password_fields_are_secret() -> None:
              f"it, and it is stored unencrypted")
 
 
+# ── THE WORKER QUEUE MUST HAND OUT HIGH-PRIORITY TITLES FIRST ──────────────
+# `master_titles.queue_priority` exists so a title added LATE can be worked
+# EARLY without renumbering: the 146 famous landmarks added 2026-09-17
+# (Eiffel Tower, Colosseum…) sit at external_id 87836+ — the very back of the
+# sheet — and only the `queue_priority.desc()` clause in pull_next() brings
+# them to the front of the worker's GET. If a future edit drops that clause,
+# NOTHING else fails: no error, no wrong page, the famous batch just quietly
+# moves to the back of an 83,000-row queue and is never worked. The owner
+# would be the only detector, months later, via missing listings.
+#
+# So this reads pull_next()'s actual syntax tree and requires the call
+# `queue_priority.desc()` inside it. AST, not a word-match, so a comment or
+# docstring mentioning the column cannot satisfy it (the docstring already
+# does mention it — sabotage-tested 2026-09-17).
+
+def check_claim_queue_orders_by_priority() -> None:
+    src = (APP / "routes" / "worker.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    fn = next((n for n in ast.walk(tree)
+               if isinstance(n, ast.FunctionDef) and n.name == "pull_next"), None)
+    if fn is None:
+        fail("routes/worker.py has no pull_next() — the claim path this "
+             "check watches is gone; rewrite the check for its successor")
+        return
+    for node in ast.walk(fn):
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "desc"
+                and isinstance(node.func.value, ast.Attribute)
+                and node.func.value.attr == "queue_priority"):
+            return
+    fail("pull_next() no longer orders by queue_priority.desc() — "
+         "late-added high-priority titles (the famous landmarks at "
+         "external_id 87836+) would silently be worked LAST. Put "
+         "MasterTitle.queue_priority.desc() back at the front of its "
+         "order_by")
+
+
 CHECKS = [
     ("python compiles",           check_python_compiles),
+    ("worker queue honours priority", check_claim_queue_orders_by_priority),
     ("no undefined names",        check_undefined_names),
     ("settings keys declared",    check_settings_keys_declared),
     ("settings reachable on the dashboard", check_settings_are_reachable),

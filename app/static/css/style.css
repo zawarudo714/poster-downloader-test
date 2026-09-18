@@ -1350,6 +1350,15 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 .g-poster:hover { transform: translateY(-2px); border-color: var(--accent); }
 .g-poster.p-flagged { border-color: var(--error); border-width: 2px; }
 .g-poster.p-awaiting { border-color: #ffb400; border-width: 2px; }
+/* The admin's K mark — the same green Approve Artwork's keep wears, so
+   "I have dealt with this one" reads identically on both screens. A flag
+   outranks it: p-flagged sits later in specificity order on the same
+   element and both set border-color, so red wins when both apply. */
+.g-poster.reviewed { border-color: var(--success); border-width: 2px; }
+.g-poster.p-flagged.reviewed { border-color: var(--error); }
+.g-title.reviewed { border-left: 3px solid var(--success); }
+.lb-reviewed #ib-lb-img { outline: 3px solid var(--success); outline-offset: -3px; }
+.status-pill.status-reviewed { color: var(--success); border-color: var(--success); }
 .g-poster-img {
   width: 100%;
   max-height: 220px;
@@ -1574,6 +1583,38 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 .revision-item.rev-rejected {
   border-left: 4px solid var(--error);
   background: rgba(255, 80, 80, 0.04);
+}
+
+/* THE PICTURE FILE IS MISSING — worker banner and admin card note. Amber,
+   not red: nothing was rejected, the file is simply gone from disk, and
+   the message's whole job is to point at the exit (REPLACE FILE for the
+   worker, DELETE THIS RECORD for the admin). Without it both sides stare
+   at a broken thumbnail — the loop that ran 2026-09-15..18 on Atlanta. */
+.rev-missing-banner {
+  background: rgba(255, 176, 32, 0.12);
+  border: 1px solid rgba(255, 176, 32, 0.45);
+  border-left: 4px solid var(--skip);   /* the house amber — nothing was rejected, something is absent */
+  padding: 8px 12px;
+  margin: 6px 0;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.rev-missing-banner strong { letter-spacing: 0.04em; }
+.rev-missing { display: flex; gap: 10px; align-items: flex-start; }
+.rev-missing-note {
+  font-size: 13px;
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+.pcc-current-missing {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  opacity: 0.75;
 }
 
 /* ── Open-TMDB button on revisions ───────────────────────────────────── */

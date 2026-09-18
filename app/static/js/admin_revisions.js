@@ -25,6 +25,31 @@
     });
   });
 
+  // DELETE THIS RECORD — shown only on cards whose picture FILE is gone
+  // from the workspace. Neither approve nor reject can help there (the
+  // worker has nothing to fix, the admin nothing to see — the loop that
+  // ran 2026-09-15..18 on Atlanta), so the card offers the one exit:
+  // the existing admin delete, which resolves the flags and returns the
+  // title to the queue for a fresh picture.
+  document.querySelectorAll('[data-missing-delete]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const pid = btn.getAttribute('data-missing-delete');
+      if (!confirm('Delete this record? The flag is closed and the title '
+                   + 'goes back to the queue so a fresh picture can be saved. '
+                   + 'This does not count against the worker.')) return;
+      btn.disabled = true;
+      try {
+        const r = await fetch(`/admin/poster/${pid}/delete`, { method: 'POST' });
+        if (r.ok) { location.reload(); return; }
+        alert('Delete failed: ' + r.status);
+      } catch (e) {
+        alert('Delete failed: ' + e);
+      }
+      // Only reached on failure — success reloads the page.
+      btn.disabled = false;
+    });
+  });
+
   // Clear-flag buttons inside open cards
   document.querySelectorAll('[data-unflag-poster-id]').forEach((btn) => {
     btn.addEventListener('click', async () => {

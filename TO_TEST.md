@@ -674,9 +674,72 @@ Added in v203:
 
 ---
 
+## 70. AFTER THE FAMOUS BATCH, THE QUEUE FALLS BACK TO NORMAL — v218
+
+You already tested the first half on 2026-09-17: GET as the worker brought
+the famous landmarks (Great Wall #87836, Eiffel Tower #87837…) ahead of
+Almaty #251. The half nobody has seen yet only becomes testable later:
+
+- **When**: once the worker has finished (or you have returned) all 146
+  famous titles.
+- **What to click**: log in as the worker and press GET.
+- **What should happen**: the queue goes back to plain number order — the
+  next titles are the ordinary ones from #251 upward (Almaty, Omaha…), with
+  no gap and no repeat of a famous one.
+- **If it does not**: a famous title reappearing means its priority or status
+  did not clear on completion; ordinary titles being skipped past means the
+  ordering clause is wrong — say which you saw.
+
+---
+
+## 71. A MISSING PICTURE FILE NOW SAYS SO — v219
+
+- **Where**: Changes Requested (as admin) and the flag panel (as the worker).
+  Atlanta, Georgia (#36) is the live case.
+- **What to click**: open Changes Requested. The Atlanta card should no
+  longer show a broken thumbnail — it should say the picture file is
+  missing and offer a DELETE THIS RECORD button.
+- **Then**: press the button. The card disappears, the flag closes, and
+  Atlanta returns to the worker queue as an ordinary pending title. The
+  worker then saves a fresh picture for it like any other.
+- **If it does not**: a still-broken thumbnail means the detection failed —
+  say which screen you were on.
+
+## 72. A FAILED DOWNLOAD LEAVES NOTHING BEHIND — v219
+
+- **Hard to trigger on purpose** (it needs a download to die part-way), so
+  treat this as a watch-item: if Diagnostics ever again shows a 0-byte file
+  under "files on disk with no database record", that is this fix failing —
+  say so. The Ostankino leftover from 2026-09-18 predates the fix and is
+  cleaned separately.
+
+## 73. THE K MARK ON WORKER IMAGES — v219
+
+- **What to click**: open Worker Images on a day with pictures. Zoom into
+  one and press **K** — the picture gets a green outline, a REVIEWED ✓
+  pill, and its box in the grid and its title box turn green too. Press K
+  again — it all clears. In the plain grid (no zoom), K marks the
+  highlighted title, the one the ‹ › arrows stand on.
+- **The count**: the line at the top ("N titles · M images total") now ends
+  with "X NOT YET REVIEWED", falling as you press K, and "all reviewed ✓"
+  when you finish.
+- **The sort**: reviewed titles do NOT jump around as you press K. They
+  sink to the bottom the next time the day loads or you touch the order
+  dropdown — unreviewed ones then sit on top in your chosen order.
+- **What it must NOT do**: nothing else changes — no flag, no approval, no
+  pipeline movement. A worker replacing a marked picture clears its mark
+  (you have not seen the new one).
+- **If it does not**: say which of the three places (grid box, title box,
+  zoom) missed the green, or whether the count disagreed with your eyes.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
-**Re-importing the catalogue.** The database still holds 88,970 places and
-the files now hold 88,876 — 44 war and grave sites were cut, then 50 bare
-country names (2026-09-06). A job to do, not a thing to test, so it lives
-in `ROADMAP.md`.
+**Re-importing the catalogue.** No longer needed at all — corrected
+2026-09-17, when this note had gone stale. The database and
+`IMPORT_titles.csv` now both hold exactly 83,882 places and are kept in
+step directly: the Israel-area cut (369), the low-view and memorial cut
+(3,743) and the 146 famous additions were each applied to the DATABASE by a
+guarded script and to the CSV in the same sitting. Re-importing would
+renumber everything and is the one move that must never happen.

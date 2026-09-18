@@ -1923,8 +1923,13 @@ def check_place_check_is_answering(db: Session, scope: Scope) -> CheckResult:
     number needs on day one — a cross-check that has gone blind reports
     agreement for ever.
 
-    Findings are grouped by the ERROR TEXT: one broken key produces one
-    finding with a count, not a page of identical rows.
+    Findings are ONE PER IMAGE, each linking to that worker and day on the
+    Worker Images screen. They were grouped by error text at first — one
+    broken key, one row with a count — but a grouped row can only link to
+    the browse page's front door, and the owner clicked it expecting to land
+    on the problem (2026-09-18). A link that answers "which picture?" beats
+    a tidy count; the heading still carries the total, and MAX_ROWS keeps a
+    broken key from producing a page of rows.
     """
     from .pipeline import get_setting
     try:
@@ -1937,18 +1942,21 @@ def check_place_check_is_answering(db: Session, scope: Scope) -> CheckResult:
             "The place check is switched off on the Pipeline settings page, "
             "so there is nothing to watch.")
 
-    q = (db.query(SavedPoster.place_check_error,
-                  func.count(SavedPoster.id).label("n"))
+    q = (db.query(SavedPoster)
            .filter(SavedPoster.deleted_at.is_(None),
                    SavedPoster.place_check_status.is_(None),
                    SavedPoster.place_check_error.isnot(None))
-           .group_by(SavedPoster.place_check_error)
-           .order_by(func.count(SavedPoster.id).desc()))
-    grouped = q.limit(MAX_ROWS).all()
-    total = sum(n for _, n in q.all())
+           .order_by(SavedPoster.id.desc()))
+    total = q.count()
 
-    rows = [Finding(f"{n} image(s)", f"failed with: {err}", "/admin/browse")
-            for err, n in grouped]
+    rows = [Finding(
+                what=f"{sp.username} · {sp.title_folder_path} · {sp.filename}",
+                detail=f"failed with: {sp.place_check_error}",
+                link=f"/admin/browse?worker={sp.username}"
+                     f"&date={sp.original_save_date}",
+                project=scope.label(_project_of(db, sp)),
+            )
+            for sp in q.limit(MAX_ROWS).all()]
     return _result(
         "place_check_answering",
         f"{total} place check(s) could not run"

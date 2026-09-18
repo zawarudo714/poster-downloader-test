@@ -408,6 +408,19 @@ def _active_revisions_for_user(db: Session, user: User, project=None):
         # "Was rejected" = status='open' AND admin_verdict was set (admin pushed back).
         was_rejected = (rev.status == "open" and bool(rev.admin_verdict))
 
+        # Does the FILE still exist? A record can outlive its picture
+        # (Atlanta, found 2026-09-18: the file vanished outside the app),
+        # and the card then shows a broken thumbnail the worker cannot act
+        # on — he has nothing to fix, submits as-is, and the admin rejects,
+        # for ever. Named in the payload so the card can SAY it and point
+        # at REPLACE FILE, which handles a missing original cleanly.
+        file_missing = False
+        if sp.deleted_at is None:
+            try:
+                file_missing = not saved_poster_path(sp).is_file()
+            except Exception:
+                file_missing = True     # unreadable path is as good as gone
+
         out.append({
             "revision_id": rev.id,
             "status": rev.status,
@@ -423,6 +436,7 @@ def _active_revisions_for_user(db: Session, user: User, project=None):
             "poster_id": sp.id,
             "filename": sp.filename,
             "poster_deleted": sp.deleted_at is not None,
+            "file_missing": file_missing,
             "related": related,                       # [{poster_id, filename, size}, ...]
             "title": mt.title,
             "year": mt.year,
@@ -1639,7 +1653,25 @@ def _too_small(width: Optional[int], height: Optional[int],
 
 
 def _download_to(url: str, target_path: Path) -> int:
-    """Stream + size-cap download. Returns bytes written. Raises HTTPException on failure."""
+    """
+    Stream + size-cap download. Returns bytes written. Raises HTTPException
+    on failure — and on EVERY failure the partly-written file is deleted.
+
+    That cleanup is not optional. Opening the file creates it on disk at
+    zero bytes BEFORE any picture arrives, so a connection that drops
+    mid-download used to leave an empty file behind while the database
+    transaction rolled back — a file no record points at, which Diagnostics
+    later reports as an orphan (found 2026-09-18: a 0-byte "Ostankino
+    Tower 1.jpg" with `title_folder_path` still NULL on the master row, the
+    exact signature of a rollback that could not reach the filesystem).
+    The too-small refusal a few lines down had this care from day one; the
+    failure paths in here did not. One cleanup, in one place, covers them
+    all now — including a disk error nobody anticipated.
+
+    Both callers guarantee `target_path` is a FRESH name (save bumps the
+    counter until unused; replace writes to `.incoming`), so deleting it on
+    failure can never destroy an existing good picture.
+    """
     try:
         with requests.get(
             url,
@@ -1659,15 +1691,24 @@ def _download_to(url: str, target_path: Path) -> int:
                         continue
                     written += len(chunk)
                     if written > MAX_DOWNLOAD_BYTES:
-                        f.close()
-                        target_path.unlink(missing_ok=True)
                         raise HTTPException(413, "Image exceeds maximum allowed size.")
                     f.write(chunk)
-            return written
-    except HTTPException:
+
+        # An empty download is not a picture. Without this, a 0-byte file
+        # slips PAST the size floor, because a file with no readable
+        # dimensions is deliberately not rejected there ("we could not
+        # measure" must never count as evidence — see _too_small). Empty is
+        # different: there is nothing to measure because nothing arrived.
+        if written == 0:
+            raise HTTPException(502, "The server sent an empty reply — no image arrived. Try the address again.")
+        return written
+    except Exception as e:
+        target_path.unlink(missing_ok=True)
+        if isinstance(e, HTTPException):
+            raise
+        if isinstance(e, requests.RequestException):
+            raise HTTPException(502, f"Download failed: {e}")
         raise
-    except requests.RequestException as e:
-        raise HTTPException(502, f"Download failed: {e}")
 
 
 def _ensure_first_save_metadata(t: MasterTitle, today: date_type) -> None:
@@ -2187,6 +2228,10 @@ def replace_poster(
     sp.place_check_error     = None
     sp.place_check_at        = None
     sp.place_check_acked_at  = None
+    # The admin's K mark was earned by the OLD picture; the new one has not
+    # been looked at. Cleared with the other facts, or a swapped-in image
+    # would sit green in a review the admin believes is finished.
+    sp.reviewed_at           = None
 
     # ── These are DIFFERENT BYTES, so any post-production verdict on the old
     # ones is void. Without this, a poster that reached failed_processing and

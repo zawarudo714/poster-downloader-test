@@ -367,6 +367,17 @@ class SavedPoster(Base):
     place_check_error    = Column(Text, nullable=True)
     place_check_acked_at = Column(DateTime, nullable=True)
 
+    # THE ADMIN'S "I HAVE LOOKED AT THIS ONE" MARK on the Worker Images
+    # screen — pressed K, turned green, purely a place-keeper so a review
+    # interrupted halfway does not restart from the top (owner's ask,
+    # 2026-09-18). It DECIDES NOTHING: no pipeline step, no approval and no
+    # payment reads it, and none ever should — approval already has its own
+    # mechanism, and a second one would be two records of one decision.
+    # It is a fact about the BYTES the admin saw, so replace_poster clears
+    # it with the other per-picture facts: a swapped-in picture must never
+    # wear a mark earned by the one it replaced.
+    reviewed_at          = Column(DateTime, nullable=True)
+
     master_title = relationship("MasterTitle", back_populates="saved_posters")
 
     __table_args__ = (

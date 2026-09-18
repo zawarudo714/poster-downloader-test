@@ -81,6 +81,9 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     # late-added famous landmarks are set above 0 so they are worked next
     # without renumbering. See MasterTitle.queue_priority and pull_next().
     ("master_titles", "queue_priority",    "INTEGER NOT NULL DEFAULT 0"),
+    # The admin's K mark on Worker Images (2026-09-18). Nullable: every
+    # existing picture truthfully reads "not yet reviewed".
+    ("saved_posters", "reviewed_at",       "DATETIME"),
     # ── Fair sharing between projects / rotation between accounts ───────
     ("projects",        "process_weight", "INTEGER NOT NULL DEFAULT 1"),
     ("upload_accounts", "rotation_order", "INTEGER NOT NULL DEFAULT 100"),

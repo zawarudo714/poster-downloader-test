@@ -43,6 +43,23 @@
                 {% if is_deleted %}
                   <img class="pcc-rev-thumb pcc-rev-thumb-placeholder"
                        src="/static/img/deleted-poster.svg" alt="deleted">
+                {% elif sp.id in missing_ids %}
+                  {# The record survives but the FILE is gone from the
+                     workspace. A broken thumbnail here once looped for
+                     three days: worker had nothing to fix, admin had
+                     nothing to see. Name the state, offer the exit. #}
+                  <div class="rev-missing">
+                    <img class="pcc-rev-thumb pcc-rev-thumb-placeholder"
+                         src="/static/img/deleted-poster.svg" alt="file missing">
+                    <div class="rev-missing-note">
+                      <strong>The picture file is missing from the workspace.</strong>
+                      Sending this back cannot fix it — the worker has nothing
+                      to correct. Delete the record and the title returns to
+                      the queue for a fresh picture.
+                      <button class="btn btn-error btn-tiny"
+                              data-missing-delete="{{ sp.id }}">DELETE THIS RECORD</button>
+                    </div>
+                  </div>
                 {% else %}
                   {# Clickable: judging needs the full picture, and the full
                      picture must not require a trip to Worker Images. #}
@@ -86,10 +103,18 @@
           {% if blk.current %}
           <div class="pcc-current-strip">
             {% for cp in blk.current %}
-              <a class="pcc-current-thumb" href="/admin/file/{{ cp.id }}?v={{ cp.file_size or 0 }}"
-                 target="_blank" rel="noopener" title="{{ cp.filename }} — click for full size">
-                <img src="/admin/file/{{ cp.id }}?v={{ cp.file_size or 0 }}" alt="" loading="lazy">
-              </a>
+              {% if cp.id in missing_ids %}
+                <span class="pcc-current-thumb pcc-current-missing"
+                      title="{{ cp.filename }} — the file is missing from the workspace">
+                  <img src="/static/img/deleted-poster.svg" alt="file missing">
+                  <span class="mono">file missing</span>
+                </span>
+              {% else %}
+                <a class="pcc-current-thumb" href="/admin/file/{{ cp.id }}?v={{ cp.file_size or 0 }}"
+                   target="_blank" rel="noopener" title="{{ cp.filename }} — click for full size">
+                  <img src="/admin/file/{{ cp.id }}?v={{ cp.file_size or 0 }}" alt="" loading="lazy">
+                </a>
+              {% endif %}
             {% endfor %}
           </div>
           {% else %}
@@ -131,6 +156,19 @@
               {% else %}
                 {% if sp.deleted_at %}
                   <img class="rev-card-thumb rev-card-thumb-placeholder" src="/static/img/deleted-poster.svg" alt="deleted">
+                {% elif sp.id in missing_ids %}
+                  <div class="rev-missing">
+                    <img class="rev-card-thumb rev-card-thumb-placeholder"
+                         src="/static/img/deleted-poster.svg" alt="file missing">
+                    <div class="rev-missing-note">
+                      <strong>The picture file is missing from the workspace.</strong>
+                      Approving or rejecting cannot bring it back. Delete the
+                      record and the title returns to the queue for a fresh
+                      picture.
+                      <button class="btn btn-error btn-tiny"
+                              data-missing-delete="{{ sp.id }}">DELETE THIS RECORD</button>
+                    </div>
+                  </div>
                 {% else %}
                   <a class="thumb-link" href="/admin/file/{{ sp.id }}?v={{ sp.file_size or 0 }}"
                      target="_blank" rel="noopener" title="Click for full size">
@@ -187,6 +225,19 @@
                       <img src="/admin/file/{{ pid }}?v={{ vbust }}" alt="{{ noun }} #{{ pid }}" loading="lazy">
                     </a>
                   {% endfor %}
+                </div>
+              {% elif sp.id in missing_ids %}
+                <div class="rev-missing">
+                  <img class="rev-card-thumb rev-card-thumb-placeholder"
+                       src="/static/img/deleted-poster.svg" alt="file missing">
+                  <div class="rev-missing-note">
+                    <strong>The picture file is missing from the workspace.</strong>
+                    The worker cannot fix this flag — there is nothing on disk
+                    to fix. Delete the record and the title returns to the
+                    queue for a fresh picture.
+                    <button class="btn btn-error btn-tiny"
+                            data-missing-delete="{{ sp.id }}">DELETE THIS RECORD</button>
+                  </div>
                 </div>
               {% else %}
                 <a class="thumb-link" href="/admin/file/{{ sp.id }}?v={{ sp.file_size or 0 }}"

@@ -54,6 +54,9 @@
     const wrap = document.createElement('div');
     wrap.className = 'chat-msg ' + (isMine ? 'chat-msg-mine' : 'chat-msg-theirs');
     wrap.dataset.msgId = m.id;
+    // The moment this message was written, in the same UTC shape the
+    // server reports read-times in — what the "Seen" line compares against.
+    if (m.created_at_iso) wrap.dataset.createdIso = m.created_at_iso;
     const bubble = document.createElement('div');
     bubble.className = 'chat-msg-bubble';
     // Text first, if any — an image-only message has an empty body.
@@ -90,6 +93,32 @@
     if (hint) hint.remove();
   }
 
+  // ── The "Seen" line — admin view only ───────────────────────────────────
+  // Instagram-style: ONE small line, under the LAST of my messages the
+  // worker has read. The server reports the worker's read-time on every
+  // poll, so the line appears the moment they open the chat — no new
+  // message needed to carry it. Comparing the two ISO strings works
+  // because both are UTC in the same shape.
+  function renderSeen(seenIso, seenLabel) {
+    if (viewerRole !== 'admin' || !seenIso) return;
+    const old = stream.querySelector('.chat-seen');
+    let target = null;
+    stream.querySelectorAll('.chat-msg-mine').forEach((el) => {
+      if (el.dataset.createdIso && el.dataset.createdIso <= seenIso) target = el;
+    });
+    if (!target) { if (old) old.remove(); return; }
+    if (old && old.previousElementSibling === target) {
+      old.textContent = 'Seen ' + (seenLabel || '');
+      return;
+    }
+    if (old) old.remove();
+    const el = document.createElement('div');
+    el.className = 'chat-seen mono muted';
+    el.textContent = 'Seen ' + (seenLabel || '');
+    el.title = 'The worker had the chat open after this message.';
+    target.insertAdjacentElement('afterend', el);
+  }
+
   // ── Polling ─────────────────────────────────────────────────────────────
   let polling = false;
   async function poll() {
@@ -114,6 +143,9 @@
       if (data.messages && data.messages.length) {
         try { await fetch(urlMarkRead(), { method: 'POST' }); } catch (e) {}
       }
+      // Place (or move) the worker's "Seen" line — sent on every poll,
+      // whether or not any new message came with it.
+      renderSeen(data.worker_seen_at_iso, data.worker_seen_at);
     } catch (e) {
       // network blip — try again next tick.
     } finally {

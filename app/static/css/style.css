@@ -5706,6 +5706,23 @@ html.theme-light .stat-value, html.theme-light .stat-pill-num {
   animation: chat-toast-in .25s ease;
 }
 .chat-toast:hover { border-color: var(--accent); color: var(--text); }
+/* The toast stays until acted on (2026-09-18) — so it needs its own way
+   out that doesn't open the chat. */
+.chat-toast-close {
+  background: none; border: none; cursor: pointer;
+  color: var(--subtext); font-size: 12px; padding: 2px 4px; line-height: 1;
+}
+.chat-toast-close:hover { color: var(--text); }
+.chat-toast-label { display: inline-flex; align-items: center; gap: 10px; }
+
+/* The worker's "Seen" line under the admin's last-read message —
+   Instagram-style: one quiet line, only ever one on screen. */
+.chat-seen {
+  font-size: 10px;
+  text-align: right;
+  margin: -4px 4px 8px 0;
+  opacity: 0.75;
+}
 .chat-toast .chat-toast-dot {
   width: 8px; height: 8px; border-radius: 50%;
   background: var(--accent);

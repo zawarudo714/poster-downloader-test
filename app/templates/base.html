@@ -28,7 +28,14 @@
     } catch (e) {}
   </script>
 </head>
-<body class="{% if user is defined and user %}has-rail{% endif %}">
+{# data-user-role: nav_badges.js needs to know WHICH unread endpoint to ask,
+   and it used to sniff the answer from the ADMIN pill's CSS classes — a name
+   chosen in one file and rendered by another, which fails silently: guessed
+   wrong, it asked the worker endpoint as an admin, got a refusal, and the
+   chat badge simply never appeared (the miss the owner reported 2026-09-18).
+   The server knows the role; it says so here, and nothing has to guess. #}
+<body class="{% if user is defined and user %}has-rail{% endif %}"
+      data-user-role="{{ user.role if user is defined and user else '' }}">
   <header class="topbar">
     <div class="topbar-inner">
       <button class="nav-toggle" id="nav-toggle" type="button"
@@ -36,7 +43,7 @@
         <span class="nav-toggle-bar"></span>
         <span class="nav-toggle-bar"></span>
         <span class="nav-toggle-bar"></span>
-        <span class="nav-toggle-badge" id="nav-toggle-badge" hidden>0</span>
+        <span class="nav-toggle-badge" id="nav-toggle-badge" data-chat-badge hidden>0</span>
       </button>
       {#
         Nav scope. `pctx` comes from middleware (app/main.py), so no route has
@@ -160,9 +167,9 @@
             </div>
             {% set people_active = active_tab in ('chat', 'users', 'audit') %}
             <div class="nav-group {% if people_active %}has-active{% endif %}" data-nav-group data-nav-tint="people">
-              <button type="button" class="navlink nav-group-btn {% if people_active %}active{% endif %}" aria-expanded="false">People&nbsp;▾<span class="nav-badge nav-badge-error" id="nav-chat-badge-group" hidden>0</span></button>
+              <button type="button" class="navlink nav-group-btn {% if people_active %}active{% endif %}" aria-expanded="false">People&nbsp;▾<span class="nav-badge nav-badge-error" id="nav-chat-badge-group" data-chat-badge hidden>0</span></button>
               <div class="nav-group-menu">
-                <a href="/admin/chat"      class="navlink chat-nav {% if active_tab == 'chat' %}active{% endif %}">Chat<span class="nav-badge nav-badge-error" id="nav-chat-badge" hidden>0</span></a>
+                <a href="/admin/chat"      class="navlink chat-nav {% if active_tab == 'chat' %}active{% endif %}">Chat<span class="nav-badge nav-badge-error" id="nav-chat-badge" data-chat-badge hidden>0</span></a>
                 <a href="/admin/users"     class="navlink {% if active_tab == 'users' %}active{% endif %}">Users</a>
                 <a href="/admin/audit"     class="navlink {% if active_tab == 'audit' %}active{% endif %}">Activity&nbsp;Log</a>
               </div>
@@ -180,7 +187,7 @@
             <a href="/"                class="navlink {% if active_tab == 'dashboard' %}active{% endif %}">Dashboard</a>
             <a href="/history"         class="navlink {% if active_tab == 'history' %}active{% endif %}">Save&nbsp;History</a>
             <a href="/stats"           class="navlink {% if active_tab == 'stats' %}active{% endif %}">Stats</a>
-            <a href="/chat"            class="navlink chat-nav {% if active_tab == 'chat' %}active{% endif %}">Chat<span class="nav-badge nav-badge-error" id="nav-chat-badge" hidden>0</span></a>
+            <a href="/chat"            class="navlink chat-nav {% if active_tab == 'chat' %}active{% endif %}">Chat<span class="nav-badge nav-badge-error" id="nav-chat-badge" data-chat-badge hidden>0</span></a>
             {#
               Only shown to workers covering more than one project. Most
               workers have exactly one and should never see a control that

@@ -734,6 +734,30 @@ Almaty #251. The half nobody has seen yet only becomes testable later:
 
 ---
 
+## 74. THE CHAT BADGE FINALLY SHOWS UP OUTSIDE CHAT — v220
+
+- **The live test comes free**: the next time a worker messages you while
+  you are anywhere else on the site, within ~12 seconds you should see the
+  red count on the **Chat** row AND on the **People ▾** heading, plus a
+  pop-up top-right reading "New chat message — open".
+- **The pop-up now stays** until you click it (goes to the chat) or press
+  its ✕. It also clears by itself once you have read the messages.
+- **If a worker message ever again sits unseen** with no red count in the
+  sidebar, say so — that is the exact failure this version fixes.
+
+## 75. "SEEN" UNDER YOUR CHAT MESSAGES — v220
+
+- **What to look for**: open Chat, pick the worker, look under the LAST
+  message of yours that they have read — a small right-aligned "Seen HH:MM".
+- **What it means**: the worker had the chat open after that message
+  arrived. Messages below it, they have not seen yet.
+- **It moves on its own** while the page is open: when the worker reads,
+  the line jumps down to your newest message within a few seconds.
+- **If it sits under the wrong message** or never appears although the
+  worker clearly replied, say so.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** No longer needed at all — corrected

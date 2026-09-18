@@ -3677,9 +3677,18 @@ def chat_thread(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    from ..chat import list_messages, serialize_message
+    from ..chat import list_messages, serialize_message, viewer_read_at
     rows = list_messages(db, worker_id=worker_id, after_id=(after or None), limit=200)
-    return JSONResponse({"ok": True, "messages": [serialize_message(m) for m in rows]})
+    # When the WORKER last had this thread open — sent on every poll (not
+    # only when new messages arrive), so the admin's "Seen" line can appear
+    # the moment the worker reads, without a new message to carry it.
+    seen = viewer_read_at(db, worker_id=worker_id, viewer_id=worker_id)
+    return JSONResponse({
+        "ok": True,
+        "messages": [serialize_message(m) for m in rows],
+        "worker_seen_at_iso": (seen.isoformat() + "Z") if seen else None,
+        "worker_seen_at": fmt_local(seen, "%H:%M") if seen else None,
+    })
 
 
 @router.post("/api/chat/{worker_id}/send")

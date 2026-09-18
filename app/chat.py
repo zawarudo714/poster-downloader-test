@@ -151,6 +151,21 @@ def mark_read(db: Session, *, worker_id: int, viewer_id: int) -> None:
         row.last_read_at = datetime.utcnow()
 
 
+def viewer_read_at(db: Session, *, worker_id: int, viewer_id: int):
+    """
+    When this viewer last opened the thread, or None if they never have.
+    The worker's own marker (viewer_id == worker_id) is what powers the
+    admin's Instagram-style "Seen" line: any admin message older than it
+    was on the worker's screen (owner's ask, 2026-09-18).
+    """
+    state = (
+        db.query(ChatReadState)
+          .filter_by(worker_id=worker_id, viewer_id=viewer_id)
+          .first()
+    )
+    return state.last_read_at if state else None
+
+
 def unread_count(db: Session, *, worker_id: int, viewer_id: int) -> int:
     """
     How many messages in this thread are newer than the viewer's last_read_at,

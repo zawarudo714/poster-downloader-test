@@ -8,13 +8,23 @@
 
 (function () {
   // ── Chat unread polling ──────────────────────────────────────────────────
-  const inlineBadge = document.getElementById('nav-chat-badge');
-  const toggleBadge = document.getElementById('nav-toggle-badge');
-  // The People group button carries the chat count too, or the unread badge
-  // would be invisible while the dropdown is closed — which is always.
-  const groupBadge  = document.getElementById('nav-chat-badge-group');
+  // Every badge that shows the chat count carries data-chat-badge in
+  // base.html — the Chat link, the People group button, and the phone's
+  // hamburger. ONE query finds them all, so a badge added later joins by
+  // carrying the attribute rather than by someone extending an id list.
+  const badges = Array.from(document.querySelectorAll('[data-chat-badge]'));
   let lastChatCount = null;
-  let chatToastTimer = null;
+
+  // WHO IS ASKING decides WHICH endpoint answers, and the server now says
+  // so outright (body's data-user-role). This used to be sniffed from the
+  // ADMIN pill's CSS classes — a name chosen in one file and rendered by
+  // another, which fails in silence: guessed wrong, the script asked the
+  // worker endpoint as an admin, was refused, and the badge simply never
+  // appeared. A worker's message sat unseen all morning (owner's report,
+  // 2026-09-18). The old sniff survives only as a fallback.
+  const role = document.body.dataset.userRole
+    || (document.querySelector('.role-badge.role-admin') ? 'admin' : 'worker');
+  const isAdmin = role === 'admin';
 
   function showChatToast(fresh) {
     let el = document.getElementById('chat-toast');
@@ -24,15 +34,32 @@
       el.className = 'chat-toast';
       el.href = isAdmin ? '/admin/chat' : '/chat';
       document.body.appendChild(el);
+      // STAYS until acted on — the 8-second version evaporated while the
+      // owner was looking elsewhere, which is the one job a notifier has.
+      // Clicking the body opens the chat; the ✕ dismisses without going.
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'chat-toast-close';
+      x.textContent = '✕';
+      x.title = 'Dismiss — the red count stays until you read the message';
+      x.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        el.hidden = true;
+      });
+      el.appendChild(x);
     }
-    el.innerHTML = '<span class="chat-toast-dot"></span>'
+    const label = el.querySelector('.chat-toast-label') || (() => {
+      const s = document.createElement('span');
+      s.className = 'chat-toast-label';
+      el.insertBefore(s, el.firstChild);
+      return s;
+    })();
+    label.innerHTML = '<span class="chat-toast-dot"></span>'
       + (fresh === 1 ? 'New chat message' : fresh + ' new chat messages')
       + ' — open';
     el.hidden = false;
-    clearTimeout(chatToastTimer);
-    chatToastTimer = setTimeout(() => { el.hidden = true; }, 8000);
   }
-  const isAdmin = !!document.querySelector('.role-badge.role-admin');
 
   function setBadge(el, n) {
     if (!el) return;
@@ -45,7 +72,7 @@
   }
 
   async function tickBadges() {
-    if (!inlineBadge && !toggleBadge) return;
+    if (!badges.length) return;
     try {
       let n = null;
       if (isAdmin) {
@@ -56,12 +83,14 @@
           if (r.ok) {
             const data = await r.json();
             n = data.total_unread || 0;
+          } else {
+            console.warn('[chat badge] summary endpoint said', r.status);
           }
         } catch (e) { /* network blip */ }
       } else {
         // Worker view: count of unread in their own thread.
         const r = await fetch('/api/chat?after=0', { cache: 'no-store' });
-        if (!r.ok) return;
+        if (!r.ok) { console.warn('[chat badge] worker endpoint said', r.status); return; }
         const data = await r.json();
         n = data.unread || 0;
       }
@@ -72,22 +101,24 @@
         if (lastChatCount !== null && n > lastChatCount
             && !location.pathname.endsWith('/chat')) {
           showChatToast(n - lastChatCount);
-          [inlineBadge, toggleBadge, groupBadge].forEach((el) => {
-            if (!el) return;
+          badges.forEach((el) => {
             el.classList.remove('bump');
             void el.offsetWidth;            // restart the animation
             el.classList.add('bump');
           });
         }
+        // Reading the message clears the pop-up too, from any page.
+        if (n === 0) {
+          const toast = document.getElementById('chat-toast');
+          if (toast) toast.hidden = true;
+        }
         lastChatCount = n;
-        setBadge(inlineBadge, n);
-        setBadge(toggleBadge, n);
-        setBadge(groupBadge, n);
+        badges.forEach((el) => setBadge(el, n));
       }
     } catch (e) { /* ignore */ }
   }
 
-  if (inlineBadge || toggleBadge) {
+  if (badges.length) {
     tickBadges();
     setInterval(tickBadges, 12000);
   }

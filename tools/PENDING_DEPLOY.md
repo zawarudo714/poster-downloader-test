@@ -1,25 +1,20 @@
 # Not yet deployed
 
-**v219 — four fixes and the K reviewed-marker (waiting to deploy).**
-- `_download_to` in routes/worker.py now deletes its partial file on EVERY
-  failure and refuses an empty (0-byte) download — the Ostankino orphan.
-- Missing-file message: when a picture's file is gone from disk, the
-  Changes Requested cards (admin) and the flag card (worker) say so plainly
-  and offer the exit — DELETE THIS RECORD for the admin (existing
-  endpoint), REPLACE FILE for the worker. Ends the Atlanta loop.
-- Diagnostics "place check could not run" findings now link to the exact
-  worker + day, one row per image, instead of the browse front door.
-- NEW: `saved_posters.reviewed_at` (migration included) + K key on Worker
-  Images — green outline on grid box / title box / zoom, reviewed titles
-  sink on the next sort, day header counts NOT YET REVIEWED. Cosmetic by
-  design: nothing gates on it; replace_poster clears it with the other
-  per-picture facts.
-- Server only. The Windows node is NOT affected (no `worker_service/`
-  change, no AGENT_VERSION bump).
-
-Also riding along from the 2026-09-17 audit: the `worker queue honours
-priority` preflight check, the CLAUDE.md queue-priority convention, and
-TO_TEST item 70. `app/` for those was byte-identical to v218.
+**v220 — the chat badge that never showed, and the "Seen" line (waiting).**
+- The sidebar chat badge was dead for the admin: nav_badges.js guessed the
+  viewer's role by sniffing the ADMIN pill's CSS classes, and a wrong guess
+  asked the worker endpoint as an admin, was refused, and showed nothing —
+  in silence. The role now arrives from the server on `<body
+  data-user-role>`, and every chat badge is found by one shared
+  `data-chat-badge` attribute instead of a list of ids.
+- The new-message pop-up now STAYS until clicked (open chat) or dismissed
+  (✕), instead of evaporating after 8 seconds; it also clears itself once
+  the messages are read.
+- Instagram-style "Seen": the admin's chat thread shows one quiet "Seen
+  HH:MM" line under the last of their messages the worker has read, fed by
+  the worker's existing read-marker on every poll. Server change is in
+  `chat_thread` + a `viewer_read_at` helper in chat.py; no schema change.
+- Server only. The Windows node is NOT affected.
 
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.

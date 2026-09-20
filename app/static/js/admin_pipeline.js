@@ -79,6 +79,8 @@
        'What the plain SEARCH button asks Brave for. {title} is the place with its country already in it — "Chicago Illinois USA". {kind} is what the place IS — city, island, mountain. So "{title} {kind}" searches "Chicago Illinois USA city". Add your own words on the end.'],
       ['google_query',        'text',     'GOOGLE button',
        'What the GOOGLE button searches for when it opens a new tab. One phrasing only — Google is the backstop you reach for when the grid here has already failed, so a row of buttons there would be one more thing to fiddle with at the wrong moment. Same placeholders: {title} and {kind}.'],
+      ['search_kind_omit',    'text',     'Kinds searched WITHOUT their word',
+       'Comma-separated kind words whose {kind} is skipped in every built search — the SEARCH button, the extra phrasings and the GOOGLE button alike. For example "island": searching "Mallorca Spain island" brings vague landmass shots, so islands search as just the place name. Every kind NOT listed keeps its word. Leave empty to always use the word.'],
       ['source_search_url',   'text',     'Google address',
        'Where the GOOGLE button goes. {query} is filled in for you, already encoded. Normally https://www.google.com/search?q={query}&tbm=isch — a setting rather than a constant because it is somebody else\'s address and they can move it.'],
       ['brave_search_phrasings', 'textarea', 'Extra phrasing buttons',

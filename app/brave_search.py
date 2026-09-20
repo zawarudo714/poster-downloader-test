@@ -162,6 +162,20 @@ def build_queries(db, artist: str, *, project=None, kind: str = "",
     clean = normalise_for_search(artist)
     kind_clean = normalise_for_search(kind or "")
 
+    # SOME KINDS HURT THE SEARCH, and the owner says which. "Mallorca Spain
+    # island" finds anonymous landmasses from the air — the word describes
+    # geography, not the place — so for the kinds listed in the
+    # `search_kind_omit` setting, {kind} renders as NOTHING and the query is
+    # just the place. Done here, in the one function every search template
+    # passes through, so the SEARCH button, the phrasing buttons and the
+    # GOOGLE button all agree without three copies of the rule.
+    if kind_clean:
+        omit = {w.strip().lower()
+                for w in str(_setting(db, "search_kind_omit", project) or "").split(",")
+                if w.strip()}
+        if (kind or "").strip().lower() in omit:
+            kind_clean = ""
+
     out = []
     for line in raw.splitlines():
         line = line.strip()

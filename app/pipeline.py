@@ -495,6 +495,15 @@ DEFAULTS: dict[str, Any] = {
     "brave_api_key_free": "",
     "brave_api_key_paid": "",
     "brave_query_normal": "{title} {kind}",
+    # Kinds whose {kind} word is LEFT OUT of every built search — the SEARCH
+    # button, the extra phrasings and the GOOGLE button alike, because they
+    # all render their words through build_queries(). Comma-separated,
+    # compared case-blind against the sheet's description column.
+    # Why it exists: "Mallorca Spain island" steers the search toward
+    # anonymous landmass-from-the-air shots — the word describes geography,
+    # not the place — while "Fribourg castle" genuinely needs its word
+    # (owner's ask, 2026-09-20). Empty means every kind keeps its word.
+    "search_kind_omit": "island",
     # ── EXTRA PHRASINGS THE WORKER CAN TRY, ONE PER LINE ─────────────────
     #
     # Each line becomes ONE MORE BUTTON on the worker screen, in this order.

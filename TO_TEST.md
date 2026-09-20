@@ -758,6 +758,26 @@ Almaty #251. The half nobody has seen yet only becomes testable later:
 
 ---
 
+## 76. ISLANDS SEARCH WITHOUT THE WORD "ISLAND" — v221
+
+- **Where the lever is**: Settings page, "Kinds searched WITHOUT their
+  word" — it ships saying "island". Add or remove kind words there any
+  time; comma-separated.
+- **What to click**: open an island title as the worker (for example
+  Mallorca) and press SEARCH. The query line above the grid should read
+  "Mallorca Spain" with NO "island" on the end, and the results should be
+  the place rather than anonymous landmass-from-the-air shots. The GOOGLE
+  button's tab should search the same words.
+- **Mind the cache**: search results are remembered for up to a day, so an
+  island searched recently shows OLD results until you press the re-search.
+  The query line is the truth — read it, not the pictures.
+- **A castle or city should still carry its word** — only the kinds listed
+  in the box lose theirs.
+- **If it does not**: say which button (SEARCH, a phrasing, or GOOGLE) and
+  what the query line showed.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** No longer needed at all — corrected

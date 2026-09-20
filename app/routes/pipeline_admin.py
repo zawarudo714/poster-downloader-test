@@ -2906,13 +2906,49 @@ def api_attention(
         ]
         findings.append(_attention_finding(
             "unusable",
-            "Retired by you",
-            "Out of the pipeline on purpose, with the reason kept. Nothing "
-            "was deleted and the worker was still paid. Listed so the "
-            "decision stays reversible if the model improves.",
+            "Artwork retired by you — reversible",
+            "One PAINTING pulled out of the pipeline on purpose, with the "
+            "reason kept. Nothing was deleted and the worker was still "
+            "paid. Listed so the decision stays reversible if the model "
+            "improves. (Retired TITLES — the other kind — have their own "
+            "card below.)",
             "RETURN TO PIPELINE to try again.",
             severity="info", items=items,
             note=(f"Showing {len(items)} of {unusable_count}." if unusable_count > len(items) else ""),
+        ))
+
+    # ── 6b · Retired TITLES ─────────────────────────────────────────────
+    # The other retire (2026-09-20): the whole TITLE withdrawn because the
+    # place itself has no good photograph anywhere — picture deleted,
+    # worker still paid, status 'unusable' with the reason on the row.
+    # FINAL, unlike the artwork card above: there is no picture left to
+    # return to the pipeline, so no action rides with it. Shown here at
+    # the owner's word — this is where he looks for anything he retired.
+    retired_titles_q = (
+        db.query(MasterTitle)
+          .filter(MasterTitle.status == "unusable",
+                  _title_scope(db, project))
+          .order_by(MasterTitle.updated_at.desc().nullslast())
+    )
+    retired_count = retired_titles_q.count()
+    if retired_count:
+        t_items = [
+            {"kind": "title", "master_id": t.id, "title": t.title,
+             "reason": t.unusable_reason or "",
+             "at": fmt_local(t.updated_at, "%Y-%m-%d") if t.updated_at else None}
+            for t in retired_titles_q.limit(limit).all()
+        ]
+        findings.append(_attention_finding(
+            "retired_titles",
+            "Titles retired by you — final, worker paid",
+            "The place itself had no good photograph, so you withdrew the "
+            "whole title: its picture was removed, the worker was still "
+            "paid, and the title never returns to any queue. Unlike the "
+            "artwork card above, this cannot be reversed from here.",
+            "Nothing — this is the record. The same rows sit on the Title "
+            "List under the 'Unusable (retired)' filter, reason on the pill.",
+            severity="info", items=t_items,
+            note=(f"Showing {len(t_items)} of {retired_count}." if retired_count > len(t_items) else ""),
         ))
 
     # ── 7 · Titles that will list short ─────────────────────────────────

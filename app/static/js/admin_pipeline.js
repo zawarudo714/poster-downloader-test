@@ -1962,6 +1962,9 @@
     upload_failed: ['retry_upload', 'mark_removed', 'skip_upload'],
     stalled:       ['release'],
     unusable:      ['return_to_pipeline'],
+    // Retired TITLES are final — the picture is gone and the worker paid —
+    // so the card is a record, deliberately without a button.
+    retired_titles: [],
     short_titles:  [],
     generation_stopped: [],
     node_offline:       [],
@@ -2102,6 +2105,17 @@
             <td>${esc(i.reason || '')}</td>
             <td class="mono">${esc(i.at || '')} ${esc(i.by || '')}</td>
           </tr>`).join('')}
+        </tbody></table>`;
+    }
+
+    if (f.key === 'retired_titles') {
+      // No checkboxes: nothing can be done to these rows, on purpose.
+      return `<table class="data-table">
+        <thead><tr><th>TITLE</th><th>REASON</th><th>RETIRED</th></tr></thead>
+        <tbody>${f.items.map((i) => `
+          <tr><td>${esc(i.title)}</td>
+              <td>${esc(i.reason || '')}</td>
+              <td class="mono">${esc(i.at || '')}</td></tr>`).join('')}
         </tbody></table>`;
     }
 

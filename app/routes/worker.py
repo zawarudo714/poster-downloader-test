@@ -715,6 +715,12 @@ def api_master(
     project = _worker_project(request, db, user)
     query = _scope_to_project(db.query(MasterTitle), project)
 
+    # A RETIRED title is none of the worker's business, whatever filter is
+    # picked — the admin binned it with pay, and showing it here would be a
+    # door back into work nobody wants (found while answering "can the
+    # worker interact with a retired title", 2026-09-20).
+    query = query.filter(MasterTitle.status != "unusable")
+
     if status in ("pending", "in_progress", "complete", "complete_pending", "skipped"):
         query = query.filter(MasterTitle.status == status)
     if content_type:
@@ -1435,6 +1441,14 @@ def go_to_title(
     # permission question the other claiming routes ask. See _may_touch().
     if not _may_touch(db, user, t):
         raise HTTPException(404, "Title not found.")
+    # RETIRED IS FINAL. The claim branch below takes any UNCLAIMED title,
+    # written when unclaimed could only mean pending — an early exit for
+    # the old job. Without this line, opening a retired title would quietly
+    # resurrect it to in_progress (caught 2026-09-20, same day the retire
+    # flow shipped).
+    if t.status == "unusable":
+        raise HTTPException(
+            410, "This title was retired by the admin — it is not worked any more.")
     # If the title is currently claimed by another worker, block.
     if t.claimed_by_id and t.claimed_by_id != user.id:
         raise HTTPException(

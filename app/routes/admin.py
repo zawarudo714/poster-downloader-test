@@ -1093,7 +1093,12 @@ def _master_query(db: Session, q: str, status: str, content_type: str, needs_rev
     diagnostic tooling wants and what a project page must never get.
     """
     query = scope_titles(db.query(MasterTitle), project)
-    if status in ("pending", "in_progress", "complete", "complete_pending", "skipped"):
+    # 'unusable' joined this list the day its dropdown option shipped
+    # WITHOUT it (2026-09-20): the option selected fine and the filter fell
+    # through to "show everything" — a whitelist and the menu it serves are
+    # two lists, and the menu had a member the whitelist did not.
+    if status in ("pending", "in_progress", "complete", "complete_pending",
+                  "skipped", "unusable"):
         query = query.filter(MasterTitle.status == status)
     if content_type:
         query = query.filter(MasterTitle.content_type == content_type)

@@ -2,7 +2,10 @@
 Payments helper — eligible-poster counting and payment-run bookkeeping.
 
 A poster counts toward pay only if ALL of:
-  - It's a non-deleted SavedPoster (deleted_at IS NULL).
+  - It's a non-deleted SavedPoster (deleted_at IS NULL) — OR it was retired
+    with pay (pay_despite_delete=1): the owner binned the picture because
+    the place has no good photograph anywhere, which nobody could know
+    before the worker spent the time looking, so the search is still paid.
   - Saved by the worker in question (matched by user_id).
   - Created on a date inside the requested period.
   - It has NO open or awaiting-approval revision against it RIGHT NOW.
@@ -230,7 +233,12 @@ def payable_criteria(worker_id: int) -> list:
     """
     return [
         SavedPoster.user_id == worker_id,
-        SavedPoster.deleted_at.is_(None),
+        # Deleted means unpaid — EXCEPT a retire-with-pay (2026-09-20): the
+        # RETIRE TITLE flow soft-deletes the picture but the search time was
+        # honest work, so that one deletion stays payable. The flag lives on
+        # the row, the rule lives here, once.
+        or_(SavedPoster.deleted_at.is_(None),
+            SavedPoster.pay_despite_delete == 1),
         # Anything the ADMIN added is not the worker's work and is never
         # payable. This is the line that was missing from the banner.
         SavedPoster.added_by.is_(None),

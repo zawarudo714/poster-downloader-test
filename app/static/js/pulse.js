@@ -122,6 +122,18 @@
                  + 'the money before taking new work. This clears itself.' }));
     }
 
+    // ── A WORKER WROTE TO YOU ─────────────────────────────────────────
+    // Red and beating, because a human is waiting on a human. Drawn only
+    // when there IS something unread — a chip reading "chat: 0" every
+    // minute of every day is furniture. Asked for by the owner 2026-09-20
+    // after the sidebar badge alone proved missable twice.
+    if (d.chat_unread) {
+      bits.push(chip('bad', 'chat',
+        d.chat_unread === 1 ? '1 new message' : d.chat_unread + ' new messages',
+        { href: '/admin/chat',
+          title: 'A worker has written to you. Click to open the chat.' }));
+    }
+
     // ── WAITING ON YOU ────────────────────────────────────────────────
     if (d.needs_you) {
       bits.push(chip('you', 'waiting on you', String(d.needs_you),

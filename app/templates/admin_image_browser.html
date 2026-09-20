@@ -154,6 +154,42 @@
       <button class="btn btn-ghost" id="ib-lb-place-ack" hidden>CHECKED, IT'S FINE</button>
       <button class="btn btn-info" id="ib-lb-google" hidden
               title="Open Google Images for this place in a new tab, to confirm the picture and judge whether it is the most scenic view.">CHECK&nbsp;GOOGLE</button>
+      <button class="btn btn-ghost btn-retire" id="ib-lb-retire"
+              title="The place has no good photograph anywhere. Removes the picture, pays the worker for the search anyway, and retires the title so nobody works it again.">RETIRE&nbsp;TITLE</button>
+    </div>
+  </div>
+</div>
+
+{# ── RETIRE TITLE — the deliberate, two-lock dialog ─────────────────────
+   Some places simply have no good photograph, and nobody — owner, worker
+   or machine — could know that before the search was spent. Retiring pays
+   the worker for the time, bins the picture, and parks the title as
+   'unusable'. Two typed locks (a reason, and the word Confirm) because
+   this deletes a paid-for file and there is no undo button. #}
+<div id="retire-dialog" class="lightbox" hidden>
+  <div class="lightbox-bg" data-retire-close></div>
+  <div class="lightbox-card delete-user-card">
+    <h3>RETIRE TITLE — <span id="retire-title-name"></span></h3>
+    <p class="muted">
+      This removes the worker's picture file, closes any flags on it, and
+      parks the title as <strong>unusable</strong> so it never returns to
+      the queue. The worker <strong>is still paid</strong> for it — the
+      search was honest work even though the place has nothing good to
+      show.
+    </p>
+    <p class="muted small">This action is logged but not reversible from the UI.</p>
+    <div class="delete-user-form">
+      <label class="filter-label">Why is this title unusable? (stored on the title)
+        <input type="text" id="retire-reason" autocomplete="off"
+               placeholder="e.g. no good photo of this place exists anywhere">
+      </label>
+      <label class="filter-label">Type <span class="mono">Confirm</span> to go ahead
+        <input type="text" id="retire-confirm" autocomplete="off">
+      </label>
+      <div class="pcc-actions">
+        <button class="btn btn-ghost" data-retire-close>CANCEL</button>
+        <button class="btn btn-error" id="retire-go" disabled>RETIRE &amp; PAY</button>
+      </div>
     </div>
   </div>
 </div>

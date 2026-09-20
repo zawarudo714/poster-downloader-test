@@ -454,8 +454,22 @@ def api_pulse(request: Request, admin: User = Depends(require_admin),
         today_line = (f"{saved_today} image(s) saved today · "
                       f"{processing_now} processing · {uploading_now} uploading")
 
+    # ── UNREAD CHAT, for the strip's red chip ───────────────────────────
+    # The sidebar badge alone was missable twice over (2026-09-18 and
+    # 2026-09-20), so the count also rides the pulse — the one reply every
+    # admin screen already polls, per this endpoint's own one-timer rule.
+    # A message from a worker is a shared, master-level fact, same family
+    # as the machine being offline.
+    from ..chat import unread_count as _chat_unread_count
+    chat_unread = 0
+    for (wid,) in (db.query(User.id)
+                     .filter(User.role == "worker", User.is_active == 1,
+                             User.is_deleted == 0).all()):
+        chat_unread += _chat_unread_count(db, worker_id=wid, viewer_id=admin.id)
+
     return JSONResponse({
         "ok": True,
+        "chat_unread": chat_unread,
         "scope": "project" if proj is not None else "master",
         "project": ({"id": proj.id, "name": proj.name, "slug": proj.slug}
                     if proj is not None else None),
@@ -1122,6 +1136,7 @@ def api_master(
                 "title": r.title, "year": r.year, "content_type": r.content_type,
                 "votes": r.votes, "rating": r.rating,
                 "status": r.status, "needs_revision": bool(r.needs_revision),
+                "unusable_reason": r.unusable_reason or "",
                 "claimed_by": r.claimed_by_name,
                 "skip_reason": r.skip_reason or "",
                 "started": t_started_str(r),
@@ -2154,6 +2169,99 @@ def admin_toggle_reviewed(
     )
     db.commit()
     return JSONResponse({"ok": True, "reviewed": now_reviewed})
+
+
+@router.post("/title/{master_id}/retire")
+def admin_retire_title(
+    master_id: int,
+    reason: str = Form(""),
+    confirm: str = Form(""),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Retire a title as UNUSABLE — the place has no good photograph anywhere,
+    which nobody could know before the worker spent the time looking. So:
+    the pictures are withdrawn (soft-deleted, files removed, flags closed),
+    the title leaves every queue as status 'unusable', and the worker is
+    STILL PAID — each withdrawn picture carries pay_despite_delete, the one
+    mark payable_criteria() honours for a deleted row (owner's design,
+    2026-09-20). Also the honest way out of a both-worked duplicate pair.
+
+    The typed reason and the typed word 'Confirm' are re-checked HERE, not
+    only in the dialog — a destructive instruction is checked by the thing
+    carrying it out.
+    """
+    reason = (reason or "").strip()
+    if not reason:
+        raise HTTPException(400, "Type the reason — it is stored on the title.")
+    if (confirm or "").strip() != "Confirm":
+        raise HTTPException(400, "Type Confirm (with a capital C) to go ahead.")
+    mt = db.query(MasterTitle).filter_by(id=master_id).first()
+    if not mt:
+        raise HTTPException(404, "Title not found.")
+    if mt.status == "unusable":
+        raise HTTPException(409, "This title is already retired.")
+
+    posters = (db.query(SavedPoster)
+                 .filter(SavedPoster.master_title_id == mt.id,
+                         SavedPoster.deleted_at.is_(None))
+                 .all())
+    # A picture the machine is holding, or one already live on the
+    # marketplace, cannot simply vanish — the node would report into a
+    # void, or a listing would point at nothing. Recall/finish first.
+    for sp in posters:
+        if sp.pipeline_status in ("processing", "uploading", "uploaded") \
+           or (sp.times_listed or 0) > 0:
+            raise HTTPException(
+                409,
+                f"'{sp.filename}' is in the pipeline or already on the "
+                f"marketplace ({sp.pipeline_status or 'listed'}). Recall or "
+                f"finish it first, then retire.")
+
+    now = datetime.utcnow()
+    last_path = None
+    for sp in posters:
+        for rv in (db.query(Revision)
+                     .filter(Revision.saved_poster_id == sp.id,
+                             Revision.status.in_(("open", "awaiting_approval")))
+                     .all()):
+            rv.status = "resolved"
+            rv.resolved_by = admin.username
+            rv.resolved_at = now
+            rv.admin_verdict = f"title retired: {reason}"
+        fs_path = saved_poster_path(sp)
+        fs_path.unlink(missing_ok=True)
+        last_path = fs_path
+        sp.deleted_at = now
+        sp.delete_note = f"[retired, paid] {reason}"
+        sp.pay_despite_delete = 1
+    # Empty folder cleanup, same as the ordinary delete.
+    if last_path is not None:
+        title_dir = last_path.parent
+        if title_dir.is_dir() and not list(title_dir.iterdir()):
+            import shutil
+            shutil.rmtree(title_dir, ignore_errors=True)
+
+    mt.status = "unusable"
+    mt.unusable_reason = reason
+    mt.needs_revision = 0
+    mt.completed_at = None
+    if mt.claimed_by_id:
+        u = db.query(User).filter_by(id=mt.claimed_by_id).first()
+        if u and u.locked_master_id == mt.id:
+            u.locked_master_id = None
+        mt.claimed_by_id = None
+        mt.claimed_by_name = None
+
+    log_activity(
+        db, user=admin, action="retired_title", target_type="master_title",
+        target_id=mt.id,
+        details={"reason": reason, "paid_posters": [sp.id for sp in posters],
+                 "title": mt.title},
+    )
+    db.commit()
+    return JSONResponse({"ok": True, "paid_posters": len(posters)})
 
 
 @router.post("/poster/add")

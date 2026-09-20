@@ -166,6 +166,12 @@ class MasterTitle(Base):
     #                      → 'complete', or rejects → back to 'in_progress'
     #                      with all revisions reopened.
     needs_revision    = Column(Integer, nullable=False, default=0, index=True)  # 0/1
+    # WHY a title was retired as 'unusable' (status above) — typed by the
+    # owner in the RETIRE TITLE dialog. Its own column rather than a lodger
+    # in skip_reason or admin_note, because those belong to the skip flow
+    # and two meanings in one field is how a screen ends up lying. NULL on
+    # every title that was never retired.
+    unusable_reason   = Column(Text, nullable=True)
     skip_reason       = Column(Text, nullable=True)
     # WHEN it was skipped, and WHICH skip the admin has read. Two columns on
     # purpose, and the comparison between them is the feature (see rule 5d):
@@ -366,6 +372,15 @@ class SavedPoster(Base):
     place_check_at       = Column(DateTime, nullable=True)
     place_check_error    = Column(Text, nullable=True)
     place_check_acked_at = Column(DateTime, nullable=True)
+
+    # PAID EVEN THOUGH WITHDRAWN. Set by the RETIRE TITLE flow (2026-09-20):
+    # some places turn out to have no good photograph anywhere — nobody
+    # could have known before the worker spent the time looking, so the
+    # owner pays for the search even while binning the picture. The row is
+    # soft-deleted like any other delete (screens and the pipeline forget
+    # it), and this mark is what keeps payable_criteria() counting it.
+    # 0 everywhere else; an ordinary delete stays unpaid.
+    pay_despite_delete   = Column(Integer, nullable=False, default=0)
 
     # THE ADMIN'S "I HAVE LOOKED AT THIS ONE" MARK on the Worker Images
     # screen — pressed K, turned green, purely a place-keeper so a review

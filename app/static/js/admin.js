@@ -694,6 +694,69 @@
     saveStateToUrl();
   }
 
+  // ── RETIRE TITLE — no good photo of this place exists ─────────────────
+  // Opened from the zoom. Two typed locks (a reason + the word Confirm),
+  // both re-checked by the server: this deletes a paid-for file with no
+  // undo, so a stray click must not be enough. The worker keeps their pay.
+  const retireDialog = document.getElementById('retire-dialog');
+  const retireBtn    = document.getElementById('ib-lb-retire');
+  if (retireDialog && retireBtn) {
+    const nameEl    = document.getElementById('retire-title-name');
+    const reasonEl  = document.getElementById('retire-reason');
+    const confirmEl = document.getElementById('retire-confirm');
+    const goBtn     = document.getElementById('retire-go');
+
+    function retireArm() {
+      goBtn.disabled = !(reasonEl.value.trim()
+                         && confirmEl.value.trim() === 'Confirm');
+    }
+    reasonEl.addEventListener('input', retireArm);
+    confirmEl.addEventListener('input', retireArm);
+
+    function retireClose() {
+      retireDialog.hidden = true;
+      reasonEl.value = '';
+      confirmEl.value = '';
+      retireArm();
+    }
+    retireDialog.querySelectorAll('[data-retire-close]').forEach((el) => {
+      el.addEventListener('click', retireClose);
+    });
+
+    retireBtn.addEventListener('click', () => {
+      if (!currentLightbox) return;
+      nameEl.textContent = currentLightbox.master.title || '';
+      retireDialog.hidden = false;
+      reasonEl.focus();
+    });
+
+    goBtn.addEventListener('click', async () => {
+      if (!currentLightbox) return;
+      const masterId = currentLightbox.master.master_id;
+      goBtn.disabled = true;
+      try {
+        const fd = new FormData();
+        fd.append('reason', reasonEl.value.trim());
+        fd.append('confirm', confirmEl.value.trim());
+        const r = await fetch(`/admin/title/${masterId}/retire`,
+                              { method: 'POST', body: fd });
+        if (r.ok) {
+          retireClose();
+          closeLightbox();
+          loadList();          // the title leaves this day's gallery
+          return;
+        }
+        let msg = String(r.status);
+        try { const d = await r.json(); msg = d.detail || msg; } catch (e) {}
+        alert('Could not retire: ' + msg);
+      } catch (e) {
+        alert('Could not retire: ' + e);
+      }
+      // Only reached on failure — success closed everything above.
+      retireArm();
+    });
+  }
+
   // ── THE K MARK — "I have looked at this one" ──────────────────────────
   // A place-keeper for a review interrupted halfway: green outline here,
   // in the grid and on the title box, and the day header counts what is

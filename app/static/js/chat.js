@@ -121,6 +121,16 @@
 
   // ── Polling ─────────────────────────────────────────────────────────────
   let polling = false;
+  // Reading owed but not yet paid — set when messages arrive while the tab
+  // is hidden, settled the moment the tab is looked at again.
+  let readOwed = false;
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState === 'visible' && readOwed) {
+      readOwed = false;
+      try { await fetch(urlMarkRead(), { method: 'POST' }); } catch (e) {}
+    }
+  });
+
   async function poll() {
     if (polling) return;
     polling = true;
@@ -139,9 +149,22 @@
           stream.innerHTML = '<div class="empty-hint">No messages yet — say hello!</div>';
         }
       }
-      // Mark read after we've seen everything.
+      // Mark read after we've seen everything — and "we" means a HUMAN.
+      // This used to fire unconditionally, so a chat tab left open in the
+      // background quietly marked every arriving message as read the
+      // moment it polled: the unread count stayed at zero, the sidebar
+      // badge and the red strip chip had nothing to show, and a worker's
+      // message sat invisible until the owner happened to open Chat —
+      // twice (2026-09-18 and 2026-09-20). Now a hidden tab only takes
+      // NOTE that reading is owed, and pays it when the tab actually
+      // comes back in front of a person. This is also what makes the
+      // worker-side "Seen" truthful: seen means on a visible screen.
       if (data.messages && data.messages.length) {
-        try { await fetch(urlMarkRead(), { method: 'POST' }); } catch (e) {}
+        if (document.visibilityState === 'visible') {
+          try { await fetch(urlMarkRead(), { method: 'POST' }); } catch (e) {}
+        } else {
+          readOwed = true;
+        }
       }
       // Place (or move) the worker's "Seen" line — sent on every poll,
       // whether or not any new message came with it.

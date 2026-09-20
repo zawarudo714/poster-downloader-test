@@ -65,7 +65,7 @@
       <td class="col-type mono">${row.content_type || ''}</td>
       <td class="col-title"></td>
       <td class="col-year mono">${row.year == null ? '' : row.year}</td>
-      <td class="col-status"><span class="status-pill status-${row.status}">${row.status.replace('_', ' ')}</span>${row.needs_revision ? ' <span class="status-pill status-flag">flag</span>' : ''}</td>
+      <td class="col-status"><span class="status-pill status-${row.status}" ${row.unusable_reason ? `title="${String(row.unusable_reason).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"` : ''}>${row.status.replace('_', ' ')}</span>${row.needs_revision ? ' <span class="status-pill status-flag">flag</span>' : ''}</td>
       <td class="col-claim mono">${row.claimed_by || ''}${row.mine ? ' (you)' : ''}</td>
     `;
     tr.querySelector('.col-title').textContent = row.title;

@@ -46,6 +46,13 @@
           <option value="in_progress" {% if status=='in_progress' %}selected{% endif %}>In progress</option>
           <option value="complete" {% if status=='complete' %}selected{% endif %}>Complete</option>
           <option value="skipped" {% if status=='skipped' %}selected{% endif %}>Skipped</option>
+          {# Retired places — no good photo exists. Filterable here; the
+             reason shows when you rest the mouse on the status pill. NOT
+             in the bulk-status menu below on purpose: retiring pays the
+             worker and deletes a file, which only the RETIRE TITLE flow
+             on the Worker Images zoom does properly — a bulk status flip
+             would be a second path that skips both. #}
+          <option value="unusable" {% if status=='unusable' %}selected{% endif %}>Unusable (retired)</option>
         </select>
         {# A one-column artist sheet has no movie/tv split — the filter would
            match nothing. Declared by the project, not branched on its slug. #}

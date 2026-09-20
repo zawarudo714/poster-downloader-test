@@ -734,16 +734,24 @@ Almaty #251. The half nobody has seen yet only becomes testable later:
 
 ---
 
-## 74. THE CHAT BADGE FINALLY SHOWS UP OUTSIDE CHAT — v220
+## 74. THE CHAT NOTIFIER, THIRD AND FINAL FORM — v222
 
-- **The live test comes free**: the next time a worker messages you while
-  you are anywhere else on the site, within ~12 seconds you should see the
-  red count on the **Chat** row AND on the **People ▾** heading, plus a
-  pop-up top-right reading "New chat message — open".
-- **The pop-up now stays** until you click it (goes to the chat) or press
-  its ✕. It also clears by itself once you have read the messages.
-- **If a worker message ever again sits unseen** with no red count in the
-  sidebar, say so — that is the exact failure this version fixes.
+The v220 badge failed again on 2026-09-20, and the real cause turned out
+to be neither the badge nor the endpoint: **a chat tab left open in the
+background was marking messages read the moment they arrived**, so the
+unread count was honestly zero everywhere. v222 fixes the cause and adds
+a second display.
+
+- **The live test**: leave the chat page open in a background tab (that is
+  the killer case), go work on any other screen, and have a worker send a
+  message. Within ~15 seconds you should now see BOTH: a red beating
+  **chat — 1 new message** chip in the top strip beside WORKER MACHINE,
+  and the red count on the sidebar's Chat row and People ▾ heading, plus
+  the sticky pop-up.
+- **They clear only when a human reads** — opening the chat with the tab
+  actually in front. A background tab no longer counts as reading.
+- **If a worker message ever again sits invisible**, say so — but this
+  time the cause had a reproduction, not a theory.
 
 ## 75. "SEEN" UNDER YOUR CHAT MESSAGES — v220
 
@@ -775,6 +783,30 @@ Almaty #251. The half nobody has seen yet only becomes testable later:
   in the box lose theirs.
 - **If it does not**: say which button (SEARCH, a phrasing, or GOOGLE) and
   what the query line showed.
+
+---
+
+## 77. RETIRE TITLE — PAY THE WORKER, BIN THE PICTURE — v222
+
+- **Where**: Worker Images, zoom into any picture — a quiet RETIRE TITLE
+  button sits at the end of the row (it turns red when you hover).
+- **What to click**: press it on a hopeless title (the Rouen maritime
+  museum is the live specimen). The dialog demands a reason AND the typed
+  word Confirm before its button arms — a stray click can do nothing.
+- **What should happen**: the title vanishes from the day's gallery; on
+  the Title List it now shows under the new "Unusable (retired)" filter,
+  grey pill, and your reason appears when the mouse rests on the pill.
+  The worker's picture file is gone from the workspace.
+- **The money check — the important half**: open Payments. The retired
+  picture must STILL be counted in the worker's unpaid total, exactly as
+  if it were live. If retiring a picture makes the payable count DROP,
+  say so immediately — that is the one wrong outcome this design exists
+  to prevent.
+- **It must refuse**: a picture that is processing, uploading or already
+  listed on the marketplace cannot be retired — expect a plain refusal
+  naming the state.
+- This is also the intended tool for the both-worked duplicate pairs
+  (Giza, Winter Palace/Hermitage…): retire the loser, keep the pay.
 
 ---
 

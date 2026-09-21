@@ -1551,6 +1551,13 @@ function actually makes, read out of the syntax tree, where a comment does
 not exist. **Sabotage found it; reading the check did not — and the first
 three attempts at the sabotage silently failed to apply, which is its own
 lesson: verify the sabotage landed before believing a green light.**
+**And verify the RESTORE landed exactly, with a pattern as narrow as the
+sabotage's.** On 2026-09-20 a sabotage removed one word from one tuple with
+a unique anchor — and the restore put it back with a BROADER pattern that
+matched four innocent tuples in the same file, silently opening a bulk
+door and a status-reset that undid retirement. A scripted restore is an
+edit like any other: unique anchor in, unique anchor out, then grep the
+whole file for the word you were juggling before believing it.
 
 **A NAME THAT EXISTS IS NOT A NAME YOU KNOW HOW TO CALL, AND THE GAP
 BETWEEN THOSE TWO IS A 500.** `check_module_attributes` proved that

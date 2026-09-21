@@ -3161,9 +3161,50 @@ def check_claim_queue_orders_by_priority() -> None:
          "order_by")
 
 
+# ── THE STATUS MENU AND THE FILTER BEHIND IT ARE TWO LISTS ─────────────────
+# The Title List's status dropdown lives in admin_master.html; the whitelist
+# that actually filters lives in _master_query() in routes/admin.py. On
+# 2026-09-20 the 'unusable' option shipped in the menu WITHOUT joining the
+# whitelist, so picking it fell through to "show everything" — selected menu,
+# no filter, no error. Same family as check_colour_names_have_rules: a name
+# chosen in one file and honoured (or not) by another. The menu options are
+# read from the template's own `{% if status=='X' %}` marks; the whitelist is
+# read from the AST of _master_query, where a comment cannot satisfy it.
+
+def check_status_menu_matches_filter() -> None:
+    tpl = (APP / "templates" / "admin_master.html").read_text(encoding="utf-8")
+    menu = set(re.findall(r"""value="([a-z_]+)"\s*\{%\s*if\s+status==""", tpl))
+    if not menu:
+        fail("admin_master.html: could not read the status menu options — "
+             "this check is blind; fix the pattern")
+        return
+    src = (APP / "routes" / "admin.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    fn = next((n for n in ast.walk(tree)
+               if isinstance(n, ast.FunctionDef) and n.name == "_master_query"), None)
+    if fn is None:
+        fail("routes/admin.py has no _master_query() — rewrite this check "
+             "for its successor")
+        return
+    allowed: set[str] = set()
+    for node in ast.walk(fn):
+        if (isinstance(node, ast.Compare)
+                and isinstance(node.left, ast.Name) and node.left.id == "status"
+                and node.ops and isinstance(node.ops[0], ast.In)):
+            for c in ast.walk(node.comparators[0]):
+                if isinstance(c, ast.Constant) and isinstance(c.value, str):
+                    allowed.add(c.value)
+    for missing in sorted(menu - allowed):
+        fail(f"Title List offers status '{missing}' in its menu, but "
+             f"_master_query() does not filter by it — picking it shows "
+             f"EVERYTHING while looking selected. Add it to the whitelist "
+             f"in routes/admin.py")
+
+
 CHECKS = [
     ("python compiles",           check_python_compiles),
     ("worker queue honours priority", check_claim_queue_orders_by_priority),
+    ("status menu matches its filter", check_status_menu_matches_filter),
     ("no undefined names",        check_undefined_names),
     ("settings keys declared",    check_settings_keys_declared),
     ("settings reachable on the dashboard", check_settings_are_reachable),

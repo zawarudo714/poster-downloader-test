@@ -1,25 +1,22 @@
 # Not yet deployed
 
-**v223 — seal the worker's side of RETIRE TITLE (small, deploy soon).**
-Found while answering "can the worker interact with a retired title": in
-the v222 that is live, a retired title still shows in the worker's Browse
-All view, and the go-to-title door CLAIMS any unclaimed title — written
-when unclaimed could only mean pending — so a worker clicking a retired
-title would quietly resurrect it to in_progress. v223 closes both: retired
-titles are excluded from the worker's browse, and go-to-title refuses them
-with a plain sentence. Until this deploys, the hole is open but narrow —
-the worker would have to browse to a retired title on purpose.
-Server only. The Windows node is NOT affected.
-
-**Also in v223 — retired titles become findable (owner's asks, 2026-09-20).**
-- The Title List's "Unusable (retired)" filter now actually filters: the
-  dropdown option shipped without its status being added to the server's
-  whitelist, so picking it showed everything. The whitelist knows it now.
-- Needs Attention gains a second card beside the artwork one: "Titles
-  retired by you — final, worker paid" — title, reason, date, no buttons
-  (nothing can or should be done to them). The artwork card is retitled
-  "Artwork retired by you — reversible" so the two kinds of retired can
-  never be confused again.
+**v224 — the 2026-09-20 audit's findings (waiting to deploy).**
+Found by walking the retire flow's seams, none reported by a symptom yet:
+- Retiring a title now also stands down any QUEUED upload rows for its
+  pictures (status 'skipped', the SKIP UPLOAD word) — the claim already
+  refused deleted pictures, but the row would have sat counted in the
+  strip's "waiting: N to upload" for ever.
+- The admin's own ADD-image box now refuses a retired title, the one door
+  left that could hang a live picture under 'unusable' (worker doors were
+  sealed in v223).
+- New Diagnostics invariant `retired titles hold nothing`: a live picture
+  under a retired title, or a pay-despite-delete mark on a picture still
+  alive, goes red unattended.
+- New preflight check `status menu matches its filter` (sabotage-tested
+  red and green): the Title List's status dropdown and _master_query's
+  whitelist can never disagree again — the class behind the "Unusable
+  filter showed everything" miss.
+- Server only. The Windows node is NOT affected.
 
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.

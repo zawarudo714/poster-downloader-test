@@ -810,6 +810,22 @@ a second display.
 
 ---
 
+## 78. THE AUDIT'S SMALL SEALS — v224
+
+Three quiet things from the 2026-09-20 audit; one glance covers them all:
+
+- **Diagnostics** gains a new row, "Retired titles hold nothing" — it
+  should read green/clean. If it ever lists a row, a door around the
+  retire flow leaked; tell me which row.
+- **ADD on a retired title refuses**: on Worker Images, a retired title no
+  longer appears at all, but if one ever does, its + ADD box must answer
+  "retired as unusable — cannot take new images" rather than accept.
+- Nothing to click for the upload-queue stand-down — it matters only once
+  uploads run; the strip's "waiting: N to upload" simply must never carry
+  a phantom from a retired title.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** No longer needed at all — corrected

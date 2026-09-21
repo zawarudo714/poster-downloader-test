@@ -2241,6 +2241,17 @@ def admin_retire_title(
         sp.deleted_at = now
         sp.delete_note = f"[retired, paid] {reason}"
         sp.pay_despite_delete = 1
+        # Stand down any QUEUED upload for this picture. The claim already
+        # refuses deleted posters, so the node could never take it — but the
+        # row would sit at 'pending' for ever, counted in the strip's
+        # "waiting: N to upload" as a queue that never moves (found by the
+        # 2026-09-20 audit, not by a symptom). 'skipped' is the same word
+        # the SKIP UPLOAD button writes.
+        for tr in (db.query(UploadTracking)
+                     .filter(UploadTracking.saved_poster_id == sp.id,
+                             UploadTracking.status.in_(("pending", "failed")))
+                     .all()):
+            tr.status = "skipped"
     # Empty folder cleanup, same as the ordinary delete.
     if last_path is not None:
         title_dir = last_path.parent
@@ -2294,6 +2305,15 @@ def admin_add_poster(
     t = db.query(MasterTitle).filter_by(id=master_id).first()
     if not t:
         raise HTTPException(404, "Title not found.")
+    # RETIRED IS FINAL — this door too. Without this line, pasting an image
+    # onto a retired title would hang a live picture under a status every
+    # screen hides, quietly breaking "an unusable title holds nothing"
+    # (found by the 2026-09-20 audit; the worker doors were sealed in v223,
+    # and this was the one remaining way in).
+    if t.status == "unusable":
+        raise HTTPException(
+            409, "This title was retired as unusable. It cannot take new "
+                 "images.")
 
     from ..pipeline import resolve_project
 

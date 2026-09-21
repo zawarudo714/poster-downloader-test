@@ -2789,6 +2789,60 @@ def check_healed_versions_are_sound(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def check_retired_titles_hold_nothing(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: a title retired as 'unusable' holds NO live picture, and the
+    pay-despite-delete mark never sits on a picture that is still alive.
+
+    The retire flow (2026-09-20) promises both in one motion: pictures
+    withdrawn (soft-deleted, still paid) and the title parked. Every door
+    that could break the promise is guarded — the worker's queue and browse,
+    go-to-title, the admin's add-poster box — but "kept in step by hand
+    across many paths" is the definition of a thing that drifts, so this
+    watches the STATE those guards protect. A live picture under a retired
+    title would be invisible on most screens while quietly counting
+    somewhere; an alive picture wearing the pay mark means some new path
+    set the flag without doing the deletion.
+    """
+    rows = []
+    bad_alive = (db.query(SavedPoster, MasterTitle)
+                   .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+                   .filter(MasterTitle.status == "unusable",
+                           SavedPoster.deleted_at.is_(None))
+                   .all())
+    for sp, mt in bad_alive:
+        rows.append(Finding(
+            what=f"live picture #{sp.id} under retired title '{mt.title}'",
+            detail="the title is unusable but this picture was never "
+                   "withdrawn — some door around the retire flow let it in",
+            project=scope.label(_project_of(db, sp)),
+        ))
+    bad_marked = (db.query(SavedPoster)
+                    .filter(SavedPoster.pay_despite_delete == 1,
+                            SavedPoster.deleted_at.is_(None))
+                    .all())
+    for sp in bad_marked:
+        rows.append(Finding(
+            what=f"picture #{sp.id} ({sp.filename}) wears the "
+                 f"pay-despite-delete mark while still alive",
+            detail="the mark only means anything on a withdrawn picture; "
+                   "something set it without doing the deletion",
+            project=scope.label(_project_of(db, sp)),
+        ))
+    total = len(rows)
+    return _result(
+        "retired_titles_hold_nothing",
+        f"{total} retire promise(s) broken" if total
+        else "Retired titles hold nothing, and the pay mark sits only on withdrawn pictures",
+        "The RETIRE TITLE flow makes two promises in one motion: the "
+        "worker's picture is withdrawn (but still paid), and the title "
+        "never takes work again. Each row here is one of those promises "
+        "broken by some path the guards did not cover — say which row and "
+        "the door can be found and closed.",
+        "warn" if total else "ok", rows[:MAX_ROWS], total,
+    )
+
+
 CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_healed_versions_are_sound,
     check_number_settings_hold_numbers,
@@ -2797,6 +2851,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_generations_share_a_file,
     check_live_titles_are_unique_per_account,
     check_needs_revision_matches_open_flags,
+    check_retired_titles_hold_nothing,
     check_place_check_is_answering,
     check_chosen_colour_was_painted,
     check_upload_gap_is_holding,

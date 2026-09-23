@@ -2139,14 +2139,11 @@ def admin_delete_poster(
               .filter(SavedPoster.deleted_at.is_(None))
               .count()
         )
-        any_active = (
-            db.query(Revision)
-              .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
-              .filter(SavedPoster.master_title_id == mt.id,
-                      Revision.status.in_(("open", "awaiting_approval")))
-              .count()
-        )
-        mt.needs_revision = 1 if any_active else 0
+        # The shared definition — open flags on LIVE pictures only. This
+        # door used to count deleted pictures too (2026-09-23).
+        from ..utils import live_flag_title_ids
+        db.flush()
+        mt.needs_revision = 1 if live_flag_title_ids(db, [mt.id]) else 0
         if remaining == 0 and mt.status in ("in_progress", "complete_pending", "complete", "skipped"):
             mt.status = "pending"
             mt.needs_revision = 0
@@ -2566,17 +2563,10 @@ def unflag_poster(
     # be resolved, but if anything ever wedged this prevents a stuck flag.
     mt = db.query(MasterTitle).filter_by(id=sp.master_title_id).first()
     if mt:
-        any_active = (
-            db.query(Revision)
-              .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
-              .filter(
-                  SavedPoster.master_title_id == mt.id,
-                  SavedPoster.deleted_at.is_(None),
-                  Revision.status.in_(("open", "awaiting_approval")),
-              )
-              .count()
-        )
-        mt.needs_revision = 1 if any_active else 0
+        # The shared definition (utils.live_flag_title_ids).
+        from ..utils import live_flag_title_ids
+        db.flush()
+        mt.needs_revision = 1 if live_flag_title_ids(db, [mt.id]) else 0
 
     log_activity(db, user=admin, action="unflagged", target_type="saved_poster", target_id=sp.id,
                  details={"cleared": cleared})
@@ -2689,18 +2679,11 @@ def approve_revision(
             sp.reviewed_at = datetime.utcnow()
         mt = db.query(MasterTitle).filter_by(id=sp.master_title_id).first()
         if mt:
-            any_active = (
-                db.query(Revision)
-                  .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
-                  .filter(
-                      SavedPoster.master_title_id == mt.id,
-                      SavedPoster.deleted_at.is_(None),
-                      Revision.status.in_(("open", "awaiting_approval")),
-                      Revision.id != rev.id,
-                  )
-                  .count()
-            )
-            mt.needs_revision = 1 if any_active else 0
+            # The shared definition (utils.live_flag_title_ids); this
+            # revision is already 'resolved' above, so it no longer counts.
+            from ..utils import live_flag_title_ids
+            db.flush()
+            mt.needs_revision = 1 if live_flag_title_ids(db, [mt.id]) else 0
 
     log_activity(db, user=admin, action="approved", target_type="revision", target_id=rev.id,
                  details={"verdict": verdict.strip() or None})
@@ -2872,7 +2855,12 @@ def reject_complete(
     t.status = "in_progress"
     t.completed_at = None
     t.admin_note = verdict
-    t.needs_revision = 1 if reopened_ids else t.needs_revision
+    # The shared definition (utils.live_flag_title_ids): the reopened flags
+    # are now 'open', so the title reads flagged exactly when one of them
+    # sits on a picture that still exists.
+    from ..utils import live_flag_title_ids
+    db.flush()
+    t.needs_revision = 1 if live_flag_title_ids(db, [t.id]) else 0
     # Re-lock the title to the worker so they can pick up where they were.
     if t.claimed_by_id:
         u = db.query(User).filter_by(id=t.claimed_by_id).first()

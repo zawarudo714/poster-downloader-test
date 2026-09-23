@@ -888,6 +888,16 @@ On Changes Requested, click a thumbnail to zoom:
 
 ---
 
+## 82. NO RED FLAG ON AN EMPTY TITLE — v228
+
+- Log in as the worker (or look over his shoulder). Atlanta and
+  Yellowstone should no longer carry the red FLAG tag. Atlanta keeps its
+  ADMIN NOTE pill, and clicking it still shows your note.
+- Any title with 0 saved must never show FLAG. A title whose live
+  picture still has an open flag must still show FLAG as before.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** No longer needed at all — corrected

@@ -1,27 +1,18 @@
 # Not yet deployed
 
-**v227 — one list, one number, plus the two console-error fixes.**
-- CHANGES REQUESTED IS NOW TWO BANDS. "Waiting on you" holds everything
-  your buttons can finish — completions, replaced pictures, deletions to
-  review — in one list, newest first, each card keeping its action word
-  (REPLACED / DELETED / COMPLETION / SUBMITTED AS-IS). "Waiting on the
-  worker" holds the untouched flags below it.
-- THE SIDEBAR BADGE FINALLY MEANS SOMETHING: it now counts exactly the
-  cards in "waiting on you", from the same server helper the page builds
-  from — it used to count single fixes only, so completions and deletions
-  waited invisibly.
-- "THE TITLE NOW HOLDS" only appears when it adds information (a picture
-  different from the one above, or "nothing left") — no more double image.
-- The zoom's "second click does nothing" crash: fixed (one erased class);
-  new preflight check guards the class of mistake, proven red pre-fix.
-- THE SIDEBAR CHAT BADGE NEVER WORKED, and now should: its address was
-  declared below /api/chat/{worker_id} and read as a worker number (422).
-  Route moved; new preflight route-order check, also proven red pre-fix.
-- FIRST ATTEMPT CRASH-LOOPED THE SITE (2026-09-23): a helper was inserted
-  between the /revisions decorator and its page, so FastAPI tried to make
-  a web route out of it and died at startup. Fixed; new preflight check
-  "route decorators sit on routes" proven red on the crash, green after.
-  v227 was never recorded as live, so the number is reused correctly.
+**v228 — the stuck red FLAG on titles with nothing in them.**
+- The worker's list now works out the red FLAG fresh each time: it shows
+  only when an open flag sits on a picture that still EXISTS. Atlanta and
+  Yellowstone (0 saved) lose the tag immediately — no clean-up script. An
+  admin note still shows as its own ADMIN NOTE pill and banner.
+- Cause: two doors (worker delete, admin DELETE THIS RECORD) counted flags
+  on DELETED pictures when setting the marker, so one old flag on a gone
+  picture kept it lit for ever. All six doors that compute the marker now
+  ask one shared question, utils.live_flag_title_ids — the same one
+  Diagnostics uses. The new preflight check found the sixth (REJECT on a
+  completion) by itself.
+- New preflight check "the flag marker has one definition", sabotage-
+  tested red then green.
 - Server only. The Windows node is NOT affected.
 
 Whoever changes code writes here what is waiting and why; the deploy tool

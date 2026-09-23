@@ -67,6 +67,7 @@ from ..parsing import IMAGE_EXT_RE, filename_for, folder_name_for, sanitize
 from ..templating import templates
 from ..utils import (
     count_live_posters_for_master, count_titles_worked_today,
+    live_flag_title_ids,
     count_user_saves_for_date, count_user_saves_for_week,
     saved_poster_folder, saved_poster_path, title_folder_for,
 )
@@ -333,7 +334,12 @@ def _serialize_master(t: MasterTitle, db: Session) -> dict:
         "content_type": t.content_type,
         "description": (t.description or "")[:300],
         "status": t.status,
-        "needs_revision": bool(t.needs_revision),
+        # DERIVED, not read from the stored marker: the red FLAG means an
+        # open flag on a picture that still exists. A stale marker on a
+        # title with 0 saved kept the tag lit and the worker avoided the
+        # title (owner, 2026-09-23). Any admin note still shows as its own
+        # ADMIN NOTE pill and banner, so the reminder survives.
+        "needs_revision": bool(live) and t.id in live_flag_title_ids(db, [t.id]),
         "saved_count": live,
         "started": t.started_at is not None,
         "started_date": t.original_save_date.isoformat() if t.original_save_date else None,
@@ -746,6 +752,9 @@ def api_master(
         .all()
     )
 
+    # Same derived definition as the worker's own list, asked ONCE for the
+    # whole page rather than per row.
+    flagged_ids = live_flag_title_ids(db, [r.id for r in rows])
     return JSONResponse({
         "page": page,
         "page_size": page_size,
@@ -759,7 +768,7 @@ def api_master(
                 "year": r.year,
                 "content_type": r.content_type,
                 "status": r.status,
-                "needs_revision": bool(r.needs_revision),
+                "needs_revision": r.id in flagged_ids,
                 "claimed_by_name": r.claimed_by_name,
                 "mine": (r.claimed_by_id == user.id),
             }
@@ -2080,16 +2089,10 @@ def delete_poster(
     # open flag on one of its OTHER images.
     mt = db.query(MasterTitle).filter_by(id=sp.master_title_id).first()
     if mt:
-        any_active = (
-            db.query(Revision)
-              .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
-              .filter(
-                  SavedPoster.master_title_id == mt.id,
-                  Revision.status.in_(("open", "awaiting_approval")),
-              )
-              .count()
-        )
-        mt.needs_revision = 1 if any_active else 0
+        # The shared definition — open flags on LIVE pictures only. This
+        # door used to count deleted pictures too (2026-09-23).
+        db.flush()
+        mt.needs_revision = 1 if live_flag_title_ids(db, [mt.id]) else 0
 
     # If ALL posters on this title are now deleted, reset the title to
     # "pending" so it returns to the pool. Also clean up the empty

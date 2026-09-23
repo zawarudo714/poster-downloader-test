@@ -691,6 +691,39 @@ def check_hooks_exist() -> None:
                  f"base.html, or its own generated HTML")
 
 
+def check_flag_marker_uses_one_definition() -> None:
+    """
+    Any code that COMPUTES MasterTitle.needs_revision (an assignment whose
+    value is an expression, not a plain 0 or 1) must ask
+    utils.live_flag_title_ids() — the one definition of "flagged".
+
+    Five doors each carried their own copy of the question, and two of the
+    copies forgot to skip DELETED pictures, so a flag left open on a gone
+    picture lit the worker's red FLAG for ever on titles with 0 saved
+    (owner, 2026-09-23). Plain literal assignments are allowed: resetting
+    to 0 on approval, or re-flagging on reject, are decisions, not counts.
+    """
+    import ast
+    for path in sorted((ROOT / "app").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            calls = {n.func.id for n in ast.walk(fn)
+                     if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+            for node in ast.walk(fn):
+                if not isinstance(node, ast.Assign):
+                    continue
+                for t in node.targets:
+                    if (isinstance(t, ast.Attribute) and t.attr == "needs_revision"
+                            and not isinstance(node.value, ast.Constant)
+                            and "live_flag_title_ids" not in calls):
+                        fail(f"{path.relative_to(ROOT)}:{node.lineno}: "
+                             f"{fn.name}() computes needs_revision without "
+                             f"utils.live_flag_title_ids() — a second copy "
+                             f"of 'is this title flagged' will drift.")
+
+
 def check_route_decorators_sit_on_routes() -> None:
     """
     A @router decorator must sit on a real endpoint, never on a helper.
@@ -3396,6 +3429,7 @@ CHECKS = [
     ("page hooks exist",          check_hooks_exist),
     ("the shared zoom ships with its markup", check_shared_zoom_markup_included),
     ("route decorators sit on routes", check_route_decorators_sit_on_routes),
+    ("the flag marker has one definition", check_flag_marker_uses_one_definition),
     ("literal routes beat parameter routes", check_literal_routes_before_param_routes),
     ("finder classes survive className writes", check_finder_classes_survive_classname_writes),
     ("buttons have handlers",     check_actions_are_handled),

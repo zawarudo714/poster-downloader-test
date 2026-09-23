@@ -216,6 +216,36 @@ def count_live_posters_for_master(db, master_title_id: int) -> int:
     )
 
 
+def live_flag_title_ids(db, master_title_ids) -> set:
+    """
+    THE one definition of "this title is flagged": an open or awaiting
+    flag on a picture that still EXISTS. Returns the subset of the given
+    title ids that qualify.
+
+    Every door that sets MasterTitle.needs_revision, the worker's red FLAG
+    tag, and Diagnostics' check_needs_revision_matches_open_flags must all
+    ask this one question. Two doors (worker delete, admin DELETE THIS
+    RECORD) used to count flags on DELETED pictures too, so a flag left
+    open on a long-gone picture lit the red tag for ever on a title with
+    0 saved — the worker then avoided those titles, not realising they
+    held nothing to fix (owner, 2026-09-23: Atlanta, Yellowstone).
+    """
+    from .models import Revision, SavedPoster
+    ids = [i for i in (master_title_ids or []) if i is not None]
+    if not ids:
+        return set()
+    rows = (
+        db.query(SavedPoster.master_title_id)
+          .join(Revision, Revision.saved_poster_id == SavedPoster.id)
+          .filter(SavedPoster.master_title_id.in_(ids),
+                  SavedPoster.deleted_at.is_(None),
+                  Revision.status.in_(("open", "awaiting_approval")))
+          .distinct()
+          .all()
+    )
+    return {r[0] for r in rows}
+
+
 # ── Filesystem path lookup for a saved poster ────────────────────────────────
 
 def _legacy_folder(poster) -> Path:

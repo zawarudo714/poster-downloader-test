@@ -1212,7 +1212,14 @@ exists or a marketplace catalogue that has been taken down.
   flag like `needs_revision`, kept in step by hand across many paths, earns a
   Diagnostics watcher that compares it against the live rows it summarises
   (`check_needs_revision_matches_open_flags`), because "kept in step by hand"
-  is the definition of a thing that drifts.
+  is the definition of a thing that drifts. It drifted on 2026-09-23 exactly as
+  predicted: six doors each computed the marker with their own copy of the
+  question, two copies forgot to skip DELETED pictures, and titles with 0
+  saved wore a red FLAG for ever — the worker avoided them. The fix was
+  ONE question (`utils.live_flag_title_ids`) asked by every door, the
+  worker's tag DERIVED from it at read time (which repaired the stuck
+  rows with no script), and `check_flag_marker_uses_one_definition` in
+  preflight, which found the sixth door on its first run.
 * **"No tool is needed" was a judgement about cost, written in the same voice
   as the measured figures around it.** Nothing on the page distinguished
   them. That is what the provenance tags are for.

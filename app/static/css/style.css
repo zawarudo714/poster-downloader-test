@@ -1451,6 +1451,9 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 .lb-status-pill { margin-left: 6px; }
 .lb-flag-comment { margin-top: 4px; }
 .lb-worker-note { margin-top: 4px; font-style: italic; }
+/* The page-supplied decision buttons inside the zoom (Changes Requested).
+   On a phone the controls column stacks them full-width like the rest. */
+.lb-actions { display: inline-flex; gap: 8px; flex-wrap: wrap; }
 .lightbox-controls {
   display: flex;
   gap: 8px;

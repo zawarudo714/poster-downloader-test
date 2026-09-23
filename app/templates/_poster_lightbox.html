@@ -27,6 +27,10 @@
     </div>
     <div class="lightbox-controls">
       <input type="text" id="ib-lb-comment" placeholder="(optional) comment for the user">
+      {# The page's own decision buttons land here (poster_lightbox.js
+         renders whatever the page supplies — APPROVE / REJECT on Changes
+         Requested; nothing on Worker Images, whose buttons are below). #}
+      <span id="ib-lb-actions" class="lb-actions"></span>
       <button class="btn btn-error" id="ib-lb-flag-btn">FLAG FOR CHANGES</button>
       <button class="btn btn-ghost" id="ib-lb-unflag-btn" hidden>CLEAR FLAG</button>
       <button class="btn btn-ghost" id="ib-lb-place-ack" hidden>CHECKED, IT'S FINE</button>

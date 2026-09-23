@@ -846,6 +846,28 @@ Open Changes Requested while anything is waiting (any section):
 
 ---
 
+## 80. DECIDE FROM INSIDE THE ZOOM — v226
+
+On Changes Requested, click a thumbnail to zoom:
+
+- The zoom now shows the same buttons as that picture's card — for
+  example APPROVE and REJECT & SEND BACK — plus a verdict text box.
+  Type the verdict in the zoom and press the button there; it must behave
+  exactly like pressing the card's button (same confirm question, same
+  result). A verdict typed in the zoom must reach the worker on a reject.
+- The K shortcut does nothing on this page any more — approving is what
+  marks a picture as seen here.
+- On Worker Images: flag a picture and IMMEDIATELY arrow to the next one.
+  The zoom must stay on the picture you moved to — it must not jump back
+  to the one you just flagged, and the old comment must not appear under
+  the new picture. That was the long-standing mix-up; refresh no longer
+  needed.
+- Re-test the thing I could not reproduce: open a zoom, close it, click
+  another image. If clicks ever go dead again, press F12, open Console,
+  and send me the red text plus which page you were on.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** No longer needed at all — corrected

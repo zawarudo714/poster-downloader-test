@@ -30,6 +30,14 @@
     return out;
   }
 
+  // The card a zoomed picture belongs to, so the zoom's buttons can drive
+  // the card's own buttons. ONE action path on purpose: the zoom is a
+  // remote control for the card, never a second door with its own rules.
+  function cardFor(posterId) {
+    const a = document.querySelector(`[data-lb="${posterId}"]`);
+    return a ? a.closest('.pending-complete-card, .rev-card') : null;
+  }
+
   const LB = window.PosterLightbox;
   const zoomReady = LB && LB.init({
     list: zoomList,
@@ -39,7 +47,38 @@
       document.querySelectorAll(`[data-lb="${p.poster_id}"]`)
         .forEach((a) => a.classList.toggle('lb-marked', !!p.reviewed));
     },
-    features: { flag: false, retire: false, placeAck: false },
+    // Approving IS the "seen" mark on this page (the server stamps it), so
+    // the K key is off here — one screen, one way to say it. The text box
+    // becomes the verdict box, copied to the card when a button is pressed.
+    features: { flag: false, retire: false, placeAck: false,
+                reviewK: false,
+                commentPlaceholder: '(verdict — required for REJECT)' },
+    // The zoomed picture's own decision buttons: exact proxies of the
+    // buttons on its card (APPROVE / REJECT, ACKNOWLEDGE / SEND BACK,
+    // CLEAR FLAG — whatever that card offers), wearing the same words.
+    actions: (t, p) => {
+      const card = cardFor(p.poster_id);
+      if (!card) return [];
+      const out = [];
+      card.querySelectorAll('.pcc-actions button, .rev-card-actions button')
+        .forEach((btn) => {
+          out.push({
+            label: btn.textContent,
+            className: btn.className,
+            onClick: () => {
+              // Carry the verdict typed in the zoom onto the card, then
+              // press the card's real button — its confirm dialog and its
+              // reload behave exactly as if pressed there.
+              const zoomText = (document.getElementById('ib-lb-comment') || {}).value || '';
+              const cardInput = card.querySelector(
+                '[data-pcc-verdict], [data-verdict-input], [data-deletion-note]');
+              if (cardInput && zoomText.trim()) cardInput.value = zoomText;
+              btn.click();
+            },
+          });
+        });
+      return out;
+    },
   });
 
   if (zoomReady) {

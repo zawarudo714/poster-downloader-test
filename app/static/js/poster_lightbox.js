@@ -141,9 +141,33 @@
     // Page-owned controls: shown only where the page said it binds them.
     const f = (opts && opts.features) || {};
     const commentEl = $id('ib-lb-comment');
-    if (commentEl) { commentEl.hidden = !f.flag; commentEl.value = ''; }
+    if (commentEl) {
+      // The text box serves the page's own purpose: a flag comment on
+      // Worker Images, the verdict on Changes Requested.
+      commentEl.hidden = !(f.flag || f.commentPlaceholder);
+      commentEl.placeholder = f.commentPlaceholder
+        || '(optional) comment for the user';
+      commentEl.value = '';
+    }
     const flagBtn = $id('ib-lb-flag-btn');
     if (flagBtn) flagBtn.hidden = !f.flag;
+
+    // The page's own decision buttons (APPROVE / REJECT on Changes
+    // Requested). The zoom only DRAWS them; what they do belongs to the
+    // page, so closing the zoom to press a card button is never needed.
+    const actionsHost = $id('ib-lb-actions');
+    if (actionsHost) {
+      actionsHost.innerHTML = '';
+      if (opts && opts.actions) {
+        (opts.actions(t, p) || []).forEach((a) => {
+          const b = document.createElement('button');
+          b.className = a.className || 'btn btn-ghost';
+          b.textContent = a.label;
+          b.addEventListener('click', a.onClick);
+          actionsHost.appendChild(b);
+        });
+      }
+    }
     const retireBtn = $id('ib-lb-retire');
     if (retireBtn) retireBtn.hidden = !f.retire;
     // "Checked, it's fine" — the page decides per image whether the verdict
@@ -238,7 +262,10 @@
       if (e.key === 'ArrowRight') step(1);
       // K = "I have looked at this one", K again undoes — the same key
       // Approve Artwork uses for keep, so the hand already knows it.
-      if ((e.key === 'k' || e.key === 'K') && current) {
+      // Switched off where approving already carries the mark (Changes
+      // Requested), so one screen never has two ways to say "seen".
+      const f = (opts && opts.features) || {};
+      if ((e.key === 'k' || e.key === 'K') && current && f.reviewK !== false) {
         toggleReviewed(current.master, current.poster);
       }
     });

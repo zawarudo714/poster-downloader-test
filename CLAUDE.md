@@ -2798,7 +2798,15 @@ Two rules came out of it, and both generalise past this button:
     happen — same family as "an implicit decision must range over what was
     seen". And overlap independent waits (here the editor boot ran AFTER the
     download; booting them together makes the wait the longer of the two,
-    not their sum).
+    not their sum). The RESPONSE side of the same capture is just as real:
+    when the slow answer finally arrives, it must check whether the person
+    is still looking at that thing before repainting the screen around it.
+    The zoom's FLAG handler re-opened the zoom on ITS poster when the
+    server replied — so an admin who had already arrowed on was yanked back,
+    and the previous flag's comment read as the newest one (owner's
+    long-standing report, root-caused 2026-09-23; nothing mechanical could
+    have caught a race only a slow network shows). Guard every late
+    repaint with "is this still what is on screen?".
 
 **AND A CONTROL THAT REFUSES MUST SAY SO — SILENCE IS INDISTINGUISHABLE FROM
 A DEAD PAGE.** The search grid greys out every picture once a title has its

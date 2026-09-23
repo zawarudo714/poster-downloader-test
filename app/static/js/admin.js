@@ -725,7 +725,15 @@
       poster.comment = $('ib-lb-comment').value || '';
       rerenderPosterCard(master, poster);
       refreshTitleFlagOutline(master, poster);
-      openLightbox(master, poster);
+      // Refresh the zoom ONLY if it still shows this picture. The server's
+      // answer can arrive after the admin has already arrowed on, and
+      // re-opening unconditionally yanked the zoom BACK to the previous
+      // image — so the earlier flag's comment appeared to be the latest
+      // one (owner's long-standing report, root-caused 2026-09-23).
+      const cur = LB.current();
+      if (cur && cur.poster.poster_id === poster.poster_id) {
+        LB.open(master, poster);
+      }
     } finally {
       lbFlagBtn.disabled = false;
     }
@@ -747,7 +755,11 @@
       poster.comment = '';
       rerenderPosterCard(master, poster);
       refreshTitleFlagOutline(master, poster);
-      openLightbox(master, poster);
+      // Same late-answer guard as the flag button above.
+      const cur = LB.current();
+      if (cur && cur.poster.poster_id === poster.poster_id) {
+        LB.open(master, poster);
+      }
     } finally {
       lbUnflagBtn.disabled = false;
     }
@@ -775,7 +787,12 @@
         const d = await r.json();
         if (r.ok && d.ok) {
           poster.place_acked = d.acked;   // same object the grid renders
-          openLightbox(master, poster);   // refresh the pill and the button
+          // Same late-answer guard as the flag button: refresh the pill
+          // and the button only if the zoom still shows this picture.
+          const cur = LB.current();
+          if (cur && cur.poster.poster_id === poster.poster_id) {
+            LB.open(master, poster);
+          }
         } else {
           alert('Could not save that: ' + (d.detail || r.status));
         }

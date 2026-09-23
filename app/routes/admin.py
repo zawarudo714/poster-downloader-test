@@ -2934,7 +2934,6 @@ def skip_revise(
 # it does nothing. The note is still cleared wherever it is actually edited.
 
 
-@router.get("/revisions", response_class=HTMLResponse)
 def _changes_waiting_sets(db: Session, proj):
     """
     THE one definition of "waiting on you" on Changes Requested.
@@ -2978,6 +2977,7 @@ def _changes_waiting_sets(db: Session, proj):
     return completion_ids, fix_title_ids, deletion_rev_ids
 
 
+@router.get("/revisions", response_class=HTMLResponse)
 def revisions_page(
     request: Request,
     admin: User = Depends(require_admin),

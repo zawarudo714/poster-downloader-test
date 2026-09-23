@@ -17,6 +17,11 @@
 - THE SIDEBAR CHAT BADGE NEVER WORKED, and now should: its address was
   declared below /api/chat/{worker_id} and read as a worker number (422).
   Route moved; new preflight route-order check, also proven red pre-fix.
+- FIRST ATTEMPT CRASH-LOOPED THE SITE (2026-09-23): a helper was inserted
+  between the /revisions decorator and its page, so FastAPI tried to make
+  a web route out of it and died at startup. Fixed; new preflight check
+  "route decorators sit on routes" proven red on the crash, green after.
+  v227 was never recorded as live, so the number is reused correctly.
 - Server only. The Windows node is NOT affected.
 
 Whoever changes code writes here what is waiting and why; the deploy tool

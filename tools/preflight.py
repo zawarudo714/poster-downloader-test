@@ -691,6 +691,58 @@ def check_hooks_exist() -> None:
                  f"base.html, or its own generated HTML")
 
 
+def check_route_decorators_sit_on_routes() -> None:
+    """
+    A @router decorator must sit on a real endpoint, never on a helper.
+
+    Inserting a helper function directly above an endpoint puts the helper
+    BETWEEN the decorator and the endpoint, so the decorator silently
+    moves onto the helper. On 2026-09-23 that turned `_changes_waiting_sets
+    (db: Session, proj)` into the /revisions route; FastAPI cannot make a
+    web parameter out of a database Session, raised at import, and the
+    live site crash-looped after the v227 deploy. The same slip happened
+    earlier that day with api_browse and was caught by eye.
+
+    Two narrow questions, read from the syntax tree:
+      * a route-decorated function whose name starts with "_" (helpers are
+        private by house convention; endpoints never are), and
+      * a route-decorated function with a `Session` parameter that is not
+        supplied by Depends(...) — the exact thing FastAPI dies on.
+    """
+    import ast
+    for path in sorted((ROOT / "app" / "routes").glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            is_route = any(
+                isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
+                and isinstance(d.func.value, ast.Name)
+                and d.func.value.id == "router"
+                for d in fn.decorator_list)
+            if not is_route:
+                continue
+            if fn.name.startswith("_"):
+                fail(f"{path.name}:{fn.lineno}: route decorator sits on "
+                     f"helper {fn.name}() — a helper was inserted between "
+                     f"the decorator and its endpoint. Move the decorator "
+                     f"down onto the endpoint.")
+            args = fn.args.args
+            defaults = [None] * (len(args) - len(fn.args.defaults)) \
+                + list(fn.args.defaults)
+            for a, dflt in zip(args, defaults):
+                ann = a.annotation
+                is_session = isinstance(ann, ast.Name) and ann.id == "Session"
+                via_depends = (isinstance(dflt, ast.Call)
+                               and isinstance(dflt.func, ast.Name)
+                               and dflt.func.id == "Depends")
+                if is_session and not via_depends:
+                    fail(f"{path.name}:{fn.lineno}: route {fn.name}() takes "
+                         f"'{a.arg}: Session' without Depends(get_db) — "
+                         f"FastAPI raises at startup and the site will not "
+                         f"boot.")
+
+
 def check_literal_routes_before_param_routes() -> None:
     """
     A route with a literal last segment must be declared BEFORE a route
@@ -3343,6 +3395,7 @@ CHECKS = [
     ("template tags balance",     check_template_tags_balance),
     ("page hooks exist",          check_hooks_exist),
     ("the shared zoom ships with its markup", check_shared_zoom_markup_included),
+    ("route decorators sit on routes", check_route_decorators_sit_on_routes),
     ("literal routes beat parameter routes", check_literal_routes_before_param_routes),
     ("finder classes survive className writes", check_finder_classes_survive_classname_writes),
     ("buttons have handlers",     check_actions_are_handled),

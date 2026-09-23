@@ -1755,6 +1755,16 @@ DIFFERENCE against a known-good run over an absolute reading of the result —
 the same reasoning as comparing a change rather than a total when checking
 ourselves against a marketplace (5d).
 
+**INSERTING ABOVE A DECORATED FUNCTION STEALS ITS DECORATOR.** A new
+helper placed directly above an endpoint lands BETWEEN `@router.get(...)`
+and the `def` it belonged to, so the decorator silently moves onto the
+helper. On 2026-09-23 this made `_changes_waiting_sets(db: Session, …)`
+the /revisions route; FastAPI cannot turn a Session into a web parameter,
+raised at import, and the live site crash-looped after deploy — the same
+slip had happened hours earlier on `api_browse` and was caught by eye,
+which is exactly why eyes are not the guard. Insert helpers ABOVE the
+decorator line. Now mechanical: `check_route_decorators_sit_on_routes`.
+
 **CUT BY THE SYNTAX TREE, NEVER BY LINE NUMBERS YOU READ OFF A SCREEN.** On
 2026-09-09, removing the spend feature meant deleting one endpoint and two
 blocks from `pipeline_admin.py`. The line numbers were read from `sed` output

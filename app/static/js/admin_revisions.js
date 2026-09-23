@@ -68,7 +68,7 @@
             onClick: () => {
               // Carry the verdict typed in the zoom onto the card, then
               // press the card's real button — its confirm dialog and its
-              // reload behave exactly as if pressed there.
+              // outcome (finishCard) behave exactly as if pressed there.
               const zoomText = (document.getElementById('ib-lb-comment') || {}).value || '';
               const cardInput = card.querySelector(
                 '[data-pcc-verdict], [data-verdict-input], [data-deletion-note]');
@@ -80,6 +80,49 @@
       return out;
     },
   });
+
+  // ── A decision finishes a card IN PLACE — never a page reload ─────────
+  // Every successful APPROVE / REJECT / ACKNOWLEDGE / SEND BACK / CLEAR
+  // FLAG comes through here. Reloading threw the admin out of the zoom
+  // after every single decision, which defeated the zoom entirely (owner,
+  // 2026-09-23). Now the card leaves, the band's count is recomputed from
+  // the cards still on the page, and if the zoom was showing this card's
+  // picture it moves straight on to the next picture that still needs a
+  // decision — or closes when there is none.
+  function finishCard(card) {
+    if (!card) return;
+    const inCard = new Set(Array.from(card.querySelectorAll('[data-lb]'))
+      .map((a) => a.getAttribute('data-lb')));
+    let moveZoom = false;
+    let next = null;
+    if (LB && LB.isOpen()) {
+      const cur = LB.current();
+      if (cur && inCard.has(String(cur.poster.poster_id))) {
+        moveZoom = true;
+        const list = zoomList();
+        const at = list.findIndex((e) => e.p.poster_id === cur.poster.poster_id);
+        const notHere = (e) => !inCard.has(String(e.p.poster_id));
+        next = list.slice(at + 1).find(notHere)
+            || list.slice(0, Math.max(at, 0)).reverse().find(notHere)
+            || null;
+      }
+    }
+    const section = card.closest('section');
+    card.remove();
+    if (section) {
+      const left = section.querySelectorAll('.pending-complete-card, .rev-card').length;
+      const countEl = section.querySelector('[data-band-count]');
+      if (countEl) countEl.textContent = String(left);
+      const box = section.querySelector('.rev-cards');
+      if (box && left === 0) {
+        box.outerHTML = '<p class="muted">All done here. ✓</p>';
+      }
+    }
+    if (moveZoom) {
+      if (next) LB.open(next.t, next.p);
+      else LB.close();
+    }
+  }
 
   if (zoomReady) {
     document.querySelectorAll('[data-lb]').forEach((a) => {
@@ -101,7 +144,7 @@
 
     approveBtn.addEventListener('click', async () => {
       if (!confirm('Approve this fix? The flag will clear from the user side.')) return;
-      await act(`/admin/revisions/${revId}/approve`, verdictInp.value || '');
+      await act(card, `/admin/revisions/${revId}/approve`, verdictInp.value || '');
     });
 
     rejectBtn.addEventListener('click', async () => {
@@ -112,7 +155,7 @@
         return;
       }
       if (!confirm('Reject and send back to the user with your verdict appended to the original comment?')) return;
-      await act(`/admin/revisions/${revId}/reject`, v);
+      await act(card, `/admin/revisions/${revId}/reject`, v);
     });
   });
 
@@ -147,7 +190,7 @@
       const pid = btn.getAttribute('data-unflag-poster-id');
       if (!confirm('Clear this flag without requiring any change?')) return;
       const r = await fetch(`/admin/poster/${pid}/unflag`, { method: 'POST' });
-      if (r.ok) location.reload();
+      if (r.ok) finishCard(btn.closest('.rev-card'));
       else alert('Failed: ' + r.status);
     });
   });
@@ -162,9 +205,7 @@
     if (ackBtn) ackBtn.addEventListener('click', async () => {
       const r = await fetch(`/admin/deletions/${revId}/acknowledge`, { method: 'POST' });
       if (r.ok) {
-        card.style.transition = 'opacity 0.3s';
-        card.style.opacity = '0';
-        setTimeout(() => card.remove(), 320);
+        finishCard(card);
       } else {
         alert('Failed.');
       }
@@ -182,9 +223,7 @@
       fd.append('note', note);
       const r = await fetch(`/admin/deletions/${revId}/escalate`, { method: 'POST', body: fd });
       if (r.ok) {
-        card.style.transition = 'opacity 0.3s';
-        card.style.opacity = '0';
-        setTimeout(() => card.remove(), 320);
+        finishCard(card);
       } else {
         let msg = r.status;
         try { const d = await r.json(); msg = d.detail || msg; } catch (e) {}
@@ -193,11 +232,11 @@
     });
   });
 
-  async function act(url, verdict) {
+  async function act(card, url, verdict) {
     const fd = new FormData();
     fd.append('verdict', verdict);
     const r = await fetch(url, { method: 'POST', body: fd });
-    if (r.ok) location.reload();
+    if (r.ok) finishCard(card);
     else {
       let msg = r.status;
       try { const d = await r.json(); msg = d.detail || msg; } catch (e) {}
@@ -216,7 +255,7 @@
       const fd = new FormData();
       fd.append('verdict', verdictInp.value || '');
       const r = await fetch(`/admin/title/${masterId}/approve_complete`, { method: 'POST', body: fd });
-      if (r.ok) location.reload();
+      if (r.ok) finishCard(card);
       else {
         let msg = r.status;
         try { const d = await r.json(); msg = d.detail || msg; } catch (e) {}
@@ -235,7 +274,7 @@
       const fd = new FormData();
       fd.append('verdict', v);
       const r = await fetch(`/admin/title/${masterId}/reject_complete`, { method: 'POST', body: fd });
-      if (r.ok) location.reload();
+      if (r.ok) finishCard(card);
       else {
         let msg = r.status;
         try { const d = await r.json(); msg = d.detail || msg; } catch (e) {}

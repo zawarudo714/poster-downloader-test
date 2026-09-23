@@ -898,6 +898,17 @@ On Changes Requested, click a thumbnail to zoom:
 
 ---
 
+## 83. DECIDE WITHOUT LEAVING THE ZOOM — v229
+
+- On Changes Requested, open a picture in the zoom and press APPROVE (or
+  REJECT with a verdict typed in the zoom box). The zoom must stay open
+  and show the NEXT waiting picture, with no page reload.
+- The count in the WAITING ON YOU heading must go down by one each time.
+- After the very last card, the zoom closes and the band reads
+  "All done here".
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** No longer needed at all — corrected

@@ -2337,7 +2337,11 @@ the property under test: a hand-rolled fake browser kept an element's old
 classes after `className` was overwritten, so the simulation of the zoom
 passed while the real page crashed on that precise behaviour (2026-09-23).
 When a simulation passes and the real thing fails, list what the double
-simplifies and ask which simplification the bug lives in.
+simplifies and ask which simplification the bug lives in. The same double
+misled a SECOND time that day in the opposite direction: its
+`innerHTML = ''` cleared nothing, so the zoom's buttons looked doubled and a
+stale one was clicked — a false FAILURE. Write the list of simplifications
+BEFORE trusting a double either way: removal, class writes, clearing.
 
 So be honest about what each rung actually buys:
 

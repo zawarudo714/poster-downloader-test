@@ -1,18 +1,15 @@
 # Not yet deployed
 
-**v228 — the stuck red FLAG on titles with nothing in them.**
-- The worker's list now works out the red FLAG fresh each time: it shows
-  only when an open flag sits on a picture that still EXISTS. Atlanta and
-  Yellowstone (0 saved) lose the tag immediately — no clean-up script. An
-  admin note still shows as its own ADMIN NOTE pill and banner.
-- Cause: two doors (worker delete, admin DELETE THIS RECORD) counted flags
-  on DELETED pictures when setting the marker, so one old flag on a gone
-  picture kept it lit for ever. All six doors that compute the marker now
-  ask one shared question, utils.live_flag_title_ids — the same one
-  Diagnostics uses. The new preflight check found the sixth (REJECT on a
-  completion) by itself.
-- New preflight check "the flag marker has one definition", sabotage-
-  tested red then green.
+**v229 — decide in the zoom without being thrown out of it.**
+- On Changes Requested, APPROVE / REJECT / APPROVE COMPLETION / ACKNOWLEDGE
+  / SEND BACK / CLEAR FLAG no longer reload the page. The finished card
+  leaves in place, the band's number counts down, and if the zoom was open
+  it moves straight to the next picture still waiting — or closes when
+  nothing is left.
+- DELETE THIS RECORD still reloads, on purpose: it only exists on cards
+  whose file is missing (no zoom there), and inside a completion it removes
+  one record, not the whole decision.
+- The sidebar badge catches up on its next refresh (a few seconds).
 - Server only. The Windows node is NOT affected.
 
 Whoever changes code writes here what is waiting and why; the deploy tool

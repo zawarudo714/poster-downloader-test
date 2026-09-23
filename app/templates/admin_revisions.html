@@ -15,7 +15,7 @@
      helper, so they can never disagree. #}
   <section class="panel panel-pending-complete">
     <div class="panel-head">
-      <span>WAITING ON YOU ({{ waiting|length }})
+      <span>WAITING ON YOU (<span data-band-count>{{ waiting|length }}</span>)
         {{ info("Every card here ends with a button of yours. A REPLACED card is a new picture to judge; APPROVE accepts it, REJECT sends it back with your typed note. A completion card is the worker saying a whole title is done. A DELETED card is a picture the worker removed — ACKNOWLEDGE closes it, SEND BACK reopens the matter. This count is the same number the sidebar shows.") }}
       </span>
     </div>
@@ -265,7 +265,7 @@
      count above, so "waiting on you" never inflates with the worker's
      backlog. #}
   <section class="panel">
-    <div class="panel-head"><span>WAITING ON THE WORKER ({{ open_rows|length }}) {{ info("You've flagged these and the user hasn't acted yet. They are not counted in the sidebar badge — nothing here needs your decision, unless you change your mind and CLEAR the flag.") }}</span></div>
+    <div class="panel-head"><span>WAITING ON THE WORKER (<span data-band-count>{{ open_rows|length }}</span>) {{ info("You've flagged these and the user hasn't acted yet. They are not counted in the sidebar badge — nothing here needs your decision, unless you change your mind and CLEAR the flag.") }}</span></div>
     <div class="panel-body">
       {% if open_rows %}
         <div class="rev-cards">

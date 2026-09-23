@@ -380,11 +380,14 @@ def api_pulse(request: Request, admin: User = Depends(require_admin),
         # Scoped through the SAME helper as every other title query — by a
         # subquery of the project's title ids, never a hand-rolled filter.
         title_ids = scope_titles(db.query(MasterTitle.id), proj).scalar_subquery()
-        rev_open = (db.query(func.count(Revision.id))
-                      .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
-                      .filter(Revision.status == "awaiting_approval",
-                              SavedPoster.master_title_id.in_(title_ids))
-                      .scalar() or 0)
+        # The Changes Requested badge counts CARDS WAITING ON THE ADMIN —
+        # completions, standalone fixes and unreviewed deletions — from the
+        # SAME helper that page builds its cards from, so the sidebar
+        # number and the page always agree. It used to count single fixes
+        # only, so completions and deletions waited invisibly and the
+        # owner wondered what the worker had skipped (2026-09-23).
+        _c_ids, _f_ids, _d_ids = _changes_waiting_sets(db, proj)
+        rev_open = len(_c_ids) + len(_f_ids) + len(_d_ids)
         review_art = (db.query(func.count(ProcessedImage.id))
                         .join(SavedPoster, ProcessedImage.saved_poster_id == SavedPoster.id)
                         .filter(ProcessedImage.review_status == "pending",
@@ -2932,6 +2935,49 @@ def skip_revise(
 
 
 @router.get("/revisions", response_class=HTMLResponse)
+def _changes_waiting_sets(db: Session, proj):
+    """
+    THE one definition of "waiting on you" on Changes Requested.
+
+    Returns three ID lists — titles pending completion, titles with a
+    standalone fix awaiting approval, and unacknowledged deletion records.
+    The sidebar badge sums their lengths and the page builds its cards
+    FROM these very sets, so the number in the sidebar and the cards on
+    the page can never disagree — which they did until 2026-09-23: the
+    badge counted single fixes only, completions and deletions counted
+    nowhere, and the owner sat wondering what the worker had skipped.
+    """
+    completion_ids = [i for (i,) in
+                      scope_titles(db.query(MasterTitle.id), proj)
+                      .filter(MasterTitle.status == "complete_pending").all()]
+
+    fix_title_ids = [i for (i,) in
+                     scope_titles(
+                         db.query(MasterTitle.id)
+                           .join(SavedPoster,
+                                 SavedPoster.master_title_id == MasterTitle.id)
+                           .join(Revision,
+                                 Revision.saved_poster_id == SavedPoster.id)
+                           .filter(Revision.status == "awaiting_approval"),
+                         proj).distinct().all()
+                     if i not in set(completion_ids)]
+
+    deletion_rev_ids = [i for (i,) in
+                        scope_titles(
+                            db.query(Revision.id)
+                              .join(SavedPoster,
+                                    Revision.saved_poster_id == SavedPoster.id)
+                              .join(MasterTitle,
+                                    SavedPoster.master_title_id == MasterTitle.id)
+                              .filter(
+                                  Revision.status == "resolved",
+                                  Revision.admin_acked_at.is_(None),
+                                  Revision.admin_verdict.like(
+                                      DELETION_VERDICT_PREFIX + "%")),
+                            proj).all()]
+    return completion_ids, fix_title_ids, deletion_rev_ids
+
+
 def revisions_page(
     request: Request,
     admin: User = Depends(require_admin),
@@ -2972,15 +3018,22 @@ def revisions_page(
     # joins it even where the section doesn't display title fields.
     proj = current_project(request, admin, db)
 
+    # The page is TWO bands since 2026-09-23 (owner's ask): everything a
+    # button of HIS can finish — completions, replaced pictures, deletions
+    # to review — in one "waiting on you" list, and the untouched flags in
+    # a "waiting on the worker" list below it. The ID sets come from the
+    # SAME helper the sidebar badge counts, so the two cannot disagree.
+    completion_ids, fix_title_ids, deletion_rev_ids = \
+        _changes_waiting_sets(db, proj)
+
     # ── Pending completions: titles in complete_pending ─────────────────────
     pending_titles = (
-        scope_titles(db.query(MasterTitle), proj)
-          .filter(MasterTitle.status == "complete_pending")
+        db.query(MasterTitle)
+          .filter(MasterTitle.id.in_(completion_ids))
           .order_by(MasterTitle.updated_at.desc().nullslast())
           .all()
-    )
+    ) if completion_ids else []
     pending_complete_blocks = []
-    pending_title_ids = set()
     for t in pending_titles:
         # All active revisions on this title's posters (open or awaiting).
         revs_for_title = (
@@ -3006,28 +3059,30 @@ def revisions_page(
               .order_by(SavedPoster.id.asc())
               .all()
         )
+        # "THE TITLE NOW HOLDS" earns its place only when it says something
+        # the card has not already shown: a picture that DIFFERS from the
+        # changed ones above, or the honest "nothing left". In travel a
+        # replacement usually IS the one live picture, so the strip was a
+        # copy of the image two centimetres above it (owner, 2026-09-23).
+        shown_ids = {sp.id for _rev, sp in revs_for_title}
+        current_extra = [cp for cp in current_posters if cp.id not in shown_ids]
         pending_complete_blocks.append({
             "title": t,
             "revisions": revs_for_title,
             "current": current_posters,
+            "current_extra": current_extra,
+            "show_holds": bool(current_extra) or not current_posters,
         })
-        pending_title_ids.add(t.id)
 
     # ── Awaiting approval (standalone — NOT inside a pending completion) ────
-    awaiting_q = scope_titles((
+    awaiting_rows = (scope_titles((
         db.query(Revision, SavedPoster, MasterTitle)
           .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
           .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
-          .filter(Revision.status == "awaiting_approval")
+          .filter(Revision.status == "awaiting_approval",
+                  MasterTitle.id.in_(fix_title_ids))
           .order_by(Revision.submitted_at.desc().nullslast())
-    ), proj)
-    if pending_title_ids:
-        # Hide any awaiting revision whose title is in a pending-completion
-        # block — those are already rendered there.
-        awaiting_q = awaiting_q.filter(
-            ~MasterTitle.id.in_(pending_title_ids)
-        )
-    awaiting_rows = awaiting_q.all()
+    ), proj).all()) if fix_title_ids else []
 
     # ── Open (waiting on user) ──────────────────────────────────────────────
     open_rows = scope_titles((
@@ -3039,19 +3094,16 @@ def revisions_page(
 
     # ── Recent deletions — the record of flagged images workers deleted ──
     # Since round 12 (2026-09-13) worker deletes of flagged posters resolve
-    # themselves with this exact verdict prefix, so this panel is once
-    # again the ONE place every such deletion surfaces. Un-acknowledged
-    # rows also drive the dashboard's "pending deletions" count.
-    deletion_rows = scope_titles((
+    # themselves with this exact verdict prefix, so this page is the ONE
+    # place every such deletion surfaces. The rows come from the same ID
+    # set the badge counts.
+    deletion_rows = (
         db.query(Revision, SavedPoster, MasterTitle)
           .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
           .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
-          .filter(
-              Revision.status == "resolved",
-              Revision.admin_acked_at.is_(None),
-              Revision.admin_verdict.like(DELETION_VERDICT_PREFIX + "%"),
-          )
-    ), proj).order_by(Revision.resolved_at.desc()).limit(50).all()
+          .filter(Revision.id.in_(deletion_rev_ids))
+          .order_by(Revision.resolved_at.desc()).all()
+    ) if deletion_rev_ids else []
 
     # What each deleted-image title holds NOW, so "did they re-do it?" is
     # answered on the card instead of on the Worker Images page. A plain
@@ -3143,14 +3195,30 @@ def revisions_page(
         for _cp in deletion_current.get(_mt.id, []):
             _zoom_add(_cp, _mt, None)
 
+    # ── ONE list for the WAITING ON YOU band, newest first ─────────────────
+    # Each entry is a card the admin's own buttons can finish. The card
+    # KIND keeps the exact story (a whole completion, one replaced picture,
+    # a deletion to review); the band is what says "this is yours to do".
+    _floor = datetime(1970, 1, 1)
+    waiting: list[dict] = []
+    for blk in pending_complete_blocks:
+        waiting.append({"kind": "completion", "blk": blk,
+                        "ts": blk["title"].updated_at or _floor})
+    for rev, sp, mt in awaiting_rows:
+        waiting.append({"kind": "fix", "rev": rev, "sp": sp, "mt": mt,
+                        "ts": rev.submitted_at or rev.created_at or _floor})
+    for rev, sp, mt in deletion_rows:
+        waiting.append({"kind": "deletion", "rev": rev, "sp": sp, "mt": mt,
+                        "ts": rev.resolved_at or _floor})
+    waiting.sort(key=lambda e: e["ts"], reverse=True)
+
     return templates.TemplateResponse(
         request,
         "admin_revisions.html",
         {"user": admin, "admin": admin,
-            "pending_complete_blocks": pending_complete_blocks,
-            "open_rows": open_rows, "awaiting_rows": awaiting_rows,
+            "waiting": waiting,
+            "open_rows": open_rows,
             "missing_ids": missing_ids,
-            "deletion_rows": deletion_rows,
             "deletion_current": deletion_current,
             "resolved_rows": resolved_rows,
             "zoom_items": zoom_items,
@@ -3880,6 +3948,26 @@ def chat_page(
     )
 
 
+@router.get("/api/chat/_summary")
+def chat_summary(
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Polled by admin pages to render an unread badge in the topbar.
+
+    DECLARED ABOVE /api/chat/{worker_id} ON PURPOSE: routes are tried in
+    declaration order, so below it the word "_summary" was read as a
+    worker number and answered 422 — the sidebar badge never lit once
+    (found 2026-09-23 from the owner's console). Watched by
+    check_literal_routes_before_param_routes in preflight.py.
+    """
+    from ..chat import admin_thread_summaries
+    threads = admin_thread_summaries(db, viewer_id=admin.id)
+    total_unread = sum(t["unread"] for t in threads)
+    return JSONResponse({"ok": True, "total_unread": total_unread, "threads": threads})
+
+
 @router.get("/api/chat/{worker_id}")
 def chat_thread(
     worker_id: int,
@@ -3958,16 +4046,7 @@ def chat_admin_mark_read(
     return JSONResponse({"ok": True})
 
 
-@router.get("/api/chat/_summary")
-def chat_summary(
-    admin: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    """Polled by admin pages to render an unread badge in the topbar."""
-    from ..chat import admin_thread_summaries
-    threads = admin_thread_summaries(db, viewer_id=admin.id)
-    total_unread = sum(t["unread"] for t in threads)
-    return JSONResponse({"ok": True, "total_unread": total_unread, "threads": threads})
+# (chat_summary moved ABOVE /api/chat/{worker_id} — see its docstring.)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

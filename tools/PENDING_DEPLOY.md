@@ -1,20 +1,22 @@
 # Not yet deployed
 
-**v226 — zoom decisions + the stale flag-panel fix (waiting to deploy).**
-- Changes Requested: the zoom now carries the CARD's own buttons (APPROVE /
-  REJECT, ACKNOWLEDGE / SEND BACK, CLEAR FLAG — whatever that card offers)
-  plus a verdict box, so no more closing the zoom to decide. The buttons
-  are remote controls for the card's real buttons — one action path.
-- The K shortcut is OFF on Changes Requested (approving stamps the mark
-  itself; K still works on Worker Images).
-- Worker Images: fixed the long-standing "previous flag comment shows as
-  the latest" — a slow server answer re-opened the zoom on the OLD picture.
-  Now a late answer refreshes the zoom only if you are still on that
-  picture. Same guard on CLEAR FLAG and the place-check tick.
-- The "click does nothing after closing the zoom" report could NOT be
-  reproduced (the exact shipped code passes open→close→reopen in
-  simulation). If it happens again on v226: F12 → Console → send the red
-  line + which page.
+**v227 — one list, one number, plus the two console-error fixes.**
+- CHANGES REQUESTED IS NOW TWO BANDS. "Waiting on you" holds everything
+  your buttons can finish — completions, replaced pictures, deletions to
+  review — in one list, newest first, each card keeping its action word
+  (REPLACED / DELETED / COMPLETION / SUBMITTED AS-IS). "Waiting on the
+  worker" holds the untouched flags below it.
+- THE SIDEBAR BADGE FINALLY MEANS SOMETHING: it now counts exactly the
+  cards in "waiting on you", from the same server helper the page builds
+  from — it used to count single fixes only, so completions and deletions
+  waited invisibly.
+- "THE TITLE NOW HOLDS" only appears when it adds information (a picture
+  different from the one above, or "nothing left") — no more double image.
+- The zoom's "second click does nothing" crash: fixed (one erased class);
+  new preflight check guards the class of mistake, proven red pre-fix.
+- THE SIDEBAR CHAT BADGE NEVER WORKED, and now should: its address was
+  declared below /api/chat/{worker_id} and read as a worker number (422).
+  Route moved; new preflight route-order check, also proven red pre-fix.
 - Server only. The Windows node is NOT affected.
 
 Whoever changes code writes here what is waiting and why; the deploy tool

@@ -1585,6 +1585,21 @@ call.** Read what it TAKES and what it RETURNS. Guessing the shape of a
 signature is `3c-bis` wearing local clothes — inventing a value you could
 have looked up in four seconds, in a file already in the repo.
 
+**AND A NAME THAT EXISTS CAN STILL BE UNREACHABLE, BECAUSE DECLARATION
+ORDER DECIDES WHO ANSWERS.** `/api/chat/_summary` existed, was correct, and
+never received a single request: `/api/chat/{worker_id}` was declared above
+it, captured the word "_summary" as a worker number, and answered 422 — so
+the sidebar chat badge was dead from the day it was built, while two
+sessions "fixed" the badge's JavaScript around it (found 2026-09-23, from
+the owner's console). Literal addresses go ABOVE parameterised ones, and
+`check_literal_routes_before_param_routes` in `preflight.py` now fails any
+route a parameterised sibling above it would capture. The same shape in
+JavaScript: a CLASS the code finds an element by is a load-bearing name,
+and writing `el.className = '…'` without it erases it — the zoom's flag
+pill was findable exactly once, so the second open of any flagged picture
+died silently (same day, same console). Watched by
+`check_finder_classes_survive_classname_writes`.
+
 Now mechanical: `check_call_arity` in `preflight.py` compares every call
 into our own module-level functions against the definition. It asks a
 deliberately narrow question — module-level only, so `self` never arises,
@@ -2299,6 +2314,13 @@ because that is how the author pictured it. **The test could not fail: it
 encoded the same assumption as the bug.**
 
 The owner found it by noticing a number going up instead of down.
+
+A test double shares the blind spot too, when it is unfaithful in exactly
+the property under test: a hand-rolled fake browser kept an element's old
+classes after `className` was overwritten, so the simulation of the zoom
+passed while the real page crashed on that precise behaviour (2026-09-23).
+When a simulation passes and the real thing fails, list what the double
+simplifies and ask which simplification the bug lives in.
 
 So be honest about what each rung actually buys:
 

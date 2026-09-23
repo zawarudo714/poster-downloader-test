@@ -7,23 +7,31 @@
 {% block content %}
 <div class="admin-grid">
 
-  {# PENDING COMPLETIONS — titles in complete_pending status; admin approves
-     or rejects the whole title-level batch. Each title's awaiting revisions
-     are rendered inline so admin can review the diff in one place. #}
-  {% if pending_complete_blocks %}
+  {# ══ BAND ONE — everything a button of YOURS can finish ═══════════════
+     One list since 2026-09-23 (owner's ask): completions, replaced
+     pictures and deletions to review, newest first. The coloured action
+     word on each card keeps the exact story; the band says whose turn it
+     is. The count here and the sidebar badge come from the same server
+     helper, so they can never disagree. #}
   <section class="panel panel-pending-complete">
     <div class="panel-head">
-      <span>PENDING COMPLETIONS ({{ pending_complete_blocks|length }})
-        {{ info("The worker clicked DONE on a title that still had open flags or pending deletions. Each card here shows the full title diff: what they added, replaced, and deleted. Approve to mark the title complete (resolves all flags). Reject to send it back with a note — the title returns to in-progress, flags re-open, your note pins to the title and to each flag.") }}
+      <span>WAITING ON YOU ({{ waiting|length }})
+        {{ info("Every card here ends with a button of yours. A REPLACED card is a new picture to judge; APPROVE accepts it, REJECT sends it back with your typed note. A completion card is the worker saying a whole title is done. A DELETED card is a picture the worker removed — ACKNOWLEDGE closes it, SEND BACK reopens the matter. This count is the same number the sidebar shows.") }}
       </span>
     </div>
     <div class="panel-body">
-      {% for blk in pending_complete_blocks %}
+      {% if waiting %}
+      <div class="rev-cards">
+      {% for e in waiting %}
+        {% if e.kind == 'completion' %}
+        {% set blk = e.blk %}
         {% set t = blk.title %}
         <div class="pending-complete-card" data-master-id="{{ t.id }}">
           <div class="pcc-head">
             <div>
-              <div class="pcc-title">{{ t.title }}{% if t.year %} ({{ t.year }}){% endif %}</div>
+              <div class="pcc-title">{{ t.title }}{% if t.year %} ({{ t.year }}){% endif %}
+                <span class="status-pill status-awaiting">COMPLETION</span>
+              </div>
               <div class="pcc-meta mono muted">
                 claimed by {{ t.claimed_by_name }} · submitted {{ t.updated_at | local_dt('%Y-%m-%d %H:%M') }}
                 {% if t.complete_comment %}
@@ -99,13 +107,15 @@
           </div>
           {% endif %}
 
-          {# What you are actually approving: the images the title holds
-             NOW. The flag cards above tell the story of what changed; this
-             strip is the outcome, so no trip to Worker Images is needed. #}
-          <div class="pcc-section-head">THE TITLE NOW HOLDS</div>
-          {% if blk.current %}
+          {# Shown only when it says something new: a live picture that
+             DIFFERS from the changed ones above, or "nothing left". A
+             strip repeating the image two centimetres above it taught
+             nothing (owner, 2026-09-23). #}
+          {% if blk.show_holds %}
+          <div class="pcc-section-head">THE TITLE ALSO HOLDS</div>
+          {% if blk.current_extra %}
           <div class="pcc-current-strip">
-            {% for cp in blk.current %}
+            {% for cp in blk.current_extra %}
               {% if cp.id in missing_ids %}
                 <span class="pcc-current-thumb pcc-current-missing"
                       title="{{ cp.filename }} — the file is missing from the workspace">
@@ -124,6 +134,7 @@
           {% else %}
           <p class="muted">No live image on this title right now — everything on it was deleted.</p>
           {% endif %}
+          {% endif %}
 
           <div class="pcc-actions">
             <input type="text" placeholder="(verdict — required for REJECT)" data-pcc-verdict>
@@ -133,17 +144,9 @@
                     data-master-id="{{ t.id }}">REJECT &amp; SEND BACK</button>
           </div>
         </div>
-      {% endfor %}
-    </div>
-  </section>
-  {% endif %}
 
-  <section class="panel">
-    <div class="panel-head"><span>AWAITING YOUR APPROVAL ({{ awaiting_rows|length }}) {{ info("The user has replaced or marked these as fixed. Review the new image and approve to clear the flag, or reject to send it back with new instructions.") }}</span></div>
-    <div class="panel-body">
-      {% if awaiting_rows %}
-        <div class="rev-cards">
-          {% for rev, sp, mt in awaiting_rows %}
+        {% elif e.kind == 'fix' %}
+        {% set rev = e.rev %}{% set sp = e.sp %}{% set mt = e.mt %}
             <div class="rev-card rev-card-awaiting {% if rev.revision_type == 'similar' %}rev-card-similar{% endif %}" data-revision-id="{{ rev.id }}" data-poster-id="{{ sp.id }}">
               {% if rev.revision_type == 'similar' %}
                 {# All related posters as equal cards. Cache-bust by submitted_at
@@ -206,16 +209,63 @@
                 </div>
               </div>
             </div>
-          {% endfor %}
-        </div>
+
+        {% elif e.kind == 'deletion' %}
+        {% set rev = e.rev %}{% set sp = e.sp %}{% set mt = e.mt %}
+            <div class="rev-card rev-card-deletion" data-revision-id="{{ rev.id }}" data-poster-id="{{ sp.id }}">
+              <div class="rev-card-deletion-marker">
+                <span class="status-pill status-deletion">DELETED</span>
+              </div>
+              <div class="rev-card-body">
+                <div class="rev-card-title">
+                  {{ mt.title if mt else '(unknown)' }}{% if mt and mt.year %} ({{ mt.year }}){% endif %}
+                </div>
+                <div class="rev-card-path mono">{{ sp.username }} / {{ sp.original_save_date.isoformat() }} / {{ sp.title_folder_path }} / {{ sp.filename }}</div>
+                <div class="rev-card-comment"><strong>Original ask:</strong> {{ rev.comment or "(no comment)" }}</div>
+                {% if rev.worker_note %}
+                  <div class="rev-card-worker-note"><strong>{{ sp.username }} says (deletion reason):</strong> {{ rev.worker_note }}</div>
+                {% else %}
+                  <div class="rev-card-worker-note muted"><em>No deletion reason given.</em></div>
+                {% endif %}
+                {# Did they re-do the title? The answer belongs on this card. #}
+                {% set now_holds = deletion_current.get(mt.id, []) if mt else [] %}
+                <div class="rev-card-current">
+                  <strong>The title now holds:</strong>
+                  {% if now_holds %}
+                    {% for cp in now_holds %}
+                      <a class="rev-current-mini" data-lb="{{ cp.id }}"
+                         href="/admin/file/{{ cp.id }}?v={{ cp.file_size or 0 }}"
+                         target="_blank" rel="noopener" title="{{ cp.filename }} — click to zoom">
+                        <img src="/admin/file/{{ cp.id }}?v={{ cp.file_size or 0 }}" alt="" loading="lazy">
+                      </a>
+                    {% endfor %}
+                  {% else %}
+                    <span class="muted">nothing yet — the title went back to the pool</span>
+                  {% endif %}
+                </div>
+                <div class="rev-card-meta mono muted">deleted {{ rev.resolved_at | local_dt('%Y-%m-%d %H:%M') }}</div>
+                <div class="rev-card-actions">
+                  <input type="text" placeholder="(optional for ACK; required for SEND BACK) note for the user" data-deletion-note>
+                  <button class="btn btn-ghost btn-tiny" data-action="ack-deletion">ACKNOWLEDGE</button>
+                  <button class="btn btn-error btn-tiny" data-action="send-back-deletion">SEND BACK</button>
+                </div>
+              </div>
+            </div>
+        {% endif %}
+      {% endfor %}
+      </div>
       {% else %}
-        <p class="muted">Nothing awaiting your approval. ✓</p>
+        <p class="muted">Nothing waiting on you. ✓</p>
       {% endif %}
     </div>
   </section>
 
+  {# ══ BAND TWO — flags the worker has not answered yet ═════════════════
+     Nothing here takes your decision; it is deliberately OUTSIDE the
+     count above, so "waiting on you" never inflates with the worker's
+     backlog. #}
   <section class="panel">
-    <div class="panel-head"><span>OPEN — WAITING ON USER ({{ open_rows|length }}) {{ info("You've flagged these and the user hasn't acted yet.") }}</span></div>
+    <div class="panel-head"><span>WAITING ON THE WORKER ({{ open_rows|length }}) {{ info("You've flagged these and the user hasn't acted yet. They are not counted in the sidebar badge — nothing here needs your decision, unless you change your mind and CLEAR the flag.") }}</span></div>
     <div class="panel-body">
       {% if open_rows %}
         <div class="rev-cards">
@@ -272,59 +322,6 @@
         </div>
       {% else %}
         <p class="muted">No open flags waiting on users. ✓</p>
-      {% endif %}
-    </div>
-  </section>
-
-  <section class="panel">
-    <div class="panel-head"><span>RECENT DELETIONS — REVIEW ({{ deletion_rows|length }}) {{ info("The user deleted a flagged poster instead of replacing it. Review the worker's note. Click ACKNOWLEDGE if you're OK with it; click SEND BACK with a comment to push it back to the worker (the title goes back to in-progress with your note pinned to it).") }}</span></div>
-    <div class="panel-body">
-      {% if deletion_rows %}
-        <div class="rev-cards">
-          {% for rev, sp, mt in deletion_rows %}
-            <div class="rev-card rev-card-deletion" data-revision-id="{{ rev.id }}" data-poster-id="{{ sp.id }}">
-              <div class="rev-card-deletion-marker">
-                <span class="status-pill status-deletion">DELETED</span>
-              </div>
-              <div class="rev-card-body">
-                <div class="rev-card-title">
-                  {{ mt.title if mt else '(unknown)' }}{% if mt and mt.year %} ({{ mt.year }}){% endif %}
-                </div>
-                <div class="rev-card-path mono">{{ sp.username }} / {{ sp.original_save_date.isoformat() }} / {{ sp.title_folder_path }} / {{ sp.filename }}</div>
-                <div class="rev-card-comment"><strong>Original ask:</strong> {{ rev.comment or "(no comment)" }}</div>
-                {% if rev.worker_note %}
-                  <div class="rev-card-worker-note"><strong>{{ sp.username }} says (deletion reason):</strong> {{ rev.worker_note }}</div>
-                {% else %}
-                  <div class="rev-card-worker-note muted"><em>No deletion reason given.</em></div>
-                {% endif %}
-                {# Did they re-do the title? The answer belongs on this card. #}
-                {% set now_holds = deletion_current.get(mt.id, []) if mt else [] %}
-                <div class="rev-card-current">
-                  <strong>The title now holds:</strong>
-                  {% if now_holds %}
-                    {% for cp in now_holds %}
-                      <a class="rev-current-mini" data-lb="{{ cp.id }}"
-                         href="/admin/file/{{ cp.id }}?v={{ cp.file_size or 0 }}"
-                         target="_blank" rel="noopener" title="{{ cp.filename }} — click to zoom">
-                        <img src="/admin/file/{{ cp.id }}?v={{ cp.file_size or 0 }}" alt="" loading="lazy">
-                      </a>
-                    {% endfor %}
-                  {% else %}
-                    <span class="muted">nothing yet — the title went back to the pool</span>
-                  {% endif %}
-                </div>
-                <div class="rev-card-meta mono muted">deleted {{ rev.resolved_at | local_dt('%Y-%m-%d %H:%M') }}</div>
-                <div class="rev-card-actions">
-                  <input type="text" placeholder="(optional for ACK; required for SEND BACK) note for the user" data-deletion-note>
-                  <button class="btn btn-ghost btn-tiny" data-action="ack-deletion">ACKNOWLEDGE</button>
-                  <button class="btn btn-error btn-tiny" data-action="send-back-deletion">SEND BACK</button>
-                </div>
-              </div>
-            </div>
-          {% endfor %}
-        </div>
-      {% else %}
-        <p class="muted">No unreviewed deletions. ✓</p>
       {% endif %}
     </div>
   </section>

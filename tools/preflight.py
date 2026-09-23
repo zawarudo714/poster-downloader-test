@@ -691,6 +691,90 @@ def check_hooks_exist() -> None:
                  f"base.html, or its own generated HTML")
 
 
+def check_literal_routes_before_param_routes() -> None:
+    """
+    A route with a literal last segment must be declared BEFORE a route
+    whose same-length path has a parameter in that position.
+
+    FastAPI tries routes in declaration order, so `/api/chat/{worker_id}`
+    declared above `/api/chat/_summary` swallows the word "_summary", tries
+    to read it as a worker number, and answers 422 — which is how the
+    sidebar chat badge NEVER worked from the day it was built (owner's
+    console screenshot, 2026-09-23). Nothing else could see it: both
+    routes exist, both handlers are correct, and the page renders.
+    """
+    deco = re.compile(
+        r"""@router\.(get|post|put|delete)\(\s*['"]([^'"]+)['"]""")
+    for path in sorted((ROOT / "app" / "routes").glob("*.py")):
+        routes = []          # (order, method, path) in declaration order
+        for m in deco.finditer(path.read_text(encoding="utf-8",
+                                              errors="ignore")):
+            routes.append((m.start(), m.group(1), m.group(2)))
+        for i, (_, meth_a, route_a) in enumerate(routes):
+            segs_a = route_a.strip("/").split("/")
+            for (_, meth_b, route_b) in routes[i + 1:]:
+                if meth_a != meth_b:
+                    continue
+                segs_b = route_b.strip("/").split("/")
+                if len(segs_a) != len(segs_b):
+                    continue
+                # Would the EARLIER route capture the LATER one's address?
+                captures = all(
+                    a.startswith("{") or a == b
+                    for a, b in zip(segs_a, segs_b))
+                has_param_where_literal = any(
+                    a.startswith("{") and not b.startswith("{")
+                    for a, b in zip(segs_a, segs_b))
+                if captures and has_param_where_literal:
+                    fail(f"{path.name}: {route_a} is declared before "
+                         f"{route_b} and captures its address — requests "
+                         f"to {route_b} never reach their handler. Move "
+                         f"the literal route above the parameterised one.")
+
+
+def check_finder_classes_survive_classname_writes() -> None:
+    """
+    A class the JS FINDS an element by must never be erased by the same
+    code writing `el.className = '…'` without it.
+
+    `pill = host.querySelector('.lb-status-pill')` followed by
+    `pill.className = 'status-pill'` works exactly once: the write deletes
+    the finder class, so every later open finds null and throws — which is
+    how "click a picture a second time and nothing happens" shipped on
+    Changes Requested (owner's console screenshot, 2026-09-23). The bug
+    had sat latent in admin.js for weeks before the zoom was shared.
+    """
+    # Walk each file line by line and remember, per variable name, what it
+    # was LAST assigned from. Only a write to a variable whose latest
+    # source is a class-finder counts — the same name assigned from
+    # createElement in another function is a different element, and the
+    # first draft of this check paired those across functions and raised
+    # two false alarms (admin.js `body`, user.js `row`).
+    finder = re.compile(
+        r"""\b(?:const|let|var)?\s*(\w+)\s*=\s*(.+)$""")
+    is_class_find = re.compile(
+        r"""querySelector\(\s*['"]\.([a-z0-9-]+)['"]\s*\)""")
+    write = re.compile(
+        r"""\b(\w+)\.className\s*=\s*['"]([^'"]*)['"]""")
+    for js in sorted(JS.glob("*.js")):
+        source_of: dict[str, str | None] = {}   # var -> finder class or None
+        for n, line in enumerate(
+                js.read_text(encoding="utf-8", errors="ignore").splitlines(), 1):
+            w = write.search(line)
+            if w:
+                cls = source_of.get(w.group(1))
+                if cls and cls not in w.group(2).split():
+                    fail(f"{js.name}:{n}: {w.group(1)} is found by '.{cls}' "
+                         f"and then '.className = \"{w.group(2)}\"' erases "
+                         f"that class — the next querySelector returns null "
+                         f"and the handler dies. Include '{cls}' in the "
+                         f"write, or use classList instead.")
+            a = finder.search(line)
+            if a:
+                fm = is_class_find.search(a.group(2))
+                source_of[a.group(1)] = fm.group(1) if fm else None
+
+
 def check_shared_zoom_markup_included() -> None:
     """
     A page that loads poster_lightbox.js must also {% include %} its markup,
@@ -3259,6 +3343,8 @@ CHECKS = [
     ("template tags balance",     check_template_tags_balance),
     ("page hooks exist",          check_hooks_exist),
     ("the shared zoom ships with its markup", check_shared_zoom_markup_included),
+    ("literal routes beat parameter routes", check_literal_routes_before_param_routes),
+    ("finder classes survive className writes", check_finder_classes_survive_classname_writes),
     ("buttons have handlers",     check_actions_are_handled),
     ("endpoints have buttons",    check_endpoints_have_buttons),
     ("nothing stuck behind hidden", check_hidden_ancestors),

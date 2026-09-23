@@ -868,6 +868,26 @@ On Changes Requested, click a thumbnail to zoom:
 
 ---
 
+## 81. ONE LIST, ONE NUMBER + THE TWO CONSOLE ERRORS — v227
+
+- **Changes Requested is now two bands.** Everything with your buttons
+  (completions, replaced pictures, deletions) sits in one "WAITING ON
+  YOU" list, newest first, action word on each card. Untouched flags sit
+  in "WAITING ON THE WORKER" below. Check nothing you expect is missing.
+- **The sidebar badge must equal the WAITING ON YOU count** — same
+  number, always. That badge used to ignore completions and deletions.
+- **No more double image:** a completion card only shows "THE TITLE ALSO
+  HOLDS" when that picture differs from the one above, or when the title
+  is empty.
+- **Zoom, second click:** open a picture, close, open again — must work
+  every time now, on both pages.
+- **The sidebar chat badge — first time it can ever work:** have the
+  worker message you while you are NOT on the chat page. The red number
+  must appear on the sidebar's Chat entry. Broken since it was built, so
+  this is a first real test.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** No longer needed at all — corrected

@@ -194,7 +194,10 @@
     if (p.flagged) {
       lbFlag.hidden = false;
       const pill = lbFlag.querySelector('.lb-status-pill');
-      pill.className = 'status-pill';
+      // Keep 'lb-status-pill': it is how the line above FINDS this element.
+      // Writing className without it worked exactly once — the second open
+      // found null and the whole zoom died silently (owner, 2026-09-23).
+      pill.className = 'lb-status-pill status-pill';
       if (p.revision_status === 'awaiting_approval') {
         pill.classList.add('status-awaiting');
         pill.textContent = 'awaiting approval';

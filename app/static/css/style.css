@@ -1359,6 +1359,10 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 .g-title.reviewed { border-left: 3px solid var(--success); }
 .lb-reviewed #ib-lb-img { outline: 3px solid var(--success); outline-offset: -3px; }
 .status-pill.status-reviewed { color: var(--success); border-color: var(--success); }
+/* The same K-mark green on the Changes Requested thumbnails (the zoom
+   toggles .lb-marked on every copy of the picture), so "I have looked at
+   this one" reads identically across the two screens. */
+[data-lb].lb-marked img { outline: 2px solid var(--success); outline-offset: -2px; }
 /* Retired-as-unusable: quiet grey — parked for ever, wrong to shout. */
 .status-pill.status-unusable { color: var(--subtext); border-color: var(--border); }
 /* The RETIRE button whispers until hovered — it deletes a paid file. */

@@ -62,9 +62,12 @@
                   </div>
                 {% else %}
                   {# Clickable: judging needs the full picture, and the full
-                     picture must not require a trip to Worker Images. #}
-                  <a class="thumb-link" href="/admin/file/{{ sp.id }}?v={{ vbust }}"
-                     target="_blank" rel="noopener" title="Click for full size">
+                     picture must not require a trip to Worker Images. The
+                     data-lb hook opens the shared zoom in place; the href
+                     stays as the fallback if the script never ran. #}
+                  <a class="thumb-link" data-lb="{{ sp.id }}"
+                     href="/admin/file/{{ sp.id }}?v={{ vbust }}"
+                     target="_blank" rel="noopener" title="Click to zoom">
                     <img class="pcc-rev-thumb"
                          src="/admin/file/{{ sp.id }}?v={{ vbust }}" alt="" loading="lazy">
                   </a>
@@ -110,8 +113,9 @@
                   <span class="mono">file missing</span>
                 </span>
               {% else %}
-                <a class="pcc-current-thumb" href="/admin/file/{{ cp.id }}?v={{ cp.file_size or 0 }}"
-                   target="_blank" rel="noopener" title="{{ cp.filename }} — click for full size">
+                <a class="pcc-current-thumb" data-lb="{{ cp.id }}"
+                   href="/admin/file/{{ cp.id }}?v={{ cp.file_size or 0 }}"
+                   target="_blank" rel="noopener" title="{{ cp.filename }} — click to zoom">
                   <img src="/admin/file/{{ cp.id }}?v={{ cp.file_size or 0 }}" alt="" loading="lazy">
                 </a>
               {% endif %}
@@ -170,8 +174,9 @@
                     </div>
                   </div>
                 {% else %}
-                  <a class="thumb-link" href="/admin/file/{{ sp.id }}?v={{ sp.file_size or 0 }}"
-                     target="_blank" rel="noopener" title="Click for full size">
+                  <a class="thumb-link" data-lb="{{ sp.id }}"
+                     href="/admin/file/{{ sp.id }}?v={{ sp.file_size or 0 }}"
+                     target="_blank" rel="noopener" title="Click to zoom">
                     <img class="rev-card-thumb" src="/admin/file/{{ sp.id }}?v={{ sp.file_size or 0 }}" alt="" loading="lazy">
                   </a>
                 {% endif %}
@@ -240,8 +245,9 @@
                   </div>
                 </div>
               {% else %}
-                <a class="thumb-link" href="/admin/file/{{ sp.id }}?v={{ sp.file_size or 0 }}"
-                   target="_blank" rel="noopener" title="Click for full size">
+                <a class="thumb-link" data-lb="{{ sp.id }}"
+                   href="/admin/file/{{ sp.id }}?v={{ sp.file_size or 0 }}"
+                   target="_blank" rel="noopener" title="Click to zoom">
                   <img class="rev-card-thumb" src="/admin/file/{{ sp.id }}?v={{ sp.file_size or 0 }}" alt="" loading="lazy">
                 </a>
               {% endif %}
@@ -297,8 +303,9 @@
                   <strong>The title now holds:</strong>
                   {% if now_holds %}
                     {% for cp in now_holds %}
-                      <a class="rev-current-mini" href="/admin/file/{{ cp.id }}?v={{ cp.file_size or 0 }}"
-                         target="_blank" rel="noopener" title="{{ cp.filename }} — click for full size">
+                      <a class="rev-current-mini" data-lb="{{ cp.id }}"
+                         href="/admin/file/{{ cp.id }}?v={{ cp.file_size or 0 }}"
+                         target="_blank" rel="noopener" title="{{ cp.filename }} — click to zoom">
                         <img src="/admin/file/{{ cp.id }}?v={{ cp.file_size or 0 }}" alt="" loading="lazy">
                       </a>
                     {% endfor %}
@@ -351,8 +358,19 @@
   </section>
 
 </div>
+
+{# The shared zoom — same overlay as Worker Images, opened by clicking any
+   thumbnail above (data-lb). Its per-picture data rides in the JSON blob
+   below, built by the same server helpers as the browse API. #}
+{% include "_poster_lightbox.html" %}
+<script type="application/json" id="lb-data">{{ zoom_items | tojson }}</script>
 {% endblock %}
 
 {% block scripts %}
+{# subject_icons draws the kind chip in the zoom's title bar, the same
+   drawing the worker saw; poster_lightbox must load before the page script
+   that wires it. #}
+<script src="/static/js/subject_icons.js?v={{ app_version }}"></script>
+<script src="/static/js/poster_lightbox.js?v={{ app_version }}"></script>
 <script src="/static/js/admin_revisions.js?v={{ app_version }}"></script>
 {% endblock %}

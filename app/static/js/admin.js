@@ -152,7 +152,9 @@
   // per-image verdicts ride on each poster in `titles`, so the pills and
   // the panel read ONE set of data and can never disagree.
   let placeCheck = { enabled: false, key_present: false, checked_this_month: 0 };
-  let currentLightbox = null;
+  // The zoom itself lives in poster_lightbox.js (shared with Changes
+  // Requested); this page wires its own buttons into it further down.
+  const LB = window.PosterLightbox;
   // Which poster the lightbox is showing, for the resume memory — 0 when
   // it is closed. Written into the saved state on every open and close,
   // so leaving mid-look reopens exactly here, while a deliberate close
@@ -238,19 +240,10 @@
   }
 
   // One spelling of each pill, so the grid box and the zoomed view show the
-  // same thing. The source pill (Brave/Google/pasted) and the place-check
-  // pill both live here and are reused in both places.
-  function sourcePillNode(p) {
-    if (!p.image_source) return null;
-    const s = document.createElement('span');
-    s.className = 'status-pill status-img-source';
-    s.textContent = { brave: 'Brave', google: 'Google',
-                      pasted: 'pasted' }[p.image_source] || p.image_source;
-    s.title = { brave: 'Found with the in-page Brave search',
-                google: 'Sent from Google by the phone add-on',
-                pasted: 'Pasted as a link by hand' }[p.image_source] || '';
-    return s;
-  }
+  // same thing. The source pill (Brave/Google/pasted) moved into
+  // poster_lightbox.js — LB.sourcePill — so Changes Requested says the same
+  // words; the place-check pill stays here because the place check is this
+  // page's feature.
   function placePillNode(p) {
     const v = placeVerdict(p);
     const s = document.createElement('span');
@@ -401,28 +394,17 @@
       pillsHost.appendChild(pill);
     }
     // Where the worker found the picture. Old saves carry no source and
-    // show no pill — absence, not a guess.
-    if (p.image_source) {
-      const pill = document.createElement('span');
-      pill.className = 'status-pill status-img-source';
-      pill.textContent = { brave: 'Brave', google: 'Google',
-                           pasted: 'pasted' }[p.image_source] || p.image_source;
-      pill.title = { brave: 'Found with the in-page Brave search',
-                     google: 'Sent from Google by the phone add-on',
-                     pasted: 'Pasted as a link by hand' }[p.image_source] || '';
-      pillsHost.appendChild(pill);
-    }
+    // show no pill — absence, not a guess. LB.sourcePill is the one
+    // spelling, shared with the zoom on every page (it used to be copied
+    // inline here and had already drifted into a second copy once).
+    const srcPill = LB.sourcePill(p);
+    if (srcPill) pillsHost.appendChild(srcPill);
     // The place check's verdict. A DOT marker rather than a rectangle, so
     // at a glance it cannot be confused with the source pill beside it —
     // "found via Google" and "Google says it is the right place" are two
     // different facts. Absent entirely when the feature is off.
     if (placeCheck.enabled) {
-      const pv = placeVerdict(p);
-      const pill = document.createElement('span');
-      pill.className = 'place-pill ' + pv.cls;
-      pill.textContent = pv.word;
-      pill.title = pv.tip;
-      pillsHost.appendChild(pill);
+      pillsHost.appendChild(placePillNode(p));
     }
     if (p.added_by) {
       const pill = document.createElement('span');
@@ -576,123 +558,40 @@
     saveStateToUrl();
   }
 
-  // ── Lightbox ─────────────────────────────────────────────────────────────
-  const lightbox = $('ib-lightbox');
-  const lbImg    = $('ib-lb-img');
-  const lbMeta   = $('ib-lb-meta');
-  const lbFlag   = $('ib-lb-flag');
-  const lbComment    = $('ib-lb-comment');
-  const lbFlagBtn    = $('ib-lb-flag-btn');
-  const lbUnflagBtn  = $('ib-lb-unflag-btn');
-
-  // Every (title, image) pair currently on screen, flattened in reading
-  // order — one image per title in travel, so stepping through images IS
-  // stepping through titles. Asked for by the owner 2026-09-06: click one
-  // image, then arrow through the whole day without closing the lightbox.
-  function lightboxList() {
-    const out = [];
-    (titles || []).forEach((t) => (t.posters || []).forEach((p) => out.push({ t, p })));
-    return out;
-  }
-  function lightboxStep(delta) {
-    const list = lightboxList();
-    if (!list.length || !currentLightbox) return;
-    const at = list.findIndex((e) => e.p.poster_id === currentLightbox.poster.poster_id);
-    const next = list[at + delta];
-    if (next) openLightbox(next.t, next.p);
-  }
-
-  function openLightbox(t, p) {
-    currentLightbox = { master: t, poster: p };
-    // The PLACE, named first and large — a bare image of somewhere you
-    // cannot name is exactly what the owner asked to never see again.
-    const nameEl = $('ib-lb-title');
-    if (nameEl) {
-      nameEl.textContent = (t.external_id != null ? t.external_id + '. ' : '')
-        + t.title + (t.year ? ` (${t.year})` : '');
-    }
-    const kindEl = $('ib-lb-kind');
-    if (kindEl) kindEl.innerHTML = window.SubjectKind ? window.SubjectKind.chip(t.kind) : '';
-    const posEl = $('ib-lb-pos');
-    if (posEl) {
-      const list = lightboxList();
-      const at = list.findIndex((e) => e.p.poster_id === p.poster_id);
-      posEl.textContent = at >= 0 ? `${at + 1} / ${list.length}` : '';
-    }
-    lbImg.src = fileUrl(p.poster_id, p.size || p.filename);
-    lbImg.alt = p.filename;
-    const dims = (p.image_width && p.image_height) ? ` · ${p.image_width}×${p.image_height}` : '';
-    const lq   = p.low_quality_url ? ' · ⚠ LQ-URL bypassed' : '';
-    const from = { brave: ' · found on Brave', google: ' · found on Google',
-                   pasted: ' · pasted link' }[p.image_source] || '';
-    lbMeta.textContent =
-      `${t.title}${t.year ? ` (${t.year})` : ''} — ${p.filename}${dims}${lq}${from}`;
-
-    // The same pills the grid box carries, so you can judge the place from
-    // the zoom without going back — the source pill, and the place-check
-    // verdict when the check is on.
-    const pillsHost = $('ib-lb-pills');
-    if (pillsHost) {
-      pillsHost.innerHTML = '';
-      const src = sourcePillNode(p);
-      if (src) pillsHost.appendChild(src);
-      if (placeCheck.enabled) pillsHost.appendChild(placePillNode(p));
-    }
-    // The K mark, so the zoom agrees with the grid about what you have seen.
-    renderLbReviewed(p);
-    // The "checked, it's fine" button, right here in the zoom — shown only
-    // for a verdict that CAN be acknowledged (Google disagreed, or had no
-    // opinion). It reads the same p.place_acked the grid does, so pressing
-    // it here and reopening the grid agree.
-    const ackBtn = $('ib-lb-place-ack');
-    if (ackBtn) {
-      const ackable = placeCheck.enabled
-        && (p.place_status === 'mismatch' || p.place_status === 'no_opinion');
-      ackBtn.hidden = !ackable;
-      ackBtn.textContent = p.place_acked ? 'UNDO — MARK IT A PROBLEM AGAIN'
-                                         : "CHECKED, IT'S FINE";
-    }
-    // CHECK GOOGLE — opens Google Images for this place in a new tab, so the
-    // scenic view can be confirmed without leaving the zoom. The URL is built
-    // by the server the same way the worker's GOOGLE button is; "" means the
-    // project has no source link, so the button stays hidden.
-    const gBtn = $('ib-lb-google');
-    if (gBtn) gBtn.hidden = !(t && t.google_url);
-
-    if (p.flagged) {
-      lbFlag.hidden = false;
-      const pill = lbFlag.querySelector('.lb-status-pill');
-      pill.className = 'status-pill';
-      if (p.revision_status === 'awaiting_approval') {
-        pill.classList.add('status-awaiting');
-        pill.textContent = 'awaiting approval';
-      } else {
-        pill.classList.add('status-flag');
-        pill.textContent = 'open';
-      }
-      lbFlag.querySelector('.lb-flag-comment').textContent = p.comment || '(no comment)';
-      lbFlag.querySelector('.lb-worker-note').textContent =
-        p.worker_note ? `User note: ${p.worker_note}` : '';
-      lbUnflagBtn.hidden = false;
-    } else {
-      lbFlag.hidden = true;
-      lbUnflagBtn.hidden = true;
-    }
-    lbComment.value = '';
-    lightbox.hidden = false;
-    // Remembered open, so an interrupted visit reopens right here.
-    lbOpenPoster = p.poster_id;
-    saveStateToUrl();
-  }
-
-  function closeLightbox() {
-    lightbox.hidden = true;
-    currentLightbox = null;
-    // A deliberate close is remembered as closed — the next visit opens
-    // the plain gallery, not a lightbox nobody asked for.
-    lbOpenPoster = 0;
-    saveStateToUrl();
-  }
+  // ── Lightbox — the shared zoom, wired for THIS page ─────────────────────
+  // The rendering, stepping and keyboard live in poster_lightbox.js. This
+  // page supplies: the day's list (arrow through the whole day without
+  // closing — owner's ask 2026-09-06), the place-check pill, the resume
+  // memory, and which page-owned buttons exist here (all of them).
+  LB.init({
+    fileUrl: (p) => fileUrl(p.poster_id, p.size || p.filename),
+    list: () => {
+      const out = [];
+      (titles || []).forEach((t) => (t.posters || []).forEach((p) => out.push({ t, p })));
+      return out;
+    },
+    extraPills: (t, p) => (placeCheck.enabled ? [placePillNode(p)] : []),
+    // Remembered open, so an interrupted visit reopens right here; a
+    // deliberate close is remembered as closed — the next visit opens the
+    // plain gallery, not a lightbox nobody asked for.
+    onOpen:  (t, p) => { lbOpenPoster = p.poster_id; saveStateToUrl(); },
+    onClose: ()     => { lbOpenPoster = 0; saveStateToUrl(); },
+    // Everything DERIVED from the K mark gets redone — the grid cell, the
+    // title outline, the day count. Deliberately NOT re-sorted here: the
+    // page must never reorder under the cursor mid-review; reviewed ones
+    // sink on the next load or when the order dropdown is touched.
+    onReviewed: () => { renderGallery(); refreshSummary(); },
+    features: {
+      flag: true,
+      retire: true,
+      // Shown only for a verdict that CAN be acknowledged (Google
+      // disagreed, or had no opinion).
+      placeAck: (t, p) => placeCheck.enabled
+        && (p.place_status === 'mismatch' || p.place_status === 'no_opinion'),
+    },
+  });
+  const openLightbox  = (t, p) => LB.open(t, p);
+  const closeLightbox = () => LB.close();
 
   // ── RETIRE TITLE — no good photo of this place exists ─────────────────
   // Opened from the zoom. Two typed locks (a reason + the word Confirm),
@@ -724,15 +623,17 @@
     });
 
     retireBtn.addEventListener('click', () => {
-      if (!currentLightbox) return;
-      nameEl.textContent = currentLightbox.master.title || '';
+      const cur = LB.current();
+      if (!cur) return;
+      nameEl.textContent = cur.master.title || '';
       retireDialog.hidden = false;
       reasonEl.focus();
     });
 
     goBtn.addEventListener('click', async () => {
-      if (!currentLightbox) return;
-      const masterId = currentLightbox.master.master_id;
+      const cur = LB.current();
+      if (!cur) return;
+      const masterId = cur.master.master_id;
       goBtn.disabled = true;
       try {
         const fd = new FormData();
@@ -761,41 +662,8 @@
   // A place-keeper for a review interrupted halfway: green outline here,
   // in the grid and on the title box, and the day header counts what is
   // still owed an eye. It decides nothing — see the column comment in
-  // models.py. Same key as Approve Artwork's keep, on purpose (muscle
-  // memory), and the same key undoes it.
-  function renderLbReviewed(p) {
-    lightbox.classList.toggle('lb-reviewed', !!p.reviewed);
-    const host = $('ib-lb-pills');
-    if (!host) return;
-    let pill = host.querySelector('.status-reviewed');
-    if (p.reviewed && !pill) {
-      pill = document.createElement('span');
-      pill.className = 'status-pill status-reviewed';
-      pill.textContent = 'REVIEWED ✓';
-      pill.title = 'You marked this one as looked-at (K). Press K again to undo.';
-      host.appendChild(pill);
-    } else if (!p.reviewed && pill) {
-      pill.remove();
-    }
-  }
-
-  async function toggleReviewed(t, p) {
-    const r = await fetch(`/admin/poster/${p.poster_id}/reviewed`, { method: 'POST' });
-    if (!r.ok) { alert('Could not save the mark: ' + r.status); return; }
-    const d = await r.json();
-    p.reviewed = !!d.reviewed;
-    // Everything DERIVED from the mark gets redone — the grid cell, the
-    // title outline, the day count, and the zoom if it shows this one.
-    // Deliberately NOT re-sorted here: the page must never reorder under
-    // the cursor mid-review; reviewed ones sink on the next load or when
-    // the order dropdown is touched.
-    renderGallery();
-    refreshSummary();
-    if (currentLightbox && currentLightbox.poster.poster_id === p.poster_id) {
-      renderLbReviewed(p);
-    }
-  }
-
+  // models.py. The save and the zoom's pill live in poster_lightbox.js
+  // (LB.toggleReviewed); this page's re-rendering rides its onReviewed.
   async function toggleReviewedTitle(t) {
     // K on a title in the grid: if anything on it is still unmarked, mark
     // it all — otherwise unmark it all. One intention per press, never a
@@ -806,17 +674,10 @@
     const marking = ps.some((p) => !p.reviewed);
     for (const p of ps) {
       if (!!p.reviewed !== marking) {
-        await toggleReviewed(t, p);
+        await LB.toggleReviewed(t, p);
       }
     }
   }
-
-  document.querySelectorAll('[data-lightbox-close]').forEach((el) => {
-    el.addEventListener('click', closeLightbox);
-  });
-  const lbPrev = $('ib-lb-prev'), lbNext = $('ib-lb-next');
-  if (lbPrev) lbPrev.addEventListener('click', () => lightboxStep(-1));
-  if (lbNext) lbNext.addEventListener('click', () => lightboxStep(1));
 
   // Rebuild ONE card in place — no full reload, so the gallery keeps its
   // scroll position and the zoom stays open. Flagging used to close the zoom
@@ -841,13 +702,16 @@
     if (section) section.classList.toggle('flagged', anyFlagged);
   }
 
+  const lbFlagBtn   = $('ib-lb-flag-btn');
+  const lbUnflagBtn = $('ib-lb-unflag-btn');
   lbFlagBtn.addEventListener('click', async () => {
-    if (!currentLightbox) return;
-    const { master, poster } = currentLightbox;
+    const cur = LB.current();
+    if (!cur) return;
+    const { master, poster } = cur;
     lbFlagBtn.disabled = true;
     try {
       const fd = new FormData();
-      fd.append('comment', lbComment.value || '');
+      fd.append('comment', $('ib-lb-comment').value || '');
       const r = await fetch(`/admin/poster/${poster.poster_id}/flag`, { method: 'POST', body: fd });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { alert('Flag failed: ' + (d.detail || r.status)); return; }
@@ -858,7 +722,7 @@
       poster.revision_id = d.id ?? poster.revision_id;
       poster.revision_status = 'open';
       poster.revision_type = null;
-      poster.comment = lbComment.value || '';
+      poster.comment = $('ib-lb-comment').value || '';
       rerenderPosterCard(master, poster);
       refreshTitleFlagOutline(master, poster);
       openLightbox(master, poster);
@@ -868,8 +732,9 @@
   });
 
   lbUnflagBtn.addEventListener('click', async () => {
-    if (!currentLightbox) return;
-    const { master, poster } = currentLightbox;
+    const cur = LB.current();
+    if (!cur) return;
+    const { master, poster } = cur;
     lbUnflagBtn.disabled = true;
     try {
       const r = await fetch(`/admin/poster/${poster.poster_id}/unflag`, { method: 'POST' });
@@ -892,21 +757,14 @@
   // through the flagged ones and clear each without going back to the grid.
   // Stays in the lightbox afterward — the point is to keep moving. The
   // underlying poster object is updated in place, so the pill and the grid
-  // behind agree the moment you look at them.
-  const lbGoogle = $('ib-lb-google');
-  if (lbGoogle) {
-    lbGoogle.addEventListener('click', () => {
-      if (!currentLightbox || !currentLightbox.master.google_url) return;
-      // A new tab, so the zoom stays open behind it and you can keep arrowing.
-      window.open(currentLightbox.master.google_url, '_blank', 'noopener');
-    });
-  }
-
+  // behind agree the moment you look at them. (CHECK GOOGLE itself is
+  // bound inside poster_lightbox.js — it is the same on every page.)
   const lbPlaceAck = $('ib-lb-place-ack');
   if (lbPlaceAck) {
     lbPlaceAck.addEventListener('click', async () => {
-      if (!currentLightbox) return;
-      const { master, poster } = currentLightbox;
+      const cur = LB.current();
+      if (!cur) return;
+      const { master, poster } = cur;
       lbPlaceAck.disabled = true;
       try {
         const r = await fetch('/admin/api/place_check/ack', {
@@ -925,21 +783,12 @@
     });
   }
 
-  // Keyboard nav
+  // Keyboard nav — the open zoom owns its own keys (Esc / arrows / K)
+  // inside poster_lightbox.js, so this handler steps aside while it shows.
   document.addEventListener('keydown', (e) => {
     const ae = document.activeElement;
     if (ae && ['INPUT', 'SELECT', 'TEXTAREA'].includes(ae.tagName)) return;
-    if (!lightbox.hidden) {
-      if (e.key === 'Escape') closeLightbox();
-      if (e.key === 'ArrowLeft')  lightboxStep(-1);
-      if (e.key === 'ArrowRight') lightboxStep(1);
-      // K = "I have looked at this one", K again undoes — the same key
-      // Approve Artwork uses for keep, so the hand already knows it.
-      if ((e.key === 'k' || e.key === 'K') && currentLightbox) {
-        toggleReviewed(currentLightbox.master, currentLightbox.poster);
-      }
-      return;
-    }
+    if (LB.isOpen()) return;
     if (e.key === 'ArrowLeft')  navTitle(-1);
     if (e.key === 'ArrowRight') navTitle(1);
     // K in the plain gallery marks the CURRENT title — the one the arrows

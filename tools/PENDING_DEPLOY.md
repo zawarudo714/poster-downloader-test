@@ -1,21 +1,18 @@
 # Not yet deployed
 
-**v224 — the 2026-09-20 audit's findings (waiting to deploy).**
-Found by walking the retire flow's seams, none reported by a symptom yet:
-- Retiring a title now also stands down any QUEUED upload rows for its
-  pictures (status 'skipped', the SKIP UPLOAD word) — the claim already
-  refused deleted pictures, but the row would have sat counted in the
-  strip's "waiting: N to upload" for ever.
-- The admin's own ADD-image box now refuses a retired title, the one door
-  left that could hang a live picture under 'unusable' (worker doors were
-  sealed in v223).
-- New Diagnostics invariant `retired titles hold nothing`: a live picture
-  under a retired title, or a pay-despite-delete mark on a picture still
-  alive, goes red unattended.
-- New preflight check `status menu matches its filter` (sabotage-tested
-  red and green): the Title List's status dropdown and _master_query's
-  whitelist can never disagree again — the class behind the "Unusable
-  filter showed everything" miss.
+**v225 — Changes Requested gets the shared zoom (waiting to deploy).**
+- The zoom overlay moved out of admin.js into poster_lightbox.js +
+  _poster_lightbox.html, shared by Worker Images and Changes Requested.
+  Worker Images behaves exactly as before; anything odd in its zoom
+  (arrows, K, flag, retire, place-ack, CHECK GOOGLE) is this change.
+- Changes Requested: clicking any thumbnail opens that zoom in place
+  (no more new tab); arrows walk the page; K works and rings the thumb.
+- Approving a fix — single APPROVE or APPROVE COMPLETION — now stamps
+  those pictures as reviewed (the K mark), narrowly: only the pictures
+  the approval covered, live ones, first look keeps its date.
+- Preflight: the hook check now reads {% include %}'d markup, and a new
+  check "the shared zoom ships with its markup" fails any page loading
+  poster_lightbox.js without _poster_lightbox.html (both sabotage-tested).
 - Server only. The Windows node is NOT affected.
 
 Whoever changes code writes here what is waiting and why; the deploy tool

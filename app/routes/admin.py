@@ -1665,6 +1665,83 @@ def browse_page(
     )
 
 
+def _zoom_master_payload(db: Session, mt, project) -> dict:
+    """
+    The title half of what the shared image zoom (poster_lightbox.js) shows.
+
+    ONE spelling for every screen that opens the zoom — Worker Images
+    builds its browse reply from this, and Changes Requested embeds the
+    same shape in its page — so the two screens can never describe the
+    same picture differently.
+    """
+    # The GOOGLE-images link for the zoom's CHECK GOOGLE button, built from
+    # the SAME google_query and address the worker's own GOOGLE button uses
+    # (worker._source_search_url), so the admin and the worker search for
+    # the same thing and it stays editable on the dashboard. Empty when the
+    # project has no source link, which hides the button.
+    from .worker import _source_search_url
+    from ..pipeline import search_text
+
+    return {
+        "master_id": mt.id if mt else None,
+        "title": mt.title if mt else "(unknown)",
+        "year":  mt.year  if mt else "",
+        # The kind word from the sheet — city, castle, waterfall — so the
+        # reviewer sees the same subject drawing the worker saw while
+        # choosing the photograph.
+        "kind":  (mt.description or "") if mt else "",
+        # The lightbox names the place with its number, and had been
+        # asking for a field this reply never carried — so the number
+        # silently never showed (found 2026-09-10).
+        "external_id": mt.external_id if mt else None,
+        "needs_revision": bool(mt.needs_revision) if mt else False,
+        # Google-images search for this place, or "" for no button.
+        "google_url": (_source_search_url(
+            db, search_text(mt), mt.content_type, project,
+            kind=(mt.description or "")) if mt else ""),
+    }
+
+
+def _zoom_poster_payload(sp, rev) -> dict:
+    """
+    The picture half of the zoom's data — same one-spelling rule as above.
+    `rev` is the picture's ACTIVE revision (open / awaiting_approval) or
+    None; the caller supplies it because each screen already holds it.
+    """
+    return {
+        "poster_id": sp.id,
+        "filename": sp.filename,
+        "title_folder": sp.title_folder_path,
+        "size": sp.file_size,
+        "low_quality_url": bool(sp.low_quality_url),
+        "image_width":  sp.image_width,
+        "image_height": sp.image_height,
+        # 'brave' / 'google' / 'pasted', or empty for saves that
+        # predate the column — the screen then says nothing.
+        "image_source": sp.image_source or "",
+        # The admin's K mark — green outline + sinks to the bottom on
+        # the next sort. Cosmetic by design; see models.py.
+        "reviewed": sp.reviewed_at is not None,
+        # The place check. status None means not answered yet — either
+        # never tried, or the last try failed (place_error True then).
+        # acked is derived by comparing the two timestamps, the
+        # skip_acked_at design: an ack only silences the check it
+        # answered.
+        "place_status": sp.place_check_status,
+        "place_guess":  sp.place_check_guess or "",
+        "place_error":  bool(sp.place_check_error),
+        "place_acked":  bool(sp.place_check_acked_at and sp.place_check_at
+                             and sp.place_check_acked_at >= sp.place_check_at),
+        "added_by":     sp.added_by or None,
+        "flagged": rev is not None,
+        "revision_id": rev.id if rev else None,
+        "revision_status": rev.status if rev else None,
+        "revision_type":   rev.revision_type if rev else None,
+        "comment": rev.comment if rev else "",
+        "worker_note": rev.worker_note if rev else "",
+    }
+
+
 @router.get("/api/browse")
 def api_browse(
     request: Request,
@@ -1709,73 +1786,16 @@ def api_browse(
           .all()
     )
 
-    # The GOOGLE-images link for the zoom's CHECK GOOGLE button, built from
-    # the SAME google_query and address the worker's own GOOGLE button uses
-    # (worker._source_search_url), so the admin and the worker search for the
-    # same thing and it stays editable on the dashboard. Once per TITLE, not
-    # per poster, and a worker-day is a small bounded set. Empty when the
-    # project has no source link, which hides the button.
-    from .worker import _source_search_url
-    from ..pipeline import search_text
-
     # Group by master title (preserve folder-name ordering)
     from collections import OrderedDict
     titles = OrderedDict()
     for sp, mt, rev in rows:
         key = mt.id if mt else None
         if key not in titles:
-            titles[key] = {
-                "master_id": key,
-                "title": mt.title if mt else "(unknown)",
-                "year":  mt.year  if mt else "",
-                # The kind word from the sheet — city, castle, waterfall —
-                # so the reviewer sees the same subject drawing the worker
-                # saw while choosing the photograph.
-                "kind":  (mt.description or "") if mt else "",
-                # The lightbox names the place with its number, and had been
-                # asking for a field this reply never carried — so the
-                # number silently never showed (found 2026-09-10).
-                "external_id": mt.external_id if mt else None,
-                "title_folder": sp.title_folder_path,
-                "needs_revision": bool(mt.needs_revision) if mt else False,
-                # Google-images search for this place, or "" for no button.
-                "google_url": (_source_search_url(
-                    db, search_text(mt), mt.content_type, project,
-                    kind=(mt.description or "")) if mt else ""),
-                "posters": [],
-            }
-        titles[key]["posters"].append({
-            "poster_id": sp.id,
-            "filename": sp.filename,
-            "title_folder": sp.title_folder_path,
-            "size": sp.file_size,
-            "low_quality_url": bool(sp.low_quality_url),
-            "image_width":  sp.image_width,
-            "image_height": sp.image_height,
-            # 'brave' / 'google' / 'pasted', or empty for saves that
-            # predate the column — the screen then says nothing.
-            "image_source": sp.image_source or "",
-            # The admin's K mark — green outline + sinks to the bottom on
-            # the next sort. Cosmetic by design; see models.py.
-            "reviewed": sp.reviewed_at is not None,
-            # The place check. status None means not answered yet — either
-            # never tried, or the last try failed (place_error True then).
-            # acked is derived by comparing the two timestamps, the
-            # skip_acked_at design: an ack only silences the check it
-            # answered.
-            "place_status": sp.place_check_status,
-            "place_guess":  sp.place_check_guess or "",
-            "place_error":  bool(sp.place_check_error),
-            "place_acked":  bool(sp.place_check_acked_at and sp.place_check_at
-                                 and sp.place_check_acked_at >= sp.place_check_at),
-            "added_by":     sp.added_by or None,
-            "flagged": rev is not None,
-            "revision_id": rev.id if rev else None,
-            "revision_status": rev.status if rev else None,
-            "revision_type":   rev.revision_type if rev else None,
-            "comment": rev.comment if rev else "",
-            "worker_note": rev.worker_note if rev else "",
-        })
+            titles[key] = _zoom_master_payload(db, mt, project)
+            titles[key]["title_folder"] = sp.title_folder_path
+            titles[key]["posters"] = []
+        titles[key]["posters"].append(_zoom_poster_payload(sp, rev))
 
     from ..pipeline import get_setting
     try:
@@ -2657,6 +2677,13 @@ def approve_revision(
     # Recompute needs_revision on the master
     sp = db.query(SavedPoster).filter_by(id=rev.saved_poster_id).first()
     if sp:
+        # Approving a fix IS looking at the picture, so it carries the K
+        # mark with it — the reviewed state on Worker Images agrees with
+        # the decision just made here (owner's ask, 2026-09-23). Narrow on
+        # purpose: only the picture this approval covered, only if it is
+        # still alive, and never re-stamped (the first look keeps its date).
+        if sp.deleted_at is None and sp.reviewed_at is None:
+            sp.reviewed_at = datetime.utcnow()
         mt = db.query(MasterTitle).filter_by(id=sp.master_title_id).first()
         if mt:
             any_active = (
@@ -2749,6 +2776,7 @@ def approve_complete(
           .all()
     )
     resolved_ids = []
+    resolved_sp_ids = set()
     suffix = (": " + verdict.strip()) if verdict.strip() else ""
     for r in revs:
         r.status = "resolved"
@@ -2756,6 +2784,19 @@ def approve_complete(
         r.resolved_at = now
         r.admin_verdict = "approved via title completion" + suffix
         resolved_ids.append(r.id)
+        resolved_sp_ids.add(r.saved_poster_id)
+
+    # Approving the completion IS looking at these pictures, so they carry
+    # the K mark too (owner's ask, 2026-09-23). Narrow on purpose: only the
+    # pictures whose flags this approval just resolved — not everything the
+    # title holds — only live ones, and a mark already made keeps its date.
+    if resolved_sp_ids:
+        for _sp in (db.query(SavedPoster)
+                      .filter(SavedPoster.id.in_(resolved_sp_ids),
+                              SavedPoster.deleted_at.is_(None),
+                              SavedPoster.reviewed_at.is_(None))
+                      .all()):
+            _sp.reviewed_at = now
 
     t.status = "complete"
     t.completed_at = now
@@ -3067,6 +3108,41 @@ def revisions_page(
     for _rev, _sp, _mt in open_rows:
         _note_missing(_sp)
 
+    # ── What the shared zoom needs, per picture on this page ───────────────
+    # Clicking any thumbnail here opens the same zoom Worker Images has
+    # (owner's ask, 2026-09-23) instead of a bare file in a new tab. The
+    # payload is built by the SAME two helpers the browse API uses, so the
+    # two screens describe a picture identically. Pictures whose file is
+    # missing are left out — their card already explains the state and
+    # offers the one exit.
+    zoom_items: dict[int, dict] = {}
+    _zoom_masters: dict[int, dict] = {}
+
+    def _zoom_add(sp, mt, rev) -> None:
+        if sp is None or mt is None:
+            return
+        if sp.id in zoom_items or sp.id in missing_ids or sp.deleted_at is not None:
+            return
+        if mt.id not in _zoom_masters:
+            _zoom_masters[mt.id] = _zoom_master_payload(db, mt, proj)
+        zoom_items[sp.id] = {"master": _zoom_masters[mt.id],
+                             "poster": _zoom_poster_payload(sp, rev)}
+
+    for _blk in pending_complete_blocks:
+        _t = _blk["title"]
+        _active_rev_by_sp = {_sp.id: _rev for _rev, _sp in _blk["revisions"]}
+        for _rev, _sp in _blk["revisions"]:
+            _zoom_add(_sp, _t, _rev)
+        for _sp in _blk["current"]:
+            _zoom_add(_sp, _t, _active_rev_by_sp.get(_sp.id))
+    for _rev, _sp, _mt in awaiting_rows:
+        _zoom_add(_sp, _mt, _rev)
+    for _rev, _sp, _mt in open_rows:
+        _zoom_add(_sp, _mt, _rev)
+    for _rev, _sp, _mt in deletion_rows:
+        for _cp in deletion_current.get(_mt.id, []):
+            _zoom_add(_cp, _mt, None)
+
     return templates.TemplateResponse(
         request,
         "admin_revisions.html",
@@ -3077,6 +3153,7 @@ def revisions_page(
             "deletion_rows": deletion_rows,
             "deletion_current": deletion_current,
             "resolved_rows": resolved_rows,
+            "zoom_items": zoom_items,
             "active_tab": "revisions",
         },
     )

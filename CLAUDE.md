@@ -1524,6 +1524,15 @@ holes in checks that had been passing for weeks:
     so a shared script's hooks had to appear on EVERY page loading it.
     Three false failures at once from `admin.js`, whose lightbox hooks live
     on one page of the three.
+  * A third hole surfaced 2026-09-23, when the zoom's markup moved into a
+    shared `{% include %}` partial: the same check read only the including
+    file, so every hook in the partial counted as missing — and once
+    taught to follow includes, the fix opened the OPPOSITE gap, because
+    per-script-across-all-pages means one page carrying the markup
+    satisfies the check for a page that forgot the include. That needed
+    its own two-lists check (`the shared zoom ships with its markup`).
+    The general shape: when markup becomes SHARED, re-ask every check
+    that maps a page to its own markup — both directions break at once.
 
 And the first attempt at sabotage tested the wrong thing: renaming the
 button's `data-` attribute proved nothing about "endpoints have buttons",

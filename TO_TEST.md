@@ -826,6 +826,26 @@ Three quiet things from the 2026-09-20 audit; one glance covers them all:
 
 ---
 
+## 79. CHANGES REQUESTED GETS THE REAL ZOOM — v225
+
+Open Changes Requested while anything is waiting (any section):
+
+- **Click a thumbnail.** The same zoom as Worker Images should open in
+  place — title with its number, the kind drawing, the size line, the
+  source pill, CHECK GOOGLE — instead of a bare file in a new browser tab.
+- **Arrow keys** step through every picture on the page; Escape closes;
+  **K** marks one as looked-at (green ring on the thumbnail too).
+- The zoom here deliberately has NO flag, retire or "checked, it's fine"
+  buttons — decisions stay on the card (APPROVE / REJECT with your typed
+  verdict).
+- **Approve = reviewed:** APPROVE (single fix) or APPROVE COMPLETION
+  should leave those pictures wearing the green K ring afterwards on
+  Worker Images, without you pressing K.
+- A card whose picture file is MISSING keeps its plain card and the
+  DELETE THIS RECORD button — no zoom for a picture that has no file.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** No longer needed at all — corrected

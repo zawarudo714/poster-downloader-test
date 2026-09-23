@@ -617,6 +617,23 @@ def _js_for_template(tpl: Path) -> list[Path]:
             if (JS / m).is_file()]
 
 
+def _with_included_markup(tpl: Path) -> str:
+    """
+    A template's source PLUS every {% include %}'d partial's source.
+
+    A hook can live in shared markup (_poster_lightbox.html is the first),
+    and a check that reads only the including file reports it missing —
+    which is how this helper was born: the shared zoom's close button
+    failed the hook check while sitting right there in the partial.
+    """
+    src = tpl.read_text(encoding="utf-8", errors="ignore")
+    for name in re.findall(r"""\{%\s*include\s+['"]([^'"]+\.html)['"]""", src):
+        part = TPL / name
+        if part.is_file():
+            src += "\n" + part.read_text(encoding="utf-8", errors="ignore")
+    return src
+
+
 def check_hooks_exist() -> None:
     """
     Every `[data-x]` the JS looks for must exist somewhere it can find it.
@@ -643,8 +660,9 @@ def check_hooks_exist() -> None:
     base = (TPL / "base.html").read_text(encoding="utf-8", errors="ignore")
 
     for js, templates in sorted(used_by.items()):
-        tpl_src = "\n".join(t.read_text(encoding="utf-8", errors="ignore")
-                            for t in templates)
+        # Included partials count as the page's own markup — a hook that
+        # lives in _poster_lightbox.html is on every page that includes it.
+        tpl_src = "\n".join(_with_included_markup(t) for t in templates)
         where = ", ".join(t.name for t in templates)
         js_src = js.read_text(encoding="utf-8", errors="ignore")
         # ── EVERY WAY THIS CODEBASE ASKS FOR A HOOK ──────────────────
@@ -671,6 +689,32 @@ def check_hooks_exist() -> None:
                 continue
             fail(f"{js.name} looks for [{token}] — not in {where}, "
                  f"base.html, or its own generated HTML")
+
+
+def check_shared_zoom_markup_included() -> None:
+    """
+    A page that loads poster_lightbox.js must also {% include %} its markup,
+    _poster_lightbox.html.
+
+    The hook check above cannot catch this: it is per SCRIPT across the
+    UNION of pages loading it, so one page carrying the markup satisfies it
+    for all of them — while a page missing the include gets a zoom whose
+    every element is absent, and the script's getElementById guards make
+    that perfectly silent: clicks on thumbnails simply do nothing. Two
+    lists, compared mechanically (the colour-names lesson): who loads the
+    script, and who includes its markup.
+    """
+    for tpl in sorted(TPL.glob("*.html")):
+        if tpl.name.startswith("_"):
+            continue                      # partials load nothing themselves
+        src = tpl.read_text(encoding="utf-8", errors="ignore")
+        if "/static/js/poster_lightbox.js" not in src:
+            continue
+        if not re.search(r"""\{%\s*include\s+['"]_poster_lightbox\.html['"]""",
+                         src):
+            fail(f"{tpl.name} loads poster_lightbox.js but never includes "
+                 f"_poster_lightbox.html — the zoom's markup. Every "
+                 f"thumbnail click on that page would silently do nothing.")
 
 
 def check_hidden_ancestors() -> None:
@@ -3214,6 +3258,7 @@ CHECKS = [
     ("javascript parses",         check_js_parses),
     ("template tags balance",     check_template_tags_balance),
     ("page hooks exist",          check_hooks_exist),
+    ("the shared zoom ships with its markup", check_shared_zoom_markup_included),
     ("buttons have handlers",     check_actions_are_handled),
     ("endpoints have buttons",    check_endpoints_have_buttons),
     ("nothing stuck behind hidden", check_hidden_ancestors),

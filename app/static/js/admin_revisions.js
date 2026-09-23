@@ -1,6 +1,58 @@
-/* Admin "Changes Requested" page — wires up Approve / Reject / Clear-flag. */
+/* Admin "Changes Requested" page — wires up Approve / Reject / Clear-flag,
+   and opens the shared zoom (poster_lightbox.js) on every thumbnail. */
 
 (function () {
+  // ── The shared zoom ──────────────────────────────────────────────────
+  // Same overlay as Worker Images: details line, source pill, kind chip,
+  // CHECK GOOGLE, the K mark, arrow through every picture on the page.
+  // The DECISIONS stay on the cards (APPROVE / REJECT with a typed
+  // verdict), so flagging, place-ack and retire are switched off here —
+  // a second door to "send back" inside the zoom would be two paths to
+  // one action.
+  let zoomData = {};
+  try {
+    const el = document.getElementById('lb-data');
+    zoomData = el ? (JSON.parse(el.textContent) || {}) : {};
+  } catch (e) { zoomData = {}; }
+
+  // Reading order of the thumbnails on the page, deduplicated — a picture
+  // can appear both in a card and in a "title now holds" strip, and the
+  // arrows should visit it once.
+  function zoomList() {
+    const out = [];
+    const seen = new Set();
+    document.querySelectorAll('[data-lb]').forEach((a) => {
+      const item = zoomData[a.getAttribute('data-lb')];
+      if (!item || seen.has(item.poster.poster_id)) return;
+      seen.add(item.poster.poster_id);
+      out.push({ t: item.master, p: item.poster });
+    });
+    return out;
+  }
+
+  const LB = window.PosterLightbox;
+  const zoomReady = LB && LB.init({
+    list: zoomList,
+    // The K mark's green ring on every copy of this picture on the page,
+    // so the grid view agrees with the zoom the moment it closes.
+    onReviewed: (t, p) => {
+      document.querySelectorAll(`[data-lb="${p.poster_id}"]`)
+        .forEach((a) => a.classList.toggle('lb-marked', !!p.reviewed));
+    },
+    features: { flag: false, retire: false, placeAck: false },
+  });
+
+  if (zoomReady) {
+    document.querySelectorAll('[data-lb]').forEach((a) => {
+      const item = zoomData[a.getAttribute('data-lb')];
+      if (!item) return;   // no payload (e.g. file missing) → keep the plain link
+      if (item.poster.reviewed) a.classList.add('lb-marked');
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        LB.open(item.master, item.poster);
+      });
+    });
+  }
   // Approve / Reject buttons inside awaiting-approval cards
   document.querySelectorAll('.rev-card-awaiting').forEach((card) => {
     const revId = card.getAttribute('data-revision-id');

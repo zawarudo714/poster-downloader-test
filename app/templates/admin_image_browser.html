@@ -124,41 +124,8 @@
   </div>
 </div>
 
-{# Lightbox modal — appears when admin clicks a poster #}
-<div id="ib-lightbox" class="lightbox" hidden>
-  <div class="lightbox-bg" data-lightbox-close></div>
-  <div class="lightbox-card">
-    <button class="lightbox-close" data-lightbox-close aria-label="Close">×</button>
-    <div class="lightbox-titlebar">
-      <span class="lightbox-title" id="ib-lb-title"></span>
-      <span id="ib-lb-kind"></span>
-      <span class="muted mono" id="ib-lb-pos"></span>
-    </div>
-    <button class="lightbox-arrow lightbox-arrow-prev" id="ib-lb-prev"
-            aria-label="Previous title" title="Previous (←)">‹</button>
-    <button class="lightbox-arrow lightbox-arrow-next" id="ib-lb-next"
-            aria-label="Next title" title="Next (→)">›</button>
-    <img id="ib-lb-img" alt="">
-    <div class="lightbox-pills" id="ib-lb-pills"></div>
-    <div class="lightbox-meta mono" id="ib-lb-meta"></div>
-    <div class="lightbox-flag" id="ib-lb-flag" hidden>
-      <strong>CURRENTLY FLAGGED:</strong>
-      <span class="lb-status-pill"></span>
-      <div class="lb-flag-comment"></div>
-      <div class="lb-worker-note muted"></div>
-    </div>
-    <div class="lightbox-controls">
-      <input type="text" id="ib-lb-comment" placeholder="(optional) comment for the user">
-      <button class="btn btn-error" id="ib-lb-flag-btn">FLAG FOR CHANGES</button>
-      <button class="btn btn-ghost" id="ib-lb-unflag-btn" hidden>CLEAR FLAG</button>
-      <button class="btn btn-ghost" id="ib-lb-place-ack" hidden>CHECKED, IT'S FINE</button>
-      <button class="btn btn-info" id="ib-lb-google" hidden
-              title="Open Google Images for this place in a new tab, to confirm the picture and judge whether it is the most scenic view.">CHECK&nbsp;GOOGLE</button>
-      <button class="btn btn-ghost btn-retire" id="ib-lb-retire"
-              title="The place has no good photograph anywhere. Removes the picture, pays the worker for the search anyway, and retires the title so nobody works it again.">RETIRE&nbsp;TITLE</button>
-    </div>
-  </div>
-</div>
+{# Lightbox modal — the shared zoom, one markup for every page that uses it #}
+{% include "_poster_lightbox.html" %}
 
 {# ── RETIRE TITLE — the deliberate, two-lock dialog ─────────────────────
    Some places simply have no good photograph, and nobody — owner, worker
@@ -230,5 +197,8 @@
 {# Subject drawings, shared with the worker page — loaded before admin.js,
    which reads window.SubjectKind when it draws each title's header. #}
 <script src="/static/js/subject_icons.js?v={{ app_version }}"></script>
+{# The shared zoom must be defined before admin.js wires its page-specific
+   buttons (flag, place-ack, retire) into it. #}
+<script src="/static/js/poster_lightbox.js?v={{ app_version }}"></script>
 <script src="/static/js/admin.js?v={{ app_version }}"></script>
 {% endblock %}

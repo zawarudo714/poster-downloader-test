@@ -3642,6 +3642,13 @@ body:has(#ib-bulk-bar:not([hidden])) { padding-bottom: 88px; }
 .pcc-rev-action { font-size: 12px; word-break: break-word; }
 .pcc-rev-flag, .pcc-rev-note { font-size: 11px; line-height: 1.4; }
 .pcc-rev-flag { color: var(--subtext); }
+/* A flag's history, newest first (flag_history filter). The latest
+   instruction is what the admin is judging against, so it reads loud;
+   everything before it steps back to grey. */
+.flag-steps { display: flex; flex-direction: column; gap: 2px; }
+.flag-step { color: var(--subtext); }
+.flag-step-latest { color: var(--text); font-weight: 600; }
+.flag-step-latest strong { color: var(--skip); }
 .pcc-rev-note {
   background: rgba(100, 180, 255, 0.06);
   border-left: 2px solid rgba(100, 180, 255, 0.4);

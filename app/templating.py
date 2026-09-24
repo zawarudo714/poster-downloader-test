@@ -121,5 +121,60 @@ def _local_dt(value, fmt="%Y-%m-%d %H:%M"):
     return fmt_local(value, fmt) if value else ""
 
 
+_ADMIN_TAG = "[admin]:"
+
+
+def _flag_history(rev) -> list:
+    """
+    Jinja filter: every instruction on a flag, NEWEST FIRST, as
+    [{"who": "latest"|"earlier"|"first", "text": ...}].
+
+    ONE reader for both kinds of Changes Requested card. The two REJECT
+    buttons store a send-back differently — single-fix REJECT appends
+    "[admin]: note" to `comment`; REJECT on a completion leaves `comment`
+    alone and writes the note only to `admin_verdict` — and the cards used
+    to print `comment` raw under "Original flag", so after a completion
+    reject the admin saw only his FIRST flag and never his newest one
+    (owner, 2026-09-24). The storage is deliberately left as it is: the
+    worker's screen reads both fields, and folding the verdict into
+    `comment` would show it to him twice. Reading both here, with repeats
+    dropped, makes the two cards agree without touching what he sees.
+
+    `admin_verdict` is only a send-back note while the flag is still live
+    (open / awaiting approval); on resolved rows it holds approval or
+    deletion wording, which is not an instruction and is ignored.
+    """
+    if rev is None:
+        return []
+    raw = (getattr(rev, "comment", None) or "").strip()
+    parts = [p.strip() for p in raw.split(_ADMIN_TAG)]
+    steps = []
+    if parts and parts[0]:
+        steps.append(parts[0])
+    for p in parts[1:]:
+        if p:
+            steps.append(p)
+    verdict = (getattr(rev, "admin_verdict", None) or "").strip()
+    live = getattr(rev, "status", "") in ("open", "awaiting_approval")
+    if live and verdict and (not steps or steps[-1] != verdict):
+        steps.append(verdict)
+    if not steps:
+        return [{"who": "first", "text": "(no comment)"}]
+    out = []
+    n = len(steps)
+    for i, text in enumerate(reversed(steps)):
+        if n == 1:
+            who = "first"
+        elif i == 0:
+            who = "latest"
+        elif i == n - 1:
+            who = "first"
+        else:
+            who = "earlier"
+        out.append({"who": who, "text": text})
+    return out
+
+
 templates.env.filters["from_json"] = _from_json
 templates.env.filters["local_dt"]  = _local_dt
+templates.env.filters["flag_history"] = _flag_history

@@ -909,6 +909,17 @@ On Changes Requested, click a thumbnail to zoom:
 
 ---
 
+## 84. NEWEST INSTRUCTION FIRST ON EVERY CARD — v230
+
+- Find (or make) a title you REJECTED as a completion, which the worker
+  has since fixed. Its card must now show "Your latest: <your reject
+  note>" highlighted at the top, and "First flag: …" in grey beneath.
+- A single picture you rejected once shows the same two lines, newest on
+  top — no more one run-on sentence.
+- A flag you never rejected just shows "Your flag: …".
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** No longer needed at all — corrected

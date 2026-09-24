@@ -2371,6 +2371,17 @@ sitting on TeePublic's inactive tab, and nothing internal disagreed with
 anything — because our single record of it said "done". The owner found it
 by opening the store in a browser.
 
+**TWO WRITERS STORING ONE FACT DIFFERENTLY NEED ONE READER.** The two
+REJECT buttons save a send-back note in different fields — one appends it
+to `comment`, the other writes only `admin_verdict` — and the Changes
+Requested cards printed `comment` raw, so after a completion reject the
+admin saw only his FIRST flag, never his newest instruction (owner,
+2026-09-24). Unifying the WRITERS would have shown the worker the note
+twice, because his screen reads both fields. The fix was ONE reader
+(`flag_history` in `templating.py`) that derives the history from both,
+drops repeats, and is the only thing any card prints. When storage cannot
+change, make the read side singular.
+
 **THE SAME BLIND SPOT SITS BETWEEN A RECORD AND THE FILE IT POINTS AT.**
 Rerunning a poster kept the old `ProcessedImage` row and set
 `is_current = 0`, and two separate comments said the rejected picture was

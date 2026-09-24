@@ -5,6 +5,17 @@
 {% block title %}Changes Requested · Admin{% endblock %}
 
 {% block content %}
+{# Every instruction on a flag, NEWEST FIRST — one reader (the
+   flag_history filter in templating.py) for every card, so the latest
+   send-back is never hidden behind the first flag (owner, 2026-09-24). #}
+{% macro flag_steps(rev) %}
+  {% set steps = rev | flag_history %}
+  <div class="flag-steps">
+  {% for s in steps %}
+    <div class="flag-step flag-step-{{ s.who }}"><strong>{% if s.who == 'latest' %}Your latest:{% elif s.who == 'earlier' %}Earlier:{% elif steps|length > 1 %}First flag:{% else %}Your flag:{% endif %}</strong> {{ s.text }}</div>
+  {% endfor %}
+  </div>
+{% endmacro %}
 <div class="admin-grid">
 
   {# ══ BAND ONE — everything a button of YOURS can finish ═══════════════
@@ -93,9 +104,7 @@
                     {% endif %}
                     {{ sp.filename }}
                   </div>
-                  <div class="pcc-rev-flag muted">
-                    <strong>Original flag:</strong> {{ rev.comment or '(no comment)' }}
-                  </div>
+                  <div class="pcc-rev-flag">{{ flag_steps(rev) }}</div>
                   {% if rev.worker_note %}
                   <div class="pcc-rev-note">
                     <strong>{{ sp.username }} note:</strong> {{ rev.worker_note }}
@@ -197,7 +206,7 @@
                   {% endif %}
                 </div>
                 <div class="rev-card-path mono">{{ sp.username }} / {{ sp.original_save_date.isoformat() }} / {{ sp.title_folder_path }}{% if rev.revision_type != 'similar' %} / {{ sp.filename }}{% endif %}</div>
-                <div class="rev-card-comment"><strong>Original ask:</strong> {{ rev.comment or "(no comment)" }}</div>
+                <div class="rev-card-comment">{{ flag_steps(rev) }}</div>
                 {% if rev.worker_note %}
                   <div class="rev-card-worker-note"><strong>{{ sp.username }} says:</strong> {{ rev.worker_note }}</div>
                 {% endif %}
@@ -221,7 +230,7 @@
                   {{ mt.title if mt else '(unknown)' }}{% if mt and mt.year %} ({{ mt.year }}){% endif %}
                 </div>
                 <div class="rev-card-path mono">{{ sp.username }} / {{ sp.original_save_date.isoformat() }} / {{ sp.title_folder_path }} / {{ sp.filename }}</div>
-                <div class="rev-card-comment"><strong>Original ask:</strong> {{ rev.comment or "(no comment)" }}</div>
+                <div class="rev-card-comment">{{ flag_steps(rev) }}</div>
                 {% if rev.worker_note %}
                   <div class="rev-card-worker-note"><strong>{{ sp.username }} says (deletion reason):</strong> {{ rev.worker_note }}</div>
                 {% else %}
@@ -308,10 +317,7 @@
                   {% if rev.revision_type == 'similar' %}<span class="status-pill status-similar">SIMILAR PAIR</span>{% endif %}
                 </div>
                 <div class="rev-card-path mono">{{ sp.username }} / {{ sp.original_save_date.isoformat() }} / {{ sp.title_folder_path }}{% if rev.revision_type != 'similar' %} / {{ sp.filename }}{% endif %}</div>
-                <div class="rev-card-comment">{{ rev.comment or "(no comment)" }}</div>
-                {% if rev.admin_verdict %}
-                  <div class="rev-card-verdict"><strong>Your earlier verdict:</strong> {{ rev.admin_verdict }}</div>
-                {% endif %}
+                <div class="rev-card-comment">{{ flag_steps(rev) }}</div>
                 <div class="rev-card-meta mono muted">flagged by {{ rev.flagged_by }} · {{ rev.created_at | local_dt('%Y-%m-%d %H:%M') }}</div>
                 <div class="rev-card-actions">
                   <button class="btn btn-ghost btn-tiny" data-unflag-poster-id="{{ sp.id }}">CLEAR FLAG</button>

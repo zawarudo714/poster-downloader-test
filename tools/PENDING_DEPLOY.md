@@ -1,15 +1,15 @@
 # Not yet deployed
 
-**v229 — decide in the zoom without being thrown out of it.**
-- On Changes Requested, APPROVE / REJECT / APPROVE COMPLETION / ACKNOWLEDGE
-  / SEND BACK / CLEAR FLAG no longer reload the page. The finished card
-  leaves in place, the band's number counts down, and if the zoom was open
-  it moves straight to the next picture still waiting — or closes when
-  nothing is left.
-- DELETE THIS RECORD still reloads, on purpose: it only exists on cards
-  whose file is missing (no zoom there), and inside a completion it removes
-  one record, not the whole decision.
-- The sidebar badge catches up on its next refresh (a few seconds).
+**v230 — your newest send-back note shows first on every card.**
+- Changes Requested cards now list a flag's full history, newest first:
+  "Your latest: …" highlighted, then "Earlier: …", then "First flag: …"
+  in grey. Before, a REJECT on a completion was never shown on the card at
+  all (only the first flag), and a REJECT on a single picture sat buried
+  at the end of one run-on line.
+- One reader (the flag_history filter in templating.py) serves all four
+  card kinds. How the two REJECT buttons SAVE is deliberately unchanged,
+  because the worker's screen reads both fields and would otherwise show
+  the note twice.
 - Server only. The Windows node is NOT affected.
 
 Whoever changes code writes here what is waiting and why; the deploy tool

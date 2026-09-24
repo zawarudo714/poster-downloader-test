@@ -1219,7 +1219,11 @@ exists or a marketplace catalogue that has been taken down.
   ONE question (`utils.live_flag_title_ids`) asked by every door, the
   worker's tag DERIVED from it at read time (which repaired the stuck
   rows with no script), and `check_flag_marker_uses_one_definition` in
-  preflight, which found the sixth door on its first run.
+  preflight, which found the sixth door on its first run. A seventh door
+  set the marker with NO flag behind it at all — SEND BACK on a deleted
+  picture — so Diagnostics called it stale and the worker could never
+  clear it; removed in v231, and the admin note carries that message. A
+  marker must mean one thing, even when setting it looks helpful.
 * **"No tool is needed" was a judgement about cost, written in the same voice
   as the measured figures around it.** Nothing on the page distinguished
   them. That is what the provenance tags are for.
@@ -2380,7 +2384,17 @@ admin saw only his FIRST flag, never his newest instruction (owner,
 twice, because his screen reads both fields. The fix was ONE reader
 (`flag_history` in `templating.py`) that derives the history from both,
 drops repeats, and is the only thing any card prints. When storage cannot
-change, make the read side singular.
+change, make the read side singular. And then COUNT the readers: v230
+fixed the cards and left the zoom printing the raw `comment`, so the card
+showed the latest note while the zoom beside it showed the first — the
+owner found it the day after deploy. "One reader" is only true once every
+screen that shows the fact has been enumerated; `check_admin_flag_text_
+uses_one_reader` now does that enumeration for every admin surface.
+The same audit found the lookup twin of this shape: the zoom picked a
+picture's card by FIRST MATCH on the page, and one picture can sit on two
+cards, so clicking it in the second card got the first card's buttons. A
+lookup by an id that can appear in several places must say WHICH place —
+here, the one the person clicked.
 
 **THE SAME BLIND SPOT SITS BETWEEN A RECORD AND THE FILE IT POINTS AT.**
 Rerunning a poster kept the old `ProcessedImage` row and set

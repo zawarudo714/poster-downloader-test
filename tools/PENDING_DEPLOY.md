@@ -1,15 +1,22 @@
 # Not yet deployed
 
-**v230 — your newest send-back note shows first on every card.**
-- Changes Requested cards now list a flag's full history, newest first:
-  "Your latest: …" highlighted, then "Earlier: …", then "First flag: …"
-  in grey. Before, a REJECT on a completion was never shown on the card at
-  all (only the first flag), and a REJECT on a single picture sat buried
-  at the end of one run-on line.
-- One reader (the flag_history filter in templating.py) serves all four
-  card kinds. How the two REJECT buttons SAVE is deliberately unchanged,
-  because the worker's screen reads both fields and would otherwise show
-  the note twice.
+**v231 — the zoom shows your newest instruction too, plus one audit fix.**
+- The zoom (Changes Requested AND Worker Images) now shows a flag's
+  history newest first — "Your latest: …" on top — from the SAME reader
+  the cards use. v230 fixed the cards and missed the zoom, which still
+  printed the first flag. New preflight check "admin flag text has one
+  reader" fails any admin screen that prints a flag's raw text; proven red
+  on the v230 zoom line, green after.
+- Audit fix: when one picture sits on two cards (for example a deletion
+  card's "now holds" strip and that picture's own REPLACED card), the zoom
+  used the FIRST card's buttons even if you clicked the second. Now the
+  card you clicked wins. Tested both ways: the test shows the wrong
+  buttons without the fix and the right ones with it.
+- SEND BACK on a DELETED card no longer marks the title as flagged. The
+  picture is gone, so there is nothing the worker could fix, and the red
+  FLAG could never clear itself. Your note still reaches the worker as the
+  ADMIN NOTE, exactly as before. Trade-off: these titles no longer appear
+  under a "needs revision" filter.
 - Server only. The Windows node is NOT affected.
 
 Whoever changes code writes here what is waiting and why; the deploy tool

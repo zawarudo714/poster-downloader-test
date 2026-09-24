@@ -691,6 +691,46 @@ def check_hooks_exist() -> None:
                  f"base.html, or its own generated HTML")
 
 
+def check_admin_flag_text_uses_one_reader() -> None:
+    """
+    No ADMIN screen prints a flag's raw `comment`; every one goes through
+    the shared history reader (templating._flag_history, delivered to the
+    browser as `flag_history`).
+
+    The two REJECT buttons store a send-back in different fields, so the raw
+    `comment` shows the FIRST flag and hides the newest instruction. v230
+    fixed the Changes Requested cards and left the zoom printing
+    `p.comment` — the admin saw the latest note on the card and the first
+    one in the zoom beside it (owner, 2026-09-24). A second reader of one
+    fact is the drift this repo keeps paying for, so the check names the
+    raw prints on every admin surface.
+
+    The WORKER's screens are deliberately out of scope: they show the flag
+    text and the send-back banner as two separate things.
+    """
+    # Flags travel as `rev` / `r` in templates and as `p` / `poster` / `rev`
+    # in the zoom's JS. The Activity Log's `row.comment` is a log note, not
+    # a flag; the first draft matched any `x.comment` and cried wolf there.
+    tpl_raw = re.compile(r"\{\{[^}]*\b(?:rev|r)\.comment\b")
+    for path in sorted(TPL.glob("admin*.html")) + [TPL / "_poster_lightbox.html"]:
+        if not path.is_file():
+            continue
+        for n, line in enumerate(path.read_text(encoding="utf-8",
+                                               errors="ignore").splitlines(), 1):
+            if tpl_raw.search(line):
+                fail(f"{path.name}:{n}: prints a flag's raw comment — use "
+                     f"the flag_steps macro / flag_history filter instead.")
+    js_raw = re.compile(r"\.textContent\s*=\s*[^;]*\b(?:p|poster|rev|r)\.comment\b")
+    for js in sorted(JS.glob("admin*.js")) + [JS / "poster_lightbox.js"]:
+        if not js.is_file():
+            continue
+        for n, line in enumerate(js.read_text(encoding="utf-8",
+                                             errors="ignore").splitlines(), 1):
+            if js_raw.search(line):
+                fail(f"{js.name}:{n}: writes a flag's raw comment to the "
+                     f"screen — render p.flag_history instead.")
+
+
 def check_flag_marker_uses_one_definition() -> None:
     """
     Any code that COMPUTES MasterTitle.needs_revision (an assignment whose
@@ -3430,6 +3470,7 @@ CHECKS = [
     ("the shared zoom ships with its markup", check_shared_zoom_markup_included),
     ("route decorators sit on routes", check_route_decorators_sit_on_routes),
     ("the flag marker has one definition", check_flag_marker_uses_one_definition),
+    ("admin flag text has one reader", check_admin_flag_text_uses_one_reader),
     ("literal routes beat parameter routes", check_literal_routes_before_param_routes),
     ("finder classes survive className writes", check_finder_classes_survive_classname_writes),
     ("buttons have handlers",     check_actions_are_handled),

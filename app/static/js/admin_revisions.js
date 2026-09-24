@@ -33,9 +33,21 @@
   // The card a zoomed picture belongs to, so the zoom's buttons can drive
   // the card's own buttons. ONE action path on purpose: the zoom is a
   // remote control for the card, never a second door with its own rules.
+  // The same picture can sit on TWO cards — e.g. a deletion card's "title
+  // now holds" strip and that picture's own REPLACED card. Taking the first
+  // match on the page handed the zoom the WRONG card's buttons when the
+  // admin had clicked the second (found in the 2026-09-24 audit). So the
+  // card the thumbnail was CLICKED in wins; arrowing, which has no click,
+  // falls back to the first card showing that picture.
+  let clickedCard = null;
+  const CARD_SEL = '.pending-complete-card, .rev-card';
   function cardFor(posterId) {
+    if (clickedCard && clickedCard.isConnected
+        && clickedCard.querySelector(`[data-lb="${posterId}"]`)) {
+      return clickedCard;
+    }
     const a = document.querySelector(`[data-lb="${posterId}"]`);
-    return a ? a.closest('.pending-complete-card, .rev-card') : null;
+    return a ? a.closest(CARD_SEL) : null;
   }
 
   const LB = window.PosterLightbox;
@@ -131,6 +143,7 @@
       if (item.poster.reviewed) a.classList.add('lb-marked');
       a.addEventListener('click', (e) => {
         e.preventDefault();
+        clickedCard = a.closest(CARD_SEL);
         LB.open(item.master, item.poster);
       });
     });

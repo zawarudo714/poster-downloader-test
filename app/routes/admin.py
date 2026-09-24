@@ -66,7 +66,7 @@ from ..projects import (
     scope_titles, set_project_cookie,
 )
 from ..timeutil import fmt_local, local_today
-from ..templating import templates
+from ..templating import templates, _flag_history
 from ..utils import (
     count_live_posters_for_master,
     count_user_saves_for_date, count_user_saves_for_week,
@@ -1741,6 +1741,11 @@ def _zoom_poster_payload(sp, rev) -> dict:
         "revision_status": rev.status if rev else None,
         "revision_type":   rev.revision_type if rev else None,
         "comment": rev.comment if rev else "",
+        # The flag's full history, newest first — the SAME reader the
+        # Changes Requested cards use (templating._flag_history), so the
+        # zoom cannot show the first flag while the card shows the latest
+        # (owner, 2026-09-24: the cards were fixed, the zoom was not).
+        "flag_history": _flag_history(rev) if rev else [],
         "worker_note": rev.worker_note if rev else "",
     }
 
@@ -3329,10 +3334,11 @@ def escalate_deletion(
     if not mt:
         raise HTTPException(404, "Underlying title row missing.")
     mt.admin_note = note
-    # Re-flag the master so it shows up in master-list views and counters.
-    # The escalation is an open issue from admin's POV until the worker
-    # responds (re-saves something or admin manually clears).
-    mt.needs_revision = 1
+    # Deliberately does NOT set needs_revision. That marker means "a LIVE
+    # flag exists on a picture that still exists" (utils.live_flag_title_ids)
+    # and the picture here is deleted, so setting it made a red FLAG no
+    # worker action could clear, and Diagnostics reported it stale. The
+    # admin note is what carries this message to the worker.
     if mt.status == "complete":
         mt.status = "in_progress"
         mt.completed_at = None

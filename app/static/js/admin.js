@@ -723,6 +723,8 @@
       poster.revision_status = 'open';
       poster.revision_type = null;
       poster.comment = $('ib-lb-comment').value || '';
+      // A brand-new flag has no history yet; the zoom falls back to comment.
+      poster.flag_history = [];
       rerenderPosterCard(master, poster);
       refreshTitleFlagOutline(master, poster);
       // Refresh the zoom ONLY if it still shows this picture. The server's
@@ -753,6 +755,7 @@
       poster.revision_status = null;
       poster.revision_type = null;
       poster.comment = '';
+      poster.flag_history = [];
       rerenderPosterCard(master, poster);
       refreshTitleFlagOutline(master, poster);
       // Same late-answer guard as the flag button above.

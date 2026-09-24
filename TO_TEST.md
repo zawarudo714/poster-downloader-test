@@ -920,6 +920,21 @@ On Changes Requested, click a thumbnail to zoom:
 
 ---
 
+## 85. NEWEST INSTRUCTION IN THE ZOOM TOO — v231
+
+- Open the zoom on a picture you sent back with a note. The flag panel in
+  the zoom must read "Your latest: <note>" on top, "First flag: …" below —
+  the same as its card. Check once on Changes Requested and once on
+  Worker Images.
+- If a picture shows on two cards at once (a DELETED card's "now holds"
+  strip and its own REPLACED card), clicking it inside each card must show
+  THAT card's buttons in the zoom.
+- Press SEND BACK on a DELETED card. On the worker's screen the title must
+  show your ADMIN NOTE, with no red FLAG. Then run Diagnostics: it must
+  NOT list that title under "flag marker is stale".
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** No longer needed at all — corrected

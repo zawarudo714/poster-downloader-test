@@ -51,6 +51,31 @@
     return s;
   }
 
+  // A flag's history, NEWEST FIRST, drawn from the server's flag_history —
+  // the same reader (templating._flag_history) and the same words as the
+  // Changes Requested cards. Printing p.comment raw here showed the FIRST
+  // flag in the zoom while the card beside it showed the latest send-back
+  // (owner, 2026-09-24). A picture flagged in this very sitting has no
+  // server history yet, so its own comment stands as the single step.
+  const FLAG_LABEL = { latest: 'Your latest:', earlier: 'Earlier:' };
+  function renderFlagHistory(host, p) {
+    if (!host) return;
+    host.innerHTML = '';
+    const steps = (p.flag_history && p.flag_history.length)
+      ? p.flag_history
+      : [{ who: 'first', text: p.comment || '(no comment)' }];
+    steps.forEach((s) => {
+      const row = document.createElement('div');
+      row.className = 'flag-step flag-step-' + s.who;
+      const b = document.createElement('strong');
+      b.textContent = FLAG_LABEL[s.who]
+        || (steps.length > 1 ? 'First flag:' : 'Your flag:');
+      row.appendChild(b);
+      row.appendChild(document.createTextNode(' ' + s.text));
+      host.appendChild(row);
+    });
+  }
+
   function list() {
     return (opts && opts.list) ? (opts.list() || []) : [];
   }
@@ -205,7 +230,7 @@
         pill.classList.add('status-flag');
         pill.textContent = 'open';
       }
-      lbFlag.querySelector('.lb-flag-comment').textContent = p.comment || '(no comment)';
+      renderFlagHistory(lbFlag.querySelector('.lb-flag-comment'), p);
       lbFlag.querySelector('.lb-worker-note').textContent =
         p.worker_note ? `User note: ${p.worker_note}` : '';
       if (unflagBtn) unflagBtn.hidden = !f.flag;

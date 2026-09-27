@@ -2770,6 +2770,20 @@ set it ranges over — any mechanism that can add members between the
 person's look and their commit turns their silence into a decision they
 never made.
 
+**A GATE MUST ASK ABOUT THE FACT IT PROTECTS, NOT ABOUT THE MECHANISM
+THAT USUALLY CARRIES IT.** The worker's DONE held a title for review only
+while a FLAG was open — standing in for "has the owner seen what this title
+now holds?". But a flag also closes when the worker deletes the picture, and
+the owner acknowledging the deletion cleared the last trace: the new picture
+that followed completed silently, filed under the title's first day on
+Worker Images, and could be painted unseen (owner, 2026-09-27). The fix asks
+the fact itself — `utils.pictures_awaiting_your_look` — so every way the
+mechanism can close (delete, acknowledge, SEND BACK, reopen-and-swap,
+reopen-and-add) is covered by one question, watched by
+`check_finished_titles_hold_no_unseen_replacement`. Before trusting a gate,
+list every way its condition can become false and ask whether each one
+means the thing it guards is really done.
+
 **Creating all the work up front is what makes stopping impossible.** The
 five deactivation jobs — one per account — were queued together, so
 STOP THIS RUN ended the run, released the pipeline, and did nothing at all

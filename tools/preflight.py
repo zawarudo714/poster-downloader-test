@@ -1515,6 +1515,29 @@ GUARDED: list[tuple[str, str, tuple[str, ...], str]] = [
      ("_same_picture_refusal(",),
      "saves a worker picture without asking whether the exact same picture "
      "is already used for another title"),
+    # ── NOTHING ALREADY MOVING MAY BE CHANGED BY A WORKER DOOR ───────────
+    # Delete, REPLACE and SKIP let a worker reopen a finished title and
+    # remove or swap a picture that was being painted or was live on the
+    # marketplace (found 2026-09-27). Each must ask _held_by_pipeline.
+    ("app/routes/worker.py", "sp.delete_note = note.strip()",
+     ("_held_by_pipeline(",),
+     "lets a worker delete a picture without checking it is not already "
+     "being painted or live on the marketplace"),
+    ("app/routes/worker.py", "tmp_target.replace(",
+     ("_held_by_pipeline(",),
+     "lets a worker swap a picture's file without checking it is not "
+     "already being painted or live on the marketplace"),
+    ("app/routes/worker.py", '"auto-deleted: title skipped"',
+     ("_held_by_pipeline(",),
+     "lets a worker skip a title, deleting its pictures, without checking "
+     "none is already being painted or live on the marketplace"),
+    # ── DONE MUST ASK "IS THERE A REPLACEMENT THE OWNER HAS NOT SEEN?" ───
+    # Without it, delete-flagged → acknowledge → new picture → DONE
+    # completed the title silently (owner, 2026-09-27).
+    ("app/routes/worker.py", 't.status = "complete"',
+     ("pictures_awaiting_your_look(",),
+     "completes a title without asking whether it holds a replacement "
+     "picture the owner has not seen"),
     ("app/routes/worker.py", "tmp_target.replace(",
      ("_same_picture_refusal(",),
      "swaps in a replacement picture without asking whether it is already "

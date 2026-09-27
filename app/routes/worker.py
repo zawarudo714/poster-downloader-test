@@ -67,7 +67,7 @@ from ..parsing import IMAGE_EXT_RE, filename_for, folder_name_for, sanitize
 from ..templating import templates
 from ..utils import (
     count_live_posters_for_master, count_titles_worked_today,
-    live_flag_title_ids,
+    live_flag_title_ids, pictures_awaiting_your_look,
     count_user_saves_for_date, count_user_saves_for_week,
     saved_poster_folder, saved_poster_path, title_folder_for,
 )
@@ -2089,6 +2089,32 @@ def save_image(
 
 # ── Delete / replace a saved poster ──────────────────────────────────────────
 
+# ── A PICTURE ALREADY MOVING IS NOT THE WORKER'S TO CHANGE ────────────────
+# Once a picture is greenlit it is being painted, painted, uploading, or
+# live on FineArtAmerica. The search-grid swap already refused to touch
+# such a picture ("in_pipeline"); its three siblings did not — a worker
+# could reopen a finished title and DELETE, REPLACE or SKIP away a picture
+# whose listing was live, leaving the listing pointing at nothing, or swap
+# the photograph under a painting made from the old one (found 2026-09-27
+# while auditing for work that moves on unseen). One test for delete,
+# REPLACE and SKIP; the grid swap keeps its own, stricter one.
+#
+# The pipeline state alone, not times_listed: a live listing is 'uploaded',
+# and a RECALLED picture has its state reset on purpose so the worker can
+# redo it — blocking on "was ever listed" would break that flow.
+_MOVING_STATES = frozenset({"greenlit", "processing", "processed",
+                            "uploading", "uploaded"})
+
+
+def _held_by_pipeline(sp) -> bool:
+    return sp.pipeline_status in _MOVING_STATES
+
+
+_HELD_MESSAGE = ("That image has already gone into processing or is on the "
+                 "marketplace, so it cannot be changed here. Ask the admin "
+                 "to recall it or rerun it.")
+
+
 def _load_my_poster(db: Session, user: User, poster_id: int) -> SavedPoster:
     sp = db.query(SavedPoster).filter_by(id=poster_id).first()
     if not sp or sp.deleted_at is not None:
@@ -2141,6 +2167,8 @@ def delete_poster(
        revision_ids: [...]}              — flags recorded closed (case b)
     """
     sp = _load_my_poster(db, user, poster_id)
+    if _held_by_pipeline(sp):
+        raise HTTPException(409, _HELD_MESSAGE)
     fs_path = saved_poster_path(sp)
     fs_path.unlink(missing_ok=True)
 
@@ -2284,6 +2312,8 @@ def replace_poster(
     limit on BOTH sides; the client can re-call with confirm_low_quality=1.
     """
     sp = _load_my_poster(db, user, poster_id)
+    if _held_by_pipeline(sp):
+        raise HTTPException(409, _HELD_MESSAGE)
     _mt = db.query(MasterTitle).filter_by(id=sp.master_title_id).first()
     ok, reason = _validate_image_url(
         url, db, resolve_project(db, _mt.project_id if _mt else None))
@@ -2379,7 +2409,12 @@ def replace_poster(
     sp.place_check_acked_at  = None
     # The admin's K mark was earned by the OLD picture; the new one has not
     # been looked at. Cleared with the other facts, or a swapped-in image
-    # would sit green in a review the admin believes is finished.
+    # would sit green in a review the admin believes is finished. WHEN a
+    # mark is cleared that way is kept, because it is the only sign a look
+    # ever happened — and a swap after a look must reach the admin before
+    # the title can complete (utils.pictures_awaiting_your_look, rule c).
+    if sp.reviewed_at is not None:
+        sp.review_voided_at  = datetime.utcnow()
     sp.reviewed_at           = None
 
     # ── These are DIFFERENT BYTES, so any post-production verdict on the old
@@ -2537,7 +2572,13 @@ def title_complete(
     if reason_source not in ("preset", "manual"):
         reason_source = ""
 
-    if active_revs:
+    # A picture that replaced one the admin flagged or had already looked
+    # at, which he has not seen yet, holds the title for him exactly like
+    # an open flag does. Without this, delete-flagged → admin acknowledges
+    # → new picture → DONE completed silently (owner, 2026-09-27).
+    unseen = pictures_awaiting_your_look(db, t.id)
+
+    if active_revs or unseen:
         # Hold the title for admin review. Escalate any still-open revisions
         # to awaiting_approval — clicking DONE counts as "I'm done acting on
         # these, please review". Already-awaiting revisions are left as-is.
@@ -2570,7 +2611,8 @@ def title_complete(
             target_type="master_title", target_id=t.id,
             details={"comment": comment.strip() or None,
                      "reason_source": reason_source or None,
-                     "escalated_revisions": escalated_ids},
+                     "escalated_revisions": escalated_ids,
+                     "unseen_replacements": [sp.id for sp in unseen]},
         )
         db.commit()
         return JSONResponse({
@@ -2620,6 +2662,13 @@ def title_skip(
     if t.status == "skipped":
         return JSONResponse({"ok": True, "deleted_posters": 0,
                              "unchanged": True})
+
+    # Skipping deletes every live picture on the title, so it gets the same
+    # guard as a single delete: nothing already moving may vanish this way.
+    if any(_held_by_pipeline(sp) for sp in db.query(SavedPoster).filter(
+            SavedPoster.master_title_id == t.id,
+            SavedPoster.deleted_at.is_(None)).all()):
+        raise HTTPException(409, _HELD_MESSAGE)
 
     t.status = "skipped"
     t.skip_reason = reason.strip() or None

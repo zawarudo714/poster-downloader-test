@@ -84,6 +84,7 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     # The admin's K mark on Worker Images (2026-09-18). Nullable: every
     # existing picture truthfully reads "not yet reviewed".
     ("saved_posters", "reviewed_at",       "DATETIME"),
+    ("saved_posters", "review_voided_at",  "DATETIME"),
     # RETIRE TITLE (2026-09-20): pay the worker although the picture was
     # withdrawn, and remember why the title is unusable. Defaults keep
     # every existing row exactly as it was.

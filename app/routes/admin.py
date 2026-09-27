@@ -71,6 +71,7 @@ from ..utils import (
     count_live_posters_for_master,
     count_user_saves_for_date, count_user_saves_for_week,
     list_date_folders, list_users_with_workspaces, live_flag_title_ids,
+    pictures_awaiting_your_look,
     safe_under_workspace, saved_poster_folder, saved_poster_path,
 )
 
@@ -2870,6 +2871,11 @@ def approve_complete(
         resolved_ids.append(r.id)
         resolved_sp_ids.add(r.saved_poster_id)
 
+    # A replacement you had not seen was on this card ("NEW PICTURE"), so
+    # approving is looking at it: it counts as seen from now on.
+    for _cp in pictures_awaiting_your_look(db, t.id):
+        _cp.reviewed_at = now
+
     # Approving the completion IS looking at these pictures, so they carry
     # the K mark too (owner's ask, 2026-09-23). Narrow on purpose: only the
     # pictures whose flags this approval just resolved — not everything the
@@ -3151,11 +3157,19 @@ def revisions_page(
         # replacement usually IS the one live picture, so the strip was a
         # copy of the image two centimetres above it (owner, 2026-09-23).
         shown_ids = {sp.id for _rev, sp in revs_for_title}
-        current_extra = [cp for cp in current_posters if cp.id not in shown_ids]
+        # Replacements you have not seen — the reason a title with no open
+        # flag can be here at all (utils.pictures_awaiting_your_look). Shown
+        # in their own section with the reason, not buried in "also holds".
+        new_pics = [cp for cp in pictures_awaiting_your_look(db, t.id)
+                    if cp.id not in shown_ids]
+        new_ids = {cp.id for cp in new_pics}
+        current_extra = [cp for cp in current_posters
+                         if cp.id not in shown_ids and cp.id not in new_ids]
         pending_complete_blocks.append({
             "title": t,
             "revisions": revs_for_title,
             "current": current_posters,
+            "new_pics": new_pics,
             "current_extra": current_extra,
             "show_holds": bool(current_extra) or not current_posters,
         })
@@ -3396,7 +3410,19 @@ def acknowledge_deletion(
     if rev.status != "resolved":
         raise HTTPException(400, "Revision is not resolved.")
     rev.admin_acked_at = datetime.utcnow()
-    log_activity(db, user=admin, action="ack_deletion", target_type="revision", target_id=rev.id)
+    # The card showed what the title holds NOW ("now holds" strip), so a
+    # replacement already saved was in front of you when you acknowledged:
+    # it counts as seen, and the worker's DONE will not ask you again. A
+    # replacement saved LATER is still unseen and will (see
+    # utils.pictures_awaiting_your_look).
+    _sp = db.query(SavedPoster).filter_by(id=rev.saved_poster_id).first()
+    seen_now = []
+    if _sp is not None:
+        for cp in pictures_awaiting_your_look(db, _sp.master_title_id):
+            cp.reviewed_at = datetime.utcnow()
+            seen_now.append(cp.id)
+    log_activity(db, user=admin, action="ack_deletion", target_type="revision", target_id=rev.id,
+                 details={"marked_seen": seen_now} if seen_now else None)
     db.commit()
     return JSONResponse({"ok": True})
 

@@ -383,15 +383,25 @@ class SavedPoster(Base):
     pay_despite_delete   = Column(Integer, nullable=False, default=0)
 
     # THE ADMIN'S "I HAVE LOOKED AT THIS ONE" MARK on the Worker Images
-    # screen — pressed K, turned green, purely a place-keeper so a review
+    # screen — pressed K, turned green, a place-keeper so a review
     # interrupted halfway does not restart from the top (owner's ask,
-    # 2026-09-18). It DECIDES NOTHING: no pipeline step, no approval and no
-    # payment reads it, and none ever should — approval already has its own
-    # mechanism, and a second one would be two records of one decision.
+    # 2026-09-18). No pipeline step and no payment reads it.
+    #
+    # ONE decision reads it since 2026-09-27, because it is exactly the fact
+    # that decision needs — "has the owner seen these bytes?": a picture
+    # that REPLACED one you flagged or had looked at sends the worker's DONE
+    # to Changes Requested until you have seen it (utils.pictures_awaiting_
+    # your_look). Approving there, or marking it here, both count as seen.
+    #
     # It is a fact about the BYTES the admin saw, so replace_poster clears
     # it with the other per-picture facts: a swapped-in picture must never
     # wear a mark earned by the one it replaced.
     reviewed_at          = Column(DateTime, nullable=True)
+    # When replace_poster cleared a reviewed_at — i.e. the file you had
+    # looked at was swapped for one you have not. Read only by
+    # utils.pictures_awaiting_your_look; without it the swap would erase
+    # the only sign that a look had ever happened.
+    review_voided_at     = Column(DateTime, nullable=True)
 
     master_title = relationship("MasterTitle", back_populates="saved_posters")
 

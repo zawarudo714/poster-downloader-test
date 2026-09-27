@@ -116,6 +116,32 @@
           </div>
           {% endif %}
 
+          {# The replacement you have not seen — the reason this title is
+             here even when no flag is open. Before 2026-09-27 a picture
+             that replaced a deleted one completed silently; now DONE waits
+             for you (utils.pictures_awaiting_your_look). #}
+          {% if blk.new_pics %}
+          <div class="pcc-section-head">NEW PICTURE YOU HAVE NOT SEEN</div>
+          <p class="muted small">It arrived after you flagged or looked at this title — for example it replaces a deleted picture. APPROVE COMPLETION accepts it; REJECT &amp; SEND BACK returns the title with your note.</p>
+          <div class="pcc-current-strip">
+            {% for cp in blk.new_pics %}
+              {% if cp.id in missing_ids %}
+                <span class="pcc-current-thumb pcc-current-missing"
+                      title="{{ cp.filename }} — the file is missing from the workspace">
+                  <img src="/static/img/deleted-poster.svg" alt="file missing">
+                  <span class="mono">file missing</span>
+                </span>
+              {% else %}
+                <a class="pcc-current-thumb" data-lb="{{ cp.id }}"
+                   href="/admin/file/{{ cp.id }}?v={{ cp.file_size or 0 }}"
+                   target="_blank" rel="noopener" title="{{ cp.filename }} — click to zoom">
+                  <img src="/admin/file/{{ cp.id }}?v={{ cp.file_size or 0 }}" alt="" loading="lazy">
+                </a>
+              {% endif %}
+            {% endfor %}
+          </div>
+          {% endif %}
+
           {# Shown only when it says something new: a live picture that
              DIFFERS from the changed ones above, or "nothing left". A
              strip repeating the image two centimetres above it taught

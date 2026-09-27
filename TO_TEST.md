@@ -990,6 +990,21 @@ On Changes Requested, click a thumbnail to zoom:
 - On Worker Images, press 9 on a title. It should get the green "looked at"
   mark. K should no longer do anything there.
 
+## 90. A NEW PICTURE AFTER A DELETION COMES BACK TO YOU — v237
+
+- Flag a picture. As the worker, delete it. As admin, press ACKNOWLEDGE on
+  the deleted card. As the worker, save a new picture and press DONE. The
+  title must appear in Changes Requested with "NEW PICTURE YOU HAVE NOT
+  SEEN". Approve it, and it completes.
+- Same again, but press SEND BACK instead of ACKNOWLEDGE. DONE must again
+  wait for you.
+- On a title you marked with the keep key, reopen it as the worker, swap the
+  picture, and press DONE. It must wait for you.
+- On a title whose picture is greenlit or already painted, try delete,
+  REPLACE and SKIP as the worker. All three must refuse with a message.
+- Run Diagnostics and read "finished titles hold a replacement picture you
+  never saw". Each link should open the picture on Worker Images.
+
 ---
 
 ## NOT ON THIS LIST, ON PURPOSE

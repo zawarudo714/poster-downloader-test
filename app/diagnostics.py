@@ -1937,6 +1937,82 @@ def check_needs_revision_matches_open_flags(db: Session, scope: Scope) -> CheckR
     )
 
 
+def check_finished_titles_hold_no_unseen_replacement(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: no finished (complete) title holds a picture that replaced one you flagged or had looked
+    at, which you have not seen — utils.pictures_awaiting_your_look.
+
+    Since 2026-09-27 the worker's DONE cannot complete such a title; it
+    waits on Changes Requested. So a title listed here either slipped
+    through BEFORE that fix, or reached "complete" through some door that
+    does not ask the question. Either way the picture went on unseen, and
+    the fix is to look at it on Worker Images (pressing the keep key marks
+    it seen) or flag it.
+
+    Candidates are narrowed by SQL first — titles with a deletion record,
+    titles holding both a picture you looked at and one you have not, or a
+    swapped file — so this never runs the per-title question over the
+    whole catalogue.
+    """
+    from .models import DELETION_VERDICT_PREFIX
+    from .utils import pictures_awaiting_your_look
+    cand = set(r[0] for r in (
+        db.query(SavedPoster.master_title_id)
+          .join(Revision, Revision.saved_poster_id == SavedPoster.id)
+          .filter(Revision.admin_verdict.like(DELETION_VERDICT_PREFIX + "%"))
+          .distinct().all()))
+    # A title with a picture you looked at AND a live picture you have not
+    # (the reopen-and-add / reopen-and-swap cases) — intersected so the
+    # per-title question only runs where it can possibly answer yes.
+    looked = set(r[0] for r in (
+        db.query(SavedPoster.master_title_id)
+          .filter(SavedPoster.reviewed_at.isnot(None)).distinct().all()))
+    unlooked = set(r[0] for r in (
+        db.query(SavedPoster.master_title_id)
+          .filter(SavedPoster.deleted_at.is_(None),
+                  SavedPoster.reviewed_at.is_(None),
+                  SavedPoster.added_by.is_(None)).distinct().all()))
+    cand |= (looked & unlooked)
+    cand |= set(r[0] for r in (
+        db.query(SavedPoster.master_title_id)
+          .filter(SavedPoster.review_voided_at.isnot(None)).distinct().all()))
+    rows = []
+    if cand:
+        titles = (db.query(MasterTitle)
+                    .filter(MasterTitle.id.in_(list(cand)), scope.titles,
+                            # A title keeps status "complete" while its
+                            # pictures are painted and uploaded — that
+                            # progress lives on MasterTitle.pipeline_status.
+                            MasterTitle.status == "complete")
+                    .all())
+        for t in titles:
+            unseen = pictures_awaiting_your_look(db, t.id)
+            if not unseen:
+                continue
+            sp = unseen[0]
+            rows.append(Finding(
+                what=f"title {t.external_id} {t.title} — {len(unseen)} picture(s) you have not seen",
+                detail=f"{sp.username}, filed under {sp.original_save_date}"
+                       f"{' · already ' + sp.pipeline_status if sp.pipeline_status else ''}",
+                link=(f"/admin/browse?worker={sp.username}"
+                      f"&date={sp.original_save_date}&open={sp.id}"),
+                project=scope.label(t.project_id),
+            ))
+    total = len(rows)
+    return _result(
+        "finished_titles_hold_no_unseen_replacement",
+        f"{total} finished title(s) hold a replacement picture you never saw"
+        if total else "No finished title holds a replacement picture you never saw",
+        "A worker deleted or swapped a picture you had flagged or already "
+        "looked at, saved a new one, and the title finished without you "
+        "seeing it. Since v237 the worker's DONE waits on Changes Requested "
+        "instead, so anything listed here got through before that, or by "
+        "another door. The link opens the picture on Worker Images, filed "
+        "under the title's FIRST day, which is why these are easy to miss. "
+        "Mark it with the keep key if it is fine, or flag it.",
+        "warn" if total else "ok", rows[:MAX_ROWS], total,
+    )
+
 def check_place_check_is_answering(db: Session, scope: Scope) -> CheckResult:
     """
     INVARIANT: while the place check is ON, "we could not ask Google" must
@@ -2876,6 +2952,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_generations_share_a_file,
     check_live_titles_are_unique_per_account,
     check_needs_revision_matches_open_flags,
+    check_finished_titles_hold_no_unseen_replacement,
     check_retired_titles_hold_nothing,
     check_place_check_is_answering,
     check_chosen_colour_was_painted,

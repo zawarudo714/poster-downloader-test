@@ -240,6 +240,61 @@ def live_flag_title_ids(db, master_title_ids) -> set:
     return {r[0] for r in rows}
 
 
+def pictures_awaiting_your_look(db, title_id) -> list:
+    """
+    THE one answer to "does this title hold a picture the owner has not
+    seen, that REPLACED something he flagged or had already looked at?"
+    — which is what decides whether the worker's DONE may complete the
+    title or must wait on Changes Requested.
+
+    Found 2026-09-27 (owner's question): a worker deletes a flagged picture,
+    the owner acknowledges the deletion, the worker saves a new picture and
+    presses DONE — and the title completed straight away, because the only
+    question DONE asked was "is a flag still open?". The new picture was
+    filed under the title's ORIGINAL date on Worker Images, and could be
+    greenlit and painted without anyone having looked at it.
+
+    A live picture counts when you have not looked at it (reviewed_at is
+    empty; the admin's own additions never count) and ANY of:
+      (a) it arrived after a FLAGGED picture on this title was deleted —
+          the deletion record's resolved_at;
+      (b) it arrived after you had looked at ANY picture on this title —
+          that picture's reviewed_at, whether it is still live or since
+          deleted or swapped out. This covers a reviewed picture being
+          replaced AND a second picture being added beside it after a
+          reopen, which replaces nothing but is still new to you;
+      (c) its own file was swapped after you had looked at it
+          (review_voided_at, set by replace_poster).
+    First-time work on a title never counts: nothing was flagged or seen
+    before it, so there is nothing it replaced.
+    """
+    from .models import DELETION_VERDICT_PREFIX, Revision, SavedPoster
+    live = (db.query(SavedPoster)
+              .filter(SavedPoster.master_title_id == title_id,
+                      SavedPoster.deleted_at.is_(None),
+                      SavedPoster.reviewed_at.is_(None),
+                      SavedPoster.added_by.is_(None))
+              .all())
+    if not live:
+        return []
+    marks = [r[0] for r in (
+        db.query(Revision.resolved_at)
+          .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
+          .filter(SavedPoster.master_title_id == title_id,
+                  Revision.admin_verdict.like(DELETION_VERDICT_PREFIX + "%"),
+                  Revision.resolved_at.isnot(None))
+          .all()) if r[0] is not None]
+    marks += [r[0] for r in (
+        db.query(SavedPoster.reviewed_at)
+          .filter(SavedPoster.master_title_id == title_id,
+                  SavedPoster.reviewed_at.isnot(None))
+          .all()) if r[0] is not None]
+    first = min(marks) if marks else None
+    return [sp for sp in live
+            if sp.review_voided_at is not None
+            or (first is not None and sp.created_at is not None
+                and sp.created_at >= first)]
+
 def _live_flag_query(db):
     """The body of the definition above, unfiltered by title — shared with
     resync_flag_markers so the startup repair cannot drift from it."""

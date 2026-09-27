@@ -279,11 +279,17 @@ class SavedPoster(Base):
     image_source       = Column(String(16), nullable=True)
     # Worker's reason if this poster was deleted from a revision context.
     delete_note        = Column(Text, nullable=True)
-    # If this poster was added by an admin (not the worker), stores the
-    # admin's username. NULL = worker-added (normal). Non-NULL = admin
-    # added it via the browse page. Admin-added posters cannot be flagged
-    # and don't count toward worker payment stats.
+    # If this picture is the ADMIN'S OWN PICK, stores the admin's username.
+    # NULL = worker-added (normal). Since v239 the only door that writes it
+    # is USE MY OWN PICTURE (routes/admin.admin_pick_title), which takes the
+    # worker's picture down and puts this one in its place. Such a row is
+    # saved under the ADMIN's user_id (the worker's username only decides
+    # the folder), so no worker door can touch it; it is never payable,
+    # never flaggable, and goes straight to painting.
     added_by           = Column(String(64), nullable=True)
+    # The admin's optional note on WHY he used his own picture. Shown beside
+    # the ADMIN PICK label. Never read by any rule.
+    added_note         = Column(Text, nullable=True)
     created_at         = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
     deleted_at         = Column(DateTime, nullable=True, index=True)
 

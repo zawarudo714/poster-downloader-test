@@ -230,7 +230,7 @@
   // empty out — an old save with no record must show nothing, not a guess.
   function sourceWord(src) {
     return { brave: 'found on Brave', google: 'found on Google',
-             pasted: 'pasted link' }[src] || '';
+             pasted: 'pasted link', uploaded: 'uploaded file' }[src] || '';
   }
 
   // ══════════════════════════════════════════════════════════════════════
@@ -900,7 +900,9 @@
           <img loading="lazy" src="${img.source_url}" alt=""
                data-zoom-open="${img.poster_id}"
                title="Click to compare side by side, full screen">
-          <figcaption><span class="muted mono">what the worker found${foundVia ? ' · ' : ''}${foundVia ? `<span class="img-source-word">${foundVia}</span>` : ''} · click to enlarge</span></figcaption>
+          <figcaption>${img.admin_pick
+              ? `<span class="status-pill status-admin-pick" title="Your own picture, used in place of the worker’s${img.admin_pick_note ? ' — ' + esc(img.admin_pick_note) : ''}">ADMIN PICK</span> `
+              : ''}<span class="muted mono">${img.admin_pick ? 'your own picture' : 'what the worker found'}${foundVia ? ' · ' : ''}${foundVia ? `<span class="img-source-word">${foundVia}</span>` : ''} · click to enlarge</span></figcaption>
         </figure>`;
 
       // THE POSTER, SITTING ON ITS COLOUR.
@@ -1845,7 +1847,8 @@
     // did not want.
     const CHUNK = 5;
     const all = payload.decisions;
-    const tally = { approved: 0, held: 0, rerun: 0, unusable: 0, files_removed: 0 };
+    const tally = { approved: 0, held: 0, rerun: 0, unusable: 0, withdrawn: 0,
+                    files_removed: 0 };
     // From here until the save ends, leaving the page costs unsent work —
     // so the browser's own "leave site?" prompt is armed (commitBusy), and
     // a running tally is written down so a cut-short save can explain
@@ -1878,6 +1881,7 @@
         writeCut(Math.min(i + part.length, all.length), all.length);
         tally.approved += d.approved || 0;
         tally.held += d.held || 0;
+        tally.withdrawn += d.withdrawn || 0;
         tally.rerun += d.rerun || 0;
         tally.unusable += d.unusable || 0;
         tally.files_removed += d.files_removed || 0;
@@ -1887,6 +1891,9 @@
       status.textContent =
         `saved — ${d.approved} released, ${d.rerun} queued to regenerate, ${d.unusable} retired`
         + (d.held ? ` · ${d.held} moved to the Photoshop queue` : '')
+        // A picture taken off its title while this screen was open (USE MY
+        // OWN PICTURE or RETIRE elsewhere): its painting is never decided.
+        + (d.withdrawn ? ` · ${d.withdrawn} skipped because the picture was replaced or retired meanwhile` : '')
         + (stillHeld ? ` · ${stillHeld} still in the Photoshop queue` : '')
         + (d.files_removed
             ? ` · ${d.files_removed} old file(s) deleted from the archive` : '');

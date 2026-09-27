@@ -127,7 +127,9 @@ queue's scoping.
 | Pipeline · GPT settings, prompt, style image | OK — gated on `processor` |
 | Pipeline · Test download / process | OK — hidden for GPT projects |
 | Pipeline · Test generation | OK — GPT only |
-| Review Posters · "Paste URL to add one" | OK — verified, see below |
+| Worker Images · "Paste URL to add one" (+ ADD) | **REMOVED v239** — replaced by USE MY OWN PICTURE, see below |
+| USE MY OWN PICTURE (Worker Images title box and zoom · Changes Requested every card and zoom · Skipped every row · Needs Attention retired-artwork and retired-title rows) | OK `DECIDED 2026-09-27` — ONE dialog (`admin_pick.js`), ONE endpoint (`admin_pick_title`). Link or file, optional reason. The new picture arrives first; the worker's picture is withdrawn (worker still paid); the title is finished and a retired one comes back; the pick is saved under the admin's user_id, marked reviewed, and sent straight to painting. The same-picture check only warns here. Watched by `check_titles_hold_too_many_pictures`, `check_admin_picks_reach_painting`, `check_withdrawn_pictures_hold_no_waiting_painting` |
+| Worker Images · day on open, NEXT DAY TO REVIEW | OK `DECIDED 2026-09-27` — opens on the remembered day only if it still has unreviewed pictures, otherwise on the oldest day that has; the button walks to the next such day |
 | Upload · title template help text | **FIXED 2026-08-27** — gated on capability |
 | Pipeline · Greenlight · Title Browser | OK — three bulk actions on one selection: greenlight, pull back, send back to the start |
 | Approve Artwork · RERUN / LEAVE FOR PHOTOSHOP / KEEP keys | OK `DECIDED 2026-09-27` — keys come from `review_key_*` (7 / 8 / 9 by default) and also match the number-pad key with Num Lock off (`keys.js`). LEAVE FOR PHOTOSHOP is sent on save as `hold`: the picture becomes `review_status = 'held'`, leaves the normal queue and its batches, and waits behind JUST THE PHOTOSHOP ONES (v238). In that door silence keeps a picture waiting; only KEEP releases it. A Photopea edit of a held picture is itself held. Watched by `check_left_for_photoshop_is_reachable`. The KEEP key is also Worker Images' "looked at it" key |
@@ -141,15 +143,16 @@ off. It was inviting the owner to build a listing template with a hole in
 it. Now assembled from the project's declared capabilities, like every other
 control on that screen.
 
-### VERIFIED · Review Posters "Paste URL to add one"
+### REMOVED v239 · the "+ ADD" box on Worker Images
 
-`MEASURED 2026-08-27` — the control exists. The 17 August note was right;
-it is simply named `.g-add-url` / `.g-add-btn` in `admin.js`, posting to
-`/admin/poster/add`, which is why a search for the label found nothing.
-
-`DECIDED 2026-08-17, still stands` — kept for MUSIK. Unlike the worker's
-paste box it is not a dead end: the in-page grid is worker-only, so this is
-the admin's only way to add an image directly.
+`TRACED 2026-09-27` — it had four faults, all quiet. It added a SECOND
+picture beside the worker's (one picture per title, so both would have been
+painted and uploaded, the second listing as "#2"). Its picture never
+reached painting on its own, because painting follows payment and the
+admin's picture is never paid. On a skipped or untouched title it set the
+status to in_progress under the admin's name, which nothing ever finishes.
+And it saved under the worker's user_id, so the worker could delete it.
+USE MY OWN PICTURE replaces it on every screen (row above).
 
 **But checking it turned up something the 17 August pass did not** — see
 the image-download section below.
@@ -158,7 +161,7 @@ the image-download section below.
 
 `MEASURED 2026-08-27`. Four controls end in the server fetching a URL a
 person typed: the worker's SAVE box, the worker's two REPLACE boxes, and
-the admin's "+ ADD". All four went through one validator, and it checked
+the admin's "+ ADD" (USE MY OWN PICTURE since v239). All four went through one validator, and it checked
 the scheme, the host being non-empty, and the file extension.
 
 **It did not check where the host pointed.** `http://127.0.0.1:8000/x.jpg`

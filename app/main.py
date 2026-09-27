@@ -251,6 +251,19 @@ def on_startup():
             db.rollback()
             log.error("Could not correct flag markers: %s", e)
 
+        # Paintings of pictures already taken off their title leave Approve
+        # Artwork — see utils.set_aside_withdrawn_paintings. Own guard, same
+        # reason as the flag markers above.
+        try:
+            from .utils import set_aside_withdrawn_paintings
+            moved = set_aside_withdrawn_paintings(db)
+            db.commit()
+            if moved:
+                log.info("Set aside %d painting(s) of withdrawn pictures", moved)
+        except Exception as e:
+            db.rollback()
+            log.error("Could not set aside withdrawn paintings: %s", e)
+
         # Give every older picture a fingerprint, so the same-picture check
         # on the save doors can see it. Off the startup path: it reads files.
         try:

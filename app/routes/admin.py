@@ -1659,11 +1659,34 @@ def browse_page(
         dates = [today_iso] + dates
     selected_date = date or (today_iso if today_iso in dates else (dates[0] if dates else today_iso))
 
+    # PICTURES NOT YET REVIEWED, per day, for the worker on screen (owner,
+    # 2026-09-27: "first and foremost put images which haven't been
+    # reviewed above everything else"). Inside a day they already float to
+    # the top; this is what carries it ACROSS days — the page opens on a day
+    # still owed an eye, and NEXT DAY TO REVIEW walks to the next one.
+    # "Reviewed" is the K mark (reviewed_at), the same fact the page's
+    # green outline and its day count read.
+    unreviewed: dict = {}
+    if selected_worker:
+        rows = (scope_titles(
+                    db.query(SavedPoster.original_save_date,
+                             func.count(SavedPoster.id))
+                      .join(MasterTitle,
+                            SavedPoster.master_title_id == MasterTitle.id),
+                    proj)
+                .filter(SavedPoster.username == selected_worker,
+                        SavedPoster.deleted_at.is_(None),
+                        SavedPoster.reviewed_at.is_(None))
+                .group_by(SavedPoster.original_save_date)
+                .all())
+        unreviewed = {d.isoformat(): n for d, n in rows if d is not None}
+
     return templates.TemplateResponse(
         request,
         "admin_image_browser.html",
         {"user": admin, "admin": admin, "workers": workers, "dates": dates,
             "selected_worker": selected_worker, "selected_date": selected_date,
+            "unreviewed_by_date": unreviewed,
             "active_tab": "browse",
         },
     )
@@ -1740,6 +1763,9 @@ def _zoom_poster_payload(sp, rev) -> dict:
         "place_acked":  bool(sp.place_check_acked_at and sp.place_check_at
                              and sp.place_check_acked_at >= sp.place_check_at),
         "added_by":     sp.added_by or None,
+        # Why the owner used his own picture, if he said — shown on the
+        # ADMIN PICK label. Empty for a worker's picture.
+        "added_note":   sp.added_note or "",
         "flagged": rev is not None,
         "revision_id": rev.id if rev else None,
         "revision_status": rev.status if rev else None,
@@ -2207,24 +2233,17 @@ def admin_delete_poster(
     sp = db.query(SavedPoster).filter_by(id=poster_id).first()
     if not sp:
         raise HTTPException(404, "Poster not found.")
-    # Remove file from disk
+    # The third door that takes a picture off a title, taught the same
+    # lessons as the other two (v239): never one being painted or live on
+    # the marketplace, and its queued uploads and paintings go with it.
+    why = _picture_cannot_leave(sp)
+    if why:
+        raise HTTPException(409, why)
     fs_path = saved_poster_path(sp)
-    fs_path.unlink(missing_ok=True)
-    # Resolve any active revisions
-    revs = (
-        db.query(Revision)
-          .filter(Revision.saved_poster_id == sp.id,
-                  Revision.status.in_(("open", "awaiting_approval")))
-          .all()
-    )
-    for r in revs:
-        r.status = "resolved"
-        r.resolved_by = admin.username
-        r.resolved_at = datetime.utcnow()
-        r.admin_verdict = "admin-deleted" + (f": {note.strip()}" if note.strip() else "")
-    # Soft-delete the poster
-    sp.deleted_at = datetime.utcnow()
-    sp.delete_note = f"[admin] {note.strip()}" if note.strip() else "[admin] deleted by admin"
+    _withdraw_pictures(
+        db, [sp], now=datetime.utcnow(), admin=admin, pay=False,
+        note=(f"[admin] {note.strip()}" if note.strip() else "[admin] deleted by admin"),
+        verdict="admin-deleted" + (f": {note.strip()}" if note.strip() else ""))
     # Recompute title state
     mt = db.query(MasterTitle).filter_by(id=sp.master_title_id).first()
     if mt:
@@ -2311,6 +2330,9 @@ def admin_retire_title(
     The typed reason and the typed word 'Confirm' are re-checked HERE, not
     only in the dialog — a destructive instruction is checked by the thing
     carrying it out.
+
+    Not final since v239: USE MY OWN PICTURE on a retired title brings it
+    back with the owner's own picture (admin_pick_title).
     """
     reason = (reason or "").strip()
     if not reason:
@@ -2328,51 +2350,17 @@ def admin_retire_title(
                          SavedPoster.deleted_at.is_(None))
                  .all())
     # A picture the machine is holding, or one already live on the
-    # marketplace, cannot simply vanish — the node would report into a
-    # void, or a listing would point at nothing. Recall/finish first.
+    # marketplace, cannot simply vanish — see _picture_cannot_leave.
     for sp in posters:
-        if sp.pipeline_status in ("processing", "uploading", "uploaded") \
-           or (sp.times_listed or 0) > 0:
-            raise HTTPException(
-                409,
-                f"'{sp.filename}' is in the pipeline or already on the "
-                f"marketplace ({sp.pipeline_status or 'listed'}). Recall or "
-                f"finish it first, then retire.")
+        why = _picture_cannot_leave(sp)
+        if why:
+            raise HTTPException(409, why)
 
     now = datetime.utcnow()
-    last_path = None
-    for sp in posters:
-        for rv in (db.query(Revision)
-                     .filter(Revision.saved_poster_id == sp.id,
-                             Revision.status.in_(("open", "awaiting_approval")))
-                     .all()):
-            rv.status = "resolved"
-            rv.resolved_by = admin.username
-            rv.resolved_at = now
-            rv.admin_verdict = f"title retired: {reason}"
-        fs_path = saved_poster_path(sp)
-        fs_path.unlink(missing_ok=True)
-        last_path = fs_path
-        sp.deleted_at = now
-        sp.delete_note = f"[retired, paid] {reason}"
-        sp.pay_despite_delete = 1
-        # Stand down any QUEUED upload for this picture. The claim already
-        # refuses deleted posters, so the node could never take it — but the
-        # row would sit at 'pending' for ever, counted in the strip's
-        # "waiting: N to upload" as a queue that never moves (found by the
-        # 2026-09-20 audit, not by a symptom). 'skipped' is the same word
-        # the SKIP UPLOAD button writes.
-        for tr in (db.query(UploadTracking)
-                     .filter(UploadTracking.saved_poster_id == sp.id,
-                             UploadTracking.status.in_(("pending", "failed")))
-                     .all()):
-            tr.status = "skipped"
-    # Empty folder cleanup, same as the ordinary delete.
-    if last_path is not None:
-        title_dir = last_path.parent
-        if title_dir.is_dir() and not list(title_dir.iterdir()):
-            import shutil
-            shutil.rmtree(title_dir, ignore_errors=True)
+    # The same withdrawal USE MY OWN PICTURE does — one rule, one place.
+    _withdraw_pictures(db, posters, now=now, admin=admin,
+                       note=f"[retired, paid] {reason}",
+                       verdict=f"title retired: {reason}")
 
     mt.status = "unusable"
     mt.unusable_reason = reason
@@ -2395,142 +2383,338 @@ def admin_retire_title(
     return JSONResponse({"ok": True, "paid_posters": len(posters)})
 
 
-@router.post("/poster/add")
-def admin_add_poster(
-    master_id: int = Form(...),
-    url: str = Form(...),
+# ── Taking pictures off a title: ONE rule, used by RETIRE and by USE MY
+#    OWN PICTURE ──────────────────────────────────────────────────────────
+#
+# Both doors remove every live picture from a title. They were written a
+# week apart and would have drifted the usual way: retire already forgot the
+# PAINTINGS — a picture painted and waiting on Approve Artwork kept its
+# 'pending' row, so the review queue would have offered the painting of a
+# withdrawn picture, and approving it would have queued an upload of a
+# picture that no longer exists (found while building v239). One function,
+# so a thing learned about withdrawing is learned by both doors.
+
+def _picture_cannot_leave(sp: SavedPoster) -> Optional[str]:
+    """Why this picture cannot be taken off its title right now, or None.
+
+    A picture the machine is painting or uploading would report into a
+    void; one already on the marketplace would leave a listing pointing at
+    nothing. Those need RECALL (or waiting) first."""
+    if sp.pipeline_status in ("processing", "uploading", "uploaded") \
+       or (sp.times_listed or 0) > 0:
+        return (f"'{sp.filename}' is in the pipeline or already on the "
+                f"marketplace ({sp.pipeline_status or 'listed'}). Recall or "
+                f"finish it first, then try again.")
+    return None
+
+
+def _withdraw_pictures(db: Session, posters: list, *, note: str,
+                       verdict: str, admin: User, now: datetime,
+                       pay: bool = True) -> None:
+    """Take these live pictures off their title, for good.
+
+    Per picture: its open flags close with `verdict`; its file is removed;
+    the row is soft-deleted with `note`; with `pay`, a WORKER's picture
+    stays payable (the search was honest work — the owner's rule for
+    retire, and his answer for USE MY OWN PICTURE on 2026-09-27; the plain
+    admin DELETE passes pay=False); queued uploads stand down; and its
+    paintings leave Approve Artwork. The admin's own earlier pick is never
+    payable whatever `pay` says (payable_criteria)."""
+    for sp in posters:
+        for rv in (db.query(Revision)
+                     .filter(Revision.saved_poster_id == sp.id,
+                             Revision.status.in_(("open", "awaiting_approval")))
+                     .all()):
+            rv.status = "resolved"
+            rv.resolved_by = admin.username
+            rv.resolved_at = now
+            rv.admin_verdict = verdict
+        fs_path = saved_poster_path(sp)
+        fs_path.unlink(missing_ok=True)
+        sp.deleted_at = now
+        sp.delete_note = note
+        if pay and not sp.added_by:
+            sp.pay_despite_delete = 1
+        # Stand down any QUEUED upload. The claim already refuses deleted
+        # pictures, so the node could never take it — but the row would sit
+        # at 'pending' for ever, counted in the strip's "N to upload" as a
+        # queue that never moves (2026-09-20 audit). 'skipped' is the word
+        # the SKIP UPLOAD button writes.
+        for tr in (db.query(UploadTracking)
+                     .filter(UploadTracking.saved_poster_id == sp.id,
+                             UploadTracking.status.in_(("pending", "failed")))
+                     .all()):
+            tr.status = "skipped"
+        # Its paintings leave Approve Artwork: no longer current, and any
+        # still waiting for a verdict is set aside. The painting FILES stay,
+        # as with every superseded generation.
+        for pi in (db.query(ProcessedImage)
+                     .filter(ProcessedImage.saved_poster_id == sp.id).all()):
+            pi.is_current = 0
+            if (pi.review_status or "") in ("pending", "held"):
+                pi.review_status = "superseded"
+        # Clean the title folder if this emptied it — same as a worker delete.
+        title_dir = fs_path.parent
+        if title_dir.is_dir() and not list(title_dir.iterdir()):
+            shutil.rmtree(title_dir, ignore_errors=True)
+
+
+# ── USE MY OWN PICTURE ───────────────────────────────────────────────────────
+
+_PICK_EXTS = {"jpg", "jpeg", "png", "webp", "gif"}
+
+
+@router.post("/title/{master_id}/admin_pick")
+def admin_pick_title(
+    master_id: int,
+    request: Request,
+    url: str = Form(""),
+    file: Optional[UploadFile] = File(None),
+    reason: str = Form(""),
+    confirm_same_picture: int = Form(0),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """
-    Admin adds a poster to a title by URL. The poster is saved under the
-    title's existing worker (claimed_by), or under 'admin' if unclaimed.
-    Does NOT count toward the worker's save stats or payment — admin's
-    responsibility to manage. Useful for fixing titles that need a poster
-    the worker missed.
+    The owner puts HIS OWN picture on a title, in place of whatever the
+    worker saved (owner, 2026-09-27: "if I start micro-managing I might as
+    well be doing the work"). One door for every screen — Worker Images,
+    Changes Requested, Skipped, and the two retired lists in Needs
+    Attention — replacing the old + ADD box, which put a SECOND picture
+    beside the worker's (both would have been painted and uploaded, the
+    second listing as "#2"), never reached painting on its own (painting
+    follows payment, and the owner's picture is never paid), and stranded a
+    skipped title at in_progress for ever.
+
+    In order:
+      1. The new picture arrives FIRST — downloaded from `url` or read from
+         `file` — and passes the same size floor as every worker door.
+         Nothing is taken down until it has.
+      2. The same-picture check runs, as a WARNING only: this is the
+         owner's own deliberate choice, so `confirm_same_picture=1` goes on.
+      3. Every live picture on the title is withdrawn (_withdraw_pictures):
+         flags closed with "replaced by admin", files removed, the worker
+         still paid, queued uploads stood down, paintings set aside.
+      4. The new picture is saved as the ADMIN'S PICK — under the admin's
+         user_id so no worker door can reach it, filed in the worker's
+         folder so the folder tree stays one tree, already marked reviewed.
+      5. The title is finished: complete, flags cleared, the worker's lock
+         released — and a RETIRED title comes back (its reason stays in
+         the activity log). The picture goes straight to painting.
     """
     from .worker import (
-        _validate_image_url, _download_to, _ensure_first_save_metadata,
-        _is_low_quality_url,
+        _download_to, _ensure_first_save_metadata, _picture_fingerprint,
+        _safe_min_px, _same_picture_hit, _title_label, _too_small,
+        _validate_image_url,
     )
-    from ..utils import title_folder_for, count_live_posters_for_master
-    from ..parsing import filename_for
+    from ..config import MAX_DOWNLOAD_BYTES
     from ..imghdr_lite import read_file_dimensions
-
-    t = db.query(MasterTitle).filter_by(id=master_id).first()
-    if not t:
-        raise HTTPException(404, "Title not found.")
-    # RETIRED IS FINAL — this door too. Without this line, pasting an image
-    # onto a retired title would hang a live picture under a status every
-    # screen hides, quietly breaking "an unusable title holds nothing"
-    # (found by the 2026-09-20 audit; the worker doors were sealed in v223,
-    # and this was the one remaining way in).
-    if t.status == "unusable":
-        raise HTTPException(
-            409, "This title was retired as unusable. It cannot take new "
-                 "images.")
-
-    from ..pipeline import resolve_project
-
-    ok, reason = _validate_image_url(
-        url.strip(), db, resolve_project(db, t.project_id))
-    if not ok:
-        raise HTTPException(400, reason)
-    src_url = url.strip()
-
-    # Determine the worker username for folder placement.
-    worker_username = "admin"
-    worker_id = admin.id
-    if t.claimed_by_id:
-        claimer = db.query(User).filter_by(id=t.claimed_by_id).first()
-        if claimer:
-            worker_username = claimer.username
-            worker_id = claimer.id
-
-    today = local_today()
-    _ensure_first_save_metadata(t, today)
-    db.flush()
-
-    # Same project stamping as the worker save path — an admin-added image
-    # must land in the same tree as the worker's own.
+    from ..parsing import filename_for
+    from ..pipeline import greenlight_titles, resolve_project
+    from ..utils import title_folder_for
     from ..workspace_migration import project_folder_for
-    project_folder = project_folder_for(ensure_default_project(db)
-                                        if not t.project_id else
-                                        db.query(Project).filter_by(id=t.project_id).first())
 
-    folder = title_folder_for(worker_username, t.original_save_date,
+    t = (scope_titles(db.query(MasterTitle), current_project(request, admin, db))
+         .filter(MasterTitle.id == master_id).first())
+    if not t:
+        raise HTTPException(404, "Title not found in this project.")
+    project = resolve_project(db, t.project_id)
+    reason = (reason or "").strip()[:2000]
+    src_url = (url or "").strip()
+    has_file = file is not None and bool(file.filename)
+    if bool(src_url) == has_file:
+        raise HTTPException(400, "Paste a link OR choose a file — one of the two.")
+
+    live = (db.query(SavedPoster)
+              .filter(SavedPoster.master_title_id == t.id,
+                      SavedPoster.deleted_at.is_(None))
+              .order_by(SavedPoster.id.asc()).all())
+    for sp in live:
+        why = _picture_cannot_leave(sp)
+        if why:
+            raise HTTPException(409, why)
+
+    if src_url:
+        ok, why = _validate_image_url(src_url, db, project)
+        if not ok:
+            raise HTTPException(400, why)
+        ext_source = src_url
+    else:
+        ext = (Path(file.filename).suffix or "").lstrip(".").lower()
+        if ext not in _PICK_EXTS:
+            raise HTTPException(400, "The file must be a .jpg, .jpeg, .png, "
+                                     ".webp or .gif picture.")
+        ext_source = f"upload.{ext}"
+
+    # WHOSE FOLDER. The title's folder is fixed at its first save and never
+    # moves (CLAUDE.md, immutable paths), so the pick lives where the
+    # worker's pictures lived: the newest picture's worker, live or not,
+    # then the claimer, then the admin for a title nobody ever touched.
+    newest_any = (db.query(SavedPoster)
+                    .filter(SavedPoster.master_title_id == t.id)
+                    .order_by(SavedPoster.id.desc()).first())
+    folder_owner = None
+    if newest_any is not None:
+        folder_owner = newest_any.username
+    elif t.claimed_by_name:
+        folder_owner = t.claimed_by_name
+    folder_owner = folder_owner or admin.username
+
+    _ensure_first_save_metadata(t, local_today())
+    db.flush()
+    project_folder = project_folder_for(project or ensure_default_project(db))
+    folder = title_folder_for(folder_owner, t.original_save_date,
                               t.title_folder_path, project_folder)
+    made_folder = not folder.exists()
+    folder.mkdir(parents=True, exist_ok=True)
 
-    base = count_live_posters_for_master(db, t.id)
-    count = base + 1
-    target_name = filename_for(t.title, count, src_url)
+    def _clean_up():
+        # Every refusal below leaves the disk as it found it: the incoming
+        # file goes, and so does a folder made only to hold it — otherwise
+        # an empty folder would list "admin" as a worker on Worker Images.
+        target_path.unlink(missing_ok=True)
+        if made_folder and folder.is_dir() and not list(folder.iterdir()):
+            shutil.rmtree(folder, ignore_errors=True)
+
+    def _refuse(status: int, message: str):
+        _clean_up()
+        raise HTTPException(status, message)
+
+    # A FRESH name: the old files are still on disk until step 3.
+    count = len(live) + 1
+    target_name = filename_for(t.title, count, ext_source)
     target_path = folder / target_name
     while target_path.exists():
         count += 1
-        target_name = filename_for(t.title, count, src_url)
+        target_name = filename_for(t.title, count, ext_source)
         target_path = folder / target_name
 
-    written = _download_to(src_url, target_path)
+    # 1 · The new picture arrives before anything old leaves.
+    if src_url:
+        try:
+            written = _download_to(src_url, target_path)
+        except HTTPException as e:
+            _refuse(e.status_code, e.detail)
+    else:
+        data = file.file.read(MAX_DOWNLOAD_BYTES + 1)
+        if len(data) > MAX_DOWNLOAD_BYTES:
+            _refuse(413, "That file is larger than the 25 MB limit.")
+        if not data:
+            _refuse(400, "That file is empty.")
+        target_path.write_bytes(data)
+        written = len(data)
     dims = read_file_dimensions(target_path)
-    img_w, img_h = (dims if dims else (None, None))
-
-    # The same hard size floor as every worker door, because "no save-anyway
-    # override on any front" (owner, 2026-09-15) includes the admin's own
-    # + ADD box — this was the fourth door and the only one without the
-    # gate (2026-09-15 audit). Same shared test, same no-override.
-    from .worker import _too_small, _safe_min_px, _picture_fingerprint
-    min_px = _safe_min_px(db, resolve_project(db, t.project_id))
+    if not dims and has_file:
+        # A download with an unreadable header is allowed through (we could
+        # not look). A FILE chosen by hand that is not readable as a
+        # picture is simply not a picture.
+        _refuse(400, "That file could not be read as a picture.")
+    img_w, img_h = dims if dims else (None, None)
+    min_px = _safe_min_px(db, project)
     if _too_small(img_w, img_h, min_px):
-        target_path.unlink(missing_ok=True)
-        raise HTTPException(
-            400, f"That picture is {img_w}×{img_h}. Every side must be at "
-                 f"least {min_px}px, so it cannot be added.")
+        _refuse(400, f"That picture is {img_w}×{img_h}. Every side must be "
+                     f"at least {min_px}px, so it cannot be used.")
 
+    # 2 · The same picture on another title — a warning he may overrule.
+    sha = _picture_fingerprint(target_path)
+    if not confirm_same_picture:
+        hit = _same_picture_hit(db, project, t, sha)
+        if hit is not None:
+            other_sp, other_t = hit
+            _clean_up()
+            return JSONResponse(
+                {"ok": False, "reason": "same_picture", "can_override": True,
+                 "message": (f'This exact picture is already used for '
+                             f'"{_title_label(other_t)}" '
+                             f'({other_sp.username}, {other_sp.original_save_date}). '
+                             f"Each place normally needs its own picture. "
+                             f"Use it here anyway?"),
+                 "other_title": _title_label(other_t)},
+                status_code=409)
+
+    # 3 · Everything live on the title is withdrawn.
+    now = datetime.utcnow()
+    said = f": {reason}" if reason else ""
+    _withdraw_pictures(
+        db, live, now=now, admin=admin,
+        note=f"[replaced by admin, paid]{said}",
+        verdict=f"replaced by admin{said}")
+
+    # A worker's DELETION of a flagged picture on this title waits on
+    # Changes Requested for an ACKNOWLEDGE. Using his own picture answers
+    # it, so it is acknowledged here — otherwise the card would keep asking
+    # about a title that is already finished.
+    for rv in (db.query(Revision)
+                 .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
+                 .filter(SavedPoster.master_title_id == t.id,
+                         Revision.status == "resolved",
+                         Revision.admin_acked_at.is_(None),
+                         Revision.admin_verdict.like(DELETION_VERDICT_PREFIX + "%"))
+                 .all()):
+        rv.admin_acked_at = now
+
+    # 4 · The pick itself.
     sp = SavedPoster(
         master_title_id    = t.id,
-        user_id            = worker_id,
-        username           = worker_username,
+        user_id            = admin.id,
+        username           = folder_owner,
         project_folder     = project_folder,
         original_save_date = t.original_save_date,
         title_folder_path  = t.title_folder_path,
         filename           = target_name,
-        source_url         = src_url,
+        source_url         = src_url or f"(uploaded file) {file.filename}",
         file_size          = written,
         low_quality_url    = 0,
         image_width        = img_w,
         image_height       = img_h,
-        # The admin pasted this address by hand; where the copy came from
-        # is unknowable here, same as the worker's paste box.
-        image_source       = "pasted",
+        image_source       = "pasted" if src_url else "uploaded",
         added_by           = admin.username,
-        # Fingerprinted like every worker save, so a worker's later copy of
-        # this picture meets the same-picture check. The admin himself is
-        # not stopped: this is the owner's own deliberate pick.
-        content_hash       = _picture_fingerprint(target_path),
+        added_note         = reason or None,
+        content_hash       = sha,
+        # He chose it, so he has seen it: the title shows green on Worker
+        # Images and never asks for his look again.
+        reviewed_at        = now,
     )
     db.add(sp)
-    db.flush()  # assign sp.id before logging
+    db.flush()
 
-    # If title was pending/skipped, move to in_progress.
-    if t.status in ("pending", "skipped"):
-        t.status = "in_progress"
-        t.skip_reason = None
-        if not t.claimed_by_id:
-            t.claimed_by_id = admin.id
+    # 5 · The title is finished, and a retired one comes back.
+    was = t.status
+    was_reason = t.unusable_reason
+    t.status = "complete"
+    t.completed_at = t.completed_at or now
+    t.needs_revision = 0
+    t.unusable_reason = None
+    t.skip_reason = None
+    if t.claimed_by_id:
+        u = db.query(User).filter_by(id=t.claimed_by_id).first()
+        if u and u.locked_master_id == t.id:
+            u.locked_master_id = None
+    # Straight to painting. Painting normally follows PAYMENT, and the
+    # owner's own picture is never paid — so without this it would wait
+    # for ever (the + ADD box's quiet failure).
+    gl = greenlight_titles(db, [t.id], by=admin.username, reason="admin_pick")
 
     log_activity(
-        db, user=admin, action="admin_added", target_type="saved_poster", target_id=sp.id,
-        details={"filename": target_name, "master_id": t.id,
-                 "url": src_url, "title": f"{t.title} ({t.year})"},
+        db, user=admin, action="admin_pick", target_type="saved_poster",
+        target_id=sp.id,
+        details={"title": t.title, "master_id": t.id, "reason": reason,
+                 "source": src_url or f"file: {file.filename}",
+                 "replaced": [p.id for p in live],
+                 "was_status": was,
+                 "unretired": was == "unusable",
+                 "retired_reason": was_reason if was == "unusable" else None,
+                 "sent_to_painting": gl.get("posters", 0)},
     )
     db.commit()
 
-    # Third of the three doors an image can arrive through — the place
-    # check covers an admin-added picture the same as a worker's.
     from ..place_check import launch_check
     launch_check(sp.id)
 
-    return JSONResponse({"ok": True, "filename": target_name, "poster_id": sp.id})
+    return JSONResponse({"ok": True, "poster_id": sp.id,
+                         "replaced": len(live),
+                         "unretired": was == "unusable",
+                         "sent_to_painting": bool(gl.get("posters", 0))})
 
 
 # ── Revisions ────────────────────────────────────────────────────────────────

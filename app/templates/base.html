@@ -273,7 +273,9 @@
   <script src="/static/js/tooltip.js?v={{ app_version }}"></script>
   <script src="/static/js/theme.js?v={{ app_version }}"></script>
   {% if user is defined and user %}<script src="/static/js/nav_badges.js?v={{ app_version }}"></script>{% endif %}
-  {% if user is defined and user and user.role == 'admin' %}<script src="/static/js/pulse.js?v={{ app_version }}"></script>{% endif %}
+  {% if user is defined and user and user.role == 'admin' %}<script src="/static/js/pulse.js?v={{ app_version }}"></script>
+  {# USE MY OWN PICTURE — one dialog for every admin screen (v239). #}
+  <script src="/static/js/admin_pick.js?v={{ app_version }}"></script>{% endif %}
   {% block scripts %}{% endblock %}
   <script>
     // Global scroll-position persistence. Saves scrollY per page path.

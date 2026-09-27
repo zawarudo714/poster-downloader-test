@@ -342,9 +342,12 @@ changes.
 ## PARKED — the owner will say when
 
 **THE ADMIN AS A PICTURE-FINDER.** `DECIDED 2026-09-10` — the owner's idea,
-parked at his request. **Remind him this exists whenever he asks what is
-outstanding, and whenever the Skipped page or the pay rules are being
-worked on.**
+parked at his request. **BUILT v239 as USE MY OWN PICTURE** (2026-09-27):
+one dialog on Worker Images, Changes Requested, Skipped and both retired
+lists; the pick goes straight to painting and is never paid. The two open
+decisions below were settled: the pick lives in the title's existing
+folder, and there is no half-saved state (the dialog saves in one step).
+Kept below as the record.
 
 The idea, in his words: on his own time he does a deep search for titles a
 worker skipped (ones he has not sent back), saves what he finds, and his

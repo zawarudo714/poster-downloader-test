@@ -345,6 +345,11 @@
       (n, t) => n + (t.posters || []).filter((p) => !p.reviewed).length, 0);
     const tail = nP === 0 ? ''
       : (un === 0 ? ' · all reviewed ✓' : ` · ${un} NOT YET REVIEWED`);
+    // The day on screen is counted from what is loaded, so a K press
+    // moves the NEXT DAY TO REVIEW button at once. noteDayCount is defined
+    // further down; this only ever runs after a load has come back, by
+    // which time the whole page script has run.
+    noteDayCount(un);
     $('ib-summary').textContent =
       `${nT} title(s) · ${nP} ${nP === 1 ? PD.noun : PD.nouns} total${tail}`;
   }
@@ -407,27 +412,8 @@
         const btn = buildPosterCell(t, p);
         grid.appendChild(btn);
       });
-      // Wire up admin add-poster button
-      const addUrl = node.querySelector('.g-add-url');
-      const addBtn = node.querySelector('.g-add-btn');
-      addBtn.addEventListener('click', async () => {
-        const u = (addUrl.value || '').trim();
-        if (!u) { addUrl.focus(); return; }
-        addBtn.disabled = true;
-        addBtn.textContent = '…';
-        const fd = new FormData();
-        fd.append('master_id', t.master_id);
-        fd.append('url', u);
-        const r = await fetch('/admin/poster/add', { method: 'POST', body: fd });
-        addBtn.disabled = false;
-        addBtn.textContent = '+ ADD';
-        if (r.ok) { addUrl.value = ''; loadList(); }
-        else {
-          let msg = r.status;
-          try { const d = await r.json(); msg = d.detail || msg; } catch (e) {}
-          alert('Add failed: ' + msg);
-        }
-      });
+      // USE MY OWN PICTURE — the shared dialog (admin_pick.js).
+      node.querySelector('.g-pick-btn').addEventListener('click', () => usePick(t));
       gallery.appendChild(node);
     });
     $('ib-title-counter').textContent = `${titleIdx + 1} / ${titles.length}`;
@@ -479,11 +465,9 @@
       pillsHost.appendChild(placePillNode(p));
     }
     if (p.added_by) {
-      const pill = document.createElement('span');
-      pill.className = 'status-pill status-admin-added';
-      pill.textContent = 'ADMIN';
-      pill.title = `Added by ${p.added_by} (not worker)`;
-      pillsHost.appendChild(pill);
+      // The one spelling of the label, shared with the zoom.
+      const pill = LB.adminPickPill(p);
+      if (pill) pillsHost.appendChild(pill);
       btn.classList.add('p-admin-added');
     }
     if (p.flagged) {
@@ -653,6 +637,12 @@
     // page must never reorder under the cursor mid-review; reviewed ones
     // sink on the next load or when the order dropdown is touched.
     onReviewed: () => { renderGallery(); refreshSummary(); },
+    // USE MY OWN PICTURE, beside the zoomed picture.
+    actions: (t) => [{
+      label: 'USE MY OWN PICTURE',
+      className: 'btn btn-info',
+      onClick: () => usePick(t),
+    }],
     features: {
       // A function, not a value: the key arrives with the first load of
       // the day, after this zoom is set up.
@@ -667,6 +657,22 @@
   });
   const openLightbox  = (t, p) => LB.open(t, p);
   const closeLightbox = () => LB.close();
+
+  // USE MY OWN PICTURE, from the title box or from the zoom. The worker's
+  // picture leaves this day's gallery and the owner's takes its place, so
+  // the page is simply reloaded afterwards.
+  function usePick(t) {
+    if (!window.AdminPick) return;
+    window.AdminPick.open({
+      masterId: t.master_id,
+      title: t.title,
+      onDone: (d, msg) => {
+        closeLightbox();
+        loadList();
+        if (window.toast) window.toast(msg);
+      },
+    });
+  }
 
   // ── RETIRE TITLE — no good photo of this place exists ─────────────────
   // Opened from the zoom. Two typed locks (a reason + the word Confirm),
@@ -1163,19 +1169,67 @@
       }));
     } catch (e) {}
   }
+  // ── NOT-YET-REVIEWED COMES FIRST, ACROSS DAYS TOO ─────────────────────
+  // Inside a day the unreviewed titles already float to the top (see
+  // sortTitles). Across days, the page used to open on today or on the
+  // last day visited, however many older pictures still waited for an
+  // eye (owner, 2026-09-27). Now: the day you were on, if it still has
+  // unreviewed pictures; otherwise the OLDEST day that does; otherwise
+  // the old behaviour. An address with a date in it always wins.
+  const unreviewed = Object.assign({}, window.__unreviewed || {});
+  function daysToReview(except) {
+    return dates.filter((d) => (unreviewed[d] || 0) > 0 && d !== except)
+                .sort();              // ISO dates: oldest first
+  }
   const urlParams = new URLSearchParams(window.location.search);
+  // True when the page opens on a different day from the one remembered,
+  // so the remembered title position and zoom (which belong to that other
+  // day) are not applied here.
+  let openedOnOwedDay = false;
   if (!urlParams.has('date') && !urlParams.has('idx')) {
+    let pick = null;
     try {
       const saved = JSON.parse(localStorage.getItem(BROWSE_STATE_KEY) || 'null');
-      if (saved && saved.date && dates.indexOf(saved.date) >= 0) {
-        if (saved.date !== dateInput.value) {
-          dateInput.value = saved.date;
-          dateLabel.textContent = saved.date;
-        }
-      }
+      if (saved && saved.date && dates.indexOf(saved.date) >= 0) pick = saved.date;
     } catch (e) {}
+    if (!pick || !(unreviewed[pick] > 0)) {
+      const owed = daysToReview(null);
+      if (owed.length) {
+        openedOnOwedDay = owed[0] !== pick;
+        pick = owed[0];
+      }
+    }
+    if (pick && pick !== dateInput.value) {
+      dateInput.value = pick;
+      dateLabel.textContent = pick;
+    }
   }
-  const restoredIdx = parseInt(urlParams.get('idx'), 10) || (function() {
+
+  function noteDayCount(un) {
+    unreviewed[dateInput.value] = un;
+    renderNextReview();
+  }
+
+  // NEXT DAY TO REVIEW — the oldest other day still owed an eye.
+  const nextReviewBtn = $('ib-next-review');
+  function renderNextReview() {
+    if (!nextReviewBtn) return;
+    const owed = daysToReview(dateInput.value);
+    nextReviewBtn.hidden = owed.length === 0;
+    if (owed.length) {
+      const pics = owed.reduce((n, d) => n + (unreviewed[d] || 0), 0);
+      nextReviewBtn.textContent = `NEXT DAY TO REVIEW · ${owed[0]} `
+        + `(${owed.length} day${owed.length === 1 ? '' : 's'}, ${pics} picture${pics === 1 ? '' : 's'})`;
+    }
+  }
+  if (nextReviewBtn) {
+    nextReviewBtn.addEventListener('click', () => {
+      const owed = daysToReview(dateInput.value);
+      if (owed.length) setDate(owed[0]);
+    });
+  }
+  renderNextReview();
+  const restoredIdx = openedOnOwedDay ? 0 : parseInt(urlParams.get('idx'), 10) || (function() {
     try {
       const saved = JSON.parse(localStorage.getItem(BROWSE_STATE_KEY) || 'null');
       return (saved && saved.idx) || 0;
@@ -1188,12 +1242,12 @@
   // An `open=<picture>` in the address wins over the remembered one: it is
   // how Diagnostics' OPEN buttons land on a picture with the zoom already
   // up. saveStateToUrl drops it again, so a reload does not reopen it.
-  let pendingLightbox = parseInt(urlParams.get('open'), 10) || (function () {
+  let pendingLightbox = parseInt(urlParams.get('open'), 10) || (openedOnOwedDay ? 0 : (function () {
     try {
       const saved = JSON.parse(localStorage.getItem(BROWSE_STATE_KEY) || 'null');
       return (saved && saved.lb) || 0;
     } catch (e) { return 0; }
-  })();
+  })());
 
   // The order dropdown: reflect the remembered choice, re-sort on change.
   const sortSel = $('ib-sort');

@@ -172,6 +172,27 @@
     });
   });
 
+  // USE MY OWN PICTURE — on every card, and (as a proxy of the card's
+  // button) in the zoom. The shared dialog does the asking; afterwards
+  // EVERY card about that title leaves, because the title is finished:
+  // its flags are closed, a completion is settled and a deletion is
+  // acknowledged by the server in the same step.
+  document.querySelectorAll('[data-pick-master]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (!window.AdminPick) return;
+      const masterId = btn.getAttribute('data-pick-master');
+      window.AdminPick.open({
+        masterId,
+        title: btn.getAttribute('data-pick-title') || '',
+        onDone: (d, msg) => {
+          document.querySelectorAll(`[data-pick-master="${masterId}"]`)
+            .forEach((b) => finishCard(b.closest(CARD_SEL)));
+          if (window.toast) window.toast(msg);
+        },
+      });
+    });
+  });
+
   // DELETE THIS RECORD — shown only on cards whose picture FILE is gone
   // from the workspace. Neither approve nor reject can help there (the
   // worker has nothing to fix, the admin nothing to see — the loop that

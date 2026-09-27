@@ -1531,6 +1531,35 @@ GUARDED: list[tuple[str, str, tuple[str, ...], str]] = [
      ("_held_by_pipeline(",),
      "lets a worker skip a title, deleting its pictures, without checking "
      "none is already being painted or live on the marketplace"),
+    # ── THE OWNER'S OWN PICK IS OUT OF EVERY WORKER'S REACH ──────────────
+    # USE MY OWN PICTURE (v239) finishes a title with the owner's picture.
+    # Picks made by the old + ADD box carry the worker's user_id, and the
+    # title-level doors (reopen, go to, skip) never look at user_id, so
+    # each door that reopens, empties or changes must ask.
+    # (The leading space keeps `mt.completed_at = None` in delete_poster
+    # out: that door reaches its picture through _load_my_poster, which
+    # asks the same question — see the third row.)
+    ("app/routes/worker.py", " t.completed_at = None",
+     ("_refuse_if_admin_chose(",),
+     "reopens a finished title without checking whether the admin chose "
+     "its picture himself"),
+    ("app/routes/worker.py", '"auto-deleted: title skipped"',
+     ("_refuse_if_admin_chose(",),
+     "lets a worker skip a title, deleting its pictures, without checking "
+     "whether one of them is the admin's own pick"),
+    ("app/routes/worker.py", 'raise HTTPException(403, "Not your poster.")',
+     ("_refuse_if_admin_chose(",),
+     "hands a worker a picture to change without checking it is not the "
+     "admin's own pick"),
+    # ── EVERY DOOR THAT TAKES PICTURES OFF A TITLE ASKS FIRST ────────────
+    # Retire, USE MY OWN PICTURE and the admin DELETE share one withdrawal
+    # (_withdraw_pictures). A picture being painted or live on the
+    # marketplace must never be withdrawn — the node would report into a
+    # void, or a listing would point at nothing.
+    ("app/routes/admin.py", "    _withdraw_pictures(",
+     ("_picture_cannot_leave(",),
+     "takes pictures off a title without checking none is being painted "
+     "or live on the marketplace"),
     # ── DONE MUST ASK "IS THERE A REPLACEMENT THE OWNER HAS NOT SEEN?" ───
     # Without it, delete-flagged → acknowledge → new picture → DONE
     # completed the title silently (owner, 2026-09-27).
@@ -1755,12 +1784,21 @@ def check_no_orphan_documents() -> None:
         return
     text = index.read_text(encoding="utf-8", errors="ignore")
 
-    skip_dirs = {".venv", "node_modules", ".git", "__pycache__"}
-    docs = sorted(
-        p for p in ROOT.rglob("*.md")
-        if not any(part in skip_dirs for part in p.parts)
-        and p.name != "CLAUDE.md"
-    )
+    # Pruned WHILE walking, not filtered afterwards. rglob walked into
+    # .git, the virtualenv and the picture workspace before throwing those
+    # results away — 41 seconds of a preflight that must finish inside the
+    # time a session's command may run (2026-09-27). No document lives in
+    # the picture folders or the backups.
+    import os
+    skip_dirs = {".venv", "node_modules", ".git", "__pycache__",
+                 "workspace", "backups"}
+    docs = []
+    for dirpath, dirnames, filenames in os.walk(ROOT):
+        dirnames[:] = [d for d in dirnames if d not in skip_dirs]
+        for fn in filenames:
+            if fn.endswith(".md") and fn != "CLAUDE.md":
+                docs.append(Path(dirpath) / fn)
+    docs.sort()
     if not docs:
         fail("no .md files found at all — this check is looking in the wrong place")
         return
@@ -1854,6 +1892,28 @@ def check_guards_are_called() -> None:
     hook name and found its own query. A check that cannot go red is worse
     than no check, because it is counted as coverage.
     """
+    # Each file is parsed ONCE and each function's text cut ONCE, by line
+    # numbers, then shared by every row. The first version called
+    # ast.get_source_segment per function per row, which re-splits the
+    # whole file every time: 133 seconds for this one check on 2026-09-27,
+    # enough to push the whole preflight past the time a tool call may run.
+    parsed: dict = {}
+
+    def functions_of(path):
+        if path not in parsed:
+            src = path.read_text(encoding="utf-8")
+            try:
+                tree = ast.parse(src)
+            except SyntaxError:
+                parsed[path] = None     # check_python_compiles owns that
+                return None
+            lines = src.splitlines()
+            parsed[path] = [
+                (node, "\n".join(lines[node.lineno - 1:node.end_lineno]))
+                for node in ast.walk(tree)
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        return parsed[path]
+
     for pattern, risky, guards, what in GUARDED:
         # A rule usually belongs to a KIND of code rather than to one file —
         # the project-scoping one applies to anything that touches titles.
@@ -1867,15 +1927,10 @@ def check_guards_are_called() -> None:
             continue
         for path in paths:
             rel = path.relative_to(ROOT).as_posix()
-            src = path.read_text(encoding="utf-8")
-            try:
-                tree = ast.parse(src)
-            except SyntaxError:
-                continue                # check_python_compiles owns that
-            for node in ast.walk(tree):
-                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    continue
-                body = ast.get_source_segment(src, node) or ""
+            funcs = functions_of(path)
+            if funcs is None:
+                continue
+            for node, body in funcs:
                 if risky not in body:
                     continue
                 # PROSE MUST NOT SATISFY A GUARD.

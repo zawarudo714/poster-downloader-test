@@ -1960,7 +1960,7 @@
     // 'Return to worker' was removed 2026-09-06 at the owner's word:
     // the worker is already PAID by the time anything reaches these
     // lists, so nothing ever goes back. The admin replaces the photo
-    // himself (Worker Images → paste a URL) or retires the image.
+    // himself (USE MY OWN PICTURE, v239) or retires the image.
     // 'retry_rejected' added 2026-09-14 at the owner's word: an OUTPUT-
     // stage refusal is the model's own painting tripping the filter, and
     // a repaint often passes — he decides how many tries are enough.
@@ -1971,8 +1971,8 @@
     upload_failed: ['retry_upload', 'mark_removed', 'skip_upload'],
     stalled:       ['release'],
     unusable:      ['return_to_pipeline'],
-    // Retired TITLES are final — the picture is gone and the worker paid —
-    // so the card is a record, deliberately without a button.
+    // Retired TITLES carry no bulk button: the only way back is USE MY
+    // OWN PICTURE, which is per row (see pickButton).
     retired_titles: [],
     short_titles:  [],
     generation_stopped: [],
@@ -2106,25 +2106,28 @@
     if (f.key === 'unusable') {
       return `<table class="data-table">
         <thead><tr><th style="width:34px"><input type="checkbox" data-attn-all
-                   title="Tick or untick every row below"></th><th>TITLE</th><th>REASON</th><th>RETIRED</th></tr></thead>
+                   title="Tick or untick every row below"></th><th>TITLE</th><th>REASON</th><th>RETIRED</th><th></th></tr></thead>
         <tbody>${f.items.map((i) => `
           <tr>
             <td><input type="checkbox" data-attn-pick="${i.poster_id}" data-attn-kind="poster"></td>
             <td>${esc(i.title)}</td>
             <td>${esc(i.reason || '')}</td>
             <td class="mono">${esc(i.at || '')} ${esc(i.by || '')}</td>
+            <td>${pickButton(i)}</td>
           </tr>`).join('')}
         </tbody></table>`;
     }
 
     if (f.key === 'retired_titles') {
-      // No checkboxes: nothing can be done to these rows, on purpose.
+      // No checkboxes: the one thing to do with a retired title is bring it
+      // back with your own picture, and that is a per-row choice (v239).
       return `<table class="data-table">
-        <thead><tr><th>TITLE</th><th>REASON</th><th>RETIRED</th></tr></thead>
+        <thead><tr><th>TITLE</th><th>REASON</th><th>RETIRED</th><th></th></tr></thead>
         <tbody>${f.items.map((i) => `
           <tr><td>${esc(i.title)}</td>
               <td>${esc(i.reason || '')}</td>
-              <td class="mono">${esc(i.at || '')}</td></tr>`).join('')}
+              <td class="mono">${esc(i.at || '')}</td>
+              <td>${pickButton(i)}</td></tr>`).join('')}
         </tbody></table>`;
     }
 
@@ -2183,6 +2186,14 @@
       </tbody></table>`;
   }
 
+  // USE MY OWN PICTURE on one row of the two retired lists. The dialog is
+  // the shared one (admin_pick.js); the button only says which title.
+  function pickButton(i) {
+    if (!i.master_id) return '';
+    return `<button class="btn btn-info btn-tiny" data-attn-own-pick="${i.master_id}"
+                    data-attn-own-title="${esc(i.title || '')}">USE MY OWN PICTURE</button>`;
+  }
+
   function renderAttentionButtons(f) {
     const acts = (ATTENTION_ACTIONS[f.key] || []).filter((a) => ACTION_LABEL[a]);
     if (!acts.length) return '';
@@ -2231,6 +2242,16 @@
           loadAttention();
           loadOverview();
         } catch (e) { toast(e.message, 'error'); }
+      }));
+
+    root_.querySelectorAll('[data-attn-own-pick]').forEach((b) =>
+      b.addEventListener('click', () => {
+        if (!window.AdminPick) return;
+        window.AdminPick.open({
+          masterId: b.dataset.attnOwnPick,
+          title: b.dataset.attnOwnTitle || '',
+          onDone: (d, msg) => { toast(msg); loadAttention(); loadOverview(); },
+        });
       }));
 
     root_.querySelectorAll('[data-attn-action]').forEach((b) =>

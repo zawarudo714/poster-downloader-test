@@ -1492,6 +1492,7 @@ def go_to_title(
 
     reopened = False
     if t.status in ("complete", "skipped"):
+        _refuse_if_admin_chose(db, title_id=t.id)
         t.status = "in_progress"
         t.completed_at = None
         t.skip_reason  = None
@@ -1727,6 +1728,36 @@ def _picture_fingerprint(path: Path) -> Optional[str]:
         return None
 
 
+def _title_label(t: MasterTitle) -> str:
+    """ "57. Kyoto" — the sheet number and the name, as every screen says it."""
+    return f"{t.external_id}. {t.title}" if t.external_id is not None else t.title
+
+
+def _same_picture_hit(db: Session, project, title: MasterTitle,
+                      sha: Optional[str]):
+    """
+    (picture, title) where this exact picture already lives under a
+    DIFFERENT title in this project, or None. ONE lookup, asked by the
+    worker doors (through _same_picture_refusal) and by the admin's own
+    USE MY OWN PICTURE, so the two can never disagree about what counts
+    as "the same picture".
+    """
+    if not sha:
+        return None
+    from ..pipeline import _default_project_id, project_scope
+    return (
+        db.query(SavedPoster, MasterTitle)
+          .join(MasterTitle, MasterTitle.id == SavedPoster.master_title_id)
+          .filter(SavedPoster.content_hash == sha,
+                  SavedPoster.deleted_at.is_(None),
+                  SavedPoster.master_title_id != title.id,
+                  project_scope(project.id if project else None,
+                                default_project_id=_default_project_id(db)))
+          .order_by(SavedPoster.id.asc())
+          .first()
+    )
+
+
 def _same_picture_refusal(db: Session, project, title: MasterTitle,
                           user: User, sha: Optional[str],
                           confirmed: bool) -> Optional[JSONResponse]:
@@ -1740,7 +1771,7 @@ def _same_picture_refusal(db: Session, project, title: MasterTitle,
     """
     if not sha:
         return None
-    from ..pipeline import _default_project_id, get_setting, project_scope
+    from ..pipeline import get_setting
     try:
         mode = str(get_setting(db, "same_picture_mode", project=project)
                    or "warn").strip().lower()
@@ -1750,22 +1781,11 @@ def _same_picture_refusal(db: Session, project, title: MasterTitle,
         mode = "warn"
     if mode == "off" or (mode == "warn" and confirmed):
         return None
-    hit = (
-        db.query(SavedPoster, MasterTitle)
-          .join(MasterTitle, MasterTitle.id == SavedPoster.master_title_id)
-          .filter(SavedPoster.content_hash == sha,
-                  SavedPoster.deleted_at.is_(None),
-                  SavedPoster.master_title_id != title.id,
-                  project_scope(project.id if project else None,
-                                default_project_id=_default_project_id(db)))
-          .order_by(SavedPoster.id.asc())
-          .first()
-    )
+    hit = _same_picture_hit(db, project, title, sha)
     if hit is None:
         return None
     other_sp, other_t = hit
-    name = (f"{other_t.external_id}. {other_t.title}"
-            if other_t.external_id is not None else other_t.title)
+    name = _title_label(other_t)
     whose = ("you saved" if other_sp.user_id == user.id
              else f"{other_sp.username} saved")
     base = (f'This exact picture is already used for "{name}" '
@@ -2115,10 +2135,40 @@ _HELD_MESSAGE = ("That image has already gone into processing or is on the "
                  "to recall it or rerun it.")
 
 
+# ── THE ADMIN'S OWN PICK IS OUT OF EVERY WORKER'S REACH ────────────────────
+#
+# USE MY OWN PICTURE (v239) puts the owner's chosen picture on a title and
+# finishes it. New picks are saved under the admin's user_id, so the
+# ownership test below already refuses them — but picks made by the old
+# + ADD box carry the WORKER's user_id, and a title-level door (reopen,
+# go to, skip) never looks at user_id at all. Asked by every door that could
+# reopen, empty or change such a title, and watched by the GUARDED table in
+# preflight.py.
+_ADMIN_PICK_MESSAGE = ("The admin chose this title's picture himself, so "
+                       "the title is finished. It cannot be reopened, "
+                       "skipped or changed from here.")
+
+
+def _refuse_if_admin_chose(db: Session, *, title_id: Optional[int] = None,
+                           poster: Optional[SavedPoster] = None) -> None:
+    """Raise 409 if this picture, or any live picture on this title, is the
+    admin's own pick. Pass whichever of the two the door has."""
+    if poster is not None and poster.added_by:
+        raise HTTPException(409, _ADMIN_PICK_MESSAGE)
+    if title_id is not None and (
+            db.query(SavedPoster.id)
+              .filter(SavedPoster.master_title_id == title_id,
+                      SavedPoster.deleted_at.is_(None),
+                      SavedPoster.added_by.isnot(None))
+              .first() is not None):
+        raise HTTPException(409, _ADMIN_PICK_MESSAGE)
+
+
 def _load_my_poster(db: Session, user: User, poster_id: int) -> SavedPoster:
     sp = db.query(SavedPoster).filter_by(id=poster_id).first()
     if not sp or sp.deleted_at is not None:
         raise HTTPException(404, "Poster not found.")
+    _refuse_if_admin_chose(db, poster=sp)
     if sp.user_id != user.id:
         raise HTTPException(403, "Not your poster.")
     return sp
@@ -2665,6 +2715,7 @@ def title_skip(
 
     # Skipping deletes every live picture on the title, so it gets the same
     # guard as a single delete: nothing already moving may vanish this way.
+    _refuse_if_admin_chose(db, title_id=t.id)
     if any(_held_by_pipeline(sp) for sp in db.query(SavedPoster).filter(
             SavedPoster.master_title_id == t.id,
             SavedPoster.deleted_at.is_(None)).all()):
@@ -2751,6 +2802,7 @@ def title_reopen(
     t = _load_my_master(db, user, master_id)
     if t.status not in ("complete", "skipped"):
         raise HTTPException(400, "Title isn't completed or skipped.")
+    _refuse_if_admin_chose(db, title_id=t.id)
     t.status = "in_progress"
     t.completed_at = None
     t.skip_reason = None

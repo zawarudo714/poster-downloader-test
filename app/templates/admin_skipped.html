@@ -21,6 +21,10 @@
       {% else %}
         <button class="btn btn-ghost btn-tiny" data-action="ack-skip">I&#8217;VE READ IT &mdash; LEAVE IT SKIPPED</button>
       {% endif %}
+      {# Found a good picture yourself? It finishes the title and goes
+         straight to painting (v239). #}
+      <button class="btn btn-info btn-tiny" data-action="use-own-picture"
+              data-title="{{ t.title }}">USE MY OWN PICTURE</button>
     </td>
   </tr>
 {% endmacro %}

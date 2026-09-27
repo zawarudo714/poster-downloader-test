@@ -1530,6 +1530,14 @@ modal into a hidden section, a settings key absent from DEFAULTS.
 `--map` prints every button on every screen and what it calls — the
 enumeration rule 1 asks for, done mechanically rather than from memory.
 
+**A check too slow to finish is a check that stops being run.** On
+2026-09-27 four new GUARDED rows pushed the guard check to 133 seconds
+(it re-split each file for every function, for every row) and the whole
+preflight past the time a session's command may run, so it died silently
+with no verdict. Each file is now parsed once per run: 2 seconds. When a
+check grows with the number of rules, make sure it does not grow with
+rules × functions × file size.
+
 **When you add a check to it, SABOTAGE-TEST the check.** Break the thing on
 purpose and confirm preflight goes red. Two of the first eight checks were
 written, looked correct, and could not fail: the hook check searched the JS
@@ -2798,6 +2806,21 @@ reopen-and-add) is covered by one question, watched by
 list every way its condition can become false and ask whether each one
 means the thing it guards is really done.
 
+**A RULE THAT LEAVES SOMETHING OUT OF ONE STEP LEAVES IT OUT OF EVERY STEP
+THAT STEP STARTS.** The admin's own pictures were rightly never paid for —
+and painting is started BY payment, so the old + ADD box's pictures were
+never painted either, unless something else on the same title happened to
+be paid. Nothing was broken in any single line; the exclusion simply
+travelled down a trigger nobody listed (traced 2026-09-27, while replacing
+that box with USE MY OWN PICTURE, which sends its pick to painting itself).
+When a thing is exempted from a step, list what that step SETS OFF and give
+the exempt thing its own way to each of them. Watched by
+`check_admin_picks_reach_painting`. The same box also saved the admin's
+picture under the WORKER's user_id, so the worker's delete button accepted
+it; v239 saves it under the admin's own id, which makes the wrong owner
+impossible rather than guarded (rule 5), and keeps a guard only for the
+title-level doors that never look at owners.
+
 **Creating all the work up front is what makes stopping impossible.** The
 five deactivation jobs — one per account — were queued together, so
 STOP THIS RUN ended the run, released the pipeline, and did nothing at all
@@ -2872,7 +2895,13 @@ failed or refused swap rolled the record back to live with its file gone
 (found 2026-09-27 while adding the same-picture check). And the only
 duplicate guard lived in the paste box alone, comparing addresses, so the
 same file reached two titles through the grid. When a door learns a rule,
-list its sibling doors and teach them all in the same edit.
+list its sibling doors and teach them all in the same edit. Three admin
+doors take pictures off a title — RETIRE, the admin DELETE and USE MY OWN
+PICTURE — and by v239 retire had forgotten the paintings (a withdrawn
+picture's painting stayed waiting on Approve Artwork) while DELETE had
+forgotten the queued uploads and the "is it being painted" check. They now
+share one `_withdraw_pictures` and one `_picture_cannot_leave`, and a
+GUARDED row makes any new caller ask.
 
 Now enforced mechanically: `preflight.py` has a GUARDED table — (file glob,
 the risky call, the calls that protect it) — so a new function that

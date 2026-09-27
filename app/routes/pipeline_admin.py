@@ -2912,7 +2912,8 @@ def api_attention(
             "paid. Listed so the decision stays reversible if the model "
             "improves. (Retired TITLES — the other kind — have their own "
             "card below.)",
-            "RETURN TO PIPELINE to try again.",
+            "RETURN TO PIPELINE to try the same photo again, or USE MY OWN "
+            "PICTURE on a row when the photo itself was the problem.",
             severity="info", items=items,
             note=(f"Showing {len(items)} of {unusable_count}." if unusable_count > len(items) else ""),
         ))
@@ -2921,9 +2922,10 @@ def api_attention(
     # The other retire (2026-09-20): the whole TITLE withdrawn because the
     # place itself has no good photograph anywhere — picture deleted,
     # worker still paid, status 'unusable' with the reason on the row.
-    # FINAL, unlike the artwork card above: there is no picture left to
-    # return to the pipeline, so no action rides with it. Shown here at
-    # the owner's word — this is where he looks for anything he retired.
+    # Since v239 it can come back: USE MY OWN PICTURE on a row puts the
+    # owner's own picture on the title and sends it to painting. Shown
+    # here at the owner's word — this is where he looks for anything he
+    # retired.
     retired_titles_q = (
         db.query(MasterTitle)
           .filter(MasterTitle.status == "unusable",
@@ -2940,13 +2942,14 @@ def api_attention(
         ]
         findings.append(_attention_finding(
             "retired_titles",
-            "Titles retired by you — final, worker paid",
+            "Titles retired by you — worker paid",
             "The place itself had no good photograph, so you withdrew the "
             "whole title: its picture was removed, the worker was still "
-            "paid, and the title never returns to any queue. Unlike the "
-            "artwork card above, this cannot be reversed from here.",
-            "Nothing — this is the record. The same rows sit on the Title "
-            "List under the 'Unusable (retired)' filter, reason on the pill.",
+            "paid, and the title never returns to a worker's queue.",
+            "Nothing, unless you have found a good picture yourself: USE MY "
+            "OWN PICTURE on a row brings the title back with your picture "
+            "and sends it to painting. The same rows sit on the Title List "
+            "under the 'Unusable (retired)' filter.",
             severity="info", items=t_items,
             note=(f"Showing {len(t_items)} of {retired_count}." if retired_count > len(t_items) else ""),
         ))
@@ -3367,7 +3370,9 @@ def api_review_dates(
           .join(ProcessedImage, ProcessedImage.saved_poster_id == SavedPoster.id)
           .filter(ProcessedImage.is_current == 1,
                   ProcessedImage.review_status == "pending",
-                  ProcessedImage.project_id == project.id)
+                  ProcessedImage.project_id == project.id,
+                  # A withdrawn picture's painting is never work (v239).
+                  SavedPoster.deleted_at.is_(None))
           .group_by(SavedPoster.original_save_date)
           .order_by(SavedPoster.original_save_date.desc())
           .all()
@@ -3425,7 +3430,9 @@ def api_review_queue(
           .join(SavedPoster, ProcessedImage.saved_poster_id == SavedPoster.id)
           .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
           .filter(ProcessedImage.is_current == 1,
-                  ProcessedImage.project_id == project.id)
+                  ProcessedImage.project_id == project.id,
+                  # A withdrawn picture's painting is never work (v239).
+                  SavedPoster.deleted_at.is_(None))
     )
     if status == "rerun":
         # "Review reruns" means the FRESH attempts awaiting a verdict, not
@@ -3567,6 +3574,10 @@ def api_review_queue(
             # 'pasted'. Empty for saves that predate the column, and the
             # screen then says nothing rather than guessing.
             "image_source": poster.image_source or "",
+            # The owner's own picture (USE MY OWN PICTURE), so the review
+            # card can say so — it is still judged like any painting.
+            "admin_pick": bool(poster.added_by),
+            "admin_pick_note": poster.added_note or "",
             "versions": versions,
         })
 
@@ -4492,7 +4503,7 @@ def api_review_decide(
 
     now = datetime.utcnow()
     counts = {"approved": 0, "held": 0, "rerun": 0, "unusable": 0,
-              "files_removed": 0}
+              "withdrawn": 0, "files_removed": 0}
     batch_doomed: list = []
 
     for item in decisions:
@@ -4500,6 +4511,14 @@ def api_review_decide(
         if processed is None:
             continue
         poster = db.query(SavedPoster).filter_by(id=processed.saved_poster_id).first()
+        # A PAINTING OF A WITHDRAWN PICTURE IS NEVER DECIDED. Retire and USE
+        # MY OWN PICTURE take the picture off its title while the review
+        # screen may still hold its painting from an earlier load; approving
+        # it would queue an upload of a picture that no longer exists. The
+        # screen is told how many it dropped.
+        if poster is None or poster.deleted_at is not None:
+            counts["withdrawn"] += 1
+            continue
         title = db.query(MasterTitle).filter_by(id=poster.master_title_id).first() if poster else None
         action = item.get("action")
 

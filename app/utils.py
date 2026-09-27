@@ -336,6 +336,44 @@ def resync_flag_markers(db) -> int:
     return changed
 
 
+def withdrawn_picture_paintings(db):
+    """
+    Query: paintings still CURRENT, or still waiting for a verdict
+    ('pending' / 'held'), whose picture has been taken off its title.
+
+    ONE definition, read by the startup repair below and by the Diagnostics
+    check `check_withdrawn_pictures_hold_no_waiting_painting`, so the two
+    cannot disagree about what counts.
+    """
+    from sqlalchemy import or_
+    from .models import ProcessedImage, SavedPoster
+    return (db.query(ProcessedImage)
+              .join(SavedPoster, ProcessedImage.saved_poster_id == SavedPoster.id)
+              .filter(SavedPoster.deleted_at.isnot(None),
+                      or_(ProcessedImage.is_current == 1,
+                          ProcessedImage.review_status.in_(("pending", "held")))))
+
+
+def set_aside_withdrawn_paintings(db) -> int:
+    """
+    Take the paintings of withdrawn pictures out of Approve Artwork, and
+    return how many rows changed. Run at startup.
+
+    RETIRE TITLE (v220-ish) removed the picture and left its painting
+    'pending' and current, so a retired title's painting could sit in the
+    review queue and, if kept, queue an upload of a picture that no longer
+    exists. v239 fixed the door (_withdraw_pictures in routes/admin.py);
+    this repairs what the door had already written — fixing a door never
+    repairs the rows it wrote. Idempotent: a clean database changes nothing.
+    """
+    changed = 0
+    for pi in withdrawn_picture_paintings(db).all():
+        pi.is_current = 0
+        if (pi.review_status or "") in ("pending", "held"):
+            pi.review_status = "superseded"
+        changed += 1
+    return changed
+
 
 def fill_missing_fingerprints(batch: int = 100) -> int:
     """

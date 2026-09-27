@@ -1020,6 +1020,35 @@ On Changes Requested, click a thumbnail to zoom:
   leave the door.
 - Run Diagnostics and read "left for Photoshop". It should be green.
 
+## 92. USE MY OWN PICTURE, AND UNREVIEWED DAYS FIRST — v239
+
+- Worker Images: open a title that has a worker picture. The + ADD box is
+  gone; press USE MY OWN PICTURE. Paste a link, type a reason, and press
+  USE THIS PICTURE. The worker's picture should disappear, yours should show
+  a gold ADMIN PICK label and a green "reviewed" outline, and the title
+  should appear on the Pipeline page as sent to painting.
+- Do it again from the zoom on another title, this time with a file from
+  your computer instead of a link.
+- Try a picture already used on another title. You should get a warning
+  naming that title, and OK should save it anyway.
+- Changes Requested: press USE MY OWN PICTURE on a flag card, on a
+  completion card and on a DELETED card. Each card for that title should
+  leave the page.
+- Skipped: press it on a skipped row. The row should leave the page.
+- Needs Attention: press it on a retired title. The title should come back
+  (Title List shows it complete), and your picture goes to painting.
+- As the worker, try to reopen or open that title. It should refuse and say
+  the admin chose the picture.
+- Payments: the worker's replaced picture should still be payable, and
+  yours should never appear there.
+- When the painting arrives on Approve Artwork, it should carry the ADMIN
+  PICK label.
+- Worker Images with no date in the address: it should open on the oldest
+  day that still has unreviewed pictures. NEXT DAY TO REVIEW should walk
+  through the rest, and disappear when there are none left.
+- Run Diagnostics: "more pictures than they take", "your own pictures ...
+  painting" and "painting(s) of removed pictures" should all be green.
+
 ---
 
 ## NOT ON THIS LIST, ON PURPOSE

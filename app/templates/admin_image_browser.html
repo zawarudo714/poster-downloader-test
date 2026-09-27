@@ -26,6 +26,10 @@
           <span class="date-nav-current mono" id="ib-date-label">{{ selected_date }}</span>
           <button type="button" class="btn btn-ghost btn-tiny" id="ib-date-next" title="Next date">›</button>
           <button type="button" class="btn btn-ghost btn-tiny" id="ib-date-grid-btn" title="All dates">📅 ALL DATES</button>
+          {# Walks to the oldest OTHER day that still has pictures you have
+             not reviewed. Hidden when there is none. #}
+          <button type="button" class="btn btn-accent btn-tiny" id="ib-next-review" hidden
+                  title="Go to the oldest other day that still has pictures you have not reviewed.">NEXT&nbsp;DAY&nbsp;TO&nbsp;REVIEW</button>
         </div>
         <button type="button" class="btn btn-ghost" id="ib-load">LOAD</button>
         <button type="button" class="btn btn-accent" id="ib-zip">ZIP THIS DAY {{ info("Builds a single ZIP of every file under {user}/{date}/ for download.") }}</button>
@@ -150,7 +154,7 @@
       search was honest work even though the place has nothing good to
       show.
     </p>
-    <p class="muted small">This action is logged but not reversible from the UI.</p>
+    <p class="muted small">This action is logged. If you later find a good picture yourself, USE MY OWN PICTURE brings the title back.</p>
     <div class="delete-user-form">
       <label class="filter-label">Why is this title unusable? (stored on the title)
         <input type="text" id="retire-reason" autocomplete="off"
@@ -179,9 +183,11 @@
       <span class="g-title-meta mono muted"></span>
     </header>
     <div class="g-title-posters"></div>
+    {# USE MY OWN PICTURE (v239) replaced the old + ADD box, which put a
+       SECOND picture beside the worker's instead of replacing it. #}
     <div class="g-title-admin-add">
-      <input type="url" class="g-add-url" placeholder="Paste URL to add one…">
-      <button class="btn btn-info btn-tiny g-add-btn">+ ADD</button>
+      <button type="button" class="btn btn-info btn-tiny g-pick-btn"
+              title="Put your own picture on this title instead of the worker's. The worker is still paid, and your picture goes straight to painting.">USE&nbsp;MY&nbsp;OWN&nbsp;PICTURE</button>
     </div>
   </section>
 </template>
@@ -199,6 +205,8 @@
 <script>
   // Server-rendered date list for the current worker.
   window.__dates = [{% for d in dates %}"{{ d }}"{% if not loop.last %},{% endif %}{% endfor %}];
+  {# Pictures not yet reviewed, per day, for this worker — see browse_page. #}
+  window.__unreviewed = {{ unreviewed_by_date | tojson }};
 </script>
 {# Subject drawings, shared with the worker page — loaded before admin.js,
    which reads window.SubjectKind when it draws each title's header. #}

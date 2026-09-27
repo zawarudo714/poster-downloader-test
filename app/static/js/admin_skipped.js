@@ -33,6 +33,23 @@
     const backBtn = row.querySelector('[data-action="send-back"]');
     const ackBtn = row.querySelector('[data-action="ack-skip"]');
     const unackBtn = row.querySelector('[data-action="unack-skip"]');
+    const pickBtn = row.querySelector('[data-action="use-own-picture"]');
+
+    // USE MY OWN PICTURE — the shared dialog (admin_pick.js). The title
+    // stops being skipped, so its row leaves the page.
+    if (pickBtn) {
+      pickBtn.addEventListener('click', () => {
+        if (!window.AdminPick) return;
+        window.AdminPick.open({
+          masterId,
+          title: pickBtn.getAttribute('data-title') || '',
+          onDone: (d, msg) => {
+            fadeOut(row);
+            if (window.toast) window.toast(msg);
+          },
+        });
+      });
+    }
 
     if (backBtn) {
       backBtn.addEventListener('click', async () => {

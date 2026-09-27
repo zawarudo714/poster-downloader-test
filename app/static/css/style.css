@@ -3919,21 +3919,13 @@ body:has(#ib-bulk-bar:not([hidden])) { padding-bottom: 88px; }
   padding-top: 8px;
   border-top: 1px solid var(--border);
 }
-.g-add-url {
-  flex: 1;
-  min-width: 0;
-  padding: 6px 8px;
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  font-family: inherit;
-  font-size: 12px;
-}
-.g-add-url:focus { outline: none; border-color: var(--accent); }
-@media (max-width: 700px) {
-  .g-title-admin-add { flex-wrap: wrap; }
-  .g-add-url { flex-basis: 100%; }
+/* USE MY OWN PICTURE's dialog (admin_pick.js) — progress line and the
+   ADMIN PICK label used on every screen that shows the owner's own pick. */
+.admin-pick-status { min-height: 1.4em; margin: 6px 0; }
+.status-pill.status-admin-pick {
+  background: rgba(212, 175, 55, 0.18);
+  color: #e3c35a;
+  border: 1px solid rgba(212, 175, 55, 0.6);
 }
 
 /* ── Admin peek mode (read-only worker dashboard view) ──────────────── */
@@ -4034,13 +4026,8 @@ body:has(#ib-bulk-bar:not([hidden])) { padding-bottom: 88px; }
 }
 .peek-item:last-child { border-bottom: none; }
 
-/* ── Admin-added poster badge ───────────────────────────────────────── */
-.status-admin-added {
-  background: rgba(100, 180, 255, 0.18) !important;
-  color: #b3d9ff !important;
-  border: 1px solid rgba(100, 180, 255, 0.40);
-}
-.g-poster.p-admin-added { border-color: rgba(100, 180, 255, 0.35); border-width: 2px; }
+/* ── The owner's own pick (USE MY OWN PICTURE) — gold, like its label ── */
+.g-poster.p-admin-added { border-color: rgba(212, 175, 55, 0.6); border-width: 2px; }
 
 /* ── Peek mode: read-only overlay on worker dashboard ───────────────── */
 .peek-banner {

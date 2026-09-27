@@ -177,6 +177,8 @@
                     data-master-id="{{ t.id }}">APPROVE COMPLETION</button>
             <button class="btn btn-error" data-action="reject-complete"
                     data-master-id="{{ t.id }}">REJECT &amp; SEND BACK</button>
+            <button class="btn btn-info" data-pick-master="{{ t.id }}"
+                    data-pick-title="{{ t.title }}">USE MY OWN PICTURE</button>
           </div>
         </div>
 
@@ -241,6 +243,8 @@
                   <input type="text" placeholder="(optional) verdict comment" data-verdict-input>
                   <button class="btn btn-success btn-tiny" data-action="approve">APPROVE</button>
                   <button class="btn btn-error btn-tiny" data-action="reject">REJECT &amp; SEND BACK</button>
+                  {% if mt %}<button class="btn btn-info btn-tiny" data-pick-master="{{ mt.id }}"
+                          data-pick-title="{{ mt.title }}">USE MY OWN PICTURE</button>{% endif %}
                 </div>
               </div>
             </div>
@@ -283,6 +287,8 @@
                   <input type="text" placeholder="(optional for ACK; required for SEND BACK) note for the user" data-deletion-note>
                   <button class="btn btn-ghost btn-tiny" data-action="ack-deletion">ACKNOWLEDGE</button>
                   <button class="btn btn-error btn-tiny" data-action="send-back-deletion">SEND BACK</button>
+                  {% if mt %}<button class="btn btn-info btn-tiny" data-pick-master="{{ mt.id }}"
+                          data-pick-title="{{ mt.title }}">USE MY OWN PICTURE</button>{% endif %}
                 </div>
               </div>
             </div>
@@ -347,6 +353,8 @@
                 <div class="rev-card-meta mono muted">flagged by {{ rev.flagged_by }} · {{ rev.created_at | local_dt('%Y-%m-%d %H:%M') }}</div>
                 <div class="rev-card-actions">
                   <button class="btn btn-ghost btn-tiny" data-unflag-poster-id="{{ sp.id }}">CLEAR FLAG</button>
+                  {% if mt %}<button class="btn btn-info btn-tiny" data-pick-master="{{ mt.id }}"
+                          data-pick-title="{{ mt.title }}">USE MY OWN PICTURE</button>{% endif %}
                 </div>
               </div>
             </div>

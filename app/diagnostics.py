@@ -2169,6 +2169,122 @@ def check_current_image_was_discarded(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def check_titles_hold_too_many_pictures(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: a finished title holds no more live pictures than its
+    project takes per title.
+
+    Everything live on a finished title is sent to painting and then to the
+    marketplace. With one picture per title (travel), a second live picture
+    becomes a second listing of the same place, which FineArtAmerica renames
+    "#2" — an address the listing check can never find. The old + ADD box
+    did exactly this, quietly, until v239 replaced it with USE MY OWN
+    PICTURE, which takes the worker's picture down in the same step.
+    """
+    per_title = {p.id: p.images_per_title
+                 for p in db.query(Project).all() if p.images_per_title}
+    if not per_title:
+        return _skipped("titles_hold_too_many_pictures",
+                        "Titles holding more pictures than they take",
+                        "No project here sets a number of pictures per title.")
+    rows_q = (db.query(MasterTitle, func.count(SavedPoster.id))
+                .join(SavedPoster, SavedPoster.master_title_id == MasterTitle.id)
+                .filter(SavedPoster.deleted_at.is_(None),
+                        MasterTitle.status.in_(("complete", "complete_pending")),
+                        scope.titles)
+                .group_by(MasterTitle.id)
+                .having(func.count(SavedPoster.id) > 1))
+    found = []
+    for mt, n in rows_q.all():
+        limit = per_title.get(mt.project_id or scope.default_id)
+        if limit and n > limit:
+            found.append(Finding(
+                scope.title_of(mt),
+                f"title {mt.external_id} holds {n} live pictures; its project "
+                f"takes {limit}",
+                "/admin/pipeline", project=scope.label(mt.project_id)))
+    total = len(found)
+    return _result(
+        "titles_hold_too_many_pictures",
+        f"{total} finished title(s) hold more pictures than they take"
+        if total else "No finished title holds more pictures than it takes",
+        "Every live picture on a finished title goes to painting and then "
+        "to the marketplace, so the extra one would become a second listing "
+        "of the same place. Open the title on Worker Images and remove the "
+        "one you do not want, or use USE MY OWN PICTURE, which leaves "
+        "exactly one.",
+        "error" if total else "ok", found[:MAX_ROWS], total,
+    )
+
+
+def check_admin_picks_reach_painting(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: the owner's own picture on a finished title is on its way
+    to painting (or past it).
+
+    Painting normally follows PAYMENT, and the owner's own picture is never
+    paid — so a pick that is not sent to painting when it is made will wait
+    for ever, looking perfectly normal. That was the old + ADD box's quiet
+    failure; USE MY OWN PICTURE sends its pick straight on. This watches
+    for any pick, old or new, that is still sitting at the start.
+    """
+    from .pipeline import awaiting_greenlight_poster_filter
+    q = (db.query(SavedPoster, MasterTitle)
+           .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+           .filter(SavedPoster.added_by.isnot(None),
+                   SavedPoster.deleted_at.is_(None),
+                   awaiting_greenlight_poster_filter(),
+                   scope.titles))
+    total = q.count()
+    rows = [Finding(scope.title_of(mt),
+                    f"picture record {sp.id} is your own pick and has not been "
+                    f"sent to painting (title is '{mt.status}')",
+                    "/admin/pipeline", project=scope.label(mt.project_id))
+            for sp, mt in q.limit(MAX_ROWS).all()]
+    return _result(
+        "admin_picks_reach_painting",
+        f"{total} of your own pictures are not on their way to painting"
+        if total else "Every picture of your own is on its way to painting",
+        "Your own pictures are never paid for, and painting normally starts "
+        "when a picture is paid — so these would wait for ever. Replace "
+        "each one with USE MY OWN PICTURE (it sends the new one straight to "
+        "painting), or greenlight the title by hand on the Pipeline page.",
+        "warn" if total else "ok", rows, total,
+    )
+
+
+def check_withdrawn_pictures_hold_no_waiting_painting(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: a picture taken off its title leaves nothing on Approve
+    Artwork.
+
+    RETIRE left the painting of the withdrawn picture current and
+    'pending' until v239, so it could be kept and queue an upload of a
+    picture that no longer exists. The doors are fixed and startup repairs
+    old rows (utils.set_aside_withdrawn_paintings); this uses the SAME
+    query, so it goes red if any door ever does it again.
+    """
+    from .utils import withdrawn_picture_paintings
+    q = withdrawn_picture_paintings(db)
+    total = q.count()
+    rows = [Finding(f"picture record {pi.saved_poster_id}",
+                    f"its painting (generation {pi.attempt or 1}) is still "
+                    f"'{pi.review_status or 'no status'}'"
+                    + (" and current" if pi.is_current else ""),
+                    "/admin/pipeline/review")
+            for pi in q.limit(MAX_ROWS).all()]
+    return _result(
+        "withdrawn_pictures_hold_no_waiting_painting",
+        f"{total} painting(s) of removed pictures are still waiting"
+        if total else "No painting of a removed picture is waiting",
+        "The picture was retired, replaced or deleted, but its painting "
+        "still counts as waiting for your verdict. Restarting the site sets "
+        "these aside automatically. If they come back, tell whoever built "
+        "the step that removed the picture.",
+        "warn" if total else "ok", rows, total,
+    )
+
+
 def check_left_for_photoshop_is_reachable(db: Session, scope: Scope) -> CheckResult:
     """
     INVARIANT: a picture LEFT FOR PHOTOSHOP is the one its poster shows.
@@ -2999,6 +3115,9 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_approved_without_a_print_file,
     check_current_image_was_discarded,
     check_left_for_photoshop_is_reachable,
+    check_titles_hold_too_many_pictures,
+    check_admin_picks_reach_painting,
+    check_withdrawn_pictures_hold_no_waiting_painting,
     check_generations_share_a_file,
     check_live_titles_are_unique_per_account,
     check_needs_revision_matches_open_flags,

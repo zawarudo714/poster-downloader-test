@@ -43,11 +43,24 @@
     if (!p.image_source) return null;
     const s = document.createElement('span');
     s.className = 'status-pill status-img-source';
-    s.textContent = { brave: 'Brave', google: 'Google',
-                      pasted: 'pasted' }[p.image_source] || p.image_source;
+    s.textContent = { brave: 'Brave', google: 'Google', pasted: 'pasted',
+                      uploaded: 'uploaded' }[p.image_source] || p.image_source;
     s.title = { brave: 'Found with the in-page Brave search',
                 google: 'Sent from Google by the phone add-on',
-                pasted: 'Pasted as a link by hand' }[p.image_source] || '';
+                pasted: 'Pasted as a link by hand',
+                uploaded: 'A file you chose from your computer' }[p.image_source] || '';
+    return s;
+  }
+
+  // One spelling of the ADMIN PICK label — the owner's own picture, put on
+  // the title with USE MY OWN PICTURE. Shared by the zoom and the grids.
+  function adminPickPill(p) {
+    if (!p || !p.added_by) return null;
+    const s = document.createElement('span');
+    s.className = 'status-pill status-admin-pick';
+    s.textContent = 'ADMIN PICK';
+    s.title = `Your own picture (${p.added_by}), used in place of the worker\u2019s`
+      + (p.added_note ? ` — ${p.added_note}` : '');
     return s;
   }
 
@@ -194,7 +207,8 @@
     const dims = (p.image_width && p.image_height) ? ` · ${p.image_width}×${p.image_height}` : '';
     const lq   = p.low_quality_url ? ' · ⚠ LQ-URL bypassed' : '';
     const from = { brave: ' · found on Brave', google: ' · found on Google',
-                   pasted: ' · pasted link' }[p.image_source] || '';
+                   pasted: ' · pasted link',
+                   uploaded: ' · uploaded file' }[p.image_source] || '';
     $id('ib-lb-meta').textContent =
       `${t.title}${t.year ? ` (${t.year})` : ''} — ${p.filename}${dims}${lq}${from}`;
 
@@ -206,6 +220,8 @@
       pillsHost.innerHTML = '';
       const src = sourcePill(p);
       if (src) pillsHost.appendChild(src);
+      const pick = adminPickPill(p);
+      if (pick) pillsHost.appendChild(pick);
       if (opts && opts.extraPills) {
         (opts.extraPills(t, p) || []).forEach((n) => { if (n) pillsHost.appendChild(n); });
       }
@@ -357,6 +373,7 @@
 
   window.PosterLightbox = {
     init, open, close, step, isOpen, toggleReviewed, sourcePill,
+    adminPickPill,
     current: () => current,
   };
 })();

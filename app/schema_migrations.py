@@ -89,6 +89,7 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     # withdrawn, and remember why the title is unusable. Defaults keep
     # every existing row exactly as it was.
     ("saved_posters", "pay_despite_delete", "INTEGER NOT NULL DEFAULT 0"),
+    ("saved_posters", "added_note",        "TEXT"),
     ("master_titles", "unusable_reason",    "TEXT"),
     # ── Fair sharing between projects / rotation between accounts ───────
     ("projects",        "process_weight", "INTEGER NOT NULL DEFAULT 1"),

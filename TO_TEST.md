@@ -981,10 +981,7 @@ On Changes Requested, click a thumbnail to zoom:
   (keep).
 - Try the keys with Num Lock both on and off. The number-pad 7, 8 and 9 must
   work either way, and 4 / 6 must still step.
-- Press SAVE & RELEASE. The tally should say "N left for Photoshop". Open the
-  screen again: the blue ones must still be waiting, still blue, and on the
-  same version.
-- Press 9 on a blue one, then save. It should now be released.
+- (Changed in v238 — see item 91 for how saving a blue one now behaves.)
 - Change a key in Settings (the Approve Artwork keys box). The buttons and
   the key list on the screen should show the new key.
 - On Worker Images, press 9 on a title. It should get the green "looked at"
@@ -1004,6 +1001,24 @@ On Changes Requested, click a thumbnail to zoom:
   REPLACE and SKIP as the worker. All three must refuse with a message.
 - Run Diagnostics and read "finished titles hold a replacement picture you
   never saw". Each link should open the picture on Worker Images.
+
+## 91. THE PHOTOSHOP QUEUE — v238
+
+- If some pictures are still blue from before v238, open the normal review
+  and press SAVE & RELEASE once. They should move to the new queue.
+- Press 8 on two titles, pick v1 on one of them first, then SAVE & RELEASE.
+  The save line should say "2 moved to the Photoshop queue". The button
+  JUST THE PHOTOSHOP ONES should now read 2.
+- Press REVIEW NEXT 20. Neither of the two should be in the batch. The big
+  button's "waiting" number should have dropped by two.
+- Press JUST THE PHOTOSHOP ONES. Both should show with a blue outline, and
+  the one where you picked v1 should open on v1.
+- Edit one in Photopea and save the edit. It must stay in this door. Press 9
+  on it, leave the other one alone, and SAVE & RELEASE. Only the kept one is
+  released. The other must still be in the door afterwards.
+- In the door, press 7 on a picture and save. It should go to regenerate and
+  leave the door.
+- Run Diagnostics and read "left for Photoshop". It should be green.
 
 ---
 

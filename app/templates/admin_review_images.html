@@ -31,6 +31,11 @@
       <div class="filter-row">
         <button class="btn btn-primary" data-action="review-all">REVIEW&nbsp;EVERYTHING&nbsp;WAITING&nbsp;<span class="mono" data-review-waiting-count></span></button>
         <button class="btn btn-ghost" data-action="review-reruns">JUST&nbsp;THE&nbsp;RERUNS&nbsp;<span data-rerun-count>0</span></button>
+        {# Pictures marked LEAVE FOR PHOTOSHOP (8) wait here, OUTSIDE the
+           normal queue and its batches, until edited and kept. In this door
+           only an explicit KEEP releases anything (v238). #}
+        <button class="btn btn-info" data-action="review-held"
+                title="Pictures you left for Photoshop. They are not in the normal queue and are never released until you keep them here.">JUST&nbsp;THE&nbsp;PHOTOSHOP&nbsp;ONES&nbsp;<span data-held-count>0</span></button>
         {# The queue order, remembered across visits. Applies to every door
            — the big button, a single day, a range, and the reruns. #}
         <label class="muted mono" style="margin-left:auto; display:flex; align-items:center; gap:6px">

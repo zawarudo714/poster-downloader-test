@@ -2770,6 +2770,20 @@ set it ranges over — any mechanism that can add members between the
 person's look and their commit turns their silence into a decision they
 never made.
 
+**A MARK KEPT ONLY IN THE BROWSER CAN DECORATE A LIST, BUT IT CANNOT
+SHORTEN ONE.** v236's LEAVE FOR PHOTOSHOP lived in localStorage, so the
+server still counted those pictures as waiting — and REVIEW NEXT 20 is the
+server's first 20. With twenty left for editing, every batch loaded the
+same twenty and no new work could be reached (owner, 2026-09-27). v238
+stores it as `review_status = 'held'`, with its own door. The test: if a
+mark is meant to change what the server HANDS OUT — a batch, a count, a
+queue — it must be stored where the server reads, or it only changes the
+paint on the thing being handed out. And the same door-by-door care
+applies as ever: a new status is invisible to every query that lists the
+old ones, so `grep review_status` and decide each hit (keeping or
+rerunning a sibling now settles a held one; a Photopea edit of a held
+picture stays held; the badge deliberately still counts `pending` only).
+
 **A GATE MUST ASK ABOUT THE FACT IT PROTECTS, NOT ABOUT THE MECHANISM
 THAT USUALLY CARRIES IT.** The worker's DONE held a title for review only
 while a FLAG was open — standing in for "has the owner seen what this title

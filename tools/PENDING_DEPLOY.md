@@ -1,23 +1,16 @@
 # Not yet deployed
 
-**v237 — nothing that follows a deletion or your look slips through
-unseen, and workers can no longer change a picture that is already moving.**
-- The worker's DONE now waits on Changes Requested when the title holds a
-  picture you have not seen that arrived after you flagged or looked at the
-  title. Examples: the new picture after a flagged one was deleted (even
-  after you acknowledged or sent it back), a picture swapped or added after
-  a reopen. The card shows it under "NEW PICTURE YOU HAVE NOT SEEN".
-  Approving, acknowledging a deleted card that showed it, or pressing the
-  keep key on Worker Images all count as seen.
-- Delete, REPLACE and SKIP now refuse a picture that is greenlit, being
-  painted, painted, uploading or uploaded, with the same wording the
-  search-grid swap already used.
-- New Diagnostics check: finished titles holding a replacement you never
-  saw. On its first run it lists the ones that slipped through before this
-  fix, each with a link to the picture.
-- Database: one new column (saved_posters.review_voided_at), added
-  automatically on startup.
-- Server only. The Windows node is NOT affected.
+## v238 — the Photoshop queue (2026-09-27)
+
+- LEAVE FOR PHOTOSHOP (8) is now saved on the server as `review_status =
+  'held'` instead of a browser mark. Held pictures leave the normal queue
+  and its batches of 20, and wait behind a new JUST THE PHOTOSHOP ONES
+  button. In that door only KEEP (9) releases anything.
+- Files: `routes/pipeline_admin.py` (the `hold` decision, the held count,
+  keeping/rerunning a sibling settles a held one, Photopea edits of a held
+  picture stay held), `projects.py`, `diagnostics.py` (new check),
+  `static/js/admin_review_images.js`, `templates/admin_review_images.html`.
+- The Windows node is not affected. No copying needed.
 
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.

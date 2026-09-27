@@ -3386,6 +3386,12 @@ def api_review_dates(
                             ProcessedImage.is_current == 1,
                             ProcessedImage.attempt > 1,
                             ProcessedImage.project_id == project.id).scalar() or 0,
+        # Pictures LEFT FOR PHOTOSHOP, waiting in their own door. Current
+        # rows only, the same spelling as every other count on this screen.
+        "held": db.query(func.count(ProcessedImage.id))
+                  .filter(ProcessedImage.review_status == "held",
+                          ProcessedImage.is_current == 1,
+                          ProcessedImage.project_id == project.id).scalar() or 0,
         # How many painted images the REVIEW EVERYTHING WAITING button loads
         # at once. 0 means all of them (batching off). The button label reads
         # this to say "REVIEW NEXT 20" instead of "everything". Guarded so a
@@ -4121,6 +4127,12 @@ def api_review_remember(
     unsent intent, and a "pending decision" is a state no other part of the
     pipeline understands — the greenlight query, the funnel counts and the
     node would all have to learn it. Those stay in the browser instead.
+
+    The one exception is LEAVE FOR PHOTOSHOP, which since v238 is sent as
+    its own decision ('held', in /review/decide) rather than kept here. It
+    needed no other part of the pipeline to learn anything: a held poster
+    is still 'processed', exactly like a pending one, and the uploader only
+    ever takes 'approved'.
     """
     import json as _json
     from .. import signature as SIG
@@ -4279,7 +4291,11 @@ def _store_variant_row(db, *, admin, project, title, poster, processed,
         variant=letter,
         healed_from=processed.id,
         preview_path=preview_rel,
-        review_status="pending" if processed.review_status else None,
+        # An edit of a picture LEFT FOR PHOTOSHOP stays left: the edit is
+        # made from the held door, and a 'pending' child would jump out of
+        # that door into the normal queue the moment it was saved.
+        review_status=(("held" if processed.review_status == "held" else "pending")
+                       if processed.review_status else None),
         master_path=master_rel,
         background_color=(colour if as_master else None),
         signature_json=processed.signature_json,
@@ -4462,6 +4478,8 @@ def api_review_decide(
     Record decisions on one or more processed images.
 
         approve  — release for upload
+        hold     — LEAVE FOR PHOTOSHOP: out of the normal queue, not
+                   released, waiting in its own door until edited and kept
         rerun    — discard and generate again; lands in the rerun list
         unusable — permanently out of the pipeline, reason required
 
@@ -4473,7 +4491,8 @@ def api_review_decide(
         raise HTTPException(400, "decisions is required.")
 
     now = datetime.utcnow()
-    counts = {"approved": 0, "rerun": 0, "unusable": 0, "files_removed": 0}
+    counts = {"approved": 0, "held": 0, "rerun": 0, "unusable": 0,
+              "files_removed": 0}
     batch_doomed: list = []
 
     for item in decisions:
@@ -4555,7 +4574,9 @@ def api_review_decide(
                                     ProcessedImage.id != processed.id).all())
                 for other in losers:
                     other.is_current = 0
-                    if (other.review_status or "") in ("pending", ""):
+                    # 'held' too: a sibling left for Photoshop is settled
+                    # the moment another generation of it is kept.
+                    if (other.review_status or "") in ("pending", "", "held"):
                         other.review_status = "superseded"
                 processed.is_current = 1
 
@@ -4625,6 +4646,32 @@ def api_review_decide(
                                  processed.master_path])
             counts["approved"] += 1
 
+        elif action == "hold":
+            # ── LEFT FOR PHOTOSHOP: ITS OWN QUEUE, NOT A BROWSER MARK ────
+            #
+            # Until v238 this mark lived only in the browser, so the image
+            # stayed 'pending' and kept its place in the normal queue. With
+            # twenty of them waiting, REVIEW NEXT 20 loaded the same twenty
+            # every time and no new work could be reached (owner,
+            # 2026-09-27). 'held' takes it out of the pending counts and the
+            # batch, and JUST THE PHOTOSHOP ONES is the door back in.
+            #
+            # Nothing is released and nothing is deleted. The generation on
+            # screen becomes the current one, exactly as approving would
+            # make it, so the door reopens on the version he chose. The
+            # siblings keep their statuses: he may still pick another one
+            # when he comes back to it.
+            processed.review_status = "held"
+            if poster is not None:
+                (db.query(ProcessedImage)
+                   .filter(ProcessedImage.saved_poster_id == poster.id,
+                           ProcessedImage.id != processed.id)
+                   .update({ProcessedImage.is_current: 0},
+                           synchronize_session=False))
+            processed.is_current = 1
+            # No colour or signature is written here: tweaks are already
+            # kept on the row by /review/remember as he makes them.
+            counts["held"] += 1
         elif action == "rerun":
             processed.review_status = "rerun"
             # The rejected generation is set aside, never deleted — its row
@@ -4640,7 +4687,7 @@ def api_review_decide(
                                 .filter(ProcessedImage.saved_poster_id == poster.id,
                                         ProcessedImage.id != processed.id).all()):
                     other.is_current = 0
-                    if (other.review_status or "") == "pending":
+                    if (other.review_status or "") in ("pending", "held"):
                         other.review_status = "superseded"
             if poster:
                 poster.pipeline_status = "greenlit"

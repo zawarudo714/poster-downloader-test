@@ -71,7 +71,7 @@ from datetime import datetime, timedelta
 from typing import Callable, Optional
 
 from sqlalchemy import func, or_, true as sa_true
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from .config import BASE_DIR, WORKSPACE_DIR
 from .models import (
@@ -2169,6 +2169,55 @@ def check_current_image_was_discarded(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def check_left_for_photoshop_is_reachable(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: a picture LEFT FOR PHOTOSHOP is the one its poster shows.
+
+    Since v238 "leave for Photoshop" is a server state ('held') with its
+    own door on Approve Artwork, and that door — like every other — lists
+    CURRENT rows only. A held row that has lost `is_current` while its
+    poster's current row is something else has fallen out of that door:
+    the owner's "this needs editing" is silently gone, and if the current
+    row is 'pending' the normal queue would release it by silence.
+
+    The paths that move `is_current` today all respect it (keeping another
+    generation supersedes a held sibling, a rerun supersedes it, a Photopea
+    edit of a held picture is itself held). This watches for the next path
+    that does not.
+    """
+    current = aliased(ProcessedImage)
+    rows_q = (db.query(ProcessedImage.saved_poster_id, ProcessedImage.attempt,
+                       current.review_status)
+                .outerjoin(current,
+                           (current.saved_poster_id == ProcessedImage.saved_poster_id)
+                           & (current.is_current == 1))
+                .filter(ProcessedImage.review_status == "held",
+                        ProcessedImage.is_current == 0,
+                        or_(current.id.is_(None),
+                            current.review_status.is_(None),
+                            current.review_status != "held")))
+    found = rows_q.limit(MAX_ROWS).all()
+    total = rows_q.count()
+
+    rows = [Finding(f"picture record {poster_id}",
+                    f"generation {attempt or 1} was left for Photoshop, but the "
+                    f"poster now shows "
+                    + (f"a picture marked '{cur}'" if cur else "no current picture"),
+                    "/admin/pipeline/review")
+            for poster_id, attempt, cur in found]
+    return _result(
+        "left_for_photoshop_is_reachable",
+        f"{total} picture(s) left for Photoshop have dropped out of that queue"
+        if total else "Every picture left for Photoshop is in its queue",
+        "These were marked LEAVE FOR PHOTOSHOP, but a different version of "
+        "the same poster is now the one on show, so JUST THE PHOTOSHOP ONES "
+        "no longer lists them. Open the poster on Approve Artwork and choose "
+        "the version you want. Tell whoever built the step that moved it, "
+        "because this is supposed to be impossible.",
+        "warn" if total else "ok", rows, total,
+    )
+
+
 def check_upload_gap_is_holding(db: Session, scope: Scope) -> CheckResult:
     """
     INVARIANT: with the gap switched on, batches really are that far apart.
@@ -2949,6 +2998,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_number_settings_hold_numbers,
     check_approved_without_a_print_file,
     check_current_image_was_discarded,
+    check_left_for_photoshop_is_reachable,
     check_generations_share_a_file,
     check_live_titles_are_unique_per_account,
     check_needs_revision_matches_open_flags,

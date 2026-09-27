@@ -250,6 +250,6 @@ def _review_visible(db: Session, proj) -> bool:
     return bool(
         db.query(ProcessedImage.id)
           .filter(ProcessedImage.project_id == proj.id,
-                  ProcessedImage.review_status.in_(("pending", "rerun")))
+                  ProcessedImage.review_status.in_(("pending", "rerun", "held")))
           .first()
     )

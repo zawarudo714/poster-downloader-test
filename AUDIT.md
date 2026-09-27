@@ -130,7 +130,7 @@ queue's scoping.
 | Review Posters · "Paste URL to add one" | OK — verified, see below |
 | Upload · title template help text | **FIXED 2026-08-27** — gated on capability |
 | Pipeline · Greenlight · Title Browser | OK — three bulk actions on one selection: greenlight, pull back, send back to the start |
-| Approve Artwork · RERUN / LEAVE FOR PHOTOSHOP / KEEP keys | OK `DECIDED 2026-09-27` — keys come from `review_key_*` (7 / 8 / 9 by default) and also match the number-pad key with Num Lock off (`keys.js`). LEAVE FOR PHOTOSHOP is never sent on save and survives it, so the image keeps waiting with its blue outline. The KEEP key is also Worker Images' "looked at it" key |
+| Approve Artwork · RERUN / LEAVE FOR PHOTOSHOP / KEEP keys | OK `DECIDED 2026-09-27` — keys come from `review_key_*` (7 / 8 / 9 by default) and also match the number-pad key with Num Lock off (`keys.js`). LEAVE FOR PHOTOSHOP is sent on save as `hold`: the picture becomes `review_status = 'held'`, leaves the normal queue and its batches, and waits behind JUST THE PHOTOSHOP ONES (v238). In that door silence keeps a picture waiting; only KEEP releases it. A Photopea edit of a held picture is itself held. Watched by `check_left_for_photoshop_is_reachable`. The KEEP key is also Worker Images' "looked at it" key |
 | Pipeline · Greenlight · Send titles back to the start | OK — a TESTING tool, live in every project. It reads the Title Browser's ticked rows, scopes through `_title_scope()`, and needs no project gating because every project can be re-painted. `MEASURED 2026-09-09`: the first version called `P.project_scope()` with a query and 500'd on every press |
 
 ### FIXED · Upload title template help text

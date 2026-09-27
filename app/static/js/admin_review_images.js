@@ -69,6 +69,11 @@
       const d = await r.json();
       const rows = d.dates || [];
       $('[data-rerun-count]').textContent = d.reruns || 0;
+      // Pictures LEFT FOR PHOTOSHOP wait in their own door, outside the
+      // counts above, so the number on that button is the only place
+      // they show (v238).
+      const heldEl = $('[data-held-count]');
+      if (heldEl) heldEl.textContent = d.held || 0;
       const totalImgs = (d.dates || []).reduce((n, r2) => n + (r2.images || 0), 0);
       batchSize = Number(d.batch_size || 0);
       // Relabel the big button to say what pressing it will actually load.
@@ -179,6 +184,9 @@
     const waiting = Number(d.total_waiting || titles.length);
     if (mode === 'rerun') {
       $('[data-review-range]').textContent = 'reruns';
+    } else if (mode === 'held') {
+      $('[data-review-range]').textContent =
+        'left for Photoshop — only what you KEEP (9) is released';
     } else if (start || end) {
       $('[data-review-range]').textContent = `${start || 'start'} → ${end || 'today'}`;
     } else if (Number(d.batch_size) > 0 && waiting > titles.length) {
@@ -762,6 +770,15 @@
   const MARK_WORD = { approve: 'keep', rerun: 'rerun', unusable: 'unusable',
                       photoshop: 'left for Photoshop' };
   const markWord = (action) => MARK_WORD[action] || action;
+
+  // THE MARK A PICTURE WEARS ON SCREEN — one answer for the card and the
+  // zoom. In the Photoshop door an unmarked picture is still left for
+  // Photoshop, so it shows the blue outline and the word it was left with.
+  function markOf(img) {
+    const d = decisions.get(img.poster_id);
+    if (d) return d.action;
+    return mode === 'held' ? 'photoshop' : '';
+  }
   function refreshKeyLabels() {
     document.querySelectorAll('[data-key-label]').forEach((el) => {
       el.textContent = keyLabel(el.dataset.keyLabel);
@@ -864,8 +881,7 @@
     seenTitles.add(Number(t.title_id));
 
     $('[data-review-pair]').innerHTML = t.images.map((img) => {
-      const d = decisions.get(img.poster_id);
-      const state = d ? d.action : '';
+      const state = markOf(img);
       const v = shownVersion(img);
       const bg = colorFor(v);
 
@@ -920,7 +936,7 @@
           <div class="review-img-actions">
             <button class="btn btn-skip btn-tiny"    data-img-action="rerun"     data-poster="${img.poster_id}">RERUN <span class="mono">(${esc(keyLabel('rerun'))})</span></button>
             <button class="btn btn-info btn-tiny"    data-img-action="photoshop" data-poster="${img.poster_id}"
-                    title="Leave this one behind for editing: it is not released when you save, and waits here with a blue outline">LEAVE FOR PHOTOSHOP <span class="mono">(${esc(keyLabel('photoshop'))})</span></button>
+                    title="Leave this one for editing: when you save it moves to its own Photoshop queue (JUST THE PHOTOSHOP ONES) and is not released">LEAVE FOR PHOTOSHOP <span class="mono">(${esc(keyLabel('photoshop'))})</span></button>
             <button class="btn btn-success btn-tiny" data-img-action="approve"   data-poster="${img.poster_id}">KEEP <span class="mono">(${esc(keyLabel('keep'))})</span></button>
             <button class="btn btn-error btn-tiny"   data-img-action="unusable"  data-poster="${img.poster_id}">UNUSABLE <span class="mono">(U)</span></button>
           </div>
@@ -1059,6 +1075,10 @@
     const d = decisions.get(img.poster_id);
     if (d && d.action === 'photoshop') return 'left';
     if (d) return 'send';
+    // In the Photoshop door silence means "not done yet", never "keep":
+    // these are pictures he already said need work, so only an explicit
+    // KEEP releases one (v238).
+    if (mode === 'held') return 'left';
     return seenTitles.has(Number(t.title_id)) ? 'send' : 'hold';
   }
 
@@ -1098,7 +1118,11 @@
     const held = heldCount();
     $('[data-review-tally]').textContent =
       `${approving} will be released · ${marked.rerun} rerun · ${marked.unusable} retired`
-      + (leftCount() ? ` · ${leftCount()} left for Photoshop` : '')
+      + (leftCount()
+          ? (mode === 'held'
+              ? ` · ${leftCount()} still left for Photoshop`
+              : ` · ${leftCount()} go to the Photoshop queue`)
+          : '')
       + (held ? ` · ${held} arrived unseen, staying` : '');
   }
 
@@ -1284,8 +1308,8 @@
         zoomMark.removeAttribute('data-sig-mark');
       }
     }
-    const d = decisions.get(img.poster_id);
-    $('[data-zoom-state]').textContent = d ? markWord(d.action).toUpperCase() : '';
+    const mark = markOf(img);
+    $('[data-zoom-state]').textContent = mark ? markWord(mark).toUpperCase() : '';
     syncZoomControls();
     box.hidden = false;
     zoomOpen = true;
@@ -1633,15 +1657,25 @@
       case 'review-reruns':
         await openRange('', '', 'rerun');
         break;
+      case 'review-held':
+        if (!(await openRange('', '', 'held'))) await loadDates();
+        break;
       case 'review-prev':    move(-1); break;
       case 'review-next':    move(1);  break;
       case 'review-clear-marks': clearTitleMarks(); break;
       case 'review-approve-all': {
         const held = heldCount();
         if (!confirm(
-            `Release everything in this range that you have not marked?\n\n`
-            + `${releasedCount()} images will go to the upload queue.`
-            + (leftCount() ? `\n${leftCount()} left for Photoshop stay waiting.` : '')
+            (mode === 'held'
+              ? `Save what you have marked?\n\n`
+                + `${releasedCount()} images you kept will go to the upload queue.`
+              : `Release everything in this range that you have not marked?\n\n`
+                + `${releasedCount()} images will go to the upload queue.`)
+            + (leftCount()
+                ? (mode === 'held'
+                    ? `\n${leftCount()} stay in the Photoshop queue.`
+                    : `\n${leftCount()} go to the Photoshop queue and stop blocking this one.`)
+                : '')
             + (held ? `\n${held} image(s) arrived during this sitting and `
                     + `were never on your screen — they stay waiting for `
                     + `the next batch.` : ''))) return;
@@ -1767,15 +1801,23 @@
     // choosing v2 mean anything. The server moves is_current to whichever
     // one arrives here.
     const payload = { decisions: [] };
+    const sentPosters = new Set();
     titles.forEach((t) => t.images.forEach((img) => {
-      // Only 'send' goes. 'hold' (never seen) and 'left' (marked for
-      // Photoshop) both stay waiting on the server.
-      if (imageFate(t, img) !== 'send') return;
+      // 'hold' (never seen) is not sent and stays waiting. 'left' (marked
+      // LEAVE FOR PHOTOSHOP) IS sent from the normal doors, as a 'hold'
+      // decision: the server moves it into its own queue, so it stops
+      // taking up a place in the next batch (owner, 2026-09-27). In the
+      // Photoshop door itself 'left' is already where it belongs, so
+      // nothing is sent for it.
+      const fate = imageFate(t, img);
+      if (fate === 'hold') return;
+      if (fate === 'left' && mode === 'held') return;
       const d = decisions.get(img.poster_id);
       const v = shownVersion(img);
+      sentPosters.add(img.poster_id);
       payload.decisions.push({
         processed_id: v.processed_id,
-        action: d ? d.action : 'approve',
+        action: fate === 'left' ? 'hold' : (d ? d.action : 'approve'),
         reason: d ? d.reason : '',
         // Sent on every image, not just the ones you touched. An untouched
         // poster still needs a colour recorded, and "the one showing on
@@ -1803,7 +1845,7 @@
     // did not want.
     const CHUNK = 5;
     const all = payload.decisions;
-    const tally = { approved: 0, rerun: 0, unusable: 0, files_removed: 0 };
+    const tally = { approved: 0, held: 0, rerun: 0, unusable: 0, files_removed: 0 };
     // From here until the save ends, leaving the page costs unsent work —
     // so the browser's own "leave site?" prompt is armed (commitBusy), and
     // a running tally is written down so a cut-short save can explain
@@ -1835,27 +1877,29 @@
         }
         writeCut(Math.min(i + part.length, all.length), all.length);
         tally.approved += d.approved || 0;
+        tally.held += d.held || 0;
         tally.rerun += d.rerun || 0;
         tally.unusable += d.unusable || 0;
         tally.files_removed += d.files_removed || 0;
       }
       const d = tally;
-      const left = leftCount();
+      const stillHeld = mode === 'held' ? leftCount() : 0;
       status.textContent =
         `saved — ${d.approved} released, ${d.rerun} queued to regenerate, ${d.unusable} retired`
-        + (left ? ` · ${left} left for Photoshop, still waiting` : '')
+        + (d.held ? ` · ${d.held} moved to the Photoshop queue` : '')
+        + (stillHeld ? ` · ${stillHeld} still in the Photoshop queue` : '')
         + (d.files_removed
             ? ` · ${d.files_removed} old file(s) deleted from the archive` : '');
-      // Released marks are forgotten, but a LEAVE FOR PHOTOSHOP mark is
-      // KEPT — with the version it was on — because that image is still
-      // waiting, and the blue outline is how it is found again. Wiping it
-      // here would turn "left for editing" into "untouched", and the next
-      // SAVE would release an image that was never edited.
-      const stillLeft = new Map(
-        [...decisions].filter(([, dd]) => dd.action === 'photoshop'));
-      decisions = stillLeft;
+      // Every mark is forgotten, LEAVE FOR PHOTOSHOP included. Until v238
+      // that one mark was kept in this browser, because the browser was the
+      // only thing that knew the image had been left. The server records it
+      // now ('held'), with the version it was on as the current one, so a
+      // copy here would be a second record of the same fact.
+      decisions = new Map();
       saveDecisions();
-      chosen = new Map([...chosen].filter(([pid]) => stillLeft.has(pid)));
+      // A version picked on a picture that was NOT sent (still waiting in
+      // the Photoshop door) is remembered, as it always was.
+      chosen = new Map([...chosen].filter(([pid]) => !sentPosters.has(pid)));
       saveChosen();
       clearCut();           // finished cleanly: nothing to explain later
       // A finished save ends the sitting, so there is no "where I was" to

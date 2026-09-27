@@ -1223,7 +1223,13 @@ exists or a marketplace catalogue that has been taken down.
   set the marker with NO flag behind it at all — SEND BACK on a deleted
   picture — so Diagnostics called it stale and the worker could never
   clear it; removed in v231, and the admin note carries that message. A
-  marker must mean one thing, even when setting it looks helpful.
+  marker must mean one thing, even when setting it looks helpful. And
+  **fixing a door never repairs the rows it already wrote**: the worker's
+  list derived the tag and looked fixed, while Worker Images read the
+  stored copy and kept Beirut ringed red with no flag (owner, 2026-09-27).
+  v232 derives the outline there too and runs `resync_flag_markers` at
+  startup. When you fix what WRITES a stored copy, ask what repairs the
+  copies already written, and which screens still read them.
 * **"No tool is needed" was a judgement about cost, written in the same voice
   as the measured figures around it.** Nothing on the page distinguished
   them. That is what the provenance tags are for.

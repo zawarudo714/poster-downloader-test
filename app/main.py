@@ -235,6 +235,22 @@ def on_startup():
         if renamed:
             log.info("Renamed %d row(s) to the settled marketplace names", renamed)
 
+        # The red "flagged" marker on a title is a stored copy of a fact the
+        # flags themselves hold. Fixing the doors that write it never
+        # repaired rows they had already written wrong, so re-derive every
+        # row here — see utils.resync_flag_markers.
+        # Its own guard: a failure here must not stop the GPT worker below
+        # from starting. Diagnostics still reports any row left wrong.
+        try:
+            from .utils import resync_flag_markers
+            fixed = resync_flag_markers(db)
+            db.commit()
+            if fixed:
+                log.info("Corrected the flag marker on %d title(s)", fixed)
+        except Exception as e:
+            db.rollback()
+            log.error("Could not correct flag markers: %s", e)
+
         # GPT generation runs HERE, not on the Windows node — it is an HTTPS
         # call, so it needs no desktop and keeps working when that box is
         # down. Started only if a project actually declares processor='gpt'.

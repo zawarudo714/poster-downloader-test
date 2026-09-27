@@ -70,8 +70,8 @@ from ..templating import templates, _flag_history
 from ..utils import (
     count_live_posters_for_master,
     count_user_saves_for_date, count_user_saves_for_week,
-    list_date_folders, list_users_with_workspaces, safe_under_workspace,
-    saved_poster_folder, saved_poster_path,
+    list_date_folders, list_users_with_workspaces, live_flag_title_ids,
+    safe_under_workspace, saved_poster_folder, saved_poster_path,
 )
 
 
@@ -1697,7 +1697,10 @@ def _zoom_master_payload(db: Session, mt, project) -> dict:
         # asking for a field this reply never carried — so the number
         # silently never showed (found 2026-09-10).
         "external_id": mt.external_id if mt else None,
-        "needs_revision": bool(mt.needs_revision) if mt else False,
+        # Asked of the live flags, never read off the stored column — the
+        # same rule as the worker's own list. The stored copy once kept a
+        # red outline on titles with no flag behind it (Beirut, 2026-09-27).
+        "needs_revision": (mt.id in live_flag_title_ids(db, [mt.id])) if mt else False,
         # Google-images search for this place, or "" for no button.
         "google_url": (_source_search_url(
             db, search_text(mt), mt.content_type, project,

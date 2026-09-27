@@ -230,20 +230,55 @@ def live_flag_title_ids(db, master_title_ids) -> set:
     0 saved — the worker then avoided those titles, not realising they
     held nothing to fix (owner, 2026-09-23: Atlanta, Yellowstone).
     """
-    from .models import Revision, SavedPoster
+    from .models import SavedPoster
     ids = [i for i in (master_title_ids or []) if i is not None]
     if not ids:
         return set()
-    rows = (
+    rows = (_live_flag_query(db)
+              .filter(SavedPoster.master_title_id.in_(ids))
+              .all())
+    return {r[0] for r in rows}
+
+
+def _live_flag_query(db):
+    """The body of the definition above, unfiltered by title — shared with
+    resync_flag_markers so the startup repair cannot drift from it."""
+    from .models import Revision, SavedPoster
+    return (
         db.query(SavedPoster.master_title_id)
           .join(Revision, Revision.saved_poster_id == SavedPoster.id)
-          .filter(SavedPoster.master_title_id.in_(ids),
-                  SavedPoster.deleted_at.is_(None),
+          .filter(SavedPoster.deleted_at.is_(None),
                   Revision.status.in_(("open", "awaiting_approval")))
           .distinct()
-          .all()
     )
-    return {r[0] for r in rows}
+
+
+def resync_flag_markers(db) -> int:
+    """
+    Bring every stored MasterTitle.needs_revision into line with the live
+    flags, and return how many rows changed. Run at startup.
+
+    Why it exists: the doors that set the marker were fixed (v228 one
+    definition, v231 SEND BACK no longer marks), but fixing a door does not
+    repair the rows it had ALREADY written. The worker's screen derived the
+    tag at read time and so looked fixed, while Worker Images and the Title
+    List read the stored column and kept a red outline on titles with no
+    flag at all (owner, 2026-09-27: Beirut). Idempotent: a clean database
+    changes nothing.
+    """
+    from .models import MasterTitle
+    live = {r[0] for r in _live_flag_query(db).all() if r[0] is not None}
+    marked = {r[0] for r in
+              db.query(MasterTitle.id).filter(MasterTitle.needs_revision == 1).all()}
+    changed = 0
+    for ids, value in ((sorted(marked - live), 0), (sorted(live - marked), 1)):
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            changed += (db.query(MasterTitle)
+                          .filter(MasterTitle.id.in_(chunk))
+                          .update({MasterTitle.needs_revision: value},
+                                  synchronize_session=False))
+    return changed
 
 
 # ── Filesystem path lookup for a saved poster ────────────────────────────────

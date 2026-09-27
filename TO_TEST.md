@@ -933,6 +933,13 @@ On Changes Requested, click a thumbnail to zoom:
   show your ADMIN NOTE, with no red FLAG. Then run Diagnostics: it must
   NOT list that title under "flag marker is stale".
 
+## 86. NO RED OUTLINE WITHOUT A FLAG — v232
+
+- Open Worker Images on Beirut's day. The title must have no red outline.
+- Run Diagnostics. The "flag marker" check must show no titles.
+- Flag any picture, then clear the flag inside the zoom. The red outline
+  must appear, then disappear, without reloading the page.
+
 ---
 
 ## NOT ON THIS LIST, ON PURPOSE

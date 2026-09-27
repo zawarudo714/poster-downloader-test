@@ -154,6 +154,13 @@ Then:
   version as its own field and the deploy tool warns when one is about to be
   reused, so this is caught by the tool rather than remembered.
 
+  **And never fold more work into a version you have already told him to
+  deploy.** On 2026-09-27 v234 was announced ready, then the Google-tab
+  change was merged into it after one read of the log — and he deployed in
+  the minute between, so v234 shipped twice (12:42 and 12:43). Both happened
+  to carry the same code, but only a file-by-file comparison could prove it.
+  Once "deploy this" has been said, the next change takes the next number.
+
 - **`MULTIPROJECT.md` — read it before writing ANY code.** This app runs
   several niches side by side. Nearly every bug it has had came from code
   assuming there was only one. That file is the contract: how to say the
@@ -2829,6 +2836,15 @@ Two things in that are worth carrying past this bug:
     it would have left live listings hidden while the screen blamed healthy
     designs. Blocked and broken are different answers; a system that has
     only one of them will use it for both.
+
+**The same holds for a LESSON applied at one door.** The replace flow had
+learned "the new picture arrives before the old one leaves" in September;
+its twin, the search-grid swap, still deleted the old file first — so a
+failed or refused swap rolled the record back to live with its file gone
+(found 2026-09-27 while adding the same-picture check). And the only
+duplicate guard lived in the paste box alone, comparing addresses, so the
+same file reached two titles through the grid. When a door learns a rule,
+list its sibling doors and teach them all in the same edit.
 
 Now enforced mechanically: `preflight.py` has a GUARDED table — (file glob,
 the risky call, the calls that protect it) — so a new function that

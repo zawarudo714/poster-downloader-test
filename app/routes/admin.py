@@ -1917,6 +1917,9 @@ def api_browse(
         "place_check": place_check,
         # Was this day paid? Drives the PAID band at the top of the page.
         "pay": _day_pay_summary(db, worker, rows),
+        # The "looked at it" key — the SAME setting as KEEP on Approve
+        # Artwork, so one key means "this one is fine" on both screens.
+        "keep_key": str(get_setting(db, "review_key_keep", project=project) or "9"),
         "title_count": len(titles),
         "poster_count": sum(len(t["posters"]) for t in titles.values()),
         "titles": list(titles.values()),
@@ -2474,7 +2477,7 @@ def admin_add_poster(
     # override on any front" (owner, 2026-09-15) includes the admin's own
     # + ADD box — this was the fourth door and the only one without the
     # gate (2026-09-15 audit). Same shared test, same no-override.
-    from .worker import _too_small, _safe_min_px
+    from .worker import _too_small, _safe_min_px, _picture_fingerprint
     min_px = _safe_min_px(db, resolve_project(db, t.project_id))
     if _too_small(img_w, img_h, min_px):
         target_path.unlink(missing_ok=True)
@@ -2499,6 +2502,10 @@ def admin_add_poster(
         # is unknowable here, same as the worker's paste box.
         image_source       = "pasted",
         added_by           = admin.username,
+        # Fingerprinted like every worker save, so a worker's later copy of
+        # this picture meets the same-picture check. The admin himself is
+        # not stopped: this is the owner's own deliberate pick.
+        content_hash       = _picture_fingerprint(target_path),
     )
     db.add(sp)
     db.flush()  # assign sp.id before logging

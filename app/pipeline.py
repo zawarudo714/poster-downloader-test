@@ -463,6 +463,14 @@ DEFAULTS: dict[str, Any] = {
     # addresses, so it fired on every save until they stopped reading it.)
     "min_image_px": 350,
 
+    # What happens when a worker saves the EXACT picture file that is already
+    # saved under a different title in this project (compared by its bytes,
+    # every worker, every day). 'warn' asks and lets them save anyway;
+    # 'block' refuses with no way round; 'off' never asks. Warn by default,
+    # because the only older guard compared ADDRESSES on the same day only,
+    # so the duplicates found on 2026-09-27 most likely never saw a warning.
+    "same_picture_mode": "warn",
+
     # ── The place check ──────────────────────────────────────────────────
     # Every saved worker image is shown to Google web detection and
     # Google's words are compared to the title, so a photo of the wrong
@@ -782,6 +790,18 @@ DEFAULTS: dict[str, Any] = {
     # ride along with a hundred others: inspect N, release N, then the next
     # N. 0 means load them all at once (batching off).
     "review_batch_size":  20,
+
+    # The decision keys on Approve Artwork. 7-8-9 by default, owner's ask
+    # 2026-09-27: he steps with the number pad's 4 and 6, so the row above
+    # sits under the same hand. A digit also matches that number-pad key
+    # when Num Lock is OFF (it then sends Home / Up / PgUp) — see
+    # static/js/keys.js. The KEEP key is shared with Worker Images, where
+    # it marks a picture as looked-at, so the hand learns one key for
+    # "this one is fine" on both screens. PHOTOSHOP leaves an image
+    # waiting (it is not released) for editing when Photopea is back.
+    "review_key_rerun":     "7",
+    "review_key_photoshop": "8",
+    "review_key_keep":      "9",
 
     # Node poll interval hint (seconds). The node honours this.
     "poll_interval_s":    30,

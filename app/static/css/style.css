@@ -5261,6 +5261,9 @@ label.inline-check {
 .review-img.is-approve  { border-color: var(--success); }
 .review-img.is-rerun    { border-color: var(--skip); }
 .review-img.is-unusable { border-color: var(--error); }
+/* LEAVE FOR PHOTOSHOP — not released on save, waits to be edited. Blue so it
+   reads apart from keep (green), rerun (amber) and unusable (red). */
+.review-img.is-photoshop { border-color: rgba(100, 180, 255, 0.9); }
 
 /* ══════════════════════════════════════════════════════════════════════
    NO BACKGROUND ON THE POSTER ITSELF. THIS ONE LINE WAS THE WHOLE BUG.

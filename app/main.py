@@ -251,6 +251,14 @@ def on_startup():
             db.rollback()
             log.error("Could not correct flag markers: %s", e)
 
+        # Give every older picture a fingerprint, so the same-picture check
+        # on the save doors can see it. Off the startup path: it reads files.
+        try:
+            from .utils import start_fingerprint_backfill
+            start_fingerprint_backfill()
+        except Exception as e:
+            log.error("Could not start the picture fingerprint backfill: %s", e)
+
         # GPT generation runs HERE, not on the Windows node — it is an HTTPS
         # call, so it needs no desktop and keeps working when that box is
         # down. Started only if a project actually declares processor='gpt'.

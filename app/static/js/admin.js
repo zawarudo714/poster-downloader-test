@@ -152,6 +152,10 @@
   // per-image verdicts ride on each poster in `titles`, so the pills and
   // the panel read ONE set of data and can never disagree.
   let placeCheck = { enabled: false, key_present: false, checked_this_month: 0 };
+  // The "I have looked at this one" key. It comes from the dashboard via
+  // /admin/api/browse and is the SAME setting as KEEP on Approve Artwork
+  // (9 by default), so one key means "this one is fine" on both screens.
+  let keepKey = '9';
   // The zoom itself lives in poster_lightbox.js (shared with Changes
   // Requested); this page wires its own buttons into it further down.
   const LB = window.PosterLightbox;
@@ -188,6 +192,7 @@
     if (typeof data.min_width === 'number') MIN_WIDTH = data.min_width;
     titles = data.titles || [];
     placeCheck = data.place_check || placeCheck;
+    if (data.keep_key) keepKey = String(data.keep_key);
     renderPaid(data.pay);
     updatePlaceButton();
     sortTitles();
@@ -649,6 +654,9 @@
     // sink on the next load or when the order dropdown is touched.
     onReviewed: () => { renderGallery(); refreshSummary(); },
     features: {
+      // A function, not a value: the key arrives with the first load of
+      // the day, after this zoom is set up.
+      reviewKey: () => keepKey,
       flag: true,
       retire: true,
       // Shown only for a verdict that CAN be acknowledged (Google
@@ -878,10 +886,11 @@
     if (LB.isOpen()) return;
     if (e.key === 'ArrowLeft')  navTitle(-1);
     if (e.key === 'ArrowRight') navTitle(1);
-    // K in the plain gallery marks the CURRENT title — the one the arrows
-    // stand on and the outline highlights — so arrow-arrow-K works the
-    // same here as in the zoom.
-    if ((e.key === 'k' || e.key === 'K') && titles[titleIdx]) {
+    // The keep key in the plain gallery marks the CURRENT title — the one
+    // the arrows stand on and the outline highlights — so arrow-arrow-keep
+    // works the same here as in the zoom.
+    if (window.PDKeys.matches(e, keepKey) && titles[titleIdx]) {
+      e.preventDefault();
       toggleReviewedTitle(titles[titleIdx]);
     }
   });

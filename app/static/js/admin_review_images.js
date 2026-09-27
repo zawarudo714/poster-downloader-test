@@ -135,6 +135,12 @@
       sigKeys.left = d.sig_keys.left || ',';
       sigKeys.right = d.sig_keys.right || '.';
     }
+    if (d.review_keys) {
+      reviewKeys.rerun = d.review_keys.rerun || '7';
+      reviewKeys.photoshop = d.review_keys.photoshop || '8';
+      reviewKeys.keep = d.review_keys.keep || '9';
+    }
+    refreshKeyLabels();
     colors.clear();
     // Decisions come back from the last sitting rather than being wiped.
     // Pruned to the range just loaded, so the store cannot grow for ever
@@ -745,6 +751,22 @@
   // Overwritten from the server on every load. The values here are only what
   // the buttons say in the instant before the first reply arrives.
   const sigKeys = { left: ',', right: '.' };
+  // The three decision keys, from the dashboard (review_key_*). 7 / 8 / 9 by
+  // default at the owner's ask (2026-09-27): he steps with the number pad's
+  // 4 and 6, so the row above sits under the same hand. PDKeys.matches (in
+  // keys.js) also accepts the number-pad key with Num Lock off.
+  const reviewKeys = { rerun: '7', photoshop: '8', keep: '9' };
+  const keyLabel = (name) => String(reviewKeys[name] || '').toUpperCase();
+  // The words a mark is SHOWN with. 'approve' is stored for KEEP; the word
+  // on screen is the one on the button.
+  const MARK_WORD = { approve: 'keep', rerun: 'rerun', unusable: 'unusable',
+                      photoshop: 'left for Photoshop' };
+  const markWord = (action) => MARK_WORD[action] || action;
+  function refreshKeyLabels() {
+    document.querySelectorAll('[data-key-label]').forEach((el) => {
+      el.textContent = keyLabel(el.dataset.keyLabel);
+    });
+  }
 
   function colorFor(v) {
     return colors.get(v.processed_id)
@@ -896,11 +918,13 @@
           ${sigBarHtml(v, 'card')}
           ${editBarHtml()}
           <div class="review-img-actions">
-            <button class="btn btn-success btn-tiny" data-img-action="approve"  data-poster="${img.poster_id}">KEEP <span class="mono">(K)</span></button>
-            <button class="btn btn-skip btn-tiny"    data-img-action="rerun"    data-poster="${img.poster_id}">RERUN <span class="mono">(R)</span></button>
-            <button class="btn btn-error btn-tiny"   data-img-action="unusable" data-poster="${img.poster_id}">UNUSABLE <span class="mono">(U)</span></button>
+            <button class="btn btn-skip btn-tiny"    data-img-action="rerun"     data-poster="${img.poster_id}">RERUN <span class="mono">(${esc(keyLabel('rerun'))})</span></button>
+            <button class="btn btn-info btn-tiny"    data-img-action="photoshop" data-poster="${img.poster_id}"
+                    title="Leave this one behind for editing: it is not released when you save, and waits here with a blue outline">LEAVE FOR PHOTOSHOP <span class="mono">(${esc(keyLabel('photoshop'))})</span></button>
+            <button class="btn btn-success btn-tiny" data-img-action="approve"   data-poster="${img.poster_id}">KEEP <span class="mono">(${esc(keyLabel('keep'))})</span></button>
+            <button class="btn btn-error btn-tiny"   data-img-action="unusable"  data-poster="${img.poster_id}">UNUSABLE <span class="mono">(U)</span></button>
           </div>
-          ${state ? `<span class="review-img-state">${esc(state)}</span>` : ''}
+          ${state ? `<span class="review-img-state">${esc(markWord(state))}</span>` : ''}
         </figure>`;
     }).join('');
 
@@ -1027,9 +1051,23 @@
   // number that happens.
   //   'send'  — explicit mark, or unmarked on a title you have seen
   //   'hold'  — unmarked on a title you have NOT seen; stays pending
+  //   'left'  — marked LEAVE FOR PHOTOSHOP; deliberately not sent, stays
+  //             pending with its blue outline until edited and kept
+  //             (owner, 2026-09-27: Photopea was down and nothing could
+  //             move while a few needed only a touch-up, not a rerun)
   function imageFate(t, img) {
-    if (decisions.get(img.poster_id)) return 'send';
+    const d = decisions.get(img.poster_id);
+    if (d && d.action === 'photoshop') return 'left';
+    if (d) return 'send';
     return seenTitles.has(Number(t.title_id)) ? 'send' : 'hold';
+  }
+
+  function leftCount() {
+    let out = 0;
+    titles.forEach((t) => t.images.forEach((img) => {
+      if (imageFate(t, img) === 'left') out += 1;
+    }));
+    return out;
   }
 
   function releasedCount() {
@@ -1051,7 +1089,7 @@
   }
 
   function updateTally() {
-    const marked = { rerun: 0, unusable: 0, approve: 0 };
+    const marked = { rerun: 0, unusable: 0, approve: 0, photoshop: 0 };
     decisions.forEach((d) => { marked[d.action] = (marked[d.action] || 0) + 1; });
     // Everything not explicitly marked is approved on commit. Spelling that
     // out is the whole safety of an approve-by-default screen: you should be
@@ -1060,6 +1098,7 @@
     const held = heldCount();
     $('[data-review-tally]').textContent =
       `${approving} will be released · ${marked.rerun} rerun · ${marked.unusable} retired`
+      + (leftCount() ? ` · ${leftCount()} left for Photoshop` : '')
       + (held ? ` · ${held} arrived unseen, staying` : '');
   }
 
@@ -1246,7 +1285,7 @@
       }
     }
     const d = decisions.get(img.poster_id);
-    $('[data-zoom-state]').textContent = d ? d.action.toUpperCase() : '';
+    $('[data-zoom-state]').textContent = d ? markWord(d.action).toUpperCase() : '';
     syncZoomControls();
     box.hidden = false;
     zoomOpen = true;
@@ -1602,6 +1641,7 @@
         if (!confirm(
             `Release everything in this range that you have not marked?\n\n`
             + `${releasedCount()} images will go to the upload queue.`
+            + (leftCount() ? `\n${leftCount()} left for Photoshop stay waiting.` : '')
             + (held ? `\n${held} image(s) arrived during this sitting and `
                     + `were never on your screen — they stay waiting for `
                     + `the next batch.` : ''))) return;
@@ -1652,6 +1692,15 @@
     if (e.key === 'ArrowRight') { move(1);  e.preventDefault(); return; }
     if (e.key === 'ArrowLeft')  { move(-1); e.preventDefault(); return; }
 
+    // THE DECISION KEYS, from the dashboard. Checked BEFORE the version
+    // digits below, because the defaults ARE digits (7 / 8 / 9): handled
+    // after, 7 would pick "generation 7" instead of rerunning. Generations
+    // are still one digit or V away for every other number.
+    const K = window.PDKeys.matches;
+    if (K(e, reviewKeys.rerun))     { decideThisTitle('rerun');     e.preventDefault(); return; }
+    if (K(e, reviewKeys.photoshop)) { decideThisTitle('photoshop'); e.preventDefault(); return; }
+    if (K(e, reviewKeys.keep))      { decideThisTitle('approve');   e.preventDefault(); return; }
+
     if (e.key >= '1' && e.key <= '9') {
       pickVersionByNumber(Number(e.key));
       e.preventDefault();
@@ -1679,8 +1728,7 @@
 
     const t = current();
     switch (e.key.toLowerCase()) {
-      case 'r': decideThisTitle('rerun');    e.preventDefault(); break;
-      case 'k': decideThisTitle('approve');  e.preventDefault(); break;
+      // RERUN, KEEP and LEAVE FOR PHOTOSHOP are the dashboard's keys, above.
       case 'u': decideThisTitle('unusable'); e.preventDefault(); break;
       case 'c': clearTitleMarks();           e.preventDefault(); break;
       case 'v': stepVersion();               e.preventDefault(); break;
@@ -1720,7 +1768,9 @@
     // one arrives here.
     const payload = { decisions: [] };
     titles.forEach((t) => t.images.forEach((img) => {
-      if (imageFate(t, img) === 'hold') return;
+      // Only 'send' goes. 'hold' (never seen) and 'left' (marked for
+      // Photoshop) both stay waiting on the server.
+      if (imageFate(t, img) !== 'send') return;
       const d = decisions.get(img.poster_id);
       const v = shownVersion(img);
       payload.decisions.push({
@@ -1790,14 +1840,23 @@
         tally.files_removed += d.files_removed || 0;
       }
       const d = tally;
+      const left = leftCount();
       status.textContent =
         `saved — ${d.approved} released, ${d.rerun} queued to regenerate, ${d.unusable} retired`
+        + (left ? ` · ${left} left for Photoshop, still waiting` : '')
         + (d.files_removed
             ? ` · ${d.files_removed} old file(s) deleted from the archive` : '');
-      decisions = new Map();
-      saveDecisions();      // released, so the browser must forget them too
-      chosen = new Map();
-      saveChosen();         // the choices went with them
+      // Released marks are forgotten, but a LEAVE FOR PHOTOSHOP mark is
+      // KEPT — with the version it was on — because that image is still
+      // waiting, and the blue outline is how it is found again. Wiping it
+      // here would turn "left for editing" into "untouched", and the next
+      // SAVE would release an image that was never edited.
+      const stillLeft = new Map(
+        [...decisions].filter(([, dd]) => dd.action === 'photoshop'));
+      decisions = stillLeft;
+      saveDecisions();
+      chosen = new Map([...chosen].filter(([pid]) => stillLeft.has(pid)));
+      saveChosen();
       clearCut();           // finished cleanly: nothing to explain later
       // A finished save ends the sitting, so there is no "where I was" to
       // walk back into — the next visit opens on the picker.

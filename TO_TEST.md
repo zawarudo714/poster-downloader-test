@@ -953,14 +953,42 @@ On Changes Requested, click a thumbnail to zoom:
   clicking one should open it.
 - Open a day you have not paid yet. There should be a small grey
   "NOT PAID YET" line only.
-- (v234) Press CHECK GOOGLE once and put the Google tab beside the site in
-  Chrome split view. Arrow to the next picture: the Google tab should change
-  to that place by itself, with no new tab. Flag a picture: it should move
-  on, and Google should follow. Press CHECK GOOGLE again: the same tab should
-  be reused. Close the Google tab and keep arrowing: nothing new should open
-  until you press CHECK GOOGLE again.
 - (v234) In the "still to pay" list, a "flag still open" item should be
   red, and a "waiting for the next payment" item should be amber.
+
+## 88. SAME PICTURE ON TWO TITLES, AND THE GOOGLE ADD-ON — v235
+
+- As a worker, save a picture for one title. Then open another title and
+  paste the SAME picture link. With the switch on "warn", a question should
+  name the first title and let you go ahead. Press Cancel, and nothing
+  should be saved.
+- Set the switch to "block" (Settings, "Same picture on two titles") and
+  try again. It should refuse, with no way round it. Also try it from the
+  search grid and from REPLACE.
+- Swap a picture from the search grid, but pick one that gets refused (for
+  example a tiny one). The old picture must still be there and still open.
+- Install poster_admin_extension (see its README_INSTALL.md). Press CHECK
+  GOOGLE once, put the Google tab beside the site in split view, then arrow
+  through pictures. Google should follow in the SAME tab. Close the Google
+  tab and arrow: nothing new should open.
+- Workers with the phone add-on: after updating it to 1.9, sending an
+  already-used picture should say which title already has it.
+
+## 89. LEAVE FOR PHOTOSHOP, AND THE 7 / 8 / 9 KEYS — v236
+
+- On Approve Artwork, press 8 on a title. It should get a blue outline and
+  read "left for Photoshop". Press 7 on another (rerun) and 9 on a third
+  (keep).
+- Try the keys with Num Lock both on and off. The number-pad 7, 8 and 9 must
+  work either way, and 4 / 6 must still step.
+- Press SAVE & RELEASE. The tally should say "N left for Photoshop". Open the
+  screen again: the blue ones must still be waiting, still blue, and on the
+  same version.
+- Press 9 on a blue one, then save. It should now be released.
+- Change a key in Settings (the Approve Artwork keys box). The buttons and
+  the key list on the screen should show the new key.
+- On Worker Images, press 9 on a title. It should get the green "looked at"
+  mark. K should no longer do anything there.
 
 ---
 

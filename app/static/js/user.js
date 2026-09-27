@@ -1489,6 +1489,7 @@
       confirm_cross_title:  opts.confirm_cross_title ? 1 : 0,
       confirm_soft_limit:   opts.confirm_soft_limit ? 1 : 0,
       confirm_low_quality:  opts.confirm_low_quality ? 1 : 0,
+      confirm_same_picture: opts.confirm_same_picture ? 1 : 0,
     });
     if (r.ok) {
       msgEl.textContent = `Saved ${r.data.filename} (${r.data.saved_count_for_title} on this title).`;
@@ -1509,6 +1510,20 @@
         return doSave(urlInput, msgEl, flashEl, { ...opts, confirm_duplicate: true });
       }
       msgEl.textContent = 'Cancelled.'; msgEl.className = 'save-msg';
+      return;
+    }
+    // The exact same picture is already saved for another title. The
+    // admin's switch decides whether this is a question or a refusal;
+    // the server says which through can_override.
+    if (r.status === 409 && r.data && r.data.reason === 'same_picture') {
+      if (r.data.can_override && confirm(r.data.message)) {
+        return doSave(urlInput, msgEl, flashEl, { ...opts, confirm_same_picture: true });
+      }
+      if (!r.data.can_override) alert(r.data.message);
+      msgEl.textContent = r.data.can_override
+        ? 'Cancelled — that picture is already used for another title.'
+        : r.data.message;
+      msgEl.className = 'save-msg err';
       return;
     }
     if (r.status === 409 && r.data && r.data.reason === 'cross_title_duplicate') {
@@ -1695,6 +1710,7 @@
     const r = await postForm(`/poster/${posterId}/replace`, {
       url,
       confirm_low_quality: opts.confirm_low_quality ? 1 : 0,
+      confirm_same_picture: opts.confirm_same_picture ? 1 : 0,
     });
     if (r.ok) {
       urlInput.value = '';
@@ -1711,6 +1727,16 @@
     if (r.status === 409 && r.data && r.data.reason === 'low_quality') {
       // No override — hard reject. Show the reason, do not offer to proceed.
       alert(r.data.message);
+      return;
+    }
+    if (r.status === 409 && r.data && r.data.reason === 'same_picture') {
+      if (r.data.can_override) {
+        if (confirm(r.data.message)) {
+          return replacePoster(posterId, urlInput, { ...opts, confirm_same_picture: true });
+        }
+      } else {
+        alert(r.data.message);
+      }
       return;
     }
     let msg = 'Replace failed: ' + (r.data && r.data.detail || r.status);
@@ -2083,9 +2109,10 @@ function wireSearch(box, title) {
     for (const url of urls) {
       btn.textContent = `SAVING ${saved + 1}/${urls.length}…`;
       try {
-        const send = async (replace) => {
+        const send = async (replace, sameOk) => {
           const fd = new FormData();
           fd.append('url', url);
+          if (sameOk) fd.append('confirm_same_picture', '1');
           // Announce the door: this save came from the in-page Brave grid.
           // The phone add-on posts to the same endpoint WITHOUT this field,
           // which is how the server tells the two searches apart.
@@ -2095,6 +2122,7 @@ function wireSearch(box, title) {
                                 { method: 'POST', body: fd });
           return { r, d: await r.json() };
         };
+        let swapped = false;
         let { r, d } = await send(false);
         // Already holding the maximum? Offer to SWAP rather than dead-end.
         // Picking a better shot from the same grid is the normal case; the
@@ -2102,7 +2130,19 @@ function wireSearch(box, title) {
         if (!r.ok && d && d.reason === 'soft_limit' && d.can_replace) {
           if (!confirm('You already saved an image for this title.\n\n'
                      + 'Replace it with this one?')) { break; }
+          swapped = true;
           ({ r, d } = await send(true));
+        }
+        // The exact same picture is already saved for another title. In
+        // "warn" mode the worker may go ahead; in "block" mode the message
+        // is shown and this pick is skipped. The retry repeats whether this
+        // was a swap, so a confirmed swap still replaces.
+        if (!r.ok && d && d.reason === 'same_picture') {
+          if (!d.can_override || !confirm(d.message)) {
+            if (!d.can_override) alert(d.message);
+            break;
+          }
+          ({ r, d } = await send(swapped, true));
         }
         if (!r.ok || !d.ok) { alert(d.message || 'Save failed.'); break; }
         // A swap that answered a flag was silently absorbing the flag —

@@ -924,6 +924,7 @@ def api_search_save(
     url: str = Form(...),
     replace: int = Form(0),
     source: str = Form(""),
+    confirm_same_picture: int = Form(0),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -947,6 +948,7 @@ def api_search_save(
     soft_limit = int(project.images_per_title or SOFT_LIMIT_PER_TITLE)
     live = count_live_posters_for_master(db, t.id)
     replaced_ids: list[int] = []
+    stood_down_paths: list = []
     if live >= soft_limit:
         # ── CHANGING YOUR MIND IS NORMAL, SO LET IT REPLACE ──────────────
         # Picking a better image from the same grid used to be refused with
@@ -978,7 +980,13 @@ def api_search_save(
                     status_code=409,
                 )
             for sp in existing:
-                saved_poster_path(sp).unlink(missing_ok=True)
+                # The FILE is only remembered here and removed once the new
+                # picture has passed every check below. Deleting it first
+                # meant a failed download, a too-small refusal or a
+                # same-picture refusal rolled the ROW back to live while its
+                # file was already gone (found 2026-09-27 while adding the
+                # same-picture check).
+                stood_down_paths.append(saved_poster_path(sp))
                 sp.deleted_at = datetime.utcnow()
                 sp.delete_note = "Replaced by a different image from the search"
                 log_activity(db, user=user, action="poster_replaced",
@@ -1039,6 +1047,18 @@ def api_search_save(
             status_code=409,
         )
 
+    # The same picture already under another title? See _same_picture_refusal.
+    sha = _picture_fingerprint(target_path)
+    refusal = _same_picture_refusal(db, project, t, user, sha,
+                                    bool(confirm_same_picture))
+    if refusal is not None:
+        target_path.unlink(missing_ok=True)
+        return refusal
+
+    # Every check has passed, so the pictures this swap stands down can go.
+    for old_path in stood_down_paths:
+        old_path.unlink(missing_ok=True)
+
     # WHICH SEARCH FOUND IT. The site's own grid announces itself
     # ('brave'); the only other caller of this endpoint is the phone
     # add-on, which ships separately and says nothing — so silence at this
@@ -1059,6 +1079,8 @@ def api_search_save(
         image_width        = img_w,
         image_height       = img_h,
         image_source       = image_source,
+        # Stamped now, so the next save's same-picture check can see it.
+        content_hash       = sha,
     )
     db.add(sp)
     db.flush()
@@ -1116,7 +1138,10 @@ def api_search_save(
 
     log_activity(db, user=user, action="saved", target_type="saved_poster",
                  target_id=sp.id,
-                 details={"via": "search", "source": image_source, "url": url})
+                 details={"via": "search", "source": image_source, "url": url,
+                          # True when the worker was told this exact picture
+                          # was already another title's and went ahead.
+                          "same_picture_confirmed": bool(confirm_same_picture)})
     db.commit()
 
     # The place check runs on its own thread AFTER the commit, so the
@@ -1675,6 +1700,88 @@ def _too_small(width: Optional[int], height: Optional[int],
     return width < limit or height < limit
 
 
+
+# ── THE SAME PICTURE UNDER TWO TITLES ────────────────────────────────────────
+#
+# Each place needs its OWN picture: two listings built from one photograph
+# are one product sold twice, and the worker is paid twice for one find.
+# The only guard before 2026-09-27 compared the pasted ADDRESS, only for
+# the same worker, only on the same day — so the same file reached from a
+# different address, or on another day, sailed through with no warning at
+# all (Minneapolis / Saint Paul, Manila / Metro Manila, found by the
+# Diagnostics duplicate check after the fact).
+#
+# This compares the picture's BYTES (sha256, the same fingerprint the place
+# check and Diagnostics use), across every worker in the project. It sees
+# only identical files: a resized or re-saved copy is a different file and
+# passes. Every save door calls ONE function, so the doors cannot disagree.
+# Whether it warns or refuses is the owner's switch: `same_picture_mode`.
+
+def _picture_fingerprint(path: Path) -> Optional[str]:
+    """sha256 of the file, or None if it cannot be read. None never refuses:
+    "we could not look" is not evidence of a duplicate."""
+    import hashlib
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def _same_picture_refusal(db: Session, project, title: MasterTitle,
+                          user: User, sha: Optional[str],
+                          confirmed: bool) -> Optional[JSONResponse]:
+    """
+    The 409 to send back when this exact picture already lives under a
+    DIFFERENT title in this project, or None to let the save go ahead.
+
+    'warn'  — the worker may confirm and save anyway (can_override=True).
+    'block' — refused outright, no way round it.
+    'off'   — never asked.
+    """
+    if not sha:
+        return None
+    from ..pipeline import _default_project_id, get_setting, project_scope
+    try:
+        mode = str(get_setting(db, "same_picture_mode", project=project)
+                   or "warn").strip().lower()
+    except Exception:
+        mode = "warn"
+    if mode not in ("warn", "block", "off"):
+        mode = "warn"
+    if mode == "off" or (mode == "warn" and confirmed):
+        return None
+    hit = (
+        db.query(SavedPoster, MasterTitle)
+          .join(MasterTitle, MasterTitle.id == SavedPoster.master_title_id)
+          .filter(SavedPoster.content_hash == sha,
+                  SavedPoster.deleted_at.is_(None),
+                  SavedPoster.master_title_id != title.id,
+                  project_scope(project.id if project else None,
+                                default_project_id=_default_project_id(db)))
+          .order_by(SavedPoster.id.asc())
+          .first()
+    )
+    if hit is None:
+        return None
+    other_sp, other_t = hit
+    name = (f"{other_t.external_id}. {other_t.title}"
+            if other_t.external_id is not None else other_t.title)
+    whose = ("you saved" if other_sp.user_id == user.id
+             else f"{other_sp.username} saved")
+    base = (f'This exact picture is already used for "{name}" '
+            f'({whose} it on {other_sp.original_save_date}). '
+            f"Each place needs its own picture.")
+    block = mode == "block"
+    return JSONResponse(
+        {"ok": False, "reason": "same_picture",
+         "can_override": not block,
+         "message": base + (" It cannot be saved here — please find a "
+                            "different one." if block
+                            else " Save it here anyway?"),
+         "other_title": name},
+        status_code=409,
+    )
+
 def _download_to(url: str, target_path: Path) -> int:
     """
     Stream + size-cap download. Returns bytes written. Raises HTTPException
@@ -1758,6 +1865,7 @@ def save_image(
     confirm_cross_title: int = Form(0),
     confirm_soft_limit: int = Form(0),
     confirm_low_quality: int = Form(0),
+    confirm_same_picture: int = Form(0),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -1915,6 +2023,14 @@ def save_image(
             status_code=409,
         )
 
+    # The same picture already under another title? See _same_picture_refusal.
+    sha = _picture_fingerprint(target_path)
+    refusal = _same_picture_refusal(db, project, t, user, sha,
+                                    bool(confirm_same_picture))
+    if refusal is not None:
+        target_path.unlink(missing_ok=True)
+        return refusal
+
     sp = SavedPoster(
         master_title_id    = t.id,
         user_id            = user.id,
@@ -1935,7 +2051,9 @@ def save_image(
         # Brave or anywhere else is not knowable from here, so the honest
         # word is "pasted", not a guess at where the copy happened.
         image_source       = "pasted",
-        # Deferred: content_hash on a follow-up worker — keep save_image fast.
+        # Stamped at save time: the same-picture check above reads this
+        # column, so a picture saved a minute ago must already carry it.
+        content_hash       = sha,
     )
     db.add(sp)
     db.flush()
@@ -1946,6 +2064,7 @@ def save_image(
             "master_id": t.id, "filename": target_name,
             "title_folder": t.title_folder_path, "url": src_url,
             "size": written, "source": "pasted",
+            "same_picture_confirmed": bool(confirm_same_picture),
         },
     )
     db.commit()
@@ -2150,6 +2269,7 @@ def replace_poster(
     url: str = Form(...),
     worker_note: str = Form(""),
     confirm_low_quality: int = Form(0),
+    confirm_same_picture: int = Form(0),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -2215,6 +2335,16 @@ def replace_poster(
                 status_code=409,
             )
 
+        # The same picture already under another title? Checked on the
+        # incoming file, before the old one is touched.
+        sha = _picture_fingerprint(tmp_target)
+        refusal = _same_picture_refusal(
+            db, resolve_project(db, _mt.project_id if _mt else None),
+            _mt, user, sha, bool(confirm_same_picture)) if _mt else None
+        if refusal is not None:
+            tmp_target.unlink(missing_ok=True)
+            return refusal
+
         old_fs.unlink(missing_ok=True)
         target = folder / new_name
         if target.exists() and target != tmp_target:
@@ -2239,7 +2369,9 @@ def replace_poster(
     # shipped believing a row's file was immutable — so a replaced image
     # kept showing Google's verdict for a picture that no longer existed
     # (2026-09-15 audit). Cleared here, and re-checked after the commit.
-    sp.content_hash          = None
+    # The fingerprint is the one fact re-stamped at once, from the NEW
+    # bytes: the same-picture check on the next save reads it.
+    sp.content_hash          = sha
     sp.place_check_status    = None
     sp.place_check_guess     = None
     sp.place_check_error     = None

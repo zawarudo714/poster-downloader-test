@@ -99,7 +99,9 @@
       pill = document.createElement('span');
       pill.className = 'status-pill status-reviewed';
       pill.textContent = 'REVIEWED ✓';
-      pill.title = 'You marked this one as looked-at (K). Press K again to undo.';
+      const f = (opts && opts.features) || {};
+      const rk = String((typeof f.reviewKey === 'function' ? f.reviewKey() : f.reviewKey) || 'K').toUpperCase();
+      pill.title = `You marked this one as looked-at (${rk}). Press ${rk} again to undo.`;
       host.appendChild(pill);
     } else if (!p.reviewed && pill) {
       pill.remove();
@@ -119,48 +121,50 @@
   }
 
   // ── The Google companion tab ────────────────────────────────────────────
-  // CHECK GOOGLE used to open a fresh tab on every press ('_blank',
-  // 'noopener'), which also threw away any handle on it — so a pile of
-  // tabs grew and nothing could follow the zoom (owner, 2026-09-27). Now
-  // ONE named tab is reused: the first press opens it, he puts it beside
-  // this page (Chrome split view), and every later picture the zoom shows
-  // re-points that same tab at its own search. It never takes the focus,
-  // so the arrow keys keep working here.
-  const GOOGLE_TAB = 'pd-google-check';
-  let googleWin = null;        // our handle on the tab, while this page lives
-  let googleUrlShown = '';     // what that tab was last pointed at
+  // ONE Google tab that follows the zoom from picture to picture, so the
+  // owner checks the place side by side instead of flipping tabs.
+  //
+  // A web page cannot do this on its own, and v234 proved it: the page
+  // opened the tab and kept a handle on it, but Google's pages cut the link
+  // back to their opener the moment they load (LEAD: its
+  // Cross-Origin-Opener-Policy header), so the handle went dead and every
+  // press opened another tab (owner, 2026-09-27). A Chrome extension CAN
+  // steer a tab, so the admin add-on (poster_admin_extension/) does the
+  // steering. This page only says "show this search" — with a window
+  // message the add-on's script on this site passes on.
+  //
+  // The add-on announces itself by setting data-pd-google-helper on <html>.
+  // Without it, CHECK GOOGLE opens a plain new tab, exactly as it did
+  // before v234, and moving between pictures does nothing to Google.
+  let googleUrlShown = '';     // what the Google tab was last asked to show
 
-  function googleTabAlive() {
-    try { return !!(googleWin && !googleWin.closed); } catch (e) { return false; }
+  function googleHelperPresent() {
+    return document.documentElement.getAttribute('data-pd-google-helper') === '1';
   }
 
+  function askHelper(mode, url) {
+    // Same-origin only: the add-on's script checks the sender is this page.
+    window.postMessage({ type: 'PD_GOOGLE', mode, url }, location.origin);
+  }
+
+  // CHECK GOOGLE was pressed: show this search, opening the tab if needed.
   function showInGoogleTab(url) {
-    if (googleTabAlive()) {
-      try {
-        googleWin.location.href = url;   // allowed across sites: write-only
-        googleUrlShown = url;
-        return;
-      } catch (e) { googleWin = null; }
+    if (googleHelperPresent()) {
+      askHelper('open', url);
+      googleUrlShown = url;
+      return;
     }
-    // Opened blank FIRST: while blank it is still this site's page, so its
-    // link back to us (window.opener) can be cut before Google loads —
-    // the protection 'noopener' gave, without losing our handle on it. The
-    // NAME is what lets a press after a page reload find the same tab
-    // again instead of starting another one.
-    const w = window.open('about:blank', GOOGLE_TAB);
-    if (!w) return;                      // popup blocked: nothing to follow
-    try { w.opener = null; } catch (e) { /* reused tab already on Google */ }
-    try { w.location.href = url; } catch (e) { return; }
-    googleWin = w;
-    googleUrlShown = url;
+    window.open(url, '_blank', 'noopener');
   }
 
-  // Called on every picture the zoom shows. Only acts when the Google tab
-  // is already open, and never repeats the same search — a late repaint of
-  // the same picture, or the next picture of the same place, costs nothing.
+  // Called on every picture the zoom shows. The add-on only acts if its
+  // Google tab is already open (it never opens one from here), and the same
+  // search is never sent twice in a row — a late repaint of the same
+  // picture, or the next picture of the same place, costs nothing.
   function followInGoogleTab(url) {
-    if (!url || url === googleUrlShown || !googleTabAlive()) return;
-    showInGoogleTab(url);
+    if (!url || url === googleUrlShown || !googleHelperPresent()) return;
+    askHelper('follow', url);
+    googleUrlShown = url;
   }
 
   function open(t, p) {
@@ -316,8 +320,8 @@
     if (prev) prev.addEventListener('click', () => step(-1));
     if (next) next.addEventListener('click', () => step(1));
 
-    // CHECK GOOGLE — opens (or reuses) the ONE Google tab; see
-    // showInGoogleTab. After the first press it follows the zoom by itself.
+    // CHECK GOOGLE — through the admin add-on when it is installed (one tab
+    // that then follows the zoom), otherwise a plain new tab. See above.
     const gBtn = $id('ib-lb-google');
     if (gBtn) {
       gBtn.addEventListener('click', () => {
@@ -335,12 +339,16 @@
       if (e.key === 'Escape') close();
       if (e.key === 'ArrowLeft')  step(-1);
       if (e.key === 'ArrowRight') step(1);
-      // K = "I have looked at this one", K again undoes — the same key
-      // Approve Artwork uses for keep, so the hand already knows it.
-      // Switched off where approving already carries the mark (Changes
-      // Requested), so one screen never has two ways to say "seen".
+      // The keep key = "I have looked at this one", pressed again undoes —
+      // the SAME setting Approve Artwork uses for KEEP (9 by default), so
+      // the hand already knows it. The page supplies it as a function,
+      // because it arrives after this zoom is set up. Switched off where
+      // approving already carries the mark (Changes Requested), so one
+      // screen never has two ways to say "seen".
       const f = (opts && opts.features) || {};
-      if ((e.key === 'k' || e.key === 'K') && current && f.reviewK !== false) {
+      const rk = typeof f.reviewKey === 'function' ? f.reviewKey() : (f.reviewKey || 'k');
+      if (window.PDKeys.matches(e, rk) && current && f.reviewK !== false) {
+        e.preventDefault();
         toggleReviewed(current.master, current.poster);
       }
     });

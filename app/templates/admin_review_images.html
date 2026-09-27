@@ -109,7 +109,7 @@
         says what is about to happen so you can read it before committing.
       #}
       <div class="review-actions">
-        <span class="muted">Everything you don't mark is released. Use RERUN or UNUSABLE on the bad ones.</span>
+        <span class="muted">Everything you don't mark is released. Use RERUN or UNUSABLE on the bad ones, and LEAVE FOR PHOTOSHOP on any that only need a touch-up — those are not released and stay waiting with a blue outline.</span>
         <button class="btn btn-ghost btn-tiny" data-action="review-clear-marks">UNMARK&nbsp;THIS&nbsp;TITLE&nbsp;<span class="mono">(C)</span></button>
         <span class="review-tally mono" data-review-tally></span>
       </div>
@@ -120,13 +120,14 @@
          screen where one action has a key and the others do not is harder
          to use than one where none of them do. #}
       <p class="review-keys muted">
-        <span class="mono">K</span> keep ·
-        <span class="mono">R</span> rerun ·
+        <span class="mono" data-key-label="rerun">7</span> rerun ·
+        <span class="mono" data-key-label="photoshop">8</span> leave for Photoshop ·
+        <span class="mono" data-key-label="keep">9</span> keep ·
         <span class="mono">U</span> unusable ·
         <span class="mono">C</span> unmark ·
         <span class="mono">E</span> eyedropper ·
         <span class="mono">B</span> signature white/black ·
-        <span class="mono">1</span>-<span class="mono">9</span> or <span class="mono">V</span> pick a generation ·
+        <span class="mono">V</span> or a number pick a generation ·
         <span class="mono">Z</span> big view ·
         <span class="mono">&larr; &rarr;</span> move ·
         <span class="mono">Esc</span> back.
@@ -159,7 +160,7 @@
     <span class="muted mono" data-zoom-pos></span>
     <span class="review-img-state" data-zoom-state></span>
     <span style="margin-left:auto" class="filter-row">
-      <span class="muted">K keep · R rerun · U unusable · B signature colour · 1-9 generation · ← → move · Esc closes</span>
+      <span class="muted"><span data-key-label="rerun">7</span> rerun · <span data-key-label="photoshop">8</span> leave for Photoshop · <span data-key-label="keep">9</span> keep · U unusable · B signature colour · V generation · ← → move · Esc closes</span>
       <button class="btn btn-ghost btn-tiny" data-action="zoom-close">CLOSE</button>
     </span>
   </div>

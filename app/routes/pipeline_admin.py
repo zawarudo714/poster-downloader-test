@@ -3600,6 +3600,18 @@ def api_review_queue(
                              "right": str(P.get_setting(
                                  db, "signature_key_right",
                                  project=project) or "."),
+                         },
+                         # The three decision keys (7 / 8 / 9 by default).
+                         "review_keys": {
+                             "rerun": str(P.get_setting(
+                                 db, "review_key_rerun",
+                                 project=project) or "7"),
+                             "photoshop": str(P.get_setting(
+                                 db, "review_key_photoshop",
+                                 project=project) or "8"),
+                             "keep": str(P.get_setting(
+                                 db, "review_key_keep",
+                                 project=project) or "9"),
                          }})
 
 

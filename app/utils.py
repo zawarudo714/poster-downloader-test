@@ -281,6 +281,67 @@ def resync_flag_markers(db) -> int:
     return changed
 
 
+
+def fill_missing_fingerprints(batch: int = 100) -> int:
+    """
+    Give every live picture with no content_hash one, and return how many
+    were filled. Run once at startup on a background thread.
+
+    Why: the fingerprint used to be written only by the place check, so a
+    picture saved while that check was off, or before it existed, carried
+    none — and the same-picture check on the save doors (2026-09-27) would
+    silently compare new saves against nothing for those. A guard that
+    cannot see part of what it guards reads as coverage while it is not.
+
+    Commits every `batch` rows so a restart part-way loses almost nothing,
+    and simply carries on next start: the query IS the to-do list.
+    """
+    import logging
+    from .db import SessionLocal
+    from .models import SavedPoster
+    log = logging.getLogger("fingerprints")
+    filled = 0
+    last_id = 0          # walk forward by id, so an unreadable row is passed once
+    db = SessionLocal()
+    try:
+        while True:
+            rows = (db.query(SavedPoster)
+                      .filter(SavedPoster.content_hash.is_(None),
+                              SavedPoster.deleted_at.is_(None),
+                              SavedPoster.id > last_id)
+                      .order_by(SavedPoster.id.asc())
+                      .limit(batch).all())
+            if not rows:
+                break
+            for sp in rows:
+                last_id = sp.id
+                try:
+                    sp.content_hash = hashlib.sha256(
+                        saved_poster_path(sp).read_bytes()).hexdigest()
+                    filled += 1
+                except OSError:
+                    # Missing or unreadable file: left empty, and Diagnostics
+                    # already reports missing files. Skipped by id, so one
+                    # bad row can never make this loop spin for ever.
+                    pass
+            db.commit()
+        if filled:
+            log.info("Fingerprinted %d picture(s) that had none", filled)
+    except Exception as e:
+        db.rollback()
+        log.error("Could not finish fingerprinting pictures: %s", e)
+    finally:
+        db.close()
+    return filled
+
+
+def start_fingerprint_backfill() -> None:
+    """Run fill_missing_fingerprints once, off the startup path, so a few
+    thousand file reads never delay the site coming up."""
+    import threading
+    threading.Thread(target=fill_missing_fingerprints,
+                     name="fingerprint-backfill", daemon=True).start()
+
 # ── Filesystem path lookup for a saved poster ────────────────────────────────
 
 def _legacy_folder(poster) -> Path:

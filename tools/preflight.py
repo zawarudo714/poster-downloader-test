@@ -1504,6 +1504,21 @@ def check_falsy_zero_defaults() -> None:
 # point is not the individual rule — it is that "somebody remembered" stops
 # being the mechanism.
 GUARDED: list[tuple[str, str, tuple[str, ...], str]] = [
+    # ── EVERY WORKER SAVE ASKS "IS THIS PICTURE ALREADY ANOTHER TITLE'S?" ──
+    #
+    # A guard only some doors call is no guard: the old address-only check
+    # lived in the paste box alone, and the same file reached two titles
+    # through the grid and on different days (Minneapolis / Saint Paul,
+    # found 2026-09-27). A new worker door that creates a picture, or swaps
+    # the bytes under one, must call the shared check.
+    ("app/routes/worker.py", "= SavedPoster(",
+     ("_same_picture_refusal(",),
+     "saves a worker picture without asking whether the exact same picture "
+     "is already used for another title"),
+    ("app/routes/worker.py", "tmp_target.replace(",
+     ("_same_picture_refusal(",),
+     "swaps in a replacement picture without asking whether it is already "
+     "used for another title"),
     # ── external_id REPEATS ACROSS PROJECTS ─────────────────────────────
     #
     # It is the `0` column from a project's OWN sheet, so every project

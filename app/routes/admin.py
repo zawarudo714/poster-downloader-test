@@ -1753,6 +1753,85 @@ def _zoom_poster_payload(sp, rev) -> dict:
     }
 
 
+
+def _day_pay_summary(db: Session, worker: str, rows) -> dict:
+    """
+    Has this worker-day been paid? What the PAID band on Worker Images shows.
+
+    Read from the payment runs themselves (payments._already_paid_poster_ids,
+    the same list the Payments page subtracts), never from a flag of its
+    own, so this band and the money cannot disagree. Only pictures the
+    worker could be paid for count: anything the admin added himself is
+    left out, exactly as payments.payable_criteria leaves it out.
+
+    Each unpaid picture carries the reason in plain words. The common ones:
+    its flag is still open (payments skip a flagged picture), or it was
+    saved AFTER this day was paid — which is what a picture swapped in
+    from the search grid looks like, because a swap makes a new record.
+    """
+    from ..payments import _already_paid_poster_ids
+    import json as _json
+
+    # One entry per picture: a picture with two open flags arrives twice
+    # from the outer join, and must count once.
+    seen: dict = {}
+    for sp, mt, rev in rows:
+        if sp.added_by is None and (sp.id not in seen or rev is not None):
+            seen[sp.id] = (sp, mt, rev)
+    payable = list(seen.values())
+    empty = {"state": "none", "paid": 0, "total": 0, "paid_on": "",
+             "reference": "", "unpaid": [], "paid_ids": []}
+    if not payable:
+        return empty
+    user = db.query(User).filter_by(username=worker).first()
+    if user is None:
+        return empty
+
+    paid_ids = _already_paid_poster_ids(db, user.id)
+    day_ids = {sp.id for sp, _mt, _rev in payable}
+    touched = day_ids & paid_ids
+
+    # The run(s) that paid this day: the newest one carries the date and
+    # reference the band shows.
+    last_run = None
+    if touched:
+        for run in (db.query(PaymentRun)
+                      .filter(PaymentRun.worker_id == user.id)
+                      .order_by(PaymentRun.created_at.desc()).all()):
+            try:
+                ids = set(_json.loads(run.poster_ids_json or "[]"))
+            except (TypeError, ValueError):
+                continue
+            if ids & touched:
+                last_run = run
+                break
+
+    unpaid = []
+    for sp, mt, rev in payable:
+        if sp.id in paid_ids:
+            continue
+        if rev is not None:
+            why = "flag still open, so it is paid once you approve the fix"
+        elif last_run is not None and sp.created_at and sp.created_at > last_run.created_at:
+            why = "saved after this day was paid (a replacement picture)"
+        else:
+            why = "waiting for the next payment"
+        name = (f"{mt.external_id}. {mt.title}"
+                if mt is not None and mt.external_id is not None
+                else (mt.title if mt is not None else sp.filename))
+        unpaid.append({"poster_id": sp.id, "title": name, "why": why})
+
+    n_paid = len(touched)
+    state = ("paid" if n_paid and not unpaid
+             else "partly" if n_paid else "unpaid")
+    return {
+        "state": state, "paid": n_paid, "total": len(payable),
+        "paid_on": (last_run.created_at.date().isoformat() if last_run else ""),
+        "reference": ((last_run.reference or "") if last_run else ""),
+        "unpaid": unpaid,
+        "paid_ids": sorted(touched),
+    }
+
 @router.get("/api/browse")
 def api_browse(
     request: Request,
@@ -1834,6 +1913,8 @@ def api_browse(
         "worker": worker, "date": date,
         "min_width": min_width,
         "place_check": place_check,
+        # Was this day paid? Drives the PAID band at the top of the page.
+        "pay": _day_pay_summary(db, worker, rows),
         "title_count": len(titles),
         "poster_count": sum(len(t["posters"]) for t in titles.values()),
         "titles": list(titles.values()),

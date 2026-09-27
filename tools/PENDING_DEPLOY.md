@@ -1,13 +1,17 @@
 # Not yet deployed
 
-**v232 — no more red outline on titles that have no flag.**
-- Worker Images now works out the red outline from the live flags each
-  time, the same way the worker's own list already did. Before this, it
-  read a saved mark that older versions had sometimes left switched on
-  (Beirut was the example).
-- On startup the server corrects every saved mark once, so the Title List,
-  the dashboard count and Diagnostics agree too. The log line reads
-  "Corrected the flag marker on N title(s)".
+**v233 — OPEN buttons on duplicate pictures, a PAID band on Worker Images,
+and every Diagnostics number now says what it counts.**
+- Diagnostics' "identical pictures" line names both titles and gives each
+  picture an OPEN button. The button goes to that worker and day on Worker
+  Images, with the zoom already open on the picture.
+- Diagnostics no longer prints a bare "#142". Title numbers read "title 57"
+  and internal numbers read "picture record 142". A new preflight check
+  fails if a bare "#number" comes back.
+- Worker Images shows a gold PAID band when the whole day is paid. When part
+  of the day is unpaid, it lists each unpaid picture with the reason, and a
+  click opens that picture. A day with nothing paid shows a small grey
+  "NOT PAID YET" line.
 - Server only. The Windows node is NOT affected.
 
 Whoever changes code writes here what is waiting and why; the deploy tool

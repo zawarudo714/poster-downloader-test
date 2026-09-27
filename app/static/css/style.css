@@ -1394,6 +1394,39 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
 }
 .ib-summary { margin: 6px 0 4px; font-size: 11px; }
 
+/* The PAID band on Worker Images. Gold and large when the whole day is
+   paid, so it reads at a glance; the same band with a short amber
+   "still to pay" list when some pictures were held back; a quiet grey
+   line when nothing on the day is paid yet. */
+.ib-paid { margin: 8px 0 6px; border-radius: 8px; }
+.ib-paid.is-unpaid {
+  font-family: var(--mono, monospace);
+  font-size: 11px; letter-spacing: .06em; color: var(--subtext);
+  padding: 4px 0;
+}
+.ib-paid.is-paid, .ib-paid.is-partly {
+  padding: 10px 14px;
+  border: 1px solid rgba(212, 167, 58, 0.55);
+  background: rgba(212, 167, 58, 0.08);
+}
+.ib-paid-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+.ib-paid-word {
+  font-size: 26px; font-weight: 800; letter-spacing: .18em;
+  color: #d4a73a;
+}
+.ib-paid-line { font-size: 12px; color: var(--subtext); }
+.ib-unpaid {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px dashed rgba(212, 167, 58, 0.35);
+}
+.ib-unpaid-lead { font-size: 12px; font-weight: 700; color: var(--skip); }
+.ib-unpaid-item {
+  font-size: 11px; padding: 3px 9px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--skip); color: var(--skip); background: transparent;
+}
+.ib-unpaid-item:hover { background: var(--skip); color: var(--bg); }
+
 /* ── Lightbox modal ──────────────────────────────────────────────────── */
 .lightbox {
   position: fixed; inset: 0;
@@ -4355,6 +4388,19 @@ body:has(#ib-bulk-bar:not([hidden])) { padding-bottom: 88px; }
   letter-spacing: .04em;
   color: var(--subtext);
 }
+
+/* One OPEN button per place a finding lives (a duplicate pair sits on two
+   worker-days). Small outlined buttons under the finding's detail line. */
+.diag-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.diag-open {
+  display: inline-block;
+  padding: 3px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  font-size: 11px;
+  letter-spacing: .03em;
+}
+.diag-open:hover { background: var(--accent); color: var(--bg); }
 
 /* Deliberately stopped. Loud, because the failure mode this prevents is
    forgetting it is paused and concluding the pipeline is broken. */

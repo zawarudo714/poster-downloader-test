@@ -175,6 +175,9 @@
   async function loadList() {
     const worker = $('ib-worker').value;
     const date   = $('ib-date').value;
+    // Clear the PAID band first: a slow or failed load must never leave
+    // the previous day's "PAID" sitting above a different day.
+    renderPaid(null);
     if (!worker || !date) { gallery.innerHTML = ''; return; }
     gallery.innerHTML = '<div class="empty-hint">Loading…</div>';
     const params = new URLSearchParams({ worker, date });
@@ -185,6 +188,7 @@
     if (typeof data.min_width === 'number') MIN_WIDTH = data.min_width;
     titles = data.titles || [];
     placeCheck = data.place_check || placeCheck;
+    renderPaid(data.pay);
     updatePlaceButton();
     sortTitles();
     // Restore title index from URL if available and valid, else 0.
@@ -266,6 +270,68 @@
   // because a fast scroll can miss a green outline and the number cannot
   // be missed (owner's ask, 2026-09-18). Recomputed from the list, so a K
   // press updates it live.
+  // ── The PAID band: has this worker-day been paid? ─────────────────────
+  // The server works it out from the payment runs themselves, so the band
+  // and the money cannot disagree. Each unpaid picture in the list opens
+  // the zoom on it, so "why is this one not paid" is one click away.
+  function renderPaid(pay) {
+    const box = $('ib-paid');
+    if (!box) return;
+    box.innerHTML = '';
+    box.className = 'ib-paid';
+    if (!pay || !pay.total) { box.hidden = true; return; }
+    box.hidden = false;
+    const when = pay.paid_on
+      ? ` · paid ${pay.paid_on}${pay.reference ? ' · ref ' + pay.reference : ''}` : '';
+    const noun = (n) => (n === 1 ? PD.noun : PD.nouns);
+    if (pay.state === 'unpaid') {
+      box.classList.add('is-unpaid');
+      box.textContent = `NOT PAID YET · ${pay.total} ${noun(pay.total)} on this day`;
+      return;
+    }
+    box.classList.add(pay.state === 'paid' ? 'is-paid' : 'is-partly');
+    const head = document.createElement('div');
+    head.className = 'ib-paid-head';
+    const word = document.createElement('span');
+    word.className = 'ib-paid-word';
+    word.textContent = 'PAID';
+    const line = document.createElement('span');
+    line.className = 'ib-paid-line mono';
+    line.textContent = (pay.state === 'paid'
+      ? `all ${pay.total} ${noun(pay.total)} on this day`
+      : `${pay.paid} of ${pay.total} ${noun(pay.total)} on this day`) + when;
+    head.appendChild(word);
+    head.appendChild(line);
+    box.appendChild(head);
+    if (!(pay.unpaid || []).length) return;
+    const list = document.createElement('div');
+    list.className = 'ib-unpaid';
+    const lead = document.createElement('span');
+    lead.className = 'ib-unpaid-lead';
+    lead.textContent = `${pay.unpaid.length} still to pay:`;
+    list.appendChild(lead);
+    pay.unpaid.forEach((u) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ib-unpaid-item';
+      b.title = 'Open this picture';
+      b.textContent = `${u.title} — ${u.why}`;
+      b.addEventListener('click', () => {
+        for (let i = 0; i < titles.length; i++) {
+          const p = (titles[i].posters || []).find((x) => x.poster_id === u.poster_id);
+          if (p) {
+            titleIdx = i;
+            renderGallery();
+            openLightbox(titles[i], p);
+            return;
+          }
+        }
+      });
+      list.appendChild(b);
+    });
+    box.appendChild(list);
+  }
+
   function refreshSummary() {
     const nT = titles.length;
     const nP = titles.reduce((n, t) => n + (t.posters || []).length, 0);
@@ -1074,6 +1140,7 @@
     url.searchParams.set('worker', $('ib-worker').value);
     url.searchParams.set('date', dateInput.value);
     url.searchParams.set('idx', String(titleIdx));
+    url.searchParams.delete('open');   // one-shot: see pendingLightbox
     history.replaceState(null, '', url.toString());
     try {
       localStorage.setItem(BROWSE_STATE_KEY, JSON.stringify({
@@ -1108,7 +1175,10 @@
   // The lightbox the last visit left open (poster id, 0 = none). Consumed
   // once by the first loadList; a poster that no longer exists is simply
   // not found, and nothing opens.
-  let pendingLightbox = (function () {
+  // An `open=<picture>` in the address wins over the remembered one: it is
+  // how Diagnostics' OPEN buttons land on a picture with the zoom already
+  // up. saveStateToUrl drops it again, so a reload does not reopen it.
+  let pendingLightbox = parseInt(urlParams.get('open'), 10) || (function () {
     try {
       const saved = JSON.parse(localStorage.getItem(BROWSE_STATE_KEY) || 'null');
       return (saved && saved.lb) || 0;

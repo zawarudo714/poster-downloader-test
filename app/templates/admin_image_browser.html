@@ -61,6 +61,12 @@
         </div>
       </div>
 
+      {# Was this worker-day paid? Filled from /admin/api/browse's `pay`.
+         Gold PAID when every picture is paid; the same band plus a short
+         "still to pay" list when some were held back (usually a flag that
+         was open on pay day); a quiet grey line when nothing is paid yet. #}
+      <div class="ib-paid" id="ib-paid" hidden></div>
+
       <div class="ib-summary mono muted" id="ib-summary"></div>
 
       <div class="gallery-controls">

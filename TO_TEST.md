@@ -940,6 +940,20 @@ On Changes Requested, click a thumbnail to zoom:
 - Flag any picture, then clear the flag inside the zoom. The red outline
   must appear, then disappear, without reloading the page.
 
+## 87. OPEN BUTTONS AND THE PAID BAND — v233
+
+- Run Diagnostics. The identical-pictures line should read "2 identical
+  pictures: <title> and <title>", with one OPEN button for each picture.
+  Each button should land on the right day with that picture zoomed in.
+  Reload that page, and the zoom should NOT open again by itself.
+- Open Worker Images on a day you have fully paid. A gold PAID band should
+  sit at the top with the pay date.
+- Open a day where part was held back, for example because a flag was open
+  on pay day. The band should read "N of M" and list the unpaid ones, and
+  clicking one should open it.
+- Open a day you have not paid yet. There should be a small grey
+  "NOT PAID YET" line only.
+
 ---
 
 ## NOT ON THIS LIST, ON PURPOSE

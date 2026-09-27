@@ -3088,6 +3088,13 @@ So, before shipping any figure or label:
   machine is doing AND what is queued behind it, so "doing nothing" beside
   "47 to paint" reads as the fault it is. Before shipping a state word, ask
   what a person would ask NEXT — and put that on the screen beside it.
+* **TWO NUMBERING SYSTEMS MUST NEVER SHARE ONE SPELLING.** Diagnostics
+  printed a picture's RECORD number as "#142"; the zoom prints the title's
+  SHEET number as "142. Yellowstone". The owner looked up 142, found the
+  wrong place, and rightly doubted a true finding (2026-09-27). Every
+  number on a screen says what it counts — "title 57", "picture record
+  142". Watched by `check_diagnostics_numbers_are_named`, which found 13
+  more the day it was written.
 * **Numbers on a button must be the numbers that will happen.** A button
   saying 627 that then does 1,543 is worse than a button with no number.
 * **A BUTTON LABELLED WITH A BARE VERB HAS NO SUBJECT, SO NOBODY CAN TELL

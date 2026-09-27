@@ -95,6 +95,10 @@ class Finding:
     # Which niche this belongs to. Filled in when scanning everything, so a
     # mixed list is still readable; left blank when already scoped to one.
     project: str = ""
+    # Extra doors when ONE finding spans several places — a duplicate pair
+    # lives on two worker-days, and one `link` can only name one of them.
+    # Each entry is {"label": ..., "url": ...}; the page draws a button each.
+    links: list = field(default_factory=list)
 
 
 class Scope:
@@ -180,7 +184,7 @@ class CheckResult:
             "skipped": self.skipped,
             "findings": [
                 {"what": f.what, "detail": f.detail, "link": f.link,
-                 "project": f.project}
+                 "project": f.project, "links": f.links}
                 for f in self.findings
             ],
         }
@@ -244,13 +248,13 @@ def check_missing_files(db: Session, scope: Scope) -> CheckResult:
             if not saved_poster_path(sp).is_file():
                 bad.append(Finding(
                     what=f"{sp.username} · {sp.title_folder_path} · {sp.filename}",
-                    detail=f"#{sp.id}, saved {sp.original_save_date}",
+                    detail=f"picture record {sp.id}, saved {sp.original_save_date}",
                     link=f"/admin/browse?worker={sp.username}"
                          f"&date={sp.original_save_date}",
                     project=scope.label(_project_of(db, sp)),
                 ))
         except Exception as e:                      # unreadable path, bad chars
-            bad.append(Finding(f"#{sp.id}: {e}"))
+            bad.append(Finding(f"picture record {sp.id}: {e}"))
         if len(bad) >= MAX_ROWS:
             break
     return _result(
@@ -280,7 +284,7 @@ def check_posters_without_title(db: Session, scope: Scope) -> CheckResult:
     itself could be walked around by a future code path).
     """
     rows = [
-        Finding(f"#{sp.id} · {sp.filename}",
+        Finding(f"picture record {sp.id} · {sp.filename}",
                 f"saved by {sp.user_id}, title id {sp.master_title_id} "
                 f"no longer exists", "/admin/diagnostics")
         for sp in (db.query(SavedPoster)
@@ -468,7 +472,7 @@ def check_complete_without_posters(db: Session, scope: Scope) -> CheckResult:
     total = q.count()
     rows = [
         Finding(scope.title_of(t),
-                f"title #{t.id}, external id {t.external_id}",
+                f"title record {t.id}, title number {t.external_id}",
                 "/admin/master?q=" + (t.title or ""),
                 project=scope.label(t.project_id))
         for t in q.limit(MAX_ROWS).all()
@@ -501,7 +505,7 @@ def check_stale_claims(db: Session, scope: Scope) -> CheckResult:
     )
     total = q.count()
     rows = [
-        Finding(f"#{sp.id} · {sp.filename}",
+        Finding(f"picture record {sp.id} · {sp.filename}",
                 f"{sp.pipeline_status} on '{sp.claimed_by}' since "
                 f"{sp.claimed_at:%Y-%m-%d %H:%M}",
                 "/admin/pipeline",
@@ -567,8 +571,8 @@ def check_uploaded_without_processed(db: Session, scope: Scope) -> CheckResult:
     # Fetched once, because a lookup per row is a query per row.
     names = _account_names(db)
     rows = [
-        Finding(f"poster #{ut.saved_poster_id} → "
-                f"{names.get(ut.account_id, f'account #{ut.account_id}')}",
+        Finding(f"picture record {ut.saved_poster_id} → "
+                f"{names.get(ut.account_id, f'account record {ut.account_id}')}",
                 ut.remote_title or "", "/admin/pipeline",
                 project=scope.label(ut.project_id))
         for ut in q.limit(MAX_ROWS).all()
@@ -1388,7 +1392,7 @@ def check_orphaned_upload_rows(db: Session, scope: Scope) -> CheckResult:
 
     rows = [
         Finding(title or f"poster {t.saved_poster_id}",
-                f"queued against account #{t.account_id}, which no longer exists",
+                f"queued against account record {t.account_id}, which no longer exists",
                 "/admin/pipeline/settings#upload",
                 project=scope.label(t.project_id))
         for t, title in q.all() if t.account_id not in live
@@ -1426,7 +1430,7 @@ def check_open_revisions_on_deleted(db: Session, scope: Scope) -> CheckResult:
     )
     total = q.count()
     rows = [
-        Finding(f"change request #{rev.id} on deleted #{sp.id}",
+        Finding(f"change request {rev.id} on deleted picture record {sp.id}",
                 rev.comment or "", "/admin/revisions",
                 project=scope.label(_project_of(db, sp)))
         for rev, sp in q.limit(MAX_ROWS).all()
@@ -1454,23 +1458,44 @@ def check_duplicate_hashes(db: Session, scope: Scope) -> CheckResult:
     )
     rows = []
     for h, n in dupes:
-        posters = (
-            db.query(SavedPoster)
+        pairs = (
+            db.query(SavedPoster, MasterTitle)
+              .join(MasterTitle, MasterTitle.id == SavedPoster.master_title_id)
               .filter(SavedPoster.content_hash == h,
                       SavedPoster.deleted_at.is_(None),
-                      scope.posters)
+                      scope.titles)
+              .order_by(SavedPoster.original_save_date.asc(), SavedPoster.id.asc())
               .limit(6)
               .all()
         )
+        # Named by TITLE and DAY, never by the picture's record number: the
+        # zoom prints the title's sheet number ("142. Yellowstone"), so a
+        # bare "#142" here read as that title and sent the owner to the
+        # wrong place (2026-09-27). Each picture gets its own OPEN button
+        # straight to its worker-day with the zoom open on it, because the
+        # two copies usually live on different days.
+        def _name(sp, mt):
+            if mt is None:
+                return sp.filename
+            return (f"{mt.external_id}. {mt.title}"
+                    if mt.external_id is not None else mt.title)
         rows.append(Finding(
-            f"{n} identical copies",
-            " · ".join(f"#{p.id} {p.username}/{p.filename}" for p in posters),
+            f"{n} identical pictures: "
+            + " and ".join(_name(sp, mt) for sp, mt in pairs[:2])
+            + ("" if n <= 2 else f" and {n - 2} more"),
+            " · ".join(f"{_name(sp, mt)} — {sp.username}, saved "
+                       f"{sp.original_save_date}" for sp, mt in pairs),
+            links=[{"label": f"OPEN {_name(sp, mt)}",
+                    "url": (f"/admin/browse?worker={sp.username}"
+                            f"&date={sp.original_save_date}&open={sp.id}")}
+                   for sp, mt in pairs],
         ))
     return _result(
         "duplicate_hashes", "Byte-identical files saved more than once",
-        "The same image saved twice — sometimes legitimately (two titles "
-        "sharing artwork), sometimes a worker saving the same file twice and "
-        "being paid twice. Worth a look when the count is high.",
+        "The exact same picture file saved under two titles. Sometimes that "
+        "is fine (two titles that really share one view); usually one of the "
+        "two needs its own picture, and the worker was paid twice. Each OPEN "
+        "button takes you to that picture's day with it already zoomed in.",
         "info", rows,
     )
 
@@ -1709,7 +1734,7 @@ def check_two_current_images(db: Session, scope: Scope) -> CheckResult:
     found = rows_q.limit(MAX_ROWS).all()
     total = len(rows_q.all())
 
-    rows = [Finding(f"poster #{poster_id}",
+    rows = [Finding(f"picture record {poster_id}",
                     f"{n} images all marked current", "/admin/pipeline")
             for poster_id, n in found]
     return _result(
@@ -1767,7 +1792,7 @@ def check_generations_share_a_file(db: Session, scope: Scope) -> CheckResult:
     found = dup_q.limit(MAX_ROWS).all()
     total = len(dup_q.all())
 
-    rows = [Finding(f"poster #{poster_id}",
+    rows = [Finding(f"picture record {poster_id}",
                     f"{n} generations all stored at {path}",
                     "/admin/pipeline/review")
             for poster_id, path, n in found]
@@ -1821,7 +1846,7 @@ def check_live_titles_are_unique_per_account(db: Session, scope: Scope) -> Check
     total = len(dup_q.all())
 
     names = _account_names(db)
-    rows = [Finding(f"{names.get(acct, f'account #{acct}')} · \"{nm}\"",
+    rows = [Finding(f"{names.get(acct, f'account record {acct}')} · \"{nm}\"",
                     f"{n} live listings share this exact name",
                     "/admin/pipeline")
             for acct, nm, n in found]
@@ -1888,11 +1913,11 @@ def check_needs_revision_matches_open_flags(db: Session, scope: Scope) -> CheckR
 
     rows = []
     for tid in stale:
-        nm, pid = names.get(tid, (f"title #{tid}", None))
+        nm, pid = names.get(tid, (f"title record {tid}", None))
         rows.append(Finding(nm, "still marked flagged, but no open flag remains",
                             None, scope.label(pid)))
     for tid in hidden:
-        nm, pid = names.get(tid, (f"title #{tid}", None))
+        nm, pid = names.get(tid, (f"title record {tid}", None))
         rows.append(Finding(nm, "has an open flag its title tag is not showing",
                             None, scope.label(pid)))
     total = len(stale) + len(hidden)
@@ -2002,7 +2027,7 @@ def check_approved_without_a_print_file(db: Session, scope: Scope) -> CheckResul
     found = rows_q.limit(MAX_ROWS).all()
     total = len(rows_q.all())
 
-    rows = [Finding(f"poster #{p.saved_poster_id}",
+    rows = [Finding(f"picture record {p.saved_poster_id}",
                     f"generation {p.attempt or 1} is approved with no print "
                     f"file recorded", "/admin/pipeline/review")
             for p in found]
@@ -2050,7 +2075,7 @@ def check_current_image_was_discarded(db: Session, scope: Scope) -> CheckResult:
     found = rows_q.limit(MAX_ROWS).all()
     total = len(rows_q.all())
 
-    rows = [Finding(f"poster #{p.saved_poster_id}",
+    rows = [Finding(f"picture record {p.saved_poster_id}",
                     f"generation {p.attempt or 1} is the current one and its "
                     f"file was deleted ({p.storage_path})",
                     "/admin/pipeline/review")
@@ -2233,7 +2258,7 @@ def check_chosen_colour_was_painted(db: Session, scope: Scope) -> CheckResult:
     found = rows_q.limit(MAX_ROWS).all()
     total = rows_q.count()
 
-    rows = [Finding(f"poster #{p.saved_poster_id}",
+    rows = [Finding(f"picture record {p.saved_poster_id}",
                     f"you chose {p.background_chosen} and the file was built "
                     f"with {p.background_color or 'nothing'}",
                     "/admin/pipeline/review")
@@ -2289,7 +2314,7 @@ def check_recalled_poster_still_painted(db: Session, scope: Scope) -> CheckResul
     found = rows_q.limit(MAX_ROWS).all()
     total = rows_q.count()
 
-    rows = [Finding(f"poster #{p.id}",
+    rows = [Finding(f"picture record {p.id}",
                     f"{p.filename} is back at the start but still has "
                     f"painted version(s) recorded",
                     "/admin/pipeline#greenlight")
@@ -2355,7 +2380,7 @@ def check_titles_collide_after_folding(db: Session, scope: Scope) -> CheckResult
     clashes = {k: v for k, v in groups.items() if len(v) > 1}
     rows = []
     for folded, members in sorted(clashes.items())[:MAX_ROWS]:
-        listed = " · ".join(f"#{ext} {name!r}" for ext, name in members[:6])
+        listed = " · ".join(f"title {ext} {name!r}" for ext, name in members[:6])
         rows.append(Finding(
             f'all list as "{folded}"',
             f"{len(members)} titles become the same name on the marketplace: {listed}",
@@ -2405,7 +2430,7 @@ def check_year_is_a_year_or_nothing(db: Session, scope: Scope) -> CheckResult:
     found = rows_q.limit(MAX_ROWS).all()
     total = rows_q.count()
 
-    rows = [Finding(f"title #{t.external_id}",
+    rows = [Finding(f"title {t.external_id}",
                     f"{t.title} has the year {t.year!r}, which is not a year",
                     "/admin/titles")
             for t in found]
@@ -2485,7 +2510,7 @@ def check_titles_the_marketplace_would_reject(db: Session, scope: Scope) -> Chec
                    "renumbers a name it already holds. Ours would be "
                    "indistinguishable from one of theirs.")
         if why:
-            rows.append(Finding(f"#{ext} {name!r}", why, "/admin/master"))
+            rows.append(Finding(f"title {ext} {name!r}", why, "/admin/master"))
 
     total = len(rows)
     return _result(
@@ -2542,21 +2567,21 @@ def check_titles_that_share_a_folder(db: Session, scope: Scope) -> CheckResult:
         # find. If sanitize ever stops doing it, this speaks again.
         if sanitize(name) != sanitize(name).rstrip(". "):
             odd.append(Finding(
-                f"#{ext} {name!r}",
+                f"title {ext} {name!r}",
                 "still ends in a dot or a space after the folder name is "
                 "built. Windows drops those without telling anyone, so the "
                 "folder on disk would not be the one the database records.",
                 "/admin/master"))
         if safe.split(".")[0].strip().upper() in RESERVED:
             odd.append(Finding(
-                f"#{ext} {name!r}",
+                f"title {ext} {name!r}",
                 "is a name Windows reserves for a device, so a folder cannot "
                 "be created with it at all.", "/admin/master"))
 
     clashes = {k: v for k, v in groups.items() if len(v) > 1}
     rows = [
         Finding(f'both become the folder "{sanitize(members[0][1])}"',
-                " · ".join(f"#{e} {n!r}" for e, n in members[:6]),
+                " · ".join(f"title {e} {n!r}" for e, n in members[:6]),
                 "/admin/master")
         for members in list(clashes.values())[:MAX_ROWS]
     ] + odd[:MAX_ROWS]
@@ -2611,7 +2636,7 @@ def check_titles_with_invisible_characters(db: Session, scope: Scope) -> CheckRe
         if "  " in name:
             faults.append("two spaces in a row")
         if faults:
-            rows.append(Finding(f"#{ext} {name.strip()!r}",
+            rows.append(Finding(f"title {ext} {name.strip()!r}",
                                 "contains " + ", ".join(faults), "/admin/master"))
 
     total = len(rows)
@@ -2657,7 +2682,7 @@ def check_external_ids_are_sound(db: Session, scope: Scope) -> CheckResult:
                  .filter(scope.titles, MasterTitle.external_id.is_(None))
                  .scalar() or 0)
 
-    rows = [Finding(f"#{ext}", f"{n} titles share this number", "/admin/master")
+    rows = [Finding(f"title number {ext}", f"{n} titles share this number", "/admin/master")
             for ext, n in dupes[:MAX_ROWS]]
     if missing:
         rows.append(Finding("no number at all",
@@ -2776,7 +2801,7 @@ def check_healed_versions_are_sound(db: Session, scope: Scope) -> CheckResult:
         if problems:
             total += 1
             if len(rows) < MAX_ROWS:
-                rows.append(Finding(f"healed version #{p.id} (v{p.attempt}{p.variant})",
+                rows.append(Finding(f"healed version record {p.id} (v{p.attempt}{p.variant})",
                                     "; ".join(problems), "/admin/pipeline"))
     return _result(
         "healed_versions_are_sound",
@@ -2812,7 +2837,7 @@ def check_retired_titles_hold_nothing(db: Session, scope: Scope) -> CheckResult:
                    .all())
     for sp, mt in bad_alive:
         rows.append(Finding(
-            what=f"live picture #{sp.id} under retired title '{mt.title}'",
+            what=f"live picture record {sp.id} under retired title '{mt.title}'",
             detail="the title is unusable but this picture was never "
                    "withdrawn — some door around the retire flow let it in",
             project=scope.label(_project_of(db, sp)),
@@ -2823,7 +2848,7 @@ def check_retired_titles_hold_nothing(db: Session, scope: Scope) -> CheckResult:
                     .all())
     for sp in bad_marked:
         rows.append(Finding(
-            what=f"picture #{sp.id} ({sp.filename}) wears the "
+            what=f"picture record {sp.id} ({sp.filename}) wears the "
                  f"pay-despite-delete mark while still alive",
             detail="the mark only means anything on a withdrawn picture; "
                    "something set it without doing the deletion",

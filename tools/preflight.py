@@ -731,6 +731,35 @@ def check_admin_flag_text_uses_one_reader() -> None:
                      f"screen — render p.flag_history instead.")
 
 
+def check_diagnostics_numbers_are_named() -> None:
+    """
+    Diagnostics never prints a bare "#<number>". Every number says what it
+    counts: "title 57" (the sheet number) or "picture record 142" (the
+    database's own row number).
+
+    The two kinds used to share one spelling. The duplicate-picture check
+    printed "#142 humphrey/Minneapolis…" — a picture RECORD number — while
+    the zoom prints the TITLE number as "142. Yellowstone". The owner went
+    looking at title 142, found Yellowstone, and rightly doubted the whole
+    finding (2026-09-27).
+
+    Read from the syntax tree, so a "#" in a comment or a plain string never
+    counts — only an f-string where "#" sits directly before a {value}.
+    """
+    path = APP / "diagnostics.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.JoinedStr):
+            continue
+        parts = node.values
+        for a, b in zip(parts, parts[1:]):
+            if (isinstance(a, ast.Constant) and isinstance(a.value, str)
+                    and a.value.rstrip().endswith("#")
+                    and isinstance(b, ast.FormattedValue)):
+                fail(f"diagnostics.py:{node.lineno}: prints a bare '#<number>'. "
+                     f"Say what the number is: 'title N' or 'picture record N'.")
+
+
 def check_flag_marker_uses_one_definition() -> None:
     """
     Any code that COMPUTES MasterTitle.needs_revision (an assignment whose
@@ -3471,6 +3500,7 @@ CHECKS = [
     ("route decorators sit on routes", check_route_decorators_sit_on_routes),
     ("the flag marker has one definition", check_flag_marker_uses_one_definition),
     ("admin flag text has one reader", check_admin_flag_text_uses_one_reader),
+    ("diagnostics numbers say what they count", check_diagnostics_numbers_are_named),
     ("literal routes beat parameter routes", check_literal_routes_before_param_routes),
     ("finder classes survive className writes", check_finder_classes_survive_classname_writes),
     ("buttons have handlers",     check_actions_are_handled),

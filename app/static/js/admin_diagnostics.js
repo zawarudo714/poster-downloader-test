@@ -87,6 +87,13 @@
                 : '<span>' + esc(f.what) + '</span>') +
               (f.project ? '<span class="diag-project mono">' + esc(f.project) + '</span>' : '') +
               (f.detail ? '<div class="diag-detail mono muted">' + esc(f.detail) + '</div>' : '') +
+              // One button per place a finding lives, when it lives in
+              // several — for example the two days holding a duplicate pair.
+              ((f.links || []).length
+                ? '<div class="diag-links">' + f.links.map(function (l) {
+                    return '<a class="diag-open" href="' + esc(l.url) + '">' + esc(l.label) + '</a>';
+                  }).join('') + '</div>'
+                : '') +
             '</li>';
         });
         html += '</ul>';

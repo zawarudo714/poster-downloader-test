@@ -1426,6 +1426,10 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
   border: 1px solid var(--skip); color: var(--skip); background: transparent;
 }
 .ib-unpaid-item:hover { background: var(--skip); color: var(--bg); }
+/* An open flag is a different job from "waiting for the next payment" —
+   it needs a decision from you — so it wears the flag red, not amber. */
+.ib-unpaid-item.is-flag { border-color: var(--error); color: var(--error); }
+.ib-unpaid-item.is-flag:hover { background: var(--error); color: var(--bg); }
 
 /* ── Lightbox modal ──────────────────────────────────────────────────── */
 .lightbox {

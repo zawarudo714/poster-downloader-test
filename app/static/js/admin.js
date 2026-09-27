@@ -313,7 +313,8 @@
     pay.unpaid.forEach((u) => {
       const b = document.createElement('button');
       b.type = 'button';
-      b.className = 'ib-unpaid-item';
+      // Colour by reason: red for an open flag, amber for everything else.
+      b.className = 'ib-unpaid-item' + (u.kind === 'flag' ? ' is-flag' : '');
       b.title = 'Open this picture';
       b.textContent = `${u.title} — ${u.why}`;
       b.addEventListener('click', () => {

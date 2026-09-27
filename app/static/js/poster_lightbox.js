@@ -118,6 +118,51 @@
     if (current && current.poster.poster_id === p.poster_id) renderReviewed(p);
   }
 
+  // ── The Google companion tab ────────────────────────────────────────────
+  // CHECK GOOGLE used to open a fresh tab on every press ('_blank',
+  // 'noopener'), which also threw away any handle on it — so a pile of
+  // tabs grew and nothing could follow the zoom (owner, 2026-09-27). Now
+  // ONE named tab is reused: the first press opens it, he puts it beside
+  // this page (Chrome split view), and every later picture the zoom shows
+  // re-points that same tab at its own search. It never takes the focus,
+  // so the arrow keys keep working here.
+  const GOOGLE_TAB = 'pd-google-check';
+  let googleWin = null;        // our handle on the tab, while this page lives
+  let googleUrlShown = '';     // what that tab was last pointed at
+
+  function googleTabAlive() {
+    try { return !!(googleWin && !googleWin.closed); } catch (e) { return false; }
+  }
+
+  function showInGoogleTab(url) {
+    if (googleTabAlive()) {
+      try {
+        googleWin.location.href = url;   // allowed across sites: write-only
+        googleUrlShown = url;
+        return;
+      } catch (e) { googleWin = null; }
+    }
+    // Opened blank FIRST: while blank it is still this site's page, so its
+    // link back to us (window.opener) can be cut before Google loads —
+    // the protection 'noopener' gave, without losing our handle on it. The
+    // NAME is what lets a press after a page reload find the same tab
+    // again instead of starting another one.
+    const w = window.open('about:blank', GOOGLE_TAB);
+    if (!w) return;                      // popup blocked: nothing to follow
+    try { w.opener = null; } catch (e) { /* reused tab already on Google */ }
+    try { w.location.href = url; } catch (e) { return; }
+    googleWin = w;
+    googleUrlShown = url;
+  }
+
+  // Called on every picture the zoom shows. Only acts when the Google tab
+  // is already open, and never repeats the same search — a late repaint of
+  // the same picture, or the next picture of the same place, costs nothing.
+  function followInGoogleTab(url) {
+    if (!url || url === googleUrlShown || !googleTabAlive()) return;
+    showInGoogleTab(url);
+  }
+
   function open(t, p) {
     const lightbox = $id('ib-lightbox');
     if (!lightbox) return;
@@ -207,11 +252,13 @@
       }
     }
 
-    // CHECK GOOGLE — opens Google Images for this place in a new tab, so
-    // the scenic view can be confirmed without leaving the zoom. "" means
-    // the project has no source link, so the button stays hidden.
+    // CHECK GOOGLE — shows Google Images for this place in the companion
+    // tab, so the scenic view can be confirmed without leaving the zoom.
+    // "" means the project has no source link, so the button stays hidden.
     const gBtn = $id('ib-lb-google');
     if (gBtn) gBtn.hidden = !(t && t.google_url);
+    // If the Google tab is open beside us, it follows to this picture.
+    followInGoogleTab(t && t.google_url);
 
     // The flag-info panel is universal DISPLAY: what is flagged and why.
     const lbFlag = $id('ib-lb-flag');
@@ -269,13 +316,13 @@
     if (prev) prev.addEventListener('click', () => step(-1));
     if (next) next.addEventListener('click', () => step(1));
 
-    // CHECK GOOGLE — a new tab, so the zoom stays open behind it and you
-    // can keep arrowing.
+    // CHECK GOOGLE — opens (or reuses) the ONE Google tab; see
+    // showInGoogleTab. After the first press it follows the zoom by itself.
     const gBtn = $id('ib-lb-google');
     if (gBtn) {
       gBtn.addEventListener('click', () => {
         if (!current || !current.master.google_url) return;
-        window.open(current.master.google_url, '_blank', 'noopener');
+        showInGoogleTab(current.master.google_url);
       });
     }
 

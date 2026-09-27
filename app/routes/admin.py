@@ -1811,15 +1811,17 @@ def _day_pay_summary(db: Session, worker: str, rows) -> dict:
         if sp.id in paid_ids:
             continue
         if rev is not None:
-            why = "flag still open, so it is paid once you approve the fix"
+            kind, why = "flag", "flag still open, so it is paid once you approve the fix"
         elif last_run is not None and sp.created_at and sp.created_at > last_run.created_at:
-            why = "saved after this day was paid (a replacement picture)"
+            kind, why = "after", "saved after this day was paid (a replacement picture)"
         else:
-            why = "waiting for the next payment"
+            kind, why = "next", "waiting for the next payment"
         name = (f"{mt.external_id}. {mt.title}"
                 if mt is not None and mt.external_id is not None
                 else (mt.title if mt is not None else sp.filename))
-        unpaid.append({"poster_id": sp.id, "title": name, "why": why})
+        # `kind` drives the chip colour, so a flag reads apart from a
+        # plain wait at a glance (owner, 2026-09-27).
+        unpaid.append({"poster_id": sp.id, "title": name, "why": why, "kind": kind})
 
     n_paid = len(touched)
     state = ("paid" if n_paid and not unpaid

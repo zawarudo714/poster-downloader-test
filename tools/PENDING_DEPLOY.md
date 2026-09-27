@@ -1,17 +1,14 @@
 # Not yet deployed
 
-**v233 — OPEN buttons on duplicate pictures, a PAID band on Worker Images,
-and every Diagnostics number now says what it counts.**
-- Diagnostics' "identical pictures" line names both titles and gives each
-  picture an OPEN button. The button goes to that worker and day on Worker
-  Images, with the zoom already open on the picture.
-- Diagnostics no longer prints a bare "#142". Title numbers read "title 57"
-  and internal numbers read "picture record 142". A new preflight check
-  fails if a bare "#number" comes back.
-- Worker Images shows a gold PAID band when the whole day is paid. When part
-  of the day is unpaid, it lists each unpaid picture with the reason, and a
-  click opens that picture. A day with nothing paid shows a small grey
-  "NOT PAID YET" line.
+**v234 — one reusable Google tab that follows the zoom, and the PAID band
+colours its "still to pay" items by reason.**
+- CHECK GOOGLE now opens ONE Google tab and reuses it, instead of a new tab
+  on every press. Once that tab is open, every picture the zoom moves to
+  re-points it at that place's search: the arrow keys, NEXT, and flagging
+  all do this. It works on Worker Images and Changes Requested alike. The
+  same place is never searched twice in a row.
+- A picture held back by an open flag now shows in the flag red. A picture
+  simply waiting for the next payment stays amber.
 - Server only. The Windows node is NOT affected.
 
 Whoever changes code writes here what is waiting and why; the deploy tool

@@ -953,6 +953,14 @@ On Changes Requested, click a thumbnail to zoom:
   clicking one should open it.
 - Open a day you have not paid yet. There should be a small grey
   "NOT PAID YET" line only.
+- (v234) Press CHECK GOOGLE once and put the Google tab beside the site in
+  Chrome split view. Arrow to the next picture: the Google tab should change
+  to that place by itself, with no new tab. Flag a picture: it should move
+  on, and Google should follow. Press CHECK GOOGLE again: the same tab should
+  be reused. Close the Google tab and keep arrowing: nothing new should open
+  until you press CHECK GOOGLE again.
+- (v234) In the "still to pay" list, a "flag still open" item should be
+  red, and a "waiting for the next payment" item should be amber.
 
 ---
 

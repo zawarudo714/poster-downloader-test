@@ -1664,10 +1664,14 @@ def browse_page(
     # reviewed above everything else"). Inside a day they already float to
     # the top; this is what carries it ACROSS days — the page opens on a day
     # still owed an eye, and NEXT DAY TO REVIEW walks to the next one.
-    # "Reviewed" is the K mark (reviewed_at), the same fact the page's
-    # green outline and its day count read.
+    # "Owed an eye" means neither REVIEWED (the K mark, reviewed_at) nor
+    # FLAGGED (an open flag, or a fix waiting for approval) — the owner's
+    # definition, 2026-09-27, and the same one the page's pictureOwed()
+    # uses for its order and its day count.
     unreviewed: dict = {}
     if selected_worker:
+        flagged_ids = (db.query(Revision.saved_poster_id)
+                         .filter(Revision.status.in_(("open", "awaiting_approval"))))
         rows = (scope_titles(
                     db.query(SavedPoster.original_save_date,
                              func.count(SavedPoster.id))
@@ -1676,7 +1680,8 @@ def browse_page(
                     proj)
                 .filter(SavedPoster.username == selected_worker,
                         SavedPoster.deleted_at.is_(None),
-                        SavedPoster.reviewed_at.is_(None))
+                        SavedPoster.reviewed_at.is_(None),
+                        ~SavedPoster.id.in_(flagged_ids))
                 .group_by(SavedPoster.original_save_date)
                 .all())
         unreviewed = {d.isoformat(): n for d, n in rows if d is not None}

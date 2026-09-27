@@ -1371,6 +1371,14 @@ The failure mode this prevents is worse than a bug: building exactly what
 was asked and quietly losing a capability nobody notices is missing until
 the day it matters.
 
+**HIS WORD IS NOT THE COLUMN THAT HAPPENS TO SHARE ITS NAME.** He asked for
+"images which haven't been reviewed" first; there is a `reviewed_at`
+column, so v239 sorted by that alone and flagged titles stayed on top. He
+meant neither reviewed NOR flagged — anything he has already acted on
+(2026-09-27). When his words line up neatly with a field, that is exactly
+the moment to ask what he sees on the screen, because he is describing
+the screen and the field only describes one of the marks on it.
+
 ### 2. When you implement something, revise everything it touches
 
 Not just the thing asked for. Anything that even remotely interacts with it:

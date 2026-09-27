@@ -271,6 +271,26 @@
     return ps.length > 0 && ps.every((p) => p.reviewed);
   }
 
+  // A title is FLAGGED when you have already acted on it: an open flag on
+  // one of its pictures, or a fix waiting for your approval.
+  function titleFlagged(t) {
+    return !!t.needs_revision || (t.posters || []).some((p) => p.flagged);
+  }
+
+  // STILL OWED AN EYE = neither reviewed nor flagged (owner, 2026-09-27:
+  // "by unreviewed I mean not flagged nor reviewed"). ONE definition, read
+  // by the order below, the day's headline count and the NEXT DAY TO
+  // REVIEW button — and the server's per-day count in browse_page asks
+  // the same question of the database.
+  function pictureOwed(p) {
+    return !p.reviewed && !p.flagged;
+  }
+  function titleRank(t) {
+    if (titleFlagged(t)) return 1;   // you have acted: it waits on the worker
+    if (titleReviewed(t)) return 2;  // you have looked: done
+    return 0;                        // untouched: first
+  }
+
   // The day's headline: titles, pictures — and how many still owed an eye,
   // because a fast scroll can miss a green outline and the number cannot
   // be missed (owner's ask, 2026-09-18). Recomputed from the list, so a K
@@ -342,7 +362,7 @@
     const nT = titles.length;
     const nP = titles.reduce((n, t) => n + (t.posters || []).length, 0);
     const un = titles.reduce(
-      (n, t) => n + (t.posters || []).filter((p) => !p.reviewed).length, 0);
+      (n, t) => n + (t.posters || []).filter(pictureOwed).length, 0);
     const tail = nP === 0 ? ''
       : (un === 0 ? ' · all reviewed ✓' : ` · ${un} NOT YET REVIEWED`);
     // The day on screen is counted from what is loaded, so a K press
@@ -374,13 +394,20 @@
     } else {
       titles.sort((a, b) => numOf(a) - numOf(b));
     }
-    // REVIEWED SINKS, whatever the dropdown says: the ones still owed an
-    // eye float to the top in the chosen order, the finished ones follow in
-    // the same order (owner's ask, 2026-09-18). A stable sort keeps both
-    // groups internally ordered. Applied at SORT time only — pressing K
-    // never reorders the page under the cursor; the mark sinks on the next
+    // UNTOUCHED FIRST, whatever the dropdown says: titles neither reviewed
+    // nor flagged float to the top, then the flagged ones, then the
+    // reviewed ones, each group in the chosen order (owner, 2026-09-18 for
+    // reviewed; 2026-09-27 for flagged — "not flagged nor reviewed" is what
+    // unreviewed means). The one exception is the "flagged first" order,
+    // which asks for exactly those on top. A stable sort keeps each group
+    // internally ordered. Applied at SORT time only — pressing K or FLAG
+    // never reorders the page under the cursor; the title moves on the next
     // load or dropdown change.
-    titles.sort((a, b) => (titleReviewed(a) ? 1 : 0) - (titleReviewed(b) ? 1 : 0));
+    const rank = (t) => {
+      const r = titleRank(t);
+      return mode === 'flagged' ? (r === 1 ? 0 : r === 0 ? 1 : 2) : r;
+    };
+    titles.sort((a, b) => rank(a) - rank(b));
   }
 
   function renderGallery() {

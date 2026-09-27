@@ -1044,8 +1044,12 @@ On Changes Requested, click a thumbnail to zoom:
 - When the painting arrives on Approve Artwork, it should carry the ADMIN
   PICK label.
 - Worker Images with no date in the address: it should open on the oldest
-  day that still has unreviewed pictures. NEXT DAY TO REVIEW should walk
-  through the rest, and disappear when there are none left.
+  day that still has pictures that are neither reviewed nor flagged. NEXT
+  DAY TO REVIEW should walk through the rest, and disappear when there are
+  none left.
+- (v240) On a day with a mix, the order should be: untouched titles first,
+  then flagged (red) ones, then reviewed (green) ones. With the order box
+  set to "flagged first", the flagged ones come first instead.
 - Run Diagnostics: "more pictures than they take", "your own pictures ...
   painting" and "painting(s) of removed pictures" should all be green.
 

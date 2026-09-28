@@ -2165,6 +2165,18 @@ lookup, scroll to the top of the file you are in and read the helpers it
 already has. That costs one screen and it is where this project's answers
 usually are.
 
+**And when TWO existing paths do the job, copy the one that has learned
+more.** v239's USE MY OWN PICTURE copied the worker paste box's raw
+download — it trusts the file name and measures size from the first 64 KB
+— instead of the search grid's reader (`imagefetch`: checks the real
+format from the bytes, lets Pillow read the whole file, converts WebP). So
+a real JPEG with a large block of camera data, and an AVIF saved as ".jpg",
+were both refused as "not a picture" with no reason given (owner,
+2026-09-28). The same 64 KB gap had been quietly letting such pictures skip
+the 350px floor at the worker paste doors, because "could not measure" is
+let through; `read_file_dimensions` now falls back to Pillow, and
+`check_pictures_have_a_measured_size` lists anything saved unmeasured.
+
 **A corollary worth stating on its own: when the owner says "just copy how
 X does it", that is not a shortcut, it is usually the correct architecture.**
 He can see the working path from outside the code. If the answer is "that

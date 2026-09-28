@@ -1,13 +1,18 @@
 # Not yet deployed
 
-## v240 — Worker Images: untouched titles first (2026-09-27)
+## v241 — USE MY OWN PICTURE reads pictures properly (2026-09-28)
 
-- "Unreviewed" now means neither reviewed nor flagged, as the owner meant
-  it. Titles sort untouched → flagged → reviewed (except in the "flagged
-  first" order). The day count, NEXT DAY TO REVIEW and the day the page
-  opens on use the same definition (`pictureOwed()` in admin.js, and the
-  per-day count in `browse_page`).
-- Files: `static/js/admin.js`, `routes/admin.py`.
+- USE MY OWN PICTURE now reads the picture the way the search grid does
+  (`imagefetch.normalise_picture`): the real format from the bytes, the size
+  from Pillow, JPEG/PNG kept as they are, WebP/GIF converted to JPEG, and a
+  plain sentence when the file is AVIF/HEIC or a web page. A website that
+  refuses the server (403) now says "save it and use Choose File".
+- `imghdr_lite.read_file_dimensions` falls back to Pillow when the quick
+  64 KB read fails, so the worker paste doors can no longer skip the size
+  floor on a JPEG with a big metadata block.
+- New Diagnostics check: pictures saved without a measured size.
+- Files: `app/imagefetch.py`, `app/imghdr_lite.py`, `routes/admin.py`,
+  `diagnostics.py`.
 - The Windows node is not affected. No copying needed.
 
 Whoever changes code writes here what is waiting and why; the deploy tool

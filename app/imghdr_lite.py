@@ -101,10 +101,28 @@ def read_dimensions(data: bytes) -> Optional[Tuple[int, int]]:
 
 
 def read_file_dimensions(path: Path) -> Optional[Tuple[int, int]]:
-    """Read just the first 64 KiB — plenty for any image header."""
+    """Read the first 64 KiB, which holds the header of nearly every picture.
+
+    NOT all of them: a JPEG can carry more than 64 KiB of camera or editor
+    data in front of its size marker, and then the walk above runs off the
+    end and answers None. None means "could not measure", which the save
+    doors deliberately let through — so such a picture skipped the 350px
+    size floor entirely (found 2026-09-28, when the admin's own upload of
+    a real JPEG was refused as "not a picture"). When the quick read fails,
+    Pillow is asked instead; it reads as far as it needs to. This module
+    only runs on the Linux server, where Pillow is installed; if it ever is
+    not, the answer is None exactly as before."""
     try:
         with path.open("rb") as f:
             data = f.read(65536)
     except OSError:
         return None
-    return read_dimensions(data)
+    dims = read_dimensions(data)
+    if dims is not None:
+        return dims
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            return im.size
+    except Exception:
+        return None

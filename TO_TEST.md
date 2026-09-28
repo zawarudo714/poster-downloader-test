@@ -1029,6 +1029,9 @@ On Changes Requested, click a thumbnail to zoom:
   should appear on the Pipeline page as sent to painting.
 - Do it again from the zoom on another title, this time with a file from
   your computer instead of a link.
+- (v241) Try the Inglewood file again. If it is an AVIF picture, the message
+  should say so and tell you how to turn it into a JPEG. Try a link from a
+  site that blocks downloads: the message should tell you to use Choose File.
 - Try a picture already used on another title. You should get a warning
   naming that title, and OK should save it anyway.
 - Changes Requested: press USE MY OWN PICTURE on a flag card, on a

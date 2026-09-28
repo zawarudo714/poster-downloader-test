@@ -3008,6 +3008,45 @@ def check_number_settings_hold_numbers(db: Session, scope: Scope) -> CheckResult
     )
 
 
+def check_pictures_have_a_measured_size(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: every live picture had its size measured when it was saved.
+
+    The size floor (every side at least `min_image_px`) can only refuse a
+    picture it could measure. "Could not measure" is let through on
+    purpose — it is not evidence of a small picture — so a picture whose
+    size came back unknown skipped the floor entirely. Until 2026-09-28
+    that happened to any JPEG with more than 64 KB of camera or editor data
+    in front of the picture. read_file_dimensions now asks Pillow when the
+    quick read fails; this lists anything saved without a size, before or
+    since, so the owner can look at it.
+    """
+    q = (db.query(SavedPoster, MasterTitle)
+           .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+           .filter(SavedPoster.deleted_at.is_(None),
+                   or_(SavedPoster.image_width.is_(None),
+                       SavedPoster.image_height.is_(None)),
+                   scope.titles))
+    total = q.count()
+    rows = [Finding(scope.title_of(mt),
+                    f"picture record {sp.id} ({sp.filename}) was saved without "
+                    f"its size being measured, so the size rule never checked it",
+                    f"/admin/browse?worker={sp.username}"
+                    f"&date={sp.original_save_date}&open={sp.id}",
+                    project=scope.label(mt.project_id))
+            for sp, mt in q.limit(MAX_ROWS).all()]
+    return _result(
+        "pictures_have_a_measured_size",
+        f"{total} picture(s) were saved without their size being measured"
+        if total else "Every picture had its size measured",
+        "The rule that every side must be at least the minimum size could not "
+        "run on these, so a small picture could be among them. Open each one "
+        "and check it by eye; replace it with USE MY OWN PICTURE if it is too "
+        "small.",
+        "warn" if total else "ok", rows, total,
+    )
+
+
 def check_healed_versions_are_sound(db: Session, scope: Scope) -> CheckResult:
     """
     INVARIANT: an edited version can always be traced to its parent.
@@ -3118,6 +3157,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_titles_hold_too_many_pictures,
     check_admin_picks_reach_painting,
     check_withdrawn_pictures_hold_no_waiting_painting,
+    check_pictures_have_a_measured_size,
     check_generations_share_a_file,
     check_live_titles_are_unique_per_account,
     check_needs_revision_matches_open_flags,

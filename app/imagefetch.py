@@ -54,7 +54,41 @@ _MAGIC = {
 
 
 class FetchError(Exception):
-    """Download or decode failed, with text safe to show a worker."""
+    """Download or decode failed, with text safe to show a worker.
+
+    `status` is the website's HTTP answer when there was one (403 = it
+    refused us), so a caller can say something more useful than the raw
+    error — "save it to your computer instead", for example."""
+
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
+
+
+# Pictures in the ISO "ftyp" box family — AVIF and HEIC. Image CDNs hand
+# these to modern browsers even when the address ends in .jpg, and a
+# browser's "Save image as" then keeps the .jpg name on AVIF bytes. Named
+# here so the refusal can say what the file REALLY is.
+_FTYP_BRANDS = {b"avif": "AVIF", b"avis": "AVIF", b"heic": "HEIC",
+                b"heix": "HEIC", b"hevc": "HEIC", b"mif1": "HEIF",
+                b"msf1": "HEIF"}
+
+
+def describe_unreadable(head: bytes) -> str:
+    """A plain sentence saying what a file that is not JPEG / PNG / WebP /
+    GIF / BMP actually is, and what to do about it."""
+    if head[4:8] == b"ftyp":
+        name = _FTYP_BRANDS.get(head[8:12], "AVIF or HEIC")
+        return (f"This file is really an {name} picture, even if its name ends "
+                f"in .jpg. The server cannot read {name}. Open the picture in "
+                f"your browser, right-click it and choose Copy image, paste it "
+                f"into Paint, save it as JPEG, and try again.")
+    low = head.lower()
+    if low.lstrip().startswith(b"<") or b"<html" in low:
+        return ("That is a web page, not a picture. The website probably "
+                "blocked the download or the link has expired.")
+    return ("That is not a picture the server can read. It accepts JPEG, "
+            "PNG, WebP and GIF.")
 
 
 def sniff_format(head: bytes) -> str | None:
@@ -74,7 +108,10 @@ def download_bytes(url: str) -> bytes:
             url, stream=True, timeout=TIMEOUT_S,
             headers={"User-Agent": "Mozilla/5.0 PosterDownloader/1.0"},
         ) as resp:
-            resp.raise_for_status()
+            if resp.status_code >= 400:
+                raise FetchError(
+                    f"Could not download that image: the website answered "
+                    f"{resp.status_code}.", status=resp.status_code)
             buf = io.BytesIO()
             for chunk in resp.iter_content(64 * 1024):
                 if not chunk:
@@ -133,6 +170,47 @@ def fetch_as_jpeg(url: str, target_path: Path, *, quality: int = 92) -> tuple[in
     target_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(target_path, "JPEG", quality=quality, optimize=True, progressive=True)
     return target_path.stat().st_size, img.width, img.height
+
+
+def normalise_picture(data: bytes) -> tuple[bytes, str, int, int]:
+    """
+    Check that `data` is a picture and return what to store:
+    (bytes, extension, width, height).
+
+    JPEG and PNG are kept byte for byte — no re-encoding, no quality lost.
+    WebP, GIF and BMP are converted to JPEG, the same conversion the search
+    grid applies (fetch_as_jpeg), because painting and the marketplace both
+    want JPEG. Anything else is refused with a sentence saying what it is.
+
+    Dimensions come from Pillow, which reads the whole file, rather than a
+    header sniffer that looks at the first 64 KB — a JPEG with a large block
+    of camera or editor data in front of the picture used to read as
+    "not a picture" (found 2026-09-28 on USE MY OWN PICTURE).
+    """
+    fmt = sniff_format(data[:16])
+    if fmt is None:
+        raise FetchError(describe_unreadable(data[:64]))
+    try:
+        from PIL import Image
+    except ImportError:
+        raise FetchError("Image processing isn't available on the server.")
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+    except Exception as e:
+        raise FetchError(f"That picture could not be read ({e}).")
+    if fmt in ("jpeg", "png"):
+        return data, ("jpg" if fmt == "jpeg" else "png"), img.width, img.height
+    if img.mode in ("RGBA", "LA", "P"):
+        img = img.convert("RGBA")
+        flat = Image.new("RGB", img.size, (255, 255, 255))
+        flat.paste(img, mask=img.split()[-1])
+        img = flat
+    elif img.mode != "RGB":
+        img = img.convert("RGB")
+    out = io.BytesIO()
+    img.save(out, "JPEG", quality=92, optimize=True, progressive=True)
+    return out.getvalue(), "jpg", img.width, img.height
 
 
 DEFAULT_BACKGROUND = "#000000"

@@ -2466,9 +2466,6 @@ def _withdraw_pictures(db: Session, posters: list, *, note: str,
 
 # ── USE MY OWN PICTURE ───────────────────────────────────────────────────────
 
-_PICK_EXTS = {"jpg", "jpeg", "png", "webp", "gif"}
-
-
 @router.post("/title/{master_id}/admin_pick")
 def admin_pick_title(
     master_id: int,
@@ -2508,12 +2505,11 @@ def admin_pick_title(
          the activity log). The picture goes straight to painting.
     """
     from .worker import (
-        _download_to, _ensure_first_save_metadata, _picture_fingerprint,
+        _ensure_first_save_metadata, _picture_fingerprint,
         _safe_min_px, _same_picture_hit, _title_label, _too_small,
         _validate_image_url,
     )
     from ..config import MAX_DOWNLOAD_BYTES
-    from ..imghdr_lite import read_file_dimensions
     from ..parsing import filename_for
     from ..pipeline import greenlight_titles, resolve_project
     from ..utils import title_folder_for
@@ -2539,17 +2535,41 @@ def admin_pick_title(
         if why:
             raise HTTPException(409, why)
 
-    if src_url:
-        ok, why = _validate_image_url(src_url, db, project)
-        if not ok:
-            raise HTTPException(400, why)
-        ext_source = src_url
-    else:
-        ext = (Path(file.filename).suffix or "").lstrip(".").lower()
-        if ext not in _PICK_EXTS:
-            raise HTTPException(400, "The file must be a .jpg, .jpeg, .png, "
-                                     ".webp or .gif picture.")
-        ext_source = f"upload.{ext}"
+    # 1 · The new picture arrives before anything old leaves — read, checked
+    # and (if it is not already JPEG or PNG) converted, all in memory, so a
+    # refusal leaves nothing on disk. The same reader the search grid uses
+    # (imagefetch), not the paste box's raw copy: the raw copy measured
+    # size from the first 64 KB and trusted the file name, so a real JPEG
+    # with a large block of camera data, and an AVIF saved as ".jpg", both
+    # read as "not a picture" with no reason given (owner, 2026-09-28).
+    from ..imagefetch import FetchError, download_bytes, normalise_picture
+    try:
+        if src_url:
+            ok, why = _validate_image_url(src_url, db, project)
+            if not ok:
+                raise HTTPException(400, why)
+            data = download_bytes(src_url)
+        else:
+            data = file.file.read(MAX_DOWNLOAD_BYTES + 1)
+            if len(data) > MAX_DOWNLOAD_BYTES:
+                raise HTTPException(413, "That file is larger than the 25 MB limit.")
+            if not data:
+                raise HTTPException(400, "That file is empty.")
+        stored, ext, img_w, img_h = normalise_picture(data)
+    except FetchError as e:
+        if e.status in (401, 403, 429):
+            # The website refused our server. Measured 2026-09-28 on a
+            # homes.com picture: 403 to the server, fine in his browser.
+            raise HTTPException(400, (
+                f"The website refused to let our server download this "
+                f"picture (it answered {e.status}). Save the picture to "
+                f"your computer from your browser, then use Choose File."))
+        raise HTTPException(400, str(e))
+    min_px = _safe_min_px(db, project)
+    if _too_small(img_w, img_h, min_px):
+        raise HTTPException(
+            400, f"That picture is {img_w}×{img_h}. Every side must be at "
+                 f"least {min_px}px, so it cannot be used.")
 
     # WHOSE FOLDER. The title's folder is fixed at its first save and never
     # moves (CLAUDE.md, immutable paths), so the pick lives where the
@@ -2573,19 +2593,9 @@ def admin_pick_title(
     made_folder = not folder.exists()
     folder.mkdir(parents=True, exist_ok=True)
 
-    def _clean_up():
-        # Every refusal below leaves the disk as it found it: the incoming
-        # file goes, and so does a folder made only to hold it — otherwise
-        # an empty folder would list "admin" as a worker on Worker Images.
-        target_path.unlink(missing_ok=True)
-        if made_folder and folder.is_dir() and not list(folder.iterdir()):
-            shutil.rmtree(folder, ignore_errors=True)
-
-    def _refuse(status: int, message: str):
-        _clean_up()
-        raise HTTPException(status, message)
-
-    # A FRESH name: the old files are still on disk until step 3.
+    # A FRESH name, with the extension of what is actually stored: the old
+    # files are still on disk until step 3.
+    ext_source = f"picture.{ext}"
     count = len(live) + 1
     target_name = filename_for(t.title, count, ext_source)
     target_path = folder / target_name
@@ -2593,32 +2603,17 @@ def admin_pick_title(
         count += 1
         target_name = filename_for(t.title, count, ext_source)
         target_path = folder / target_name
+    target_path.write_bytes(stored)
+    written = len(stored)
 
-    # 1 · The new picture arrives before anything old leaves.
-    if src_url:
-        try:
-            written = _download_to(src_url, target_path)
-        except HTTPException as e:
-            _refuse(e.status_code, e.detail)
-    else:
-        data = file.file.read(MAX_DOWNLOAD_BYTES + 1)
-        if len(data) > MAX_DOWNLOAD_BYTES:
-            _refuse(413, "That file is larger than the 25 MB limit.")
-        if not data:
-            _refuse(400, "That file is empty.")
-        target_path.write_bytes(data)
-        written = len(data)
-    dims = read_file_dimensions(target_path)
-    if not dims and has_file:
-        # A download with an unreadable header is allowed through (we could
-        # not look). A FILE chosen by hand that is not readable as a
-        # picture is simply not a picture.
-        _refuse(400, "That file could not be read as a picture.")
-    img_w, img_h = dims if dims else (None, None)
-    min_px = _safe_min_px(db, project)
-    if _too_small(img_w, img_h, min_px):
-        _refuse(400, f"That picture is {img_w}×{img_h}. Every side must be "
-                     f"at least {min_px}px, so it cannot be used.")
+    def _clean_up():
+        # The one refusal after this point (the same-picture warning) leaves
+        # the disk as it found it: the incoming file goes, and so does a
+        # folder made only to hold it — otherwise an empty folder would list
+        # "admin" as a worker on Worker Images.
+        target_path.unlink(missing_ok=True)
+        if made_folder and folder.is_dir() and not list(folder.iterdir()):
+            shutil.rmtree(folder, ignore_errors=True)
 
     # 2 · The same picture on another title — a warning he may overrule.
     sha = _picture_fingerprint(target_path)

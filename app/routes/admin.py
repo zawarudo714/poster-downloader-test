@@ -2474,6 +2474,7 @@ def admin_pick_title(
     file: Optional[UploadFile] = File(None),
     reason: str = Form(""),
     confirm_same_picture: int = Form(0),
+    confirm_flagged: int = Form(0),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -2534,6 +2535,37 @@ def admin_pick_title(
         why = _picture_cannot_leave(sp)
         if why:
             raise HTTPException(409, why)
+
+    # ── A TITLE YOU ALREADY SENT BACK TO THE WORKER ─────────────────────
+    #
+    # He replaces pictures in batches, and a title he flagged minutes ago
+    # looks like any other in a batch (owner, 2026-09-28: "I may by mistake
+    # change that one without seeing I had put it for change"). Asked here,
+    # before any download, so every door gets the same question. Changes
+    # Requested sends confirm_flagged=1 from the start, because there the
+    # flag is the card he is pressing the button on — asking again would be
+    # a warning that fires on the normal case.
+    if not confirm_flagged and live:
+        flag = (db.query(Revision)
+                  .filter(Revision.saved_poster_id.in_([p.id for p in live]),
+                          Revision.status.in_(("open", "awaiting_approval")))
+                  .order_by(Revision.created_at.desc())
+                  .first())
+        if flag is not None:
+            steps = _flag_history(flag)
+            note = steps[0]["text"] if steps else ""
+            where = ("The worker has already sent a new picture, and it is "
+                     "waiting for your approval on Changes Requested."
+                     if flag.status == "awaiting_approval"
+                     else "The worker has not answered yet.")
+            return JSONResponse(
+                {"ok": False, "reason": "flagged_title", "can_override": True,
+                 "message": (
+                     f"You sent this title back to the worker for changes"
+                     + (f': "{note}"' if note else "") + f". {where}\n\n"
+                     f"Use your own picture anyway? The flag will close, and "
+                     f"the worker is still paid for their picture.")},
+                status_code=409)
 
     # 1 · The new picture arrives before anything old leaves — read, checked
     # and (if it is not already JPEG or PNG) converted, all in memory, so a

@@ -1430,6 +1430,11 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
    it needs a decision from you — so it wears the flag red, not amber. */
 .ib-unpaid-item.is-flag { border-color: var(--error); color: var(--error); }
 .ib-unpaid-item.is-flag:hover { background: var(--error); color: var(--bg); }
+/* Saved AFTER the day was paid — a replacement picture, not a missed
+   payment. Blue, so it never reads as the amber "waiting for the next
+   payment" beside it (owner, 2026-09-28: "easier on my eyes"). */
+.ib-unpaid-item.is-after { border-color: rgba(100, 180, 255, 0.9); color: rgb(130, 195, 255); }
+.ib-unpaid-item.is-after:hover { background: rgb(100, 180, 255); color: var(--bg); }
 
 /* ── Lightbox modal ──────────────────────────────────────────────────── */
 .lightbox {

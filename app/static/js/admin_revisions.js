@@ -184,6 +184,8 @@
       window.AdminPick.open({
         masterId,
         title: btn.getAttribute('data-pick-title') || '',
+        // The flag is on this very card, so no "you flagged this" warning.
+        flagSeen: true,
         onDone: (d, msg) => {
           document.querySelectorAll(`[data-pick-master="${masterId}"]`)
             .forEach((b) => finishCard(b.closest(CARD_SEL)));

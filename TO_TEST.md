@@ -1029,6 +1029,11 @@ On Changes Requested, click a thumbnail to zoom:
   should appear on the Pipeline page as sent to painting.
 - Do it again from the zoom on another title, this time with a file from
   your computer instead of a link.
+- (v242) On Worker Images, flag a title, then press USE MY OWN PICTURE on
+  it. You should be asked whether to go ahead, with your flag note quoted.
+  On Changes Requested the same button should NOT ask.
+- (v242) On a day with a picture saved after the day was paid, that name
+  in the PAID band should be blue, not amber.
 - (v241) Try the Inglewood file again. If it is an AVIF picture, the message
   should say so and tell you how to turn it into a JPEG. Try a link from a
   site that blocks downloads: the message should tell you to use Choose File.

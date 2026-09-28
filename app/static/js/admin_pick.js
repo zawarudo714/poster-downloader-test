@@ -77,7 +77,7 @@
     cancel.addEventListener('click', close);
     const go = el('button', 'btn btn-accent', 'USE THIS PICTURE');
     go.type = 'button';
-    go.addEventListener('click', () => send(false));
+    go.addEventListener('click', () => send({}));
     actions.appendChild(cancel);
     actions.appendChild(go);
 
@@ -85,7 +85,7 @@
     // what is sent is always what is on screen.
     url.addEventListener('input', () => { if (url.value.trim()) file.value = ''; });
     file.addEventListener('change', () => { if (file.files.length) url.value = ''; });
-    url.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(false); });
+    url.addEventListener('keydown', (e) => { if (e.key === 'Enter') send({}); });
 
     [urlLab, fileLab, whyLab, status, actions].forEach((n) => form.appendChild(n));
     [head, lead, form].forEach((n) => card.appendChild(n));
@@ -129,7 +129,10 @@
     job = null;
   }
 
-  async function send(sameOk) {
+  // `ok` carries what has already been confirmed in this press, so a
+  // second warning does not undo the answer to the first one.
+  async function send(ok) {
+    ok = ok || {};
     if (busy || !job) return;
     const p = box._parts;
     const link = p.url.value.trim();
@@ -143,7 +146,10 @@
     if (chosen) fd.append('file', chosen);
     else fd.append('url', link);
     fd.append('reason', p.why.value.trim());
-    if (sameOk) fd.append('confirm_same_picture', '1');
+    if (ok.same) fd.append('confirm_same_picture', '1');
+    // Changes Requested passes flagSeen: the flag is on the very card the
+    // button sits on, so the "you flagged this" warning would only repeat it.
+    if (ok.flagged || job.flagSeen) fd.append('confirm_flagged', '1');
 
     busy = true;
     p.go.disabled = true;
@@ -155,10 +161,19 @@
                             { method: 'POST', body: fd });
       let d = {};
       try { d = await r.json(); } catch (e) { d = {}; }
+      if (r.status === 409 && d.reason === 'flagged_title') {
+        busy = false;
+        if (confirm(d.message || 'You sent this title back to the worker. Use your own picture anyway?')) {
+          await send(Object.assign({}, ok, { flagged: true }));
+        } else {
+          p.status.textContent = 'Not saved. The title is still waiting on the worker.';
+        }
+        return;
+      }
       if (r.status === 409 && d.reason === 'same_picture') {
         busy = false;
         if (confirm(d.message || 'This picture is already used for another title. Use it anyway?')) {
-          await send(true);
+          await send(Object.assign({}, ok, { same: true }));
         } else {
           p.status.textContent = 'Not saved. Choose a different picture.';
         }

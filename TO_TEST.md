@@ -1081,6 +1081,15 @@ On Changes Requested, click a thumbnail to zoom:
 - In JUST THE PHOTOSHOP ONES, SAVE & RELEASE should still save with pictures
   left unmarked — they simply stay in that queue.
 
+## 95. PHOTOPEA SLIDING SIDEWAYS — v245
+
+- Open a few pictures in Photopea. If the editor opens pushed to the left,
+  within a few seconds it should slide back by itself and a message should
+  say how many pixels it had slid. Tell me that number.
+- If it is ever cut off and NO message appears, press FIX EDITOR VIEW in the
+  top bar. If that does not fix it either, the cause is something else —
+  send a screenshot.
+
 ---
 
 ## NOT ON THIS LIST, ON PURPOSE

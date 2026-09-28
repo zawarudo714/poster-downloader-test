@@ -1356,6 +1356,38 @@
 
   function peaFrame() { return document.querySelector('[data-pea-frame]'); }
 
+  // ── PHOTOPEA SLIDING SIDEWAYS ─────────────────────────────────────────
+  // Since Photopea's outage on 2026-09-28 the editor often opened pushed
+  // about 300 pixels to the left: the tool column and the File/Edit menus
+  // were off screen, so no tool could be picked (owner's screenshots,
+  // Trevi Fountain). 300 pixels is the width of the advert column
+  // photopea.com shows on its own site, and the picture fits "the page
+  // inside the frame has scrolled sideways". MEASURED 2026-09-28 in a test
+  // frame: Photopea runs a script we send it, `window.scrollTo` inside
+  // that script puts a sideways-scrolled editor back, and `echoToOE`
+  // reports how far it had moved. (Its script engine is its own: no
+  // `document`, no try/catch, no callbacks — so this is a one-shot check
+  // we repeat, not a listener we install.)
+  //
+  // The report is the evidence: the toast says how far it had slid, so the
+  // next time it happens the cause is confirmed rather than guessed. If the
+  // editor is ever wrong WITHOUT that toast, the cause is something else.
+  const PEA_UNSLIDE =
+    'var pdX = window.scrollX; if (pdX > 0) { window.scrollTo(0, window.scrollY); '
+    + 'app.echoToOE("pd-pea-shift:" + pdX); }';
+  let peaShiftTimers = [];
+  function peaUnslide() {
+    const f = peaFrame();
+    if (!pea.open || !f || !f.contentWindow) return;
+    f.contentWindow.postMessage(PEA_UNSLIDE, PEA_ORIGIN);
+  }
+  function peaWatchSlide() {
+    peaShiftTimers.forEach(clearTimeout);
+    // A few looks over the first seconds, when the advert column loads;
+    // then only on demand (FIX EDITOR VIEW), so nothing runs while he edits.
+    peaShiftTimers = [500, 2000, 5000, 10000, 20000].map((ms) => setTimeout(peaUnslide, ms));
+  }
+
   // Show or hide the loading veil, and keep SAVE unclickable until the
   // picture is actually in the editor — saving an empty document would just
   // overwrite the version with nothing.
@@ -1392,6 +1424,7 @@
     // to while it loads. The image is captured here in `v` and never re-read.
     pea.loading = true;
     pea.open = true;
+    pea.slideTold = false;
     pea.pid = v.processed_id;
     $('[data-pea-title]').textContent =
       `editing v${v.attempt}${v.variant || ''} — SAVE files it as a new lettered version`;
@@ -1414,6 +1447,7 @@
       setPeaBusy(false);
       try { peaFrame().contentWindow.postMessage(bytes, PEA_ORIGIN); }
       catch (err) { toast('Could not hand the picture to the editor: ' + err.message, 'error'); }
+      peaWatchSlide();
     };
 
     const frame = peaFrame();
@@ -1440,6 +1474,8 @@
   }
 
   function peaClose() {
+    peaShiftTimers.forEach(clearTimeout);
+    peaShiftTimers = [];
     setPeaBusy(false);
     const overlay = $('[data-pea]');
     if (overlay) overlay.hidden = true;
@@ -1466,6 +1502,16 @@
     // only the binary reply to a save we asked for — its "done" strings
     // and progress notes fall through harmlessly.
     if (e.origin !== PEA_ORIGIN || !pea.open) return;
+    // The sideways-slide report (see PEA_UNSLIDE): say it, once per open.
+    if (typeof e.data === 'string' && e.data.startsWith('pd-pea-shift:')) {
+      const px = e.data.slice('pd-pea-shift:'.length);
+      console.info('Photopea had slid sideways by', px, 'px — put back');
+      if (!pea.slideTold) {
+        pea.slideTold = true;
+        toast(`Photopea's screen had slid ${px} pixels to the left. It has been put back.`);
+      }
+      return;
+    }
     if (!(e.data instanceof ArrayBuffer) || !pea.waitingSave) return;
     pea.waitingSave = false;
     const btn = pea.saveBtn;
@@ -1646,6 +1692,7 @@
       }
       case 'pea-open':  await peaOpen(); break;
       case 'pea-save':  peaSave(el); break;
+      case 'pea-unslide': peaUnslide(); break;
       case 'pea-close':
         if (!confirm('Close the editor? Anything not saved back is lost.')) return;
         peaClose();

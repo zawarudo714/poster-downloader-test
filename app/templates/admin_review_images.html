@@ -193,6 +193,10 @@
   <div class="pea-bar">
     <span class="mono muted" data-pea-title></span>
     <span class="pea-bar-spacer"></span>
+    {# Puts the editor back if it has slid sideways and hidden its tools
+       (Photopea, since 2026-09-28). Checked automatically at open too. #}
+    <button class="btn btn-ghost btn-tiny" data-action="pea-unslide"
+            title="If the editor's tools or menus are cut off on the left, this slides it back into place.">FIX EDITOR VIEW</button>
     <button class="btn btn-accent btn-tiny" data-action="pea-save">SAVE BACK AS NEW VERSION</button>
     <button class="btn btn-ghost btn-tiny" data-action="pea-close">CLOSE WITHOUT SAVING</button>
   </div>

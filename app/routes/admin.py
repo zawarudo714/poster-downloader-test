@@ -3968,6 +3968,13 @@ def payments_page(
     rate = get_rate_kes(db)
     week_start = get_week_start_day(db)
     runs = all_runs(db, limit=200)
+    # The oldest save day anywhere — where EVERYTHING BEFORE THIS WEEK
+    # starts, so a picture from three weeks ago is inside the range without
+    # typing a date (owner, 2026-09-28: he pays on Mondays for everything
+    # before the current week). Already-paid pictures are left out by the
+    # preview itself, so starting this early never pays anything twice.
+    earliest_save = (db.query(func.min(SavedPoster.original_save_date)).scalar()
+                     or local_today())
 
     return templates.TemplateResponse(
         request, "admin_payments.html",
@@ -3979,6 +3986,7 @@ def payments_page(
             "week_start_day": week_start,
             "runs": runs,
             "today": local_today(),
+            "earliest_save": earliest_save,
         },
     )
 

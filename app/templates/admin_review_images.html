@@ -109,12 +109,12 @@
       <div class="review-pair" data-review-pair></div>
 
       {#
-        Approve-by-default. You are looking for the handful that came out
-        badly; everything you don't touch is released when you save. The tally
-        says what is about to happen so you can read it before committing.
+        Every picture needs a mark (owner, 2026-09-28). Nothing unmarked is
+        ever released, and SAVE & RELEASE will not save a batch with a bare
+        picture in it — it jumps to the first one. The tally counts them.
       #}
       <div class="review-actions">
-        <span class="muted">Everything you don't mark is released. Use RERUN or UNUSABLE on the bad ones, and LEAVE FOR PHOTOSHOP on any that only need a touch-up — those are not released and stay waiting with a blue outline.</span>
+        <span class="muted">Give every picture a mark: KEEP, RERUN, UNUSABLE, or LEAVE FOR PHOTOSHOP (blue outline, waits for a touch-up). A picture with no mark is never released, and SAVE &amp; RELEASE will not save until every picture has one.</span>
         <button class="btn btn-ghost btn-tiny" data-action="review-clear-marks">UNMARK&nbsp;THIS&nbsp;TITLE&nbsp;<span class="mono">(C)</span></button>
         <span class="review-tally mono" data-review-tally></span>
       </div>
@@ -141,7 +141,8 @@
 
       <div class="review-commit">
         <button class="btn btn-accent" data-action="review-commit">SAVE&nbsp;&amp;&nbsp;RELEASE</button>
-        <button class="btn btn-ghost" data-action="review-approve-all">RELEASE&nbsp;WITHOUT&nbsp;FINISHING&nbsp;THE&nbsp;SKIM</button>
+        <button class="btn btn-ghost" data-action="review-save-marked"
+                title="Save the pictures you have marked and stop here. Pictures with no mark are not released; they wait for the next batch.">SAVE&nbsp;ONLY&nbsp;WHAT&nbsp;I&nbsp;MARKED</button>
         <span class="muted mono" data-review-commit-status></span>
       </div>
     </div>

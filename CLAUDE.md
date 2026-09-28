@@ -2796,7 +2796,14 @@ those; an unseen arrival is not sent at all and keeps waiting. The
 general shape: wherever absence-of-a-mark carries meaning, pin down the
 set it ranges over — any mechanism that can add members between the
 person's look and their commit turns their silence into a decision they
-never made.
+never made. **And the strongest fix is to stop silence meaning anything.**
+On 2026-09-28 the owner asked for exactly that: working in batches, one
+forgotten picture could still go to the marketplace, so v244 removed
+approve-by-default from Approve Artwork altogether — every picture needs a
+mark, SAVE & RELEASE refuses a batch with a bare one and jumps to it, and
+the rendered-titles patch went with the rule it patched. When a patch
+keeps an implicit decision safe, ask whether the decision should be
+implicit at all.
 
 **A MARK KEPT ONLY IN THE BROWSER CAN DECORATE A LIST, BUT IT CANNOT
 SHORTEN ONE.** v236's LEAVE FOR PHOTOSHOP lived in localStorage, so the

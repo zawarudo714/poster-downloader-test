@@ -876,9 +876,6 @@
     // Every design shown is remembered, so leaving and coming back reopens
     // on this one rather than at the start.
     rememberSeen(t);
-    // …and it counts as SEEN, which is what lets the release approve it
-    // by silence. A title never rendered is never silently approved.
-    seenTitles.add(Number(t.title_id));
 
     $('[data-review-pair]').innerHTML = t.images.map((img) => {
       const state = markOf(img);
@@ -1046,42 +1043,48 @@
   // Press KEEP on three and RERUN on one and the button said four fewer when
   // the true answer was one. Counted from what the decisions SAY rather than
   // from how many there are.
-  // ── SILENCE ONLY MEANS APPROVAL FOR WHAT WAS IN FRONT OF YOUR EYES ──
+  // ── EVERY PICTURE NEEDS A MARK; SILENCE NEVER RELEASES ANYTHING ──────
   //
-  // SAVE AND RELEASE approves every UNMARKED image — that is the screen's
-  // whole design. But the loaded batch can GROW mid-sitting: a Photopea
-  // save, a version delete or a page refresh reloads the queue, and a
-  // rerun that finished painting meanwhile slips in, often behind your
-  // position. On 2026-09-14 that combination released freshly repainted
-  // images the owner had never looked at, and the node uploaded them.
+  // Until v244 an unmarked picture was KEPT on save — approve-by-default.
+  // That had already bitten once (2026-09-14: repaints that slipped into
+  // the batch mid-sitting were released unseen, patched then by tracking
+  // which titles had been rendered). The owner then asked for the whole
+  // rule to go (2026-09-28): working in batches, one forgotten picture
+  // went straight to the marketplace. Now nothing leaves this screen
+  // without KEEP, RERUN, UNUSABLE or LEAVE FOR PHOTOSHOP on it, and
+  // SAVE & RELEASE will not save while any picture in the batch is bare —
+  // it jumps to the first one instead. The rendered-titles set is gone
+  // with the rule it patched: silence now means "not decided" everywhere.
   //
-  // So the screen keeps a set of titles that have actually been RENDERED
-  // this page-lifetime, and the untouched-means-approved rule applies to
-  // those alone. An unseen title's unmarked images are simply NOT SENT —
-  // they keep waiting for the next batch. Explicit marks (which require
-  // having seen the thing, or were made in an earlier sitting and
-  // restored) are always sent. Never reset: "I saw it" stays true, and a
-  // refresh clearing it only errs toward holding work back.
-  const seenTitles = new Set();
-
-  // The three-way split of one image, used by the count, the tally and
-  // the commit — ONE spelling, so the number on the button is always the
-  // number that happens.
-  //   'send'  — explicit mark, or unmarked on a title you have seen
-  //   'hold'  — unmarked on a title you have NOT seen; stays pending
-  //   'left'  — marked LEAVE FOR PHOTOSHOP; deliberately not sent, stays
-  //             pending with its blue outline until edited and kept
-  //             (owner, 2026-09-27: Photopea was down and nothing could
-  //             move while a few needed only a touch-up, not a rerun)
+  // The split of one image, used by the count, the tally and the commit —
+  // ONE spelling, so the number on the button is always what happens:
+  //   'send'     — marked KEEP, RERUN or UNUSABLE
+  //   'left'     — marked LEAVE FOR PHOTOSHOP (sent as a hold from the
+  //                normal doors; already where it belongs in the
+  //                Photoshop door, where silence also means "leave it")
+  //   'unmarked' — no mark; never sent, stays waiting
   function imageFate(t, img) {
     const d = decisions.get(img.poster_id);
     if (d && d.action === 'photoshop') return 'left';
     if (d) return 'send';
     // In the Photoshop door silence means "not done yet", never "keep":
-    // these are pictures he already said need work, so only an explicit
-    // KEEP releases one (v238).
+    // these are pictures he already said need work (v238).
     if (mode === 'held') return 'left';
-    return seenTitles.has(Number(t.title_id)) ? 'send' : 'hold';
+    return 'unmarked';
+  }
+
+  // The pictures still owed a mark, in batch order — what SAVE & RELEASE
+  // refuses on, and where it jumps.
+  function unmarkedCount() {
+    let out = 0;
+    titles.forEach((t) => t.images.forEach((img) => {
+      if (imageFate(t, img) === 'unmarked') out += 1;
+    }));
+    return out;
+  }
+  function firstUnmarkedIndex() {
+    return titles.findIndex((t) => t.images.some(
+      (img) => imageFate(t, img) === 'unmarked'));
   }
 
   function leftCount() {
@@ -1102,22 +1105,13 @@
     return out;
   }
 
-  function heldCount() {
-    let out = 0;
-    titles.forEach((t) => t.images.forEach((img) => {
-      if (imageFate(t, img) === 'hold') out += 1;
-    }));
-    return out;
-  }
-
   function updateTally() {
     const marked = { rerun: 0, unusable: 0, approve: 0, photoshop: 0 };
     decisions.forEach((d) => { marked[d.action] = (marked[d.action] || 0) + 1; });
-    // Everything not explicitly marked is approved on commit. Spelling that
-    // out is the whole safety of an approve-by-default screen: you should be
-    // able to read what is about to happen before you press the button.
+    // What SAVE would do, and how many pictures still have no mark — the
+    // second number is the one that stops SAVE & RELEASE (v244).
     const approving = releasedCount();
-    const held = heldCount();
+    const bare = unmarkedCount();
     $('[data-review-tally]').textContent =
       `${approving} will be released · ${marked.rerun} rerun · ${marked.unusable} retired`
       + (leftCount()
@@ -1125,7 +1119,7 @@
               ? ` · ${leftCount()} still left for Photoshop`
               : ` · ${leftCount()} go to the Photoshop queue`)
           : '')
-      + (held ? ` · ${held} arrived unseen, staying` : '');
+      + (bare ? ` · ${bare} NOT MARKED YET` : '');
   }
 
   function decide(posterId, action, reason) {
@@ -1133,9 +1127,9 @@
     render();
   }
 
-  // Pressing the same decision again clears it, which puts the poster back
-  // into the approved majority. Without this, an accidental tap could only
-  // be undone by discarding the whole session.
+  // Pressing the same decision again clears it, which leaves the poster
+  // with no mark (and so NOT released until it gets one). Without this, an
+  // accidental tap could only be undone by discarding the whole session.
   function toggleDecision(posterId, action) {
     const existing = decisions.get(posterId);
     if (existing && existing.action === action) {
@@ -1665,22 +1659,20 @@
       case 'review-prev':    move(-1); break;
       case 'review-next':    move(1);  break;
       case 'review-clear-marks': clearTitleMarks(); break;
-      case 'review-approve-all': {
-        const held = heldCount();
+      // SAVE ONLY WHAT I MARKED — for stopping part-way through a batch.
+      // Pictures with no mark are NOT released; they stay waiting.
+      case 'review-save-marked': {
+        const bare = unmarkedCount();
         if (!confirm(
-            (mode === 'held'
-              ? `Save what you have marked?\n\n`
-                + `${releasedCount()} images you kept will go to the upload queue.`
-              : `Release everything in this range that you have not marked?\n\n`
-                + `${releasedCount()} images will go to the upload queue.`)
+            `Save only what you have marked?\n\n`
+            + `${releasedCount()} images you kept will go to the upload queue.`
             + (leftCount()
                 ? (mode === 'held'
                     ? `\n${leftCount()} stay in the Photoshop queue.`
-                    : `\n${leftCount()} go to the Photoshop queue and stop blocking this one.`)
+                    : `\n${leftCount()} go to the Photoshop queue.`)
                 : '')
-            + (held ? `\n${held} image(s) arrived during this sitting and `
-                    + `were never on your screen — they stay waiting for `
-                    + `the next batch.` : ''))) return;
+            + (bare ? `\n${bare} image(s) have no mark. They are NOT released `
+                    + `and stay waiting for the next batch.` : ''))) return;
         await commit();
         break;
       }
@@ -1701,7 +1693,24 @@
         } catch (e) { /* a blocked store must never break the screen */ }
         await loadDates();
         break;
-      case 'review-commit':  await commit(); break;
+      case 'review-commit': {
+        // SAVE & RELEASE only saves a batch where every picture has a
+        // mark (owner, 2026-09-28). Otherwise it says how many are bare and
+        // shows the first one, so nothing can slip through by being missed.
+        const bare = unmarkedCount();
+        if (bare) {
+          const at = firstUnmarkedIndex();
+          if (at >= 0) { index = at; render(); if (zoomOpen) syncZoom(); }
+          $('[data-review-commit-status]').textContent =
+            `not saved — ${bare} picture${bare === 1 ? ' has' : 's have'} no mark yet. `
+            + `Showing the first one. Mark each with KEEP, RERUN, UNUSABLE or `
+            + `LEAVE FOR PHOTOSHOP, or use SAVE ONLY WHAT I MARKED.`;
+          if (window.toast) window.toast(`${bare} not marked yet — showing the first one.`);
+          break;
+        }
+        await commit();
+        break;
+      }
     }
   });
 
@@ -1792,12 +1801,10 @@
     if (!titles.length) { status.textContent = 'nothing loaded'; return; }
     status.textContent = 'saving…';
 
-    // Send an explicit decision for every poster the admin MARKED, plus
-    // approvals for the untouched ones he actually SAW. The server never
-    // infers "approved" from absence — and since 2026-09-14 neither does
-    // this screen for a title that slipped into the batch unseen (a
-    // mid-sitting reload can grow the list; see the note on seenTitles).
-    // Held images are simply not sent and keep waiting.
+    // Send a decision for every poster the admin MARKED, and nothing else.
+    // The server never infers "approved" from absence, and since v244
+    // neither does this screen (see the note above imageFate). Unmarked
+    // images are simply not sent and keep waiting.
     //
     // `processed_id` is the generation ON SCREEN, which is what makes
     // choosing v2 mean anything. The server moves is_current to whichever
@@ -1805,30 +1812,29 @@
     const payload = { decisions: [] };
     const sentPosters = new Set();
     titles.forEach((t) => t.images.forEach((img) => {
-      // 'hold' (never seen) is not sent and stays waiting. 'left' (marked
+      // 'unmarked' is not sent and stays waiting. 'left' (marked
       // LEAVE FOR PHOTOSHOP) IS sent from the normal doors, as a 'hold'
       // decision: the server moves it into its own queue, so it stops
       // taking up a place in the next batch (owner, 2026-09-27). In the
       // Photoshop door itself 'left' is already where it belongs, so
       // nothing is sent for it.
       const fate = imageFate(t, img);
-      if (fate === 'hold') return;
+      if (fate === 'unmarked') return;
       if (fate === 'left' && mode === 'held') return;
       const d = decisions.get(img.poster_id);
       const v = shownVersion(img);
       sentPosters.add(img.poster_id);
       payload.decisions.push({
         processed_id: v.processed_id,
-        action: fate === 'left' ? 'hold' : (d ? d.action : 'approve'),
+        action: fate === 'left' ? 'hold' : d.action,
         reason: d ? d.reason : '',
-        // Sent on every image, not just the ones you touched. An untouched
-        // poster still needs a colour recorded, and "the one showing on
-        // screen" is exactly what you just approved by not changing it.
+        // Sent with every decision. A poster whose colour you never touched
+        // still needs one recorded, and "the one showing on screen" is what
+        // you approved by pressing KEEP without changing it.
         background_color: v.can_recolor ? colorFor(v) : '',
-        // Where this poster's mark goes. Sent on every image for the same
-        // reason the colour is: an untouched poster still needs a placement
-        // recorded, and "the one on screen" is what you approved by not
-        // moving it.
+        // Where this poster's signature goes. Sent with every decision for
+        // the same reason the colour is: a signature you never moved still
+        // needs a placement recorded.
         signature: v.signature ? sigFor(v) : null,
       });
     }));

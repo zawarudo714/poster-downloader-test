@@ -63,6 +63,19 @@
     refreshAll();
   });
 
+  // EVERYTHING BEFORE THIS WEEK — the oldest save day (from the server)
+  // up to the day before this week starts. Paid pictures are left out by
+  // the preview, so the early start is safe.
+  $('pay-preset-before').addEventListener('click', () => {
+    const [thisStart] = weekBoundsContaining(todayUTC(), weekStartDay);
+    const end = addDays(thisStart, -1);
+    const earliestRaw = weekInfo.getAttribute('data-earliest') || '';
+    let start = earliestRaw ? parseISO(earliestRaw) : end;
+    if (start > end) start = end;   // nothing saved before this week
+    startInp.value = fmtISO(start); endInp.value = fmtISO(end);
+    refreshAll();
+  });
+
   startInp.addEventListener('change', refreshAll);
   endInp.addEventListener('change', refreshAll);
 

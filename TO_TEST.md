@@ -1061,6 +1061,26 @@ On Changes Requested, click a thumbnail to zoom:
 - Run Diagnostics: "more pictures than they take", "your own pictures ...
   painting" and "painting(s) of removed pictures" should all be green.
 
+## 93. EVERYTHING BEFORE THIS WEEK ON PAYMENTS — v243
+
+- Press EVERYTHING BEFORE THIS WEEK. FROM should be the first day any
+  picture was saved, and TO should be the day before this week started.
+- Each worker's number should include an unpaid picture from two or more
+  weeks ago, and should not include anything you have already paid.
+
+## 94. EVERY PICTURE NEEDS A MARK ON APPROVE ARTWORK — v244
+
+- Open a batch, mark all but one picture, and press SAVE & RELEASE. It
+  should NOT save. It should jump to the unmarked picture and say how many
+  have no mark.
+- Mark that one too and press SAVE & RELEASE. It should save.
+- In another batch, mark a few and press SAVE ONLY WHAT I MARKED. Only the
+  marked ones go; the rest are still there next time.
+- The line under the pictures should say "N NOT MARKED YET" while any are
+  bare.
+- In JUST THE PHOTOSHOP ONES, SAVE & RELEASE should still save with pictures
+  left unmarked — they simply stay in that queue.
+
 ---
 
 ## NOT ON THIS LIST, ON PURPOSE

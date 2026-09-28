@@ -42,7 +42,13 @@
         <button class="btn btn-ghost" id="pay-preset-today">TODAY</button>
         <button class="btn btn-ghost" id="pay-preset-week">THIS WEEK</button>
         <button class="btn btn-ghost" id="pay-preset-prevweek">LAST WEEK</button>
+        {# From the oldest save day up to the day before this week starts.
+           Anything already paid is left out by the preview, so the early
+           start never pays twice. #}
+        <button class="btn btn-ghost" id="pay-preset-before"
+                title="Everything from the first saved picture up to the day before this week started. Pictures already paid are left out.">EVERYTHING&nbsp;BEFORE&nbsp;THIS&nbsp;WEEK</button>
         <span class="muted mono" id="pay-week-info"
+              data-earliest="{{ earliest_save.isoformat() }}"
               data-week-start="{{ week_start_day }}"
               data-rate-kes="{{ rate_kes }}"></span>
       </div>

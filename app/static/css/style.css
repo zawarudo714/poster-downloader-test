@@ -6525,3 +6525,15 @@ a.pulse-chip:hover {
 @media (max-width: 700px) {
   .sig-field input[type="range"] { width: 84px; }
 }
+
+/* ── PROMPT TEST MODE panel on Approve Artwork (v249) ───────────────────── */
+.pt-switch { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; cursor: pointer; }
+.pt-switch input { transform: translateY(1px); }
+[data-prompt-test].is-on { border-color: var(--skip); }
+.pt-pile { margin: 8px 0 10px; }
+.pt-pile:empty { display: none; }
+.pt-prompt { margin-top: 6px; }
+.pt-text { width: 100%; margin-top: 8px; font-family: inherit; font-size: 12.5px;
+           background: var(--bg); color: var(--text); border: 1px solid var(--border);
+           border-radius: 4px; padding: 8px; resize: vertical; }
+.pt-size { width: 70px; }

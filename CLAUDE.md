@@ -2823,6 +2823,13 @@ applies as ever: a new status is invisible to every query that lists the
 old ones, so `grep review_status` and decide each hit (keeping or
 rerunning a sibling now settles a held one; a Photopea edit of a held
 picture stays held; the badge deliberately still counts `pending` only).
+The same held true for a MARK beside a status: PROMPT TEST MODE's pile is
+`greenlit` plus `rerun_hold_at` (v249), and five counts of "waiting to be
+painted" — the status strip, the node banner, the worker-not-running alarm
+— would have read the pile as a stuck machine until each learned the mark.
+And a switch that must stop work arriving by several doors (RERUN, RETRY,
+RETURN TO PIPELINE) belongs where the work is TAKEN, not at each door: the
+pile is filled in the painter's claim, the one place every repaint passes.
 
 **A GATE MUST ASK ABOUT THE FACT IT PROTECTS, NOT ABOUT THE MECHANISM
 THAT USUALLY CARRIES IT.** The worker's DONE held a title for review only

@@ -135,8 +135,12 @@ def process_one(db: Session, poster, title, project) -> bool:
         # filled in — sent verbatim — so the model captioned the PHOTO
         # instead, guessing e.g. "JAPAN" for Mount Fuji. The owner chose the
         # `title` column as the poster text.
+        # A picture being painted for a prompt-test round uses that round's
+        # prompt; everything else the main one (app/prompt_test.py).
+        from . import prompt_test as PT
         gen = G.generate(db, source=source, style=style, project=project,
-                         location=(title.title or ""))
+                         location=(title.title or ""),
+                         prompt_text=PT.round_prompt_text(db, poster))
     except G.PermanentFailure as e:
         # Never retried automatically. GPT's own words are kept so the admin
         # can judge, and so a policy change a year from now is actionable.
@@ -363,6 +367,9 @@ def process_one(db: Session, poster, title, project) -> bool:
     poster.process_error = None
     poster.claimed_at = None
     poster.claimed_by = None
+    # A prompt-test round's picture: the round now points at this painting
+    # and the picture's round mark is cleared, in this same commit.
+    PT.file_painting(db, poster, processed)
 
     if not gate:
         from .pipeline import ensure_upload_rows
@@ -389,11 +396,20 @@ def _claim_next(db: Session, project):
     from sqlalchemy import or_
 
     max_attempts = int(get_setting(db, "process_max_attempts", project=project) or 3)
+    # PROMPT TEST MODE. While it is on, every repaint about to be painted —
+    # whichever door sent it (RERUN, a RETRY after a failure, RETURN TO
+    # PIPELINE) — is moved into the pile first, and the pile is skipped
+    # below. This is the one place every repaint passes, so no door can be
+    # forgotten. See app/prompt_test.py.
+    from . import prompt_test as PT
+    if PT.hold_waiting_repaints(db, project):
+        db.commit()
     row = (
         db.query(SavedPoster, MasterTitle)
           .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
           .filter(SavedPoster.deleted_at.is_(None),
                   SavedPoster.process_attempts < max_attempts,
+                  SavedPoster.rerun_hold_at.is_(None),
                   or_(SavedPoster.pipeline_status == "greenlit",
                       SavedPoster.pipeline_status == "failed_processing"),
                   project_scope(project.id,

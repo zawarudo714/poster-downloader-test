@@ -415,6 +415,22 @@ class SavedPoster(Base):
     # the only sign that a look had ever happened.
     review_voided_at     = Column(DateTime, nullable=True)
 
+    # PROMPT TEST MODE (owner, 2026-09-29). Two marks on the picture, both
+    # empty for everything outside a test:
+    #   · rerun_hold_at — "waiting in the pile". A repaint asked for while
+    #     test mode is on waits here instead of being painted, so testing a
+    #     prompt never spends on its own. The painter's claim skips any row
+    #     carrying it; only TEST THE PROMPT (a round) clears it. The time is
+    #     the order the pile is taken in, oldest first.
+    #   · prompt_round_id — "being painted for round N". Set when a round
+    #     takes the picture, cleared by the painter in the same commit that
+    #     files the painting (the round's own record then points at the
+    #     painting). While it is set, the painter uses that round's prompt
+    #     instead of the main one — including after a failure and a RETRY.
+    # A row never carries both (check_prompt_test_marks_are_sound).
+    rerun_hold_at        = Column(DateTime, nullable=True, index=True)
+    prompt_round_id      = Column(Integer, nullable=True, index=True)
+
     master_title = relationship("MasterTitle", back_populates="saved_posters")
 
     __table_args__ = (
@@ -1609,3 +1625,54 @@ class ListingSweep(Base):
     # stalled sweep retry a few times and then give up saying so, rather
     # than sitting "running" for ever with nothing working on it.
     attempts    = Column(Integer, nullable=False, default=0)
+
+
+# ── Prompt test mode ─────────────────────────────────────────────────────────
+
+class PromptTestPrompt(Base):
+    """
+    One prompt wording tried in PROMPT TEST MODE, under the name the owner
+    gave it ("prompt v12"). Test records only: DELETE ALL TEST DATA removes
+    every row of this and the two tables below, and nothing outside them
+    depends on them once no round is still painting (owner, 2026-09-29: "I
+    dont want stale data in the site").
+    """
+    __tablename__ = "prompt_test_prompts"
+
+    id         = Column(Integer, primary_key=True)
+    project_id = Column(Integer, nullable=False, index=True)
+    name       = Column(String(200), nullable=False)
+    text       = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class PromptTestRound(Base):
+    """
+    One press of TEST THE PROMPT (or TRY THIS ROUND AGAIN): a handful of
+    pictures from the pile, painted with one prompt, and judged together.
+
+    Nothing is counted here. Painted / waiting / kept / rerun are all read
+    from the pictures each time (the item rows below and the paintings they
+    point at), so the score cannot drift from what actually happened.
+    """
+    __tablename__ = "prompt_test_rounds"
+
+    id         = Column(Integer, primary_key=True)
+    project_id = Column(Integer, nullable=False, index=True)
+    number     = Column(Integer, nullable=False)          # 1, 2, 3 … shown
+    prompt_id  = Column(Integer, nullable=False)
+    retry_of   = Column(Integer, nullable=True)           # round id, for TRY AGAIN
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_by = Column(String(64), nullable=True)
+
+
+class PromptTestItem(Base):
+    """One picture in one round. `processed_id` is the painting the round
+    produced — empty until the painter files it."""
+    __tablename__ = "prompt_test_items"
+
+    id              = Column(Integer, primary_key=True)
+    round_id        = Column(Integer, nullable=False, index=True)
+    saved_poster_id = Column(Integer, nullable=False, index=True)
+    processed_id    = Column(Integer, nullable=True, index=True)
+    created_at      = Column(DateTime, default=datetime.utcnow, nullable=False)

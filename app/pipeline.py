@@ -798,6 +798,15 @@ DEFAULTS: dict[str, Any] = {
     # N. 0 means load them all at once (batching off).
     "review_batch_size":  20,
 
+    # PROMPT TEST MODE (owner, 2026-09-29), set from the Approve Artwork
+    # screen. While on, every repaint waits in a pile instead of being
+    # painted, and only TEST THE PROMPT ON N paints any of them — N being
+    # the size below. Off, repaints go straight to painting as they always
+    # did; anything already in the pile still waits for the button. See
+    # app/prompt_test.py.
+    "prompt_test_mode": False,
+    "prompt_test_round_size": 10,
+
     # The decision keys on Approve Artwork. 7-8-9 by default, owner's ask
     # 2026-09-27: he steps with the number pad's 4 and 6, so the row above
     # sits under the same hand. A digit also matches that number-pad key
@@ -2450,6 +2459,10 @@ def claim_process_batch(
               .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
               .filter(SavedPoster.deleted_at.is_(None),
                       SavedPoster.process_attempts < max_attempts,
+                      # Never paint a picture waiting in the prompt-test
+                      # pile — only TEST THE PROMPT releases it
+                      # (app/prompt_test.py). The GPT painter skips it too.
+                      SavedPoster.rerun_hold_at.is_(None),
                       or_(SavedPoster.pipeline_status == "greenlit",
                           SavedPoster.pipeline_status == "failed_processing"))
         )

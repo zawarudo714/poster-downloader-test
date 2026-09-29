@@ -1133,6 +1133,24 @@ On Changes Requested, click a thumbnail to zoom:
   colour, as before.
 - On the Settings page, the new box "BOTTOM colour" should read #000000.
 
+## 99. PROMPT TEST MODE — v249
+
+- Open Approve Artwork. A PROMPT TEST MODE panel should sit under WAITING
+  FOR REVIEW, with the box unticked.
+- Tick the box. Review something and mark one picture RERUN, then save.
+  The panel should say 1 picture is in the pile, and nothing should paint.
+- Type a name and a prompt, set PICTURES PER ROUND to 1, and press TEST THE
+  PROMPT ON 1. A round should appear in the table as "still painting".
+- When it is painted, press REVIEW on its row. The screen should offer
+  only KEEP and RERUN, with no Photoshop, Photopea or UNUSABLE.
+- Mark it RERUN and save. The round's score should read 0 kept, 1 rerun,
+  and TRY THIS ROUND AGAIN should appear. Pressing it should start a new
+  round marked "retry of 1".
+- Untick the box. A new RERUN should paint straight away again. Anything
+  still in the pile should stay there, with the button still showing.
+- With the box off and the pile empty, DELETE ALL TEST DATA should empty
+  the table. The paintings should still be there.
+
 ---
 
 ## NOT ON THIS LIST, ON PURPOSE

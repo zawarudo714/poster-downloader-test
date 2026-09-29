@@ -2565,6 +2565,9 @@ def api_attention(
             db.query(func.count(SavedPoster.id))
               .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
               .filter(SavedPoster.pipeline_status == "greenlit",
+                      # The prompt-test pile waits for a button, not for
+                      # the worker (app/prompt_test.py).
+                      SavedPoster.rerun_hold_at.is_(None),
                       SavedPoster.deleted_at.is_(None), scope)
               .scalar() or 0
         )
@@ -2617,6 +2620,7 @@ def api_attention(
         db.query(func.count(SavedPoster.id))
           .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
           .filter(SavedPoster.pipeline_status == "greenlit",
+                  SavedPoster.rerun_hold_at.is_(None),
                   SavedPoster.deleted_at.is_(None), scope)
           .scalar() or 0
     ) if project.processor in P.NODE_PROCESSORS else 0
@@ -3362,6 +3366,10 @@ def api_review_dates(
     want to sit down to it — "everything since Monday", not "the next 40".
     """
     project = _project(request, admin, db)
+    # A prompt-test round's paintings are judged in their round, so none of
+    # the counts below include them (app/prompt_test.py).
+    from .. import prompt_test as PT
+    not_in_round = ~ProcessedImage.id.in_(PT.round_painting_ids())
     rows = (
         db.query(SavedPoster.original_save_date,
                  func.count(func.distinct(MasterTitle.id)),
@@ -3370,6 +3378,7 @@ def api_review_dates(
           .join(ProcessedImage, ProcessedImage.saved_poster_id == SavedPoster.id)
           .filter(ProcessedImage.is_current == 1,
                   ProcessedImage.review_status == "pending",
+                  not_in_round,
                   ProcessedImage.project_id == project.id,
                   # A withdrawn picture's painting is never work (v239).
                   SavedPoster.deleted_at.is_(None))
@@ -3390,6 +3399,7 @@ def api_review_dates(
                     .filter(ProcessedImage.review_status == "pending",
                             ProcessedImage.is_current == 1,
                             ProcessedImage.attempt > 1,
+                            not_in_round,
                             ProcessedImage.project_id == project.id).scalar() or 0,
         # Pictures LEFT FOR PHOTOSHOP, waiting in their own door. Current
         # rows only, the same spelling as every other count on this screen.
@@ -3413,11 +3423,16 @@ def api_review_queue(
     end: str = Query(""),
     status: str = Query("pending"),
     sort: str = Query("saved"),
+    round_id: int = Query(0),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """
     Every title awaiting review in a date range, with its images.
+
+    `status=round&round_id=N` is one PROMPT TEST round's paintings, and
+    nothing else; every other door leaves round paintings out, because a
+    round is judged as a whole (app/prompt_test.py).
 
     Returns the WHOLE range in one call rather than paging. A review session
     is arrow-keyed at a couple of seconds per title, and a network round trip
@@ -3434,15 +3449,21 @@ def api_review_queue(
                   # A withdrawn picture's painting is never work (v239).
                   SavedPoster.deleted_at.is_(None))
     )
-    if status == "rerun":
+    from .. import prompt_test as PT
+    if status == "round":
+        q = q.filter(ProcessedImage.review_status == "pending",
+                     ProcessedImage.id.in_(PT.round_painting_ids(round_id)))
+    elif status == "rerun":
         # "Review reruns" means the FRESH attempts awaiting a verdict, not
         # the superseded originals (those keep status 'rerun' for ever, as
         # evidence). Asking for the originals gave the owner a button
         # reading 4 with nothing behind it (2026-09-06).
         q = q.filter(ProcessedImage.review_status == "pending",
-                     ProcessedImage.attempt > 1)
+                     ProcessedImage.attempt > 1,
+                     ~ProcessedImage.id.in_(PT.round_painting_ids()))
     else:
-        q = q.filter(ProcessedImage.review_status == status)
+        q = q.filter(ProcessedImage.review_status == status,
+                     ~ProcessedImage.id.in_(PT.round_painting_ids()))
     if start:
         try:
             q = q.filter(SavedPoster.original_save_date >= date.fromisoformat(start))
@@ -4533,6 +4554,18 @@ def api_review_decide(
     if not decisions:
         raise HTTPException(400, "decisions is required.")
 
+    # A PROMPT-TEST ROUND IS JUDGED KEEP OR RERUN, NOTHING ELSE (owner,
+    # 2026-09-29): the round asks only "did this prompt get it right", so
+    # Photoshop and unusable have no meaning there. The screen offers
+    # neither; this refuses them before anything is changed, so a stale
+    # page cannot half-save a batch.
+    from .. import prompt_test as PT
+    for item in decisions:
+        if (item.get("action") in ("hold", "unusable")
+                and PT.is_round_painting(db, item.get("processed_id"))):
+            raise HTTPException(
+                400, "A prompt-test round is judged KEEP or RERUN only.")
+
     now = datetime.utcnow()
     counts = {"approved": 0, "held": 0, "rerun": 0, "unusable": 0,
               "withdrawn": 0, "files_removed": 0}
@@ -4742,6 +4775,15 @@ def api_review_decide(
                 poster.pipeline_status = "greenlit"
                 poster.process_attempts = 0
                 poster.process_error = None
+                # PROMPT TEST MODE: the repaint waits in the pile, stamped
+                # now so the pile is taken in the order you marked. (The
+                # painter's claim would also catch it; stamping here keeps
+                # the order exact and the pile count right at once.)
+                # Off, a rerun paints straight away, so an old pile mark
+                # left on the picture by some other door is cleared.
+                poster.rerun_hold_at = (
+                    now if PT.is_on(db, P.project_for_title(db, title) if title else None)
+                    else None)
             counts["rerun"] += 1
 
         elif action == "unusable":
@@ -4818,3 +4860,175 @@ def api_stats(
         "avg_active_day": round(sum(active) / len(active), 1) if active else 0,
         "days_active": len(active),
     })
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  PROMPT TEST MODE — the panel on Approve Artwork (app/prompt_test.py)
+# ═══════════════════════════════════════════════════════════════════════════
+
+@router.get("/api/prompt_test/state")
+def api_prompt_test_state(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Everything the test panel shows: the switch, the pile, the saved
+    prompts, every round's score, and whether DELETE may run yet."""
+    from .. import prompt_test as PT
+    from ..models import PromptTestPrompt
+    project = _project(request, admin, db)
+    prompts = (db.query(PromptTestPrompt)
+                 .filter(PromptTestPrompt.project_id == project.id)
+                 .order_by(PromptTestPrompt.id.desc()).all())
+    rounds = PT.summaries(db, project)
+    return JSONResponse({
+        "on": PT.is_on(db, project),
+        "round_size": int(P.get_setting(db, "prompt_test_round_size",
+                                        project=project) or 10),
+        "pile": PT.pile_query(db, project).count(),
+        "main_prompt": str(P.get_setting(db, "openai_prompt", project=project) or ""),
+        "main_prompt_name": PT.MAIN_PROMPT_NAME,
+        "prompts": [{"id": p.id, "name": p.name, "text": p.text} for p in prompts],
+        "rounds": rounds,
+        "delete_blockers": PT.delete_blockers(db, project),
+        # Round pictures that FAILED (no credit, for example) lose their
+        # round if the test data is deleted, and are then painted with the
+        # main prompt when retried. Said before the button is pressed.
+        "failed_in_rounds": sum(r["failed"] for r in rounds),
+    })
+
+
+@router.post("/api/prompt_test/settings")
+def api_prompt_test_settings(
+    request: Request,
+    payload: dict = Body(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """The switch and the round size. Turning the switch off does NOT
+    paint the pile — that would be the burst of spending the mode exists
+    to prevent; the pile keeps waiting for TEST THE PROMPT."""
+    project = _project(request, admin, db)
+    from .. import prompt_test as PT
+    changed = {}
+    if "on" in payload:
+        P.set_setting(db, "prompt_test_mode", bool(payload.get("on")),
+                      project=project, by=admin.username)
+        changed["on"] = bool(payload.get("on"))
+        if changed["on"]:
+            # Repaints already queued but not yet started join the pile at
+            # once, rather than at the painter's next turn — so the pile
+            # count is right the moment the box is ticked.
+            db.flush()
+            changed["moved_to_pile"] = PT.hold_waiting_repaints(db, project)
+    if "round_size" in payload:
+        try:
+            size = int(payload.get("round_size"))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "The round size must be a whole number.")
+        if not 1 <= size <= 200:
+            raise HTTPException(400, "The round size must be between 1 and 200.")
+        P.set_setting(db, "prompt_test_round_size", size,
+                      project=project, by=admin.username)
+        changed["round_size"] = size
+    if not changed:
+        raise HTTPException(400, "Nothing to change.")
+    log_activity(db, user=admin, action="prompt_test_settings",
+                 target_type="pipeline", details=changed)
+    db.commit()
+    return JSONResponse({"ok": True, **changed})
+
+
+@router.post("/api/prompt_test/round")
+def api_prompt_test_round(
+    request: Request,
+    payload: dict = Body(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """TEST THE PROMPT ON N: the N oldest pictures in the pile become a
+    round, painted with the prompt in the boxes (or the main prompt when
+    the text box is empty)."""
+    from .. import prompt_test as PT
+    project = _project(request, admin, db)
+    try:
+        size = int(payload.get("size") or P.get_setting(
+            db, "prompt_test_round_size", project=project) or 10)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "The round size must be a whole number.")
+    if not 1 <= size <= 200:
+        raise HTTPException(400, "The round size must be between 1 and 200.")
+    posters = PT.pile_query(db, project).limit(size).all()
+    if not posters:
+        raise HTTPException(400, "The pile is empty. Mark some pictures RERUN "
+                                 "while test mode is on to fill it.")
+    try:
+        rnd = PT.start_round(db, project, name=payload.get("name") or "",
+                             text=payload.get("text") or "", posters=posters,
+                             retry_of=None, by=admin.username)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    log_activity(db, user=admin, action="prompt_test_round",
+                 target_type="pipeline", target_id=rnd.id,
+                 details={"round": rnd.number, "pictures": len(posters)})
+    db.commit()
+    return JSONResponse({"ok": True, "round": rnd.number,
+                         "pictures": len(posters)})
+
+
+@router.post("/api/prompt_test/retry")
+def api_prompt_test_retry(
+    request: Request,
+    payload: dict = Body(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """TRY THIS ROUND AGAIN: the pictures of that round you marked RERUN,
+    painted again with the prompt in the boxes now. Kept ones are never
+    repainted — they are on their way to the marketplace."""
+    from .. import prompt_test as PT
+    from ..models import PromptTestRound
+    project = _project(request, admin, db)
+    rnd = (db.query(PromptTestRound)
+             .filter(PromptTestRound.id == payload.get("round_id"),
+                     PromptTestRound.project_id == project.id).first())
+    if rnd is None:
+        raise HTTPException(404, "That round no longer exists.")
+    posters = PT.retry_candidates(db, project, rnd)
+    if not posters:
+        raise HTTPException(400, f"Round {rnd.number} has no rerun pictures "
+                                 f"waiting in the pile.")
+    try:
+        new = PT.start_round(db, project, name=payload.get("name") or "",
+                             text=payload.get("text") or "", posters=posters,
+                             retry_of=rnd.id, by=admin.username)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    log_activity(db, user=admin, action="prompt_test_retry",
+                 target_type="pipeline", target_id=new.id,
+                 details={"round": new.number, "retry_of": rnd.number,
+                          "pictures": len(posters)})
+    db.commit()
+    return JSONResponse({"ok": True, "round": new.number,
+                         "pictures": len(posters)})
+
+
+@router.post("/api/prompt_test/delete")
+def api_prompt_test_delete(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """DELETE ALL TEST DATA — the prompts, rounds and scores. Never a
+    painting. Refused, with the reason, while anything could be left
+    stranded by it."""
+    from .. import prompt_test as PT
+    project = _project(request, admin, db)
+    why = PT.delete_blockers(db, project)
+    if why:
+        raise HTTPException(409, " ".join(why))
+    done = PT.delete_all(db, project)
+    log_activity(db, user=admin, action="prompt_test_delete",
+                 target_type="pipeline", details=done)
+    db.commit()
+    return JSONResponse({"ok": True, **done})

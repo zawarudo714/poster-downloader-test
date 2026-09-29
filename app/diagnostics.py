@@ -2559,6 +2559,64 @@ def check_failure_evidence_is_pruned(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def check_prompt_test_marks_are_sound(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: the two PROMPT TEST marks on a picture mean what they say.
+
+      · A picture is never both in the pile (`rerun_hold_at`) and being
+        painted for a round (`prompt_round_id`).
+      · A picture marked as being painted for a round is actually waiting
+        for the painter or being painted. The painter clears the mark in
+        the same commit that files the painting; a mark on anything else
+        means that step was skipped, and the round will show it as
+        "still painting" for ever.
+      · A picture marked as in the pile is waiting to be painted. A mark on
+        a picture that has moved on is invisible today, but would pull the
+        picture into the pile the day it is sent back for painting.
+
+    See app/prompt_test.py.
+    """
+    from .prompt_test import WAITING_TO_PAINT
+    rows = (db.query(SavedPoster, MasterTitle)
+              .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+              .filter(SavedPoster.deleted_at.is_(None),
+                      or_(SavedPoster.rerun_hold_at.isnot(None),
+                          SavedPoster.prompt_round_id.isnot(None)),
+                      scope.titles)
+              .all())
+    found = []
+    for sp, mt in rows:
+        why = None
+        if sp.rerun_hold_at is not None and sp.prompt_round_id is not None:
+            why = "is marked both in the pile and in a round"
+        elif (sp.prompt_round_id is not None
+              and sp.pipeline_status not in WAITING_TO_PAINT + ("processing",)):
+            why = (f"is marked as being painted for a round, but its state "
+                   f"is '{sp.pipeline_status}'")
+        elif (sp.rerun_hold_at is not None
+              and sp.pipeline_status not in WAITING_TO_PAINT):
+            why = (f"is marked as in the pile, but its state is "
+                   f"'{sp.pipeline_status}'")
+        if why:
+            found.append(Finding(scope.title_of(mt),
+                                 f"picture record {sp.id} {why}",
+                                 "/admin/pipeline/review",
+                                 project=scope.label(mt.project_id)))
+    total = len(found)
+    return _result(
+        "prompt_test_marks_are_sound",
+        f"{total} picture(s) carry a prompt-test mark that does not fit"
+        if total else "Every prompt-test mark fits the picture it is on",
+        "Prompt test mode marks a picture as waiting in the pile, or as "
+        "being painted for a round. These marks disagree with what the "
+        "picture is actually doing, so a round could show a picture as "
+        "painting for ever, or a picture could land in the pile by "
+        "surprise. Tell me which picture; the step that forgot to clear "
+        "the mark needs fixing.",
+        "warn" if total else "ok", found[:MAX_ROWS], total,
+    )
+
+
 def check_backgrounds_are_readable(db: Session, scope: Scope) -> CheckResult:
     """
     INVARIANT: every stored background is one the painter can read — one
@@ -3295,6 +3353,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_finished_titles_hold_no_unseen_replacement,
     check_retired_titles_hold_nothing,
     check_place_check_is_answering,
+    check_prompt_test_marks_are_sound,
     check_backgrounds_are_readable,
     check_chosen_colour_was_painted,
     check_upload_gap_is_holding,

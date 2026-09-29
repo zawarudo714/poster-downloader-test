@@ -188,7 +188,8 @@ def _part(path: Path) -> tuple[str, bytes, str]:
 
 
 def generate(db: Session, *, source: Path, style: Path, project=None,
-             location: str = "", log_fn=None) -> Generation:
+             location: str = "", log_fn=None,
+             prompt_text: str | None = None) -> Generation:
     """
     Send one image through the style transfer and return the result.
 
@@ -236,7 +237,11 @@ def generate(db: Session, *, source: Path, style: Path, project=None,
     # title/keywords/description have always been rendered, but the prompt
     # went out raw, so the model invented the poster text from the picture.
     # Both cases are replaced so a prompt written either way works.
-    prompt = str(get_setting(db, "openai_prompt", project=project))
+    # `prompt_text` is a PROMPT TEST round's own wording (app/prompt_test.py).
+    # It goes through the same {LOCATION} fill as the main prompt, so a test
+    # prompt is judged on exactly what the main one would get.
+    prompt = (prompt_text if prompt_text is not None
+              else str(get_setting(db, "openai_prompt", project=project)))
     prompt = (prompt.replace("{LOCATION}", location)
                     .replace("{location}", location))
     data = {

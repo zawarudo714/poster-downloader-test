@@ -64,6 +64,62 @@
   </section>
 
   {#
+    PROMPT TEST MODE (owner, 2026-09-29). Trying a new painting prompt on a
+    handful of repaints, without anything painting on its own and without
+    touching the main prompt. The panel is filled by admin_prompt_test.js;
+    a round is reviewed on the same screen as everything else, but judged
+    KEEP or RERUN only. See app/prompt_test.py.
+  #}
+  <section class="panel" data-prompt-test>
+    <div class="panel-head">
+      <span>PROMPT TEST MODE
+        {{ info("For trying a new painting prompt on a few pictures at a time. While it is ticked, a picture you mark RERUN waits in the pile instead of being painted, so nothing spends money on its own. TEST THE PROMPT paints the oldest few in the pile with the prompt in the box below, and the round is judged KEEP or RERUN only. The main prompt on the Settings page is never changed here: copy your best prompt there yourself when you are happy with it. New pictures from workers are not affected and keep painting with the main prompt.") }}
+      </span>
+      <span class="muted mono" data-pt-summary></span>
+    </div>
+    <div class="panel-body">
+      <label class="pt-switch">
+        <input type="checkbox" data-pt-on data-setting="prompt_test_mode">
+        <strong>Prompt test mode</strong>
+        <span class="muted">While this is ticked, a picture you mark RERUN waits in the pile instead of being painted. Unticked, reruns paint straight away as before.</span>
+      </label>
+      <div class="pt-pile" data-pt-pile></div>
+
+      <div class="pt-prompt">
+        <div class="filter-row">
+          <label>PROMPT NAME
+            <input type="text" data-pt-name maxlength="200" placeholder="for example prompt v12"></label>
+          <label>LOAD A SAVED ONE
+            <select data-pt-saved><option value="">—</option></select></label>
+          <button class="btn btn-ghost btn-tiny" data-pt-action="copy-main"
+                  title="Put the main prompt from the Settings page in the box, to edit from">START FROM THE MAIN PROMPT</button>
+        </div>
+        <textarea data-pt-text rows="8" class="pt-text"
+                  placeholder="Paste the prompt to test here. If you leave this empty, the round uses the main prompt from the Settings page."></textarea>
+      </div>
+
+      <div class="filter-row" style="margin-top:10px">
+        <label>PICTURES PER ROUND
+          <input type="number" min="1" max="200" data-pt-size data-setting="prompt_test_round_size" class="pt-size"></label>
+        <button class="btn btn-primary" data-pt-action="round">TEST THE PROMPT ON <span data-pt-size-label>10</span></button>
+        <span class="muted" data-pt-round-note></span>
+      </div>
+
+      <table class="data-table" style="margin-top:12px">
+        <thead><tr><th>ROUND</th><th>PROMPT</th><th>PAINTING</th><th>SCORE</th><th></th></tr></thead>
+        <tbody data-pt-rounds>
+          <tr><td colspan="5" class="muted">No rounds yet.</td></tr>
+        </tbody>
+      </table>
+
+      <div class="filter-row" style="margin-top:12px">
+        <button class="btn btn-error btn-tiny" data-pt-action="delete">DELETE ALL TEST DATA</button>
+        <span class="muted" data-pt-delete-note></span>
+      </div>
+    </div>
+  </section>
+
+  {#
     The reviewer. One title on screen, its images side by side, arrow keys to
     move. Decisions are held locally and committed in one go at the end —
     a network round trip per keypress would make it feel broken, and it lets
@@ -218,4 +274,5 @@
    script, which reads window.SubjectKind when it shows each title. #}
 <script src="/static/js/subject_icons.js?v={{ app_version }}"></script>
 <script src="/static/js/admin_review_images.js?v={{ app_version }}"></script>
+<script src="/static/js/admin_prompt_test.js?v={{ app_version }}"></script>
 {% endblock %}

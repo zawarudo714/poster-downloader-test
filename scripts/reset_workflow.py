@@ -57,7 +57,8 @@ from app.db import SessionLocal                                      # noqa: E40
 from app.models import (                                             # noqa: E402
     ActivityLog, ChatMessage, ChatReadState, ImportJob, LedgerEntry,
     ListingSweep, MarketplaceSnapshot, MasterTitle, PaymentRun, PipelineJob,
-    ProcessedImage, Revision, SavedPoster, SearchCache, TitleAlias,
+    ProcessedImage, PromptTestItem, PromptTestPrompt, PromptTestRound,
+    Revision, SavedPoster, SearchCache, TitleAlias,
     UploadTracking, User,
 )
 
@@ -217,6 +218,10 @@ def reset(db, *, wipe_titles: bool, dry_run: bool) -> None:
         ("listing sweeps",         ListingSweep),
         ("sale-name aliases",      TitleAlias),
         ("search cache",           SearchCache),
+        # Prompt test records describe paintings of pictures being wiped.
+        ("prompt test pictures",   PromptTestItem),
+        ("prompt test rounds",     PromptTestRound),
+        ("prompt test prompts",    PromptTestPrompt),
     ]
     for label, model in tables:
         n = db.query(model).count()

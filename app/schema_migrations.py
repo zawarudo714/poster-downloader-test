@@ -92,6 +92,10 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("saved_posters", "added_note",        "TEXT"),
     ("master_titles", "unusable_reason",    "TEXT"),
     ("master_titles", "completion_rejected_at", "DATETIME"),
+    # PROMPT TEST MODE (2026-09-29): the pile and the round a picture is
+    # being painted for. Empty on every existing row, which is "not in a test".
+    ("saved_posters", "rerun_hold_at",   "DATETIME"),
+    ("saved_posters", "prompt_round_id", "INTEGER"),
     # ── Fair sharing between projects / rotation between accounts ───────
     ("projects",        "process_weight", "INTEGER NOT NULL DEFAULT 1"),
     ("upload_accounts", "rotation_order", "INTEGER NOT NULL DEFAULT 100"),
@@ -229,6 +233,8 @@ NEW_INDEXES: list[tuple[str, str, str]] = [
     ("ix_master_greenlit_source",        "master_titles", "greenlit_source"),
     ("ix_poster_project_folder",         "saved_posters", "project_folder"),
     ("ix_processed_review",              "processed_images", "review_status"),
+    ("ix_saved_posters_rerun_hold_at",   "saved_posters", "rerun_hold_at"),
+    ("ix_saved_posters_prompt_round_id", "saved_posters", "prompt_round_id"),
     # The master dashboard groups every title by (project_id, status) on
     # each load. `ix_master_titles_project_id` covers only the first column,
     # so SQLite scanned that index and then built a TEMP B-TREE to do the

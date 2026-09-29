@@ -209,8 +209,12 @@ def api_pulse(request: Request, admin: User = Depends(require_admin),
     # above. The machine is shared, so a number about the machine that only
     # covered the project you happen to be standing in would be the very
     # defect rule 3b is about.
+    # A picture in the prompt-test pile is greenlit but waits for a button,
+    # not for the machine — counting it would make an idle machine look
+    # stuck (see app/prompt_test.py).
     process_waiting = (db.query(func.count(SavedPoster.id))
                          .filter(SavedPoster.pipeline_status == "greenlit",
+                                 SavedPoster.rerun_hold_at.is_(None),
                                  SavedPoster.deleted_at.is_(None)).scalar() or 0)
     upload_waiting = (db.query(func.count(UploadTracking.id))
                         .filter(UploadTracking.status == "pending")
@@ -727,6 +731,7 @@ def admin_dashboard(request: Request, admin: User = Depends(require_admin), db: 
         "processing": (
             db.query(func.count(SavedPoster.id))
               .filter(SavedPoster.pipeline_status == "greenlit",
+                      SavedPoster.rerun_hold_at.is_(None),
                       SavedPoster.deleted_at.is_(None))
               .scalar() or 0
         ),

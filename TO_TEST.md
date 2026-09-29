@@ -1117,6 +1117,22 @@ On Changes Requested, click a thumbnail to zoom:
 - Run Diagnostics and read "titles paid more than once". It should be
   green.
 
+## 98. A TOP-INTO-BOTTOM BACKGROUND ON APPROVE ARTWORK — v248
+
+- Open Approve Artwork. Each picture's colour bar should show a TOP and a
+  BOTTOM swatch. A picture you never touched should show blue at the top
+  fading to black at the bottom.
+- Change the bottom swatch to a green. The picture should change at once,
+  with the green only near the bottom.
+- Press Shift+E and click some trees. That colour should become the
+  BOTTOM colour. Press E and click the sky. That colour should become the
+  TOP colour.
+- Keep the picture and save. When its print file is built, open it. The
+  blend in the file should match what the screen showed.
+- Set both swatches to the same colour. The picture should show one flat
+  colour, as before.
+- On the Settings page, the new box "BOTTOM colour" should read #000000.
+
 ---
 
 ## NOT ON THIS LIST, ON PURPOSE

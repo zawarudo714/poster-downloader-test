@@ -2466,6 +2466,11 @@ values usually equal" — it is "does anything COMPARE them".** If something
 does, they are two facts and the comparison is the feature; the duplication
 rule does not apply. If nothing ever does, they are one fact stored twice and
 it will drift. Ask which before merging two columns or splitting one.
+The same test runs the other way: when the background grew a TOP and a
+BOTTOM colour (2026-09-29), nothing ever compared one plate's top with
+another's, only whole plates, so it stayed ONE value ("#top/#bottom") with
+ONE spelling (`imagefetch.normalise_background`) — two columns would have
+been two things every comparison had to remember to read together.
 
 The reverse of that mistake is worth stating too, because the fix used it.
 When the print file moved to approval time (2026-09-09) there was a choice

@@ -115,10 +115,11 @@ def process_one(db: Session, poster, title, project) -> bool:
     recorded on the poster so the dashboard can explain it.
     """
     from . import gpt_images as G
-    from .imagefetch import (DEFAULT_BACKGROUND, flatten_onto,
+    from .imagefetch import (flatten_onto,
                              has_transparency, make_preview,
                              upscale_to_width)
-    from .pipeline import get_setting, recompute_title_status, storage_path_for
+    from .pipeline import (default_background, get_setting,
+                           recompute_title_status, storage_path_for)
     from .models import ProcessedImage
     from .storage_remote import StorageError, write_bytes
     from .utils import saved_poster_path
@@ -205,8 +206,8 @@ def process_one(db: Session, poster, title, project) -> bool:
     raw.write_bytes(gen.image_bytes)
 
     tmp = WORKSPACE_DIR / "_gpt_tmp" / f"{poster.id}.jpg"
-    background = str(get_setting(db, "gpt_background_color", project=project)
-                     or DEFAULT_BACKGROUND)
+    # One colour or top-into-bottom, from the dashboard (default_background).
+    background = default_background(db, project)
     transparent = has_transparency(raw)
 
     # FLATTEN FIRST, ENLARGE SECOND. With no alpha channel left there is

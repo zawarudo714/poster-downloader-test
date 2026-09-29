@@ -1119,6 +1119,11 @@ class ProcessedImage(Base):
     # FLATTEN BEFORE UPSCALING. With the alpha already gone there is nothing
     # for the resize to average the hidden colour into. Chosen for safety
     # rather than from an observed fault — see imagefetch.flatten_onto().
+    #
+    # A BACKGROUND IS ONE COLOUR OR TWO (2026-09-29): "#0067c6", or
+    # "#0067c6/#000000" for a top colour blending into a bottom one — 15
+    # characters, inside the 16 this column and background_chosen hold. The
+    # one spelling is imagefetch.normalise_background; read it there.
     master_path      = Column(String(768), nullable=True)
     background_color = Column(String(16), nullable=True)
     reviewed_by     = Column(String(64), nullable=True)

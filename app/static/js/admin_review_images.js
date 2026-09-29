@@ -791,11 +791,57 @@
         || defaultBackground;
   }
 
+  // ── A BACKGROUND IS ONE COLOUR OR A TOP COLOUR BLENDING INTO A BOTTOM ──
+  //
+  // Spelled exactly as the server spells it (imagefetch.normalise_
+  // background): "#0067c6" or "#0067c6/#000000". The owner's ask
+  // (2026-09-29): a see-through sky wants blue behind it while see-through
+  // trees at the bottom want black, and one colour tinted the trees.
+  function bgParts(spec) {
+    const parts = String(spec || '#000000').toLowerCase().split('/');
+    return { top: parts[0], bottom: parts[parts.length - 1] };
+  }
+  function bgSpec(top, bottom) {
+    const t = String(top).toLowerCase();
+    const b = String(bottom).toLowerCase();
+    return t === b ? t : `${t}/${b}`;
+  }
+  // The same blend the server paints: top row the top colour, bottom row
+  // the bottom colour, even in between. It goes on the PICTURE's own box
+  // (see setColor), which is the picture's exact shape, so the blend lines
+  // up with the file's first and last rows.
+  function paintBg(el, spec) {
+    const { top, bottom } = bgParts(spec);
+    el.style.backgroundColor = bottom;
+    el.style.backgroundImage = top === bottom
+      ? 'none' : `linear-gradient(to bottom, ${top}, ${bottom})`;
+  }
+  function bgStyle(spec) {
+    const { top, bottom } = bgParts(spec);
+    return top === bottom ? `background-color:${top}`
+      : `background-color:${bottom};background-image:linear-gradient(to bottom, ${top}, ${bottom})`;
+  }
+
   document.addEventListener('input', (e) => {
     if (e.target.matches('[data-color-input]')) {
-      setColor(Number(e.target.dataset.pid), e.target.value);
+      const pid = Number(e.target.dataset.pid);
+      const cur = bgParts(colors.get(pid) || currentSpecOf(pid));
+      cur[e.target.dataset.stop === 'bottom' ? 'bottom' : 'top'] = e.target.value;
+      setColor(pid, bgSpec(cur.top, cur.bottom));
     }
   });
+
+  // The background a generation shows right now, found by its id (the
+  // colour inputs only know the id).
+  function currentSpecOf(pid) {
+    for (const t of titles) {
+      for (const img of t.images || []) {
+        const v = (versionsOf(img) || []).find((x) => x.processed_id === pid);
+        if (v) return colorFor(v);
+      }
+    }
+    return defaultBackground;
+  }
 
   // The eyedropper click. Capture phase, because the poster sits inside a
   // link to the full-size file — without this the browser opens that file
@@ -809,7 +855,11 @@
     e.preventDefault();
     e.stopPropagation();
     const hex = sampleAt(img, e);
-    if (hex) setColor(eyedropFor, hex);
+    if (hex) {
+      const cur = bgParts(colors.get(eyedropFor) || currentSpecOf(eyedropFor));
+      cur[eyedropStop] = hex;
+      setColor(eyedropFor, bgSpec(cur.top, cur.bottom));
+    }
     document.querySelectorAll('.is-picking').forEach(
       (el) => el.classList.remove('is-picking'));
     eyedropFor = null;
@@ -819,19 +869,39 @@
   function colorBarHtml(v, where) {
     if (!v.can_recolor) return '';
     const bg = colorFor(v);
+    const { top, bottom } = bgParts(bg);
+    // Two colours: TOP blends into BOTTOM down the picture. Set both the
+    // same for one flat colour.
     return `
       <div class="review-color" data-pid="${v.processed_id}" data-where="${where}">
         <span class="muted mono">background</span>
-        <input type="color" value="${esc(bg)}" data-color-input
-               data-pid="${v.processed_id}" title="Pick a colour">
-        <button class="btn btn-ghost btn-tiny" data-img-action="eyedrop"
-                data-pid="${v.processed_id}"
-                title="Press E, then click a colour in the picture">
-          EYEDROPPER <span class="mono">(E)</span></button>
+        <span class="review-color-stop">
+          <span class="muted mono">top</span>
+          <input type="color" value="${esc(top)}" data-color-input data-stop="top"
+                 data-pid="${v.processed_id}" title="The colour at the top of the picture">
+          <button class="btn btn-ghost btn-tiny" data-img-action="eyedrop"
+                  data-stop="top" data-pid="${v.processed_id}"
+                  title="Press E, then click a colour in the picture — sets the TOP colour">
+            EYEDROPPER <span class="mono">(E)</span></button>
+        </span>
+        <span class="review-color-stop">
+          <span class="muted mono">bottom</span>
+          <input type="color" value="${esc(bottom)}" data-color-input data-stop="bottom"
+                 data-pid="${v.processed_id}" title="The colour at the bottom of the picture">
+          <button class="btn btn-ghost btn-tiny" data-img-action="eyedrop"
+                  data-stop="bottom" data-pid="${v.processed_id}"
+                  title="Press Shift+E, then click a colour in the picture — sets the BOTTOM colour">
+            EYEDROPPER <span class="mono">(⇧E)</span></button>
+        </span>
         <button class="btn btn-ghost btn-tiny" data-img-action="color-reset"
-                data-pid="${v.processed_id}">RESET</button>
-        <span class="mono review-color-value">${esc(bg)}</span>
+                data-pid="${v.processed_id}"
+                title="Back to the colours set on the Settings page">RESET</button>
+        <span class="mono review-color-value">${esc(bgLabel(bg))}</span>
       </div>`;
+  }
+  function bgLabel(spec) {
+    const { top, bottom } = bgParts(spec);
+    return top === bottom ? top : `${top} → ${bottom}`;
   }
 
   // ── The version picker ─────────────────────────────────────────────────
@@ -919,7 +989,7 @@
                   title="Click to compare side by side, full screen">
               <img loading="lazy" src="${shown}" alt="" data-poster-img
                    data-pid="${v.processed_id}" crossorigin="anonymous"
-                   style="background-color:${esc(bg)}">
+                   style="${esc(bgStyle(bg))}">
               <span class="sig-layer" data-sig-layer data-pid="${v.processed_id}"
                     >${sigMarkHtml(v)}</span>
             </span>
@@ -979,13 +1049,15 @@
     // behind its see-through pixels, which is both the right composite and
     // the right shape.
     document.querySelectorAll(`[data-poster-img][data-pid="${pid}"]`).forEach((el) => {
-      el.style.backgroundColor = value;
+      paintBg(el, value);
     });
+    const parts = bgParts(value);
     document.querySelectorAll(`[data-color-input][data-pid="${pid}"]`).forEach((input) => {
-      if (input.value !== value) input.value = value;
+      const want = input.dataset.stop === 'bottom' ? parts.bottom : parts.top;
+      if (input.value !== want) input.value = want;
     });
     document.querySelectorAll(`.review-color[data-pid="${pid}"] .review-color-value`)
-      .forEach((label) => { label.textContent = value; });
+      .forEach((label) => { label.textContent = bgLabel(value); });
   }
 
   // ── The eyedropper ─────────────────────────────────────────────────────
@@ -995,12 +1067,14 @@
   // half-transparent pixel already sitting on the current background — not
   // the raw value hiding underneath, which is not what anybody is looking at.
   let eyedropFor = null;
+  let eyedropStop = 'top';     // which of the two colours the click sets
 
-  function startEyedrop(pid) {
+  function startEyedrop(pid, stop) {
     eyedropFor = pid;
+    eyedropStop = stop === 'bottom' ? 'bottom' : 'top';
     document.querySelectorAll(`[data-canvas][data-pid="${pid}"]`).forEach(
       (box) => box.classList.add('is-picking'));
-    toast('Click a colour in the picture.');
+    toast(`Click a colour in the picture for the ${eyedropStop.toUpperCase()} colour.`);
   }
 
   // `box` (the plate) used to be passed in for its background colour and is
@@ -1018,7 +1092,18 @@
     // painted. `box` is still the plate and is no longer the thing carrying
     // the colour, so reading it here would have sampled a transparent
     // background and every eyedropper pick would have come back black.
-    ctx.fillStyle = getComputedStyle(imgEl).backgroundColor;
+    // The background is read from the SAME value the picture is painted
+    // with, top-into-bottom, so a pick near the bottom samples the pixel as
+    // it really sits on the bottom colour.
+    const { top, bottom } = bgParts(currentSpecOf(Number(imgEl.dataset.pid)));
+    if (top === bottom) {
+      ctx.fillStyle = top;
+    } else {
+      const grad = ctx.createLinearGradient(0, 0, 0, c.height);
+      grad.addColorStop(0, top);
+      grad.addColorStop(1, bottom);
+      ctx.fillStyle = grad;
+    }
     ctx.fillRect(0, 0, c.width, c.height);
     try {
       ctx.drawImage(imgEl, 0, 0, c.width, c.height);
@@ -1285,7 +1370,7 @@
     const canvas = $('[data-zoom-canvas]');
     canvas.dataset.pid = v.processed_id;
     // The colour goes on the picture, not on this box — see setColor().
-    poster.style.backgroundColor = colorFor(v);
+    paintBg(poster, colorFor(v));
     // Scoped to the overlay. `$` takes ONE argument, so `$(sel, canvas)`
     // would have quietly returned the first card's layer instead.
     const zoomLayer = canvas.querySelector('[data-sig-layer]');
@@ -1631,7 +1716,7 @@
     const imgAction = el.dataset.imgAction;
     if (imgAction) {
       if (imgAction === 'eyedrop') {
-        startEyedrop(parseInt(el.dataset.pid, 10));
+        startEyedrop(parseInt(el.dataset.pid, 10), el.dataset.stop);
         return;
       }
       if (imgAction === 'color-reset') {
@@ -1835,7 +1920,8 @@
       case 'e':
         if (t && t.images.length) {
           const v = shownVersion(t.images[0]);
-          if (v.can_recolor) startEyedrop(v.processed_id);
+          // E sets the TOP colour (the sky, the usual one); Shift+E the BOTTOM.
+          if (v.can_recolor) startEyedrop(v.processed_id, e.shiftKey ? 'bottom' : 'top');
         }
         e.preventDefault();
         break;

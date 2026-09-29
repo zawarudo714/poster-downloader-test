@@ -2559,6 +2559,43 @@ def check_failure_evidence_is_pruned(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def check_backgrounds_are_readable(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: every stored background is one the painter can read — one
+    colour, or a top colour and a bottom colour (imagefetch.
+    normalise_background). The painter never refuses a bad value; it quietly
+    paints black (parse_color explains why), so a garbled value here would
+    reach the marketplace as a black background nobody chose. The doors
+    refuse garbage since v248; this watches for anything that got past them
+    or predates them.
+    """
+    from .imagefetch import normalise_background
+    found = []
+    for pid, spid, chosen, painted in (
+            db.query(ProcessedImage.id, ProcessedImage.saved_poster_id,
+                     ProcessedImage.background_chosen,
+                     ProcessedImage.background_color)
+              .filter(or_(ProcessedImage.background_chosen.isnot(None),
+                          ProcessedImage.background_color.isnot(None)))
+              .all()):
+        for label, val in (("chosen", chosen), ("painted", painted)):
+            if (val or "").strip() and not normalise_background(val):
+                found.append(Finding(
+                    f"picture record {spid}",
+                    f"the {label} background reads {val!r}, which is not a "
+                    f"colour", "/admin/pipeline/review"))
+    total = len(found)
+    return _result(
+        "backgrounds_are_readable",
+        f"{total} background(s) cannot be read"
+        if total else "Every stored background can be read",
+        "A background the painter cannot read is painted as black without "
+        "any warning. Open the picture on Approve Artwork and pick its "
+        "colours again.",
+        "warn" if total else "ok", found[:MAX_ROWS], total,
+    )
+
+
 def check_chosen_colour_was_painted(db: Session, scope: Scope) -> CheckResult:
     """
     INVARIANT: once released, the colour CHOSEN is the colour PAINTED.
@@ -3258,6 +3295,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_finished_titles_hold_no_unseen_replacement,
     check_retired_titles_hold_nothing,
     check_place_check_is_answering,
+    check_backgrounds_are_readable,
     check_chosen_colour_was_painted,
     check_upload_gap_is_holding,
     check_failure_evidence_is_pruned,

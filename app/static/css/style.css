@@ -5243,6 +5243,9 @@ label.inline-check {
   border: 1px solid var(--border); background: none; cursor: pointer;
 }
 .review-color-value { opacity: .7; }
+/* One TOP and one BOTTOM colour, each with its own eyedropper; kept together
+   so a wrap never separates a swatch from its button. */
+.review-color-stop { display: inline-flex; align-items: center; gap: 4px; }
 
 .review-pair {
   display: grid;

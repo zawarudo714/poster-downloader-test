@@ -746,6 +746,13 @@ DEFAULTS: dict[str, Any] = {
     # image that needs something else gets its own colour on the Approve
     # Artwork screen with the eyedropper. This is only the starting point.
     "gpt_background_color": "#0067c6",
+    # The BOTTOM of the background: the top colour above blends evenly into
+    # this one down the picture (owner, 2026-09-29). A sky that comes back
+    # see-through wants blue, while see-through trees at the bottom were
+    # tinted blue by a single colour. Pure black at the owner's ask. Set it
+    # to the same colour as the top to go back to one flat colour. Read
+    # only through default_background(), never on its own.
+    "gpt_background_color_bottom": "#000000",
     # ── Storage access from THIS server ──────────────────────────────────
     # The Windows node writes to the drive letter in `storage_root`. This
     # server has no such drive, so the GPT stage pushes over SFTP to the same
@@ -954,6 +961,22 @@ def _coerce(value: str, like: Any) -> Any:
             return merged
         return parsed
     return value
+
+
+
+def default_background(db: Session, project=None) -> str:
+    """
+    The background a see-through picture gets unless the admin chooses
+    another: the dashboard's top colour blending into its bottom colour, in
+    the one spelling imagefetch.normalise_background uses. EVERY caller that
+    needs "the default background" asks this — the painter, the Approve
+    Artwork screen, approval and the Photopea edit — so the top and bottom
+    settings cannot be read in one place and forgotten in another.
+    """
+    from .imagefetch import background_spec
+    return background_spec(
+        str(get_setting(db, "gpt_background_color", project=project) or ""),
+        str(get_setting(db, "gpt_background_color_bottom", project=project) or ""))
 
 
 def get_setting(db: Session, key: str, *, project: Optional[Project | str] = None) -> Any:

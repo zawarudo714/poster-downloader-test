@@ -3507,6 +3507,28 @@ def api_review_queue(
             "url": "/admin/pipeline/signature_image",
         }
 
+    # WHAT BACKGROUND EACH PICTURE SHOWS. What you chose wins. A picture
+    # still waiting for you that was painted with the dashboard's old
+    # one-colour default (the top colour alone, before the top-into-bottom
+    # blend existed — 2026-09-29) shows TODAY's default instead, so the
+    # blend reaches the pictures already waiting without you touching each
+    # one. Approving sends what is shown, and the print file is rebuilt to
+    # match. Anything released keeps what it was painted with.
+    from ..imagefetch import normalise_background as _norm_bg
+    default_bg = P.default_background(db, project)
+    default_top = _norm_bg(str(P.get_setting(db, "gpt_background_color",
+                                             project=project) or ""))
+
+    def _bg_shown(p) -> str:
+        chosen = _norm_bg(p.background_chosen)
+        if chosen:
+            return chosen
+        painted = _norm_bg(p.background_color)
+        if (p.review_status or "") in ("pending", "held") \
+                and painted in ("", default_top):
+            return default_bg
+        return painted
+
     def _version(p) -> dict:
         return {
             "processed_id": p.id,
@@ -3536,7 +3558,7 @@ def api_review_queue(
             # the screen must show when he comes back to a poster he tweaked
             # earlier. Falling back to the painted colour is right for
             # everything he has not touched.
-            "background_color": (p.background_chosen or p.background_color or ""),
+            "background_color": _bg_shown(p),
             # Where this poster's signature sits. The project's defaults with
             # the poster's own nudges over the top, worked out server-side so
             # the screen and the builder can never disagree about it — two
@@ -3604,9 +3626,10 @@ def api_review_queue(
                          "total_waiting": total_waiting,
                          "batch_size": batch,
                          "status": status,
-                         "default_background": str(
-                             P.get_setting(db, "gpt_background_color",
-                                           project=project) or "#000000"),
+                         # One colour, or "top/bottom" blended — see
+                         # imagefetch.normalise_background.
+                         "default_background": P.default_background(
+                             db, project),
                          # The shortcut keys come from the settings rather
                          # than being written into the script, so changing
                          # them is a box on a screen and not a deploy.
@@ -3822,7 +3845,8 @@ def _build_print_file(db: Session, processed, color: str, project,
     """
     import json as _json
 
-    from ..imagefetch import flatten_onto, make_preview, upscale_to_width
+    from ..imagefetch import (flatten_onto, make_preview,
+                              normalise_background, upscale_to_width)
     from ..storage_remote import read_bytes, write_bytes
     from ..config import WORKSPACE_DIR
     from .. import signature as SIG
@@ -3848,7 +3872,8 @@ def _build_print_file(db: Session, processed, color: str, project,
         sort_keys=True) if place else ""
 
     needs_file = not (processed.storage_path or "").strip()
-    needs_colour = (processed.background_color or "").lower() != (color or "").lower()
+    needs_colour = normalise_background(processed.background_color) \
+        != normalise_background(color)
     needs_sig = (processed.signature_applied or "") != wanted_sig
     if not (needs_file or needs_colour or needs_sig):
         return ""
@@ -4145,6 +4170,7 @@ def api_review_remember(
     is still 'processed', exactly like a pending one, and the uploader only
     ever takes 'approved'.
     """
+    from ..imagefetch import normalise_background
     import json as _json
     from .. import signature as SIG
 
@@ -4174,7 +4200,12 @@ def api_review_remember(
         changed.append("signature")
 
     if "background_color" in payload:
-        colour = str(payload.get("background_color") or "").strip()
+        raw_colour = str(payload.get("background_color") or "").strip()
+        colour = normalise_background(raw_colour)
+        # A value that is not a colour is refused, not stored: stored, it
+        # would quietly become black at approval (parse_color never raises).
+        if raw_colour and not colour:
+            raise HTTPException(400, f"Not a background: {raw_colour!r}")
         # Written to the CHOSEN column, never to `background_color`. That one
         # means "already flattened into the file", and `_build_print_file`
         # compares against it — so writing here would tell the builder the
@@ -4210,7 +4241,7 @@ def _store_variant_row(db, *, admin, project, title, poster, processed,
 
     Returns (row, label). Commits nothing — the caller owns the commit.
     """
-    from ..imagefetch import flatten_onto, make_preview, DEFAULT_BACKGROUND
+    from ..imagefetch import flatten_onto, make_preview, normalise_background
     from ..storage_remote import StorageError, write_bytes
     from ..pipeline import storage_path_for
     from ..config import WORKSPACE_DIR
@@ -4239,9 +4270,9 @@ def _store_variant_row(db, *, admin, project, title, poster, processed,
         else f"previews/{parts[0]}"
 
     # The flatten colour for the preview: what the parent shows right now.
-    colour = (processed.background_chosen or processed.background_color
-              or str(P.get_setting(db, "gpt_background_color", project=project)
-                     or DEFAULT_BACKGROUND))
+    colour = (normalise_background(processed.background_chosen)
+              or normalise_background(processed.background_color)
+              or P.default_background(db, project))
 
     as_master = bool(processed.master_path)
     if as_master and image.mode != "RGBA":
@@ -4497,6 +4528,7 @@ def api_review_decide(
     Batched because the reviewer approves a whole date range at the end of a
     session rather than one title at a time.
     """
+    from ..imagefetch import normalise_background
     decisions = payload.get("decisions") or []
     if not decisions:
         raise HTTPException(400, "decisions is required.")
@@ -4550,14 +4582,12 @@ def api_review_decide(
             # makes a tweak made yesterday still count today — without it, a
             # poster whose colour was set on another day would silently
             # release with the default.
-            wanted = ((item.get("background_color") or "").strip()
-                      or (processed.background_chosen or "").strip())
+            wanted = (normalise_background(item.get("background_color"))
+                      or normalise_background(processed.background_chosen))
             if processed.master_path:
                 if not wanted:
-                    wanted = str(P.get_setting(
-                        db, "gpt_background_color",
-                        project=P.project_for_title(db, title) if title else None)
-                        or "#000000")
+                    wanted = P.default_background(
+                        db, P.project_for_title(db, title) if title else None)
                 try:
                     _build_print_file(
                         db, processed, wanted,

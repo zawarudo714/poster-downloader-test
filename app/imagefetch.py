@@ -245,10 +245,90 @@ def parse_color(text: str | None) -> tuple[int, int, int]:
         return (0, 0, 0)
 
 
+def _hex_or_none(text: str | None) -> str | None:
+    raw = (text or "").strip().lstrip("#").lower()
+    if len(raw) == 3:
+        raw = "".join(c * 2 for c in raw)
+    if len(raw) != 6 or any(c not in "0123456789abcdef" for c in raw):
+        return None
+    return "#" + raw
+
+
+def normalise_background(spec: str | None) -> str:
+    """
+    THE one spelling of a background. Either a single colour, "#0067c6",
+    or a TOP and a BOTTOM colour blended down the picture, "#0067c6/#000000"
+    (owner, 2026-09-29: a sky wants blue behind it and the trees below want
+    black, and one colour tinted the trees). Returns "" for anything that is
+    not a readable background, so a caller can tell garbage from a choice.
+
+    Two equal colours collapse to one, so "blue/blue" and "blue" are the
+    same string — `_build_print_file` compares these strings to decide
+    whether a picture must be rebuilt, and two spellings of one plate would
+    rebuild it for nothing.
+
+    Why one string and not two columns: nothing ever compares the top of one
+    plate with the top of another. The plate is compared as a whole (chosen
+    against painted), so it is one fact and stays one value.
+    """
+    parts = [(x or "") for x in (spec or "").split("/")]
+    if not 1 <= len(parts) <= 2:
+        return ""
+    cols = [_hex_or_none(x) for x in parts]
+    if any(c is None for c in cols):
+        return ""
+    if len(cols) == 2 and cols[0] == cols[1]:
+        return cols[0]
+    return "/".join(cols)
+
+
+def background_spec(top: str | None, bottom: str | None) -> str:
+    """Build a background from its two colours (either may be blank, which
+    means "the same as the other one")."""
+    t = _hex_or_none(top)
+    b = _hex_or_none(bottom)
+    t = t or b or DEFAULT_BACKGROUND
+    return normalise_background(f"{t}/{b or t}")
+
+
+def parse_background(spec: str | None) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
+    """(top RGB, bottom RGB). A single colour is both. Anything unreadable is
+    black, for the reason parse_color gives."""
+    norm = normalise_background(spec)
+    if not norm:
+        return (0, 0, 0), (0, 0, 0)
+    parts = norm.split("/")
+    return parse_color(parts[0]), parse_color(parts[-1])
+
+
+def background_plate(size: tuple[int, int], spec: str | None):
+    """
+    The plate a see-through picture is flattened onto: one colour, or the
+    top colour blending evenly into the bottom colour from the first row to
+    the last. The browser previews the same thing as
+    `linear-gradient(to bottom, top, bottom)` on the picture's own box, so
+    what the Approve Artwork screen shows is what the file gets.
+    """
+    from PIL import Image
+
+    top, bottom = parse_background(spec)
+    w, h = size
+    if top == bottom or h < 2:
+        return Image.new("RGB", size, top)
+    # A one-pixel-wide ramp, 0 at the top row and 255 at the bottom row,
+    # stretched sideways. The mask picks the bottom colour where it is 255.
+    ramp = Image.new("L", (1, h))
+    ramp.putdata([round(255 * y / (h - 1)) for y in range(h)])
+    mask = ramp.resize((w, h), Image.NEAREST)
+    return Image.composite(Image.new("RGB", size, bottom),
+                           Image.new("RGB", size, top), mask)
+
+
 def flatten_onto(src: Path, dest: Path, color: str | None) -> tuple[int, int]:
     """
-    Put a solid colour behind a picture that may be see-through, and save it
-    as a JPEG. Returns the size.
+    Put a background behind a picture that may be see-through, and save it
+    as a JPEG. Returns the size. `color` is a background as
+    normalise_background spells it: one colour, or top/bottom blended.
 
     ════════════════════════════════════════════════════════════════════════
     WHY THIS EXISTS AT ALL
@@ -282,7 +362,7 @@ def flatten_onto(src: Path, dest: Path, color: str | None) -> tuple[int, int]:
         if img.mode in ("RGBA", "LA") or (
                 img.mode == "P" and "transparency" in img.info):
             img = img.convert("RGBA")
-            plate = Image.new("RGB", img.size, parse_color(color))
+            plate = background_plate(img.size, color)
             # The alpha channel is the mask, so a HALF-transparent pixel comes
             # out half its own colour and half the plate — which is exactly
             # why a semi-transparent sky reads muddy on black and correct on

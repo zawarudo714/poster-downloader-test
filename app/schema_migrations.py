@@ -91,6 +91,7 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("saved_posters", "pay_despite_delete", "INTEGER NOT NULL DEFAULT 0"),
     ("saved_posters", "added_note",        "TEXT"),
     ("master_titles", "unusable_reason",    "TEXT"),
+    ("master_titles", "completion_rejected_at", "DATETIME"),
     # ── Fair sharing between projects / rotation between accounts ───────
     ("projects",        "process_weight", "INTEGER NOT NULL DEFAULT 1"),
     ("upload_accounts", "rotation_order", "INTEGER NOT NULL DEFAULT 100"),

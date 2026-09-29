@@ -1954,13 +1954,21 @@ def check_finished_titles_hold_no_unseen_replacement(db: Session, scope: Scope) 
     swapped file — so this never runs the per-title question over the
     whole catalogue.
     """
-    from .models import DELETION_VERDICT_PREFIX
     from .utils import pictures_awaiting_your_look
+    # Candidates follow the marks in pictures_awaiting_your_look: a flagged
+    # picture that was taken off the title (by anyone), a rejected
+    # completion, a reviewed picture, a swapped file. Until 2026-09-29 this
+    # list carried its own narrower copy of mark (a) — worker deletions
+    # only — so it could not see Atlanta even once the rule was widened.
     cand = set(r[0] for r in (
         db.query(SavedPoster.master_title_id)
           .join(Revision, Revision.saved_poster_id == SavedPoster.id)
-          .filter(Revision.admin_verdict.like(DELETION_VERDICT_PREFIX + "%"))
+          .filter(SavedPoster.deleted_at.isnot(None),
+                  Revision.resolved_at.isnot(None))
           .distinct().all()))
+    cand |= set(r[0] for r in (
+        db.query(MasterTitle.id)
+          .filter(MasterTitle.completion_rejected_at.isnot(None)).all()))
     # A title with a picture you looked at AND a live picture you have not
     # (the reopen-and-add / reopen-and-swap cases) — intersected so the
     # per-title question only runs where it can possibly answer yes.
@@ -2213,6 +2221,91 @@ def check_titles_hold_too_many_pictures(db: Session, scope: Scope) -> CheckResul
         "of the same place. Open the title on Worker Images and remove the "
         "one you do not want, or use USE MY OWN PICTURE, which leaves "
         "exactly one.",
+        "error" if total else "ok", found[:MAX_ROWS], total,
+    )
+
+
+# The day "a title is paid once" became the rule (owner, 2026-09-29). A
+# title paid twice BEFORE it is history that cannot be undone, so only a
+# payment run made on or after this day can break the rule.
+TITLE_PAID_ONCE_FROM = datetime(2026, 9, 29)
+
+
+def check_titles_are_paid_once(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: no payment run pays a title for more pictures than its
+    project takes per title (one, for travel).
+
+    The owner's rule, 2026-09-29: a replacement picture is paid only when
+    the picture it replaced was not, "so a title is never paid twice".
+    payments.unpayable_reasons enforces it for every screen. This check
+    reads the payment runs THEMSELVES — the money actually sent — so it
+    also catches a run written by some path that never asked that
+    function. A project with no number per title has no limit and is not
+    checked. Runs made before the rule existed are not reported: that
+    money was sent under the old rule and nothing can be done about it.
+    """
+    import json as _json
+    from .models import PaymentRun
+
+    per_title = {p.id: p.images_per_title
+                 for p in db.query(Project).all() if p.images_per_title}
+    if not per_title:
+        return _skipped("titles_are_paid_once",
+                        "Titles paid more than once",
+                        "No project here sets a number of pictures per title.")
+    # picture id -> when it was paid (the newest run holding it)
+    paid_at: dict = {}
+    for raw, when in db.query(PaymentRun.poster_ids_json,
+                              PaymentRun.created_at).all():
+        try:
+            ids = _json.loads(raw or "[]")
+        except (TypeError, ValueError):
+            continue
+        for pid in ids:
+            if isinstance(pid, int) and when is not None:
+                if pid not in paid_at or when > paid_at[pid]:
+                    paid_at[pid] = when
+    if not paid_at:
+        return _result("titles_are_paid_once",
+                       "No title was paid more than once",
+                       "Nothing has been paid yet.", "ok", [], 0)
+    by_title: dict = {}
+    ids = sorted(paid_at)
+    for at in range(0, len(ids), 500):
+        for pid, tid in (db.query(SavedPoster.id, SavedPoster.master_title_id)
+                           .filter(SavedPoster.id.in_(ids[at:at + 500]))
+                           .all()):
+            by_title.setdefault(tid, []).append(pid)
+    found = []
+    for tid, pids in by_title.items():
+        if len(pids) < 2:
+            continue
+        mt = (db.query(MasterTitle)
+                .filter(MasterTitle.id == tid, scope.titles).first())
+        if mt is None:
+            continue
+        limit = per_title.get(mt.project_id or scope.default_id)
+        if not limit or len(pids) <= limit:
+            continue
+        if max(paid_at[p] for p in pids) < TITLE_PAID_ONCE_FROM:
+            continue
+        found.append(Finding(
+            scope.title_of(mt),
+            f"title {mt.external_id} was paid for {len(pids)} pictures "
+            f"(picture records {', '.join(str(p) for p in sorted(pids))}); "
+            f"its project pays {limit} per title",
+            "/admin/payments", project=scope.label(mt.project_id)))
+    total = len(found)
+    return _result(
+        "titles_are_paid_once",
+        f"{total} title(s) paid more than once"
+        if total else "No title was paid more than once",
+        "A title is paid once: a replacement picture is only paid when the "
+        "picture it replaced was not. Each row here is a payment that broke "
+        "that rule, which means some screen built a payment without asking "
+        "the shared rule. The money has already been sent; say which title "
+        "and the door can be found and closed.",
         "error" if total else "ok", found[:MAX_ROWS], total,
     )
 
@@ -3155,6 +3248,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_current_image_was_discarded,
     check_left_for_photoshop_is_reachable,
     check_titles_hold_too_many_pictures,
+    check_titles_are_paid_once,
     check_admin_picks_reach_painting,
     check_withdrawn_pictures_hold_no_waiting_painting,
     check_pictures_have_a_measured_size,

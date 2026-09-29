@@ -3012,6 +3012,16 @@ def history_view(request: Request, user: User = Depends(require_user), db: Sessi
     )
 
 
+# How the worker's history names each reason from payments.unpayable_reasons.
+# A picture with no reason is eligible.
+_HISTORY_BUCKET = {
+    "paid": "paid",
+    "flag": "pending",
+    "look": "pending",
+    "title_paid": "not_paid",
+}
+
+
 @router.get("/api/history/days")
 def api_history_days(
     user: User = Depends(require_user),
@@ -3021,64 +3031,38 @@ def api_history_days(
     Per-day summary for the current worker — one row per save_date that
     has at least one live poster. Each row breaks the count into:
        paid       — already in a past PaymentRun
-       eligible   — counts toward future pay (live, no open revision)
-       pending    — has open / awaiting-approval revision (transparency)
+       eligible   — counts toward future pay
+       pending    — an open flag, or a new picture the admin has not
+                    checked yet (paid once he approves it)
+       not_paid   — a new picture on a title already paid for; a title
+                    is paid once (owner, 2026-09-29)
     Plus the computed amount for the eligible bucket at the current rate.
     Newest day first.
     """
     from ..payments import (
-        get_rate_kes, parse_decimal, _already_paid_poster_ids,
+        get_rate_kes, parse_decimal, payable_criteria, unpayable_reasons,
     )
     rate = get_rate_kes(db)
     rate_dec = parse_decimal(rate)
-    paid_ids = _already_paid_poster_ids(db, user.id)
 
-    # All this worker's live poster rows: id + save_date.
+    # Every picture this worker could be paid for (payments.payable_criteria
+    # — the same rows the payment run starts from), with its save date.
     rows = (
         db.query(SavedPoster.id, SavedPoster.original_save_date,
                  MasterTitle.project_id)
           .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
-          .filter(
-              SavedPoster.user_id == user.id,
-              SavedPoster.deleted_at.is_(None),
-          )
+          .filter(*payable_criteria(user.id))
           .all()
     )
     if not rows:
         return JSONResponse({"ok": True, "days": [], "rate_kes": str(rate_dec)})
 
-    all_ids = {pid for pid, _d, _p in rows}
-
-    # Block list: posters under any open / awaiting-approval revision.
-    blocked = set()
-    blocked_rows = (
-        db.query(Revision.saved_poster_id)
-          .filter(
-              Revision.saved_poster_id.in_(all_ids),
-              Revision.status.in_(("open", "awaiting_approval")),
-          )
-          .all()
-    )
-    for (pid,) in blocked_rows:
-        blocked.add(pid)
-    # Similar-pair related list also counts as blocked.
-    sim_rows = (
-        db.query(Revision.related_poster_ids)
-          .filter(
-              Revision.status.in_(("open", "awaiting_approval")),
-              Revision.revision_type == "similar",
-          )
-          .all()
-    )
-    for (raw,) in sim_rows:
-        if not raw:
-            continue
-        try:
-            for pid in json.loads(raw):
-                if isinstance(pid, int) and pid in all_ids:
-                    blocked.add(pid)
-        except (TypeError, ValueError):
-            pass
+    # Why each one is not payable now — ONE answer shared with the admin's
+    # Payments page (payments.unpayable_reasons), so the worker is never
+    # shown money the payment run will not send. This used to be a copy of
+    # the flag rules alone, which counted a replacement on an already-paid
+    # title as "eligible" (2026-09-29).
+    reasons = unpayable_reasons(db, user.id, {pid for pid, _d, _p in rows})
 
     # Bucket by date.
     from ..pipeline import _default_project_id
@@ -3089,13 +3073,9 @@ def api_history_days(
     for pid, d, proj_id in rows:
         key = d.isoformat()
         b = by_day.setdefault(key, {"date": key, "paid": 0, "eligible": 0,
-                                    "pending": 0, "by_project": {}})
-        if pid in paid_ids:
-            b["paid"] += 1
-        elif pid in blocked:
-            b["pending"] += 1
-        else:
-            b["eligible"] += 1
+                                    "pending": 0, "not_paid": 0,
+                                    "by_project": {}})
+        b[_HISTORY_BUCKET.get(reasons.get(pid), "eligible")] += 1
         name = names.get(proj_id or default_pid, "")
         b["by_project"][name] = b["by_project"].get(name, 0) + 1
 
@@ -3134,26 +3114,19 @@ def api_history_day(
     saved on that day with the count of live posters + their state
     (paid / eligible / pending).
     """
-    from ..payments import _already_paid_poster_ids
+    from ..payments import payable_criteria, unpayable_reasons
     try:
         target_d = date_type.fromisoformat(d)
     except ValueError:
         raise HTTPException(400, "Bad date.")
 
-    paid_ids = _already_paid_poster_ids(db, user.id)
-
-    # Posters this worker saved that day, joined to their MasterTitle.
-    # Project comes along for the ride. A worker covering two niches sees
-    # both in one day's list, and "Adele" next to "Pulp Fiction" with nothing
-    # distinguishing them is confusing in exactly the moment they are
-    # checking their own pay.
+    # Same rows and same reasons as /api/history/days above.
     rows = (
         db.query(SavedPoster.id, SavedPoster.master_title_id,
                  MasterTitle.title, MasterTitle.year, MasterTitle.project_id)
           .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
           .filter(
-              SavedPoster.user_id == user.id,
-              SavedPoster.deleted_at.is_(None),
+              *payable_criteria(user.id),
               SavedPoster.original_save_date == target_d,
           )
           .all()
@@ -3161,37 +3134,7 @@ def api_history_day(
     if not rows:
         return JSONResponse({"ok": True, "date": d, "titles": []})
 
-    all_ids = {r[0] for r in rows}
-
-    # Block list — same logic as /api/history/days.
-    blocked = set()
-    blocked_rows = (
-        db.query(Revision.saved_poster_id)
-          .filter(
-              Revision.saved_poster_id.in_(all_ids),
-              Revision.status.in_(("open", "awaiting_approval")),
-          )
-          .all()
-    )
-    for (pid,) in blocked_rows:
-        blocked.add(pid)
-    sim_rows = (
-        db.query(Revision.related_poster_ids)
-          .filter(
-              Revision.status.in_(("open", "awaiting_approval")),
-              Revision.revision_type == "similar",
-          )
-          .all()
-    )
-    for (raw,) in sim_rows:
-        if not raw:
-            continue
-        try:
-            for pid in json.loads(raw):
-                if isinstance(pid, int) and pid in all_ids:
-                    blocked.add(pid)
-        except (TypeError, ValueError):
-            pass
+    reasons = unpayable_reasons(db, user.id, {r[0] for r in rows})
 
     # Aggregate per master title.
     from ..pipeline import _default_project_id
@@ -3205,12 +3148,10 @@ def api_history_day(
             # NULL project_id means the DEFAULT project, not "no project" —
             # the 101,605 imported rows are all NULL.
             "project": names.get(proj_id or default_pid, ""),
-            "paid": 0, "eligible": 0, "pending": 0, "total": 0,
+            "paid": 0, "eligible": 0, "pending": 0, "not_paid": 0, "total": 0,
         })
         b["total"] += 1
-        if pid in paid_ids:    b["paid"] += 1
-        elif pid in blocked:    b["pending"] += 1
-        else:                   b["eligible"] += 1
+        b[_HISTORY_BUCKET.get(reasons.get(pid), "eligible")] += 1
 
     titles = sorted(by_title.values(), key=lambda r: r["title"].lower())
     return JSONResponse({"ok": True, "date": d, "titles": titles})

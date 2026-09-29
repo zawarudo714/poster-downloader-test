@@ -1090,6 +1090,33 @@ On Changes Requested, click a thumbnail to zoom:
   top bar. If that does not fix it either, the cause is something else —
   send a screenshot.
 
+## 96. A REDO AFTER YOU REJECTED OR DELETED COMES BACK TO YOU — v246
+
+- Run Diagnostics and read "finished titles hold a replacement picture you
+  never saw". Atlanta, Georgia should now be listed. Open it and look.
+- Reject a title's completion on Changes Requested. As the worker, swap its
+  picture and press DONE. It must come back to Changes Requested.
+- Flag a picture, delete it yourself (DELETE THIS RECORD or the delete
+  button), then as the worker save a new one and press DONE. It must come
+  back to Changes Requested.
+
+## 97. A TITLE IS PAID ONCE, AND A REDO WAITS FOR YOUR LOOK — v247
+
+- Open Payments and press EVERYTHING BEFORE THIS WEEK for the worker. The
+  four pictures found on 2026-09-29 (picture records 970, 971, 1011 and
+  1018) should be gone from the total. All four are redos you have not
+  looked at yet. Their old pictures were never paid, so each one becomes
+  payable once you approve it.
+- Open Worker Images on one of those days. The PAID band should list the
+  picture in red with "a replacement you have not looked at yet".
+- Approve one of the three waiting titles on Changes Requested. Its
+  picture should then appear on Payments, unless its title was already
+  paid.
+- As the worker, open My History. A redo on an already-paid title should
+  show as "not paid", not as "eligible".
+- Run Diagnostics and read "titles paid more than once". It should be
+  green.
+
 ---
 
 ## NOT ON THIS LIST, ON PURPOSE

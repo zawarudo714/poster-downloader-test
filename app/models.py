@@ -186,6 +186,12 @@ class MasterTitle(Base):
     skip_acked_at     = Column(DateTime, nullable=True)
     complete_comment  = Column(Text, nullable=True)   # optional note from worker on complete
     admin_note        = Column(Text, nullable=True)   # admin's note when sending a skipped title back
+    # When the owner last REJECTED this title's completion (REJECT & SEND
+    # BACK on Changes Requested). A rejection is the owner having looked, so
+    # a picture that arrives after it must come back to him — see
+    # utils.pictures_awaiting_your_look, mark (d). Found 2026-09-29: Atlanta
+    # was rejected three times, redone, and then finished without his look.
+    completion_rejected_at = Column(DateTime, nullable=True)
 
     # Claim — set when a user pulls/selects this row, cleared on release.
     claimed_by_id     = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)

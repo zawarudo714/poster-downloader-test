@@ -256,44 +256,113 @@ def pictures_awaiting_your_look(db, title_id) -> list:
 
     A live picture counts when you have not looked at it (reviewed_at is
     empty; the admin's own additions never count) and ANY of:
-      (a) it arrived after a FLAGGED picture on this title was deleted —
-          the deletion record's resolved_at;
+      (a) it arrived after a FLAGGED picture on this title was taken off
+          it — by the worker's delete OR yours: the flag's resolved_at.
+          Until 2026-09-29 only the worker's delete counted (its verdict
+          wording was matched), so Atlanta — flagged, deleted by the admin,
+          redone — finished without his look;
       (b) it arrived after you had looked at ANY picture on this title —
           that picture's reviewed_at, whether it is still live or since
           deleted or swapped out. This covers a reviewed picture being
           replaced AND a second picture being added beside it after a
           reopen, which replaces nothing but is still new to you;
       (c) its own file was swapped after you had looked at it
-          (review_voided_at, set by replace_poster).
+          (review_voided_at, set by replace_poster);
+      (d) it arrived after you REJECTED the title's completion
+          (MasterTitle.completion_rejected_at, set by reject_complete).
+    Every one of those is a way YOU have already acted on the title. A new
+    way of acting on a title must be added here, or the picture after it
+    will finish unseen.
     First-time work on a title never counts: nothing was flagged or seen
     before it, so there is nothing it replaced.
+
+    PAYMENT asks this too (payments.unpayable_reasons, owner 2026-09-29):
+    a picture waiting for your look is not paid until you have looked.
     """
-    from .models import DELETION_VERDICT_PREFIX, Revision, SavedPoster
-    live = (db.query(SavedPoster)
-              .filter(SavedPoster.master_title_id == title_id,
-                      SavedPoster.deleted_at.is_(None),
-                      SavedPoster.reviewed_at.is_(None),
-                      SavedPoster.added_by.is_(None))
-              .all())
-    if not live:
-        return []
-    marks = [r[0] for r in (
-        db.query(Revision.resolved_at)
-          .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
-          .filter(SavedPoster.master_title_id == title_id,
-                  Revision.admin_verdict.like(DELETION_VERDICT_PREFIX + "%"),
-                  Revision.resolved_at.isnot(None))
-          .all()) if r[0] is not None]
-    marks += [r[0] for r in (
-        db.query(SavedPoster.reviewed_at)
-          .filter(SavedPoster.master_title_id == title_id,
-                  SavedPoster.reviewed_at.isnot(None))
-          .all()) if r[0] is not None]
-    first = min(marks) if marks else None
-    return [sp for sp in live
-            if sp.review_voided_at is not None
-            or (first is not None and sp.created_at is not None
-                and sp.created_at >= first)]
+    return awaiting_your_look_by_title(db, [title_id]).get(title_id, [])
+
+
+def awaiting_your_look_by_title(db, title_ids) -> dict:
+    """
+    The body of pictures_awaiting_your_look, over many titles at once:
+    {title_id: [SavedPoster, ...]}, only titles that have some. Payments ask
+    it for every title a worker ever touched, so it runs a fixed number of
+    queries per 500 titles instead of four per title. The single-title
+    version calls this one, so the two cannot drift apart.
+    """
+    from .models import MasterTitle, Revision, SavedPoster
+    ids = sorted({i for i in (title_ids or []) if i is not None})
+    out: dict = {}
+    for at in range(0, len(ids), 500):
+        chunk = ids[at:at + 500]
+        live = (db.query(SavedPoster)
+                  .filter(SavedPoster.master_title_id.in_(chunk),
+                          SavedPoster.deleted_at.is_(None),
+                          SavedPoster.reviewed_at.is_(None),
+                          SavedPoster.added_by.is_(None))
+                  .order_by(SavedPoster.id.asc())
+                  .all())
+        if not live:
+            continue
+        tids = sorted({sp.master_title_id for sp in live})
+        first: dict = {}
+
+        def mark(tid, when):
+            if when is not None and (tid not in first or when < first[tid]):
+                first[tid] = when
+
+        for tid, when in (
+                db.query(SavedPoster.master_title_id, Revision.resolved_at)
+                  .join(Revision, Revision.saved_poster_id == SavedPoster.id)
+                  .filter(SavedPoster.master_title_id.in_(tids),
+                          SavedPoster.deleted_at.isnot(None),
+                          Revision.resolved_at.isnot(None))
+                  .all()):
+            mark(tid, when)                                   # (a)
+        for tid, when in (
+                db.query(SavedPoster.master_title_id, SavedPoster.reviewed_at)
+                  .filter(SavedPoster.master_title_id.in_(tids),
+                          SavedPoster.reviewed_at.isnot(None))
+                  .all()):
+            mark(tid, when)                                   # (b)
+        for tid, when in (
+                db.query(MasterTitle.id, MasterTitle.completion_rejected_at)
+                  .filter(MasterTitle.id.in_(tids),
+                          MasterTitle.completion_rejected_at.isnot(None))
+                  .all()):
+            mark(tid, when)                                   # (d)
+        for sp in live:
+            f = first.get(sp.master_title_id)
+            if (sp.review_voided_at is not None                # (c)
+                    or (f is not None and sp.created_at is not None
+                        and sp.created_at >= f)):
+                out.setdefault(sp.master_title_id, []).append(sp)
+    return out
+
+def backfill_completion_rejections(db) -> int:
+    """
+    Give titles rejected BEFORE MasterTitle.completion_rejected_at existed
+    their rejection time, read from the activity log, and return how many
+    changed. Run at startup; only fills empty ones, so it is harmless to
+    repeat. Without it, a title rejected last week and redone tomorrow would
+    still finish without the owner's look — fixing the door does not repair
+    what it had already written (CLAUDE.md, rule 7 family).
+    """
+    from sqlalchemy import func
+    from .models import ActivityLog, MasterTitle
+    rows = (db.query(ActivityLog.target_id, func.max(ActivityLog.created_at))
+              .filter(ActivityLog.action == "rejected_completion",
+                      ActivityLog.target_type == "master_title",
+                      ActivityLog.target_id.isnot(None))
+              .group_by(ActivityLog.target_id).all())
+    changed = 0
+    for tid, when in rows:
+        t = db.query(MasterTitle).filter(MasterTitle.id == tid).first()
+        if t is not None and t.completion_rejected_at is None and when is not None:
+            t.completion_rejected_at = when
+            changed += 1
+    return changed
+
 
 def _live_flag_query(db):
     """The body of the definition above, unfiltered by title — shared with

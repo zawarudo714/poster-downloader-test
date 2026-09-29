@@ -1796,12 +1796,12 @@ def _day_pay_summary(db: Session, worker: str, rows) -> dict:
     worker could be paid for count: anything the admin added himself is
     left out, exactly as payments.payable_criteria leaves it out.
 
-    Each unpaid picture carries the reason in plain words. The common ones:
-    its flag is still open (payments skip a flagged picture), or it was
-    saved AFTER this day was paid — which is what a picture swapped in
-    from the search grid looks like, because a swap makes a new record.
+    Each unpaid picture carries the reason in plain words, taken from
+    payments.unpayable_reasons — the same answer the payment run uses, so
+    the band can never promise a payment the run will not make.
     """
-    from ..payments import _already_paid_poster_ids
+    from ..payments import (_already_paid_poster_ids, unpayable_reasons,
+                            UNPAYABLE_WORDS)
     import json as _json
 
     # One entry per picture: a picture with two open flags arrives twice
@@ -1812,7 +1812,7 @@ def _day_pay_summary(db: Session, worker: str, rows) -> dict:
             seen[sp.id] = (sp, mt, rev)
     payable = list(seen.values())
     empty = {"state": "none", "paid": 0, "total": 0, "paid_on": "",
-             "reference": "", "unpaid": [], "paid_ids": []}
+             "reference": "", "unpaid": [], "never": [], "paid_ids": []}
     if not payable:
         return empty
     user = db.query(User).filter_by(username=worker).first()
@@ -1838,28 +1838,41 @@ def _day_pay_summary(db: Session, worker: str, rows) -> dict:
                 last_run = run
                 break
 
+    reasons = unpayable_reasons(db, user.id, day_ids - paid_ids)
     unpaid = []
+    never = []
     for sp, mt, rev in payable:
         if sp.id in paid_ids:
             continue
-        if rev is not None:
-            kind, why = "flag", "flag still open, so it is paid once you approve the fix"
+        r = reasons.get(sp.id)
+        name = (f"{mt.external_id}. {mt.title}"
+                if mt is not None and mt.external_id is not None
+                else (mt.title if mt is not None else sp.filename))
+        if r == "title_paid":
+            # Not "still to pay": this one will NEVER be paid, because its
+            # title already was (owner, 2026-09-29). Listed on its own so
+            # the band does not promise money the run will not send.
+            never.append({"poster_id": sp.id, "title": name,
+                          "why": UNPAYABLE_WORDS[r], "kind": "title"})
+            continue
+        if r in ("flag", "look"):
+            kind, why = "flag", UNPAYABLE_WORDS[r]
         elif last_run is not None and sp.created_at and sp.created_at > last_run.created_at:
             kind, why = "after", "saved after this day was paid (a replacement picture)"
         else:
             kind, why = "next", "waiting for the next payment"
-        name = (f"{mt.external_id}. {mt.title}"
-                if mt is not None and mt.external_id is not None
-                else (mt.title if mt is not None else sp.filename))
         # `kind` drives the chip colour, so a flag reads apart from a
         # plain wait at a glance (owner, 2026-09-27).
         unpaid.append({"poster_id": sp.id, "title": name, "why": why, "kind": kind})
 
     n_paid = len(touched)
-    state = ("paid" if n_paid and not unpaid
+    # A day whose only unpaid pictures are replacements on already-paid
+    # titles IS paid: nothing more will ever be sent for it.
+    state = ("paid" if (n_paid or never) and not unpaid
              else "partly" if n_paid else "unpaid")
     return {
-        "state": state, "paid": n_paid, "total": len(payable),
+        "state": state, "paid": n_paid, "total": len(payable) - len(never),
+        "never": never,
         "paid_on": (last_run.created_at.date().isoformat() if last_run else ""),
         "reference": ((last_run.reference or "") if last_run else ""),
         "unpaid": unpaid,
@@ -3175,6 +3188,9 @@ def reject_complete(
     t.status = "in_progress"
     t.completed_at = None
     t.admin_note = verdict
+    # You have looked at this title: whatever the worker saves next must
+    # come back to you (utils.pictures_awaiting_your_look, mark (d)).
+    t.completion_rejected_at = datetime.utcnow()
     # The shared definition (utils.live_flag_title_ids): the reopened flags
     # are now 'open', so the title reads flagged exactly when one of them
     # sits on a picture that still exists.

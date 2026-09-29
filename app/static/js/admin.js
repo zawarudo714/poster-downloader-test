@@ -304,44 +304,57 @@
     if (!box) return;
     box.innerHTML = '';
     box.className = 'ib-paid';
-    if (!pay || !pay.total) { box.hidden = true; return; }
+    const never = pay ? (pay.never || []) : [];
+    if (!pay || (!pay.total && !never.length)) { box.hidden = true; return; }
     box.hidden = false;
     const when = pay.paid_on
       ? ` · paid ${pay.paid_on}${pay.reference ? ' · ref ' + pay.reference : ''}` : '';
     const noun = (n) => (n === 1 ? PD.noun : PD.nouns);
     if (pay.state === 'unpaid') {
       box.classList.add('is-unpaid');
-      box.textContent = `NOT PAID YET · ${pay.total} ${noun(pay.total)} on this day`;
-      return;
+      const head = document.createElement('div');
+      head.textContent = `NOT PAID YET · ${pay.total} ${noun(pay.total)} on this day`;
+      box.appendChild(head);
+    } else {
+      box.classList.add(pay.state === 'paid' ? 'is-paid' : 'is-partly');
+      const head = document.createElement('div');
+      head.className = 'ib-paid-head';
+      const word = document.createElement('span');
+      word.className = 'ib-paid-word';
+      word.textContent = 'PAID';
+      const line = document.createElement('span');
+      line.className = 'ib-paid-line mono';
+      // A day can be settled with nothing paid ON it: its only picture is
+      // a replacement on a title that was paid before (never paid twice).
+      line.textContent = (!pay.total
+        ? 'this title was already paid for'
+        : pay.paid === pay.total
+          ? `all ${pay.total} ${noun(pay.total)} on this day`
+          : `${pay.paid} of ${pay.total} ${noun(pay.total)} on this day`) + when;
+      head.appendChild(word);
+      head.appendChild(line);
+      box.appendChild(head);
     }
-    box.classList.add(pay.state === 'paid' ? 'is-paid' : 'is-partly');
-    const head = document.createElement('div');
-    head.className = 'ib-paid-head';
-    const word = document.createElement('span');
-    word.className = 'ib-paid-word';
-    word.textContent = 'PAID';
-    const line = document.createElement('span');
-    line.className = 'ib-paid-line mono';
-    line.textContent = (pay.state === 'paid'
-      ? `all ${pay.total} ${noun(pay.total)} on this day`
-      : `${pay.paid} of ${pay.total} ${noun(pay.total)} on this day`) + when;
-    head.appendChild(word);
-    head.appendChild(line);
-    box.appendChild(head);
-    if (!(pay.unpaid || []).length) return;
+    // One colour per reason: red = open flag or waiting for your look,
+    // blue = saved after the day was paid, amber = waiting for the next
+    // payment, grey = never paid, because its title already was.
+    addUnpaidList(box, pay.unpaid || [], (n) => `${n} still to pay:`);
+    addUnpaidList(box, never, (n) => `${n} not paid again:`);
+  }
+
+  function addUnpaidList(box, items, leadText) {
+    if (!items.length) return;
     const list = document.createElement('div');
     list.className = 'ib-unpaid';
     const lead = document.createElement('span');
     lead.className = 'ib-unpaid-lead';
-    lead.textContent = `${pay.unpaid.length} still to pay:`;
+    lead.textContent = leadText(items.length);
     list.appendChild(lead);
-    pay.unpaid.forEach((u) => {
+    items.forEach((u) => {
       const b = document.createElement('button');
       b.type = 'button';
-      // One colour per reason: red = open flag, blue = saved after the day
-      // was paid, amber = simply waiting for the next payment.
       b.className = 'ib-unpaid-item'
-        + ({ flag: ' is-flag', after: ' is-after' }[u.kind] || '');
+        + ({ flag: ' is-flag', after: ' is-after', title: ' is-never' }[u.kind] || '');
       b.title = 'Open this picture';
       b.textContent = `${u.title} — ${u.why}`;
       b.addEventListener('click', () => {
@@ -359,6 +372,7 @@
     });
     box.appendChild(list);
   }
+
 
   function refreshSummary() {
     const nT = titles.length;

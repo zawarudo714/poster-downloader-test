@@ -1435,6 +1435,10 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
    payment" beside it (owner, 2026-09-28: "easier on my eyes"). */
 .ib-unpaid-item.is-after { border-color: rgba(100, 180, 255, 0.9); color: rgb(130, 195, 255); }
 .ib-unpaid-item.is-after:hover { background: rgb(100, 180, 255); color: var(--bg); }
+/* Never paid, because its title already was (a title is paid once —
+   owner, 2026-09-29). Grey: nothing to wait for and nothing to do. */
+.ib-unpaid-item.is-never { border-color: var(--subtext); color: var(--subtext); }
+.ib-unpaid-item.is-never:hover { background: var(--subtext); color: var(--bg); }
 
 /* ── Lightbox modal ──────────────────────────────────────────────────── */
 .lightbox {
@@ -2666,6 +2670,7 @@ html.theme-light .env-banner-name {
 .history-bucket.paid,     .history-bucket-mini.paid     { background: rgba(80,200,120,0.15); color: #66dd99; border-color: rgba(80,200,120,0.45); }
 .history-bucket.eligible, .history-bucket-mini.eligible { background: rgba(220,180,80,0.15); color: #ffd060; border-color: rgba(220,180,80,0.45); }
 .history-bucket.pending,  .history-bucket-mini.pending  { background: rgba(244,180,0,0.10); color: #f4b400; border-color: rgba(244,180,0,0.45); }
+.history-bucket.not-paid, .history-bucket-mini.not-paid { background: rgba(150,150,170,0.12); color: var(--subtext); border-color: rgba(150,150,170,0.45); }
 .history-bucket.total {
   background: transparent;
   color: var(--subtext);

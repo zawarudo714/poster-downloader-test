@@ -109,7 +109,7 @@ live bug fix — it was reported as a live bug and that was wrong.
 | Control | Status |
 |---|---|
 | Project filter | OK — only shown when the worker covers more than one |
-| Per-day rows, KES | OK |
+| Per-day rows, KES | OK — `DECIDED 2026-09-29` the buckets (paid · eligible · pending · not paid) come from `payments.unpayable_reasons`, the same answer the payment run uses. It used to carry its own copy of the flag rules, which counted admin-added pictures and hid retired-with-pay ones |
 
 `MEASURED 2026-08-27` — Save history is deliberately CROSS-project and
 shows a split when a day spans two. That is right: pay is cross-project,

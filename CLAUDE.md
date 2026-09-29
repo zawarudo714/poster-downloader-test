@@ -2831,7 +2831,30 @@ mechanism can close (delete, acknowledge, SEND BACK, reopen-and-swap,
 reopen-and-add) is covered by one question, watched by
 `check_finished_titles_hold_no_unseen_replacement`. Before trusting a gate,
 list every way its condition can become false and ask whether each one
-means the thing it guards is really done.
+means the thing it guards is really done. **And the list of "ways the
+owner has already acted" is itself a list that must be complete.** v237's
+version matched the WORKER's deletion wording only, so Atlanta — flagged,
+deleted by the ADMIN, completion rejected three times, redone — finished
+without his look (found 2026-09-29, while he checked why four pictures
+were payable). The Diagnostics watcher could not see it either, because
+it picked its candidate titles with its own copy of the same narrow rule:
+a watcher that shares the definition it watches shares its holes. The
+marks are now any flagged picture taken off the title, by anyone, and a
+stored `completion_rejected_at`; the watcher reads the same marks.
+**And a gate protects EVERY step that follows, not just the one it was
+built beside.** The look gate held DONE, but payment never asked it, so
+those same four redos sat in "everything before this week" as payable —
+and nothing stopped a title being paid a second time for its replacement
+(owner, 2026-09-29: "a title is never paid twice"). Payment now asks
+`payments.unpayable_reasons`, which reads the look gate in bulk
+(`utils.awaiting_your_look_by_title`) and the per-title limit. Building it
+turned up a THIRD copy of the pay rules, in the worker's own history, which
+lacked both the admin-added exclusion and retire-with-pay — so a worker
+could be shown money the run would never send. Every screen that counts
+money now asks the one function; `check_titles_are_paid_once` reads the
+payment runs themselves. When a gate is added, list every later step that
+acts on what it guards (paying, painting, uploading) and ask whether each
+one consults it.
 
 **A RULE THAT LEAVES SOMETHING OUT OF ONE STEP LEAVES IT OUT OF EVERY STEP
 THAT STEP STARTS.** The admin's own pictures were rightly never paid for —

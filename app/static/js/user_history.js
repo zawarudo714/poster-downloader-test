@@ -47,7 +47,7 @@
     const wrap = document.createElement('div');
     wrap.className = 'history-day';
     wrap.dataset.date = d.date;
-    const total = (d.paid || 0) + (d.eligible || 0) + (d.pending || 0);
+    const total = (d.paid || 0) + (d.eligible || 0) + (d.pending || 0) + (d.not_paid || 0);
     wrap.innerHTML = `
       <div class="history-day-head">
         <span class="history-day-arrow mono">▸</span>
@@ -55,7 +55,8 @@
         <span class="history-day-counts">
           <span class="history-bucket paid"     data-tooltip="Already in a past payment">${d.paid || 0} paid</span>
           <span class="history-bucket eligible" data-tooltip="Counts toward your next payment">${d.eligible || 0} eligible</span>
-          ${d.pending ? `<span class="history-bucket pending"  data-tooltip="Waiting on a revision fix">${d.pending} pending</span>` : ''}
+          ${d.pending ? `<span class="history-bucket pending"  data-tooltip="Waiting on a fix, or on the admin to check a new picture">${d.pending} pending</span>` : ''}
+          ${d.not_paid ? `<span class="history-bucket not-paid" data-tooltip="A new picture on a title you were already paid for. Each title is paid once.">${d.not_paid} not paid</span>` : ''}
           <span class="history-bucket total mono">total ${total}</span>
         </span>
         <span class="history-day-amount mono"></span>
@@ -116,6 +117,7 @@
       if (t.paid)     totalCells.push(`<span class="history-bucket-mini paid">${t.paid} paid</span>`);
       if (t.eligible) totalCells.push(`<span class="history-bucket-mini eligible">${t.eligible} eligible</span>`);
       if (t.pending)  totalCells.push(`<span class="history-bucket-mini pending">${t.pending} pending</span>`);
+      if (t.not_paid) totalCells.push(`<span class="history-bucket-mini not-paid" data-tooltip="Already paid for this title once">${t.not_paid} not paid</span>`);
       html += `
         <div class="history-title-row">
           <span class="history-title-name"></span>

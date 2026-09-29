@@ -10,6 +10,10 @@ A poster counts toward pay only if ALL of:
   - Created on a date inside the requested period.
   - It has NO open or awaiting-approval revision against it RIGHT NOW.
   - It hasn't already been paid (poster_ids_json across past PaymentRuns).
+  - Its TITLE has not already been paid for (a replacement on a paid title
+    is not paid again — owner, 2026-09-29), and it is not a replacement
+    still waiting for the owner's look. See unpayable_reasons, which is the
+    one place every "can this be paid now" question is answered.
 
 The "no open revision" check is intentional — if admin flagged it but the
 worker hasn't fixed yet, we don't pay for it. If/when the revision resolves,
@@ -196,8 +200,19 @@ def week_bounds_containing(d: date, week_start: int) -> tuple[date, date]:
 
 def _already_paid_poster_ids(db: Session, worker_id: int) -> set[int]:
     """All saved_poster IDs that were already counted in a past PaymentRun for this worker."""
+    return _paid_ids_from(
+        db.query(PaymentRun.poster_ids_json).filter_by(worker_id=worker_id).all())
+
+
+def _every_paid_poster_id(db: Session) -> set[int]:
+    """Every saved_poster ID any payment run has ever paid, for any worker.
+    "A title is never paid twice" is about the TITLE, so it must see a
+    picture paid to somebody else too."""
+    return _paid_ids_from(db.query(PaymentRun.poster_ids_json).all())
+
+
+def _paid_ids_from(rows) -> set[int]:
     paid: set[int] = set()
-    rows = db.query(PaymentRun.poster_ids_json).filter_by(worker_id=worker_id).all()
     for (raw,) in rows:
         if not raw:
             continue
@@ -245,6 +260,160 @@ def payable_criteria(worker_id: int) -> list:
     ]
 
 
+# Why a picture that passes payable_criteria cannot be paid RIGHT NOW. The
+# words are what the PAID band and the worker's history show; the keys are
+# what the code compares.
+UNPAYABLE_WORDS = {
+    "paid":       "already paid",
+    "title_paid": "this title was already paid for, and a title is paid once",
+    "flag":       "flag still open, so it is paid once you approve the fix",
+    "look":       "a replacement you have not looked at yet — it is paid "
+                  "once you approve it on Changes Requested",
+}
+
+
+def _chunks(ids, size=500):
+    ids = sorted(ids)
+    for at in range(0, len(ids), size):
+        yield ids[at:at + size]
+
+
+def unpayable_reasons(db: Session, worker_id: int, candidate_ids) -> dict:
+    """
+    THE one answer to "which of these pictures cannot be paid now, and
+    why". Returns {poster_id: key}; a picture missing from the answer IS
+    payable. Every screen that counts money owed asks this — the payment
+    run itself, the "older unpaid days" list, the PAID band on Worker
+    Images and the worker's own history — so they cannot disagree.
+
+    The candidates must already pass payable_criteria. In order:
+
+      paid        already in one of this worker's payment runs.
+      title_paid  the title already had its pictures paid (by ANY run, to
+                  anybody), so a replacement is not paid again. Owner,
+                  2026-09-29: "pay only when the old picture was not paid,
+                  so a title is never paid twice". The limit is the
+                  project's images_per_title (1 for travel), so a project
+                  that takes three pictures per title still pays three. A
+                  project with no number set has no limit. When two unpaid
+                  pictures compete for the last place, the OLDER one wins.
+      flag        an open or awaiting flag on it (or on a similar pair).
+      look        a replacement the owner has not looked at yet
+                  (utils.awaiting_your_look_by_title). Owner, 2026-09-29:
+                  payment holds these back until he approves them.
+
+    Found 2026-09-29: four pictures showed up as payable in "everything
+    before this week" although the owner had approved nothing — they were
+    redos on titles he had flagged, rejected or already paid for.
+    """
+    from .models import MasterTitle, Project
+    from .pipeline import _default_project_id
+    from .utils import awaiting_your_look_by_title
+
+    asked = {i for i in (candidate_ids or []) if i is not None}
+    if not asked:
+        return {}
+    # The answer for one picture must not depend on which others the caller
+    # happened to pass: "the older unpaid picture on this title wins" needs
+    # to see that older picture even when it is deleted-but-payable or on
+    # another page. So every payable picture of this worker on the same
+    # titles joins the question, and only the asked ones are answered.
+    asked_titles: set = set()
+    for chunk in _chunks(asked):
+        asked_titles |= {r[0] for r in (
+            db.query(SavedPoster.master_title_id)
+              .filter(SavedPoster.id.in_(chunk)).all()) if r[0] is not None}
+    cand = set(asked)
+    for chunk in _chunks(asked_titles):
+        cand |= {r[0] for r in (
+            db.query(SavedPoster.id)
+              .filter(SavedPoster.master_title_id.in_(chunk),
+                      *payable_criteria(worker_id)).all())}
+    out: dict = {}
+
+    for pid in cand & _already_paid_poster_ids(db, worker_id):
+        out[pid] = "paid"
+    rest = cand - set(out)
+
+    # Where each remaining picture sits.
+    info: dict = {}
+    for chunk in _chunks(rest):
+        for pid, tid, created, proj in (
+                db.query(SavedPoster.id, SavedPoster.master_title_id,
+                         SavedPoster.created_at, MasterTitle.project_id)
+                  .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+                  .filter(SavedPoster.id.in_(chunk)).all()):
+            info[pid] = (tid, created, proj)
+    title_ids = {tid for tid, _c, _p in info.values() if tid is not None}
+
+    # How many pictures each title has ALREADY had paid, by anybody.
+    every_paid = _every_paid_poster_id(db)
+    paid_on_title: dict = {}
+    for chunk in _chunks(title_ids):
+        for pid, tid in (db.query(SavedPoster.id, SavedPoster.master_title_id)
+                           .filter(SavedPoster.master_title_id.in_(chunk)).all()):
+            if pid in every_paid:
+                paid_on_title[tid] = paid_on_title.get(tid, 0) + 1
+    default_pid = _default_project_id(db)
+    per_title = {p.id: int(p.images_per_title)
+                 for p in db.query(Project).all() if p.images_per_title}
+
+    def limit_of(proj):
+        return per_title.get(proj if proj is not None else default_pid)
+
+    for pid, (tid, _c, proj) in info.items():
+        lim = limit_of(proj)
+        if lim is not None and paid_on_title.get(tid, 0) >= lim:
+            out[pid] = "title_paid"
+    rest -= set(out)
+
+    # Open or awaiting flags, on the picture itself or in a similar pair.
+    flagged: set = set()
+    for chunk in _chunks(rest):
+        flagged |= {r[0] for r in (
+            db.query(Revision.saved_poster_id)
+              .filter(Revision.saved_poster_id.in_(chunk),
+                      Revision.status.in_(("open", "awaiting_approval")))
+              .all())}
+    for (raw,) in (db.query(Revision.related_poster_ids)
+                     .filter(Revision.status.in_(("open", "awaiting_approval")),
+                             Revision.revision_type == "similar")
+                     .all()):
+        if not raw:
+            continue
+        try:
+            flagged |= {i for i in json.loads(raw) if isinstance(i, int)}
+        except (TypeError, ValueError):
+            pass
+    for pid in rest & flagged:
+        out[pid] = "flag"
+    rest -= set(out)
+
+    # Replacements the owner has not looked at.
+    waiting = awaiting_your_look_by_title(
+        db, {info[p][0] for p in rest if p in info})
+    unseen = {sp.id for lst in waiting.values() for sp in lst}
+    for pid in rest & unseen:
+        out[pid] = "look"
+    rest -= set(out)
+
+    # Two unpaid pictures on one title with room for one: the older is paid,
+    # the other is not — otherwise the title is paid twice in ONE run.
+    by_title: dict = {}
+    for pid in rest:
+        if pid in info:
+            by_title.setdefault(info[pid][0], []).append(pid)
+    for tid, pids in by_title.items():
+        lim = limit_of(info[pids[0]][2])
+        if lim is None:
+            continue
+        room = max(lim - paid_on_title.get(tid, 0), 0)
+        pids.sort(key=lambda p: (info[p][1] is None, info[p][1], p))
+        for pid in pids[room:]:
+            out[pid] = "title_paid"
+    return {pid: why for pid, why in out.items() if pid in asked}
+
+
 def eligible_poster_ids(
     db: Session,
     *,
@@ -270,46 +439,9 @@ def eligible_poster_ids(
     candidate_ids = {row[0] for row in base_q.all()}
     if not candidate_ids:
         return []
-
-    # Subtract already-paid IDs.
-    candidate_ids -= _already_paid_poster_ids(db, worker_id)
-    if not candidate_ids:
-        return []
-
-    # Subtract IDs that have an open or awaiting-approval revision RIGHT NOW.
-    blocked_rows = (
-        db.query(Revision.saved_poster_id)
-          .filter(
-              Revision.saved_poster_id.in_(candidate_ids),
-              Revision.status.in_(("open", "awaiting_approval")),
-          )
-          .all()
-    )
-    blocked = {row[0] for row in blocked_rows}
-    candidate_ids -= blocked
-
-    # Also subtract IDs that appear inside a similar-pair revision's
-    # related_poster_ids JSON — those are still under review even if the
-    # blocked saved_poster_id IS one of the related, not the primary.
-    sim_rows = (
-        db.query(Revision.related_poster_ids)
-          .filter(
-              Revision.status.in_(("open", "awaiting_approval")),
-              Revision.revision_type == "similar",
-          )
-          .all()
-    )
-    for (raw,) in sim_rows:
-        if not raw:
-            continue
-        try:
-            ids = json.loads(raw)
-        except (TypeError, ValueError):
-            continue
-        for pid in ids:
-            if isinstance(pid, int):
-                candidate_ids.discard(pid)
-
+    # Already paid, title already paid, flagged, or waiting for the owner's
+    # look — one function decides, for every screen (unpayable_reasons).
+    candidate_ids -= set(unpayable_reasons(db, worker_id, candidate_ids))
     return sorted(candidate_ids)
 
 
@@ -405,41 +537,7 @@ def unpaid_dates_before(
         return []
 
     candidate = {pid for pid, _d in rows}
-    candidate -= _already_paid_poster_ids(db, worker_id)
-    if not candidate:
-        return []
-
-    # Subtract any with active revisions.
-    blocked_rows = (
-        db.query(Revision.saved_poster_id)
-          .filter(
-              Revision.saved_poster_id.in_(candidate),
-              Revision.status.in_(("open", "awaiting_approval")),
-          )
-          .all()
-    )
-    blocked = {r[0] for r in blocked_rows}
-    candidate -= blocked
-
-    # Similar-pair revision related list.
-    sim_rows = (
-        db.query(Revision.related_poster_ids)
-          .filter(
-              Revision.status.in_(("open", "awaiting_approval")),
-              Revision.revision_type == "similar",
-          )
-          .all()
-    )
-    for (raw,) in sim_rows:
-        if not raw:
-            continue
-        try:
-            for pid in json.loads(raw):
-                if isinstance(pid, int):
-                    candidate.discard(pid)
-        except (TypeError, ValueError):
-            pass
-
+    candidate -= set(unpayable_reasons(db, worker_id, candidate))
     if not candidate:
         return []
 

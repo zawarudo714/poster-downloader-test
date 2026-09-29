@@ -251,6 +251,18 @@ def on_startup():
             db.rollback()
             log.error("Could not correct flag markers: %s", e)
 
+        # Titles rejected before the rejection time was stored get it from
+        # the activity log — see utils.backfill_completion_rejections.
+        try:
+            from .utils import backfill_completion_rejections
+            filled = backfill_completion_rejections(db)
+            db.commit()
+            if filled:
+                log.info("Recorded the rejection time on %d title(s)", filled)
+        except Exception as e:
+            db.rollback()
+            log.error("Could not record past rejections: %s", e)
+
         # Paintings of pictures already taken off their title leave Approve
         # Artwork — see utils.set_aside_withdrawn_paintings. Own guard, same
         # reason as the flag markers above.

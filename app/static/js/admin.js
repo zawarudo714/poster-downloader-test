@@ -702,19 +702,64 @@
   const closeLightbox = () => LB.close();
 
   // USE MY OWN PICTURE, from the title box or from the zoom. The worker's
-  // picture leaves this day's gallery and the owner's takes its place, so
-  // the page is simply reloaded afterwards.
+  // picture leaves this day's gallery and the owner's takes its place.
   function usePick(t) {
     if (!window.AdminPick) return;
     window.AdminPick.open({
       masterId: t.master_id,
       title: t.title,
-      onDone: (d, msg) => {
-        closeLightbox();
-        loadList();
+      onDone: async (d, msg) => {
+        await refreshTitleInPlace(t.master_id);
         if (window.toast) window.toast(msg);
       },
     });
+  }
+
+  // ONE TITLE CHANGED — re-read the day and put back only that title, in
+  // its old place. This used to call loadList(), which blanked the gallery
+  // to "Loading…", re-sorted (a picked title is now looked-at, so it sank
+  // to the bottom) and jumped back to the first title, with the zoom shut
+  // — a full reload in all but name (owner, 2026-10-09; Changes Requested
+  // already updated in place). Now the order, the scroll and the zoom stay
+  // where they were, and the zoom shows the new picture.
+  async function refreshTitleInPlace(masterId) {
+    const worker = $('ib-worker').value;
+    const date   = $('ib-date').value;
+    const wasOpen = LB.isOpen();
+    let data;
+    try {
+      const params = new URLSearchParams({ worker, date });
+      const r = await fetch('/admin/api/browse?' + params.toString() + '&_t=' + Date.now(),
+                            { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      data = await r.json();
+    } catch (e) {
+      // Showing a stale title would be worse than the old jump.
+      closeLightbox();
+      await loadList();
+      return;
+    }
+    const fresh = (data.titles || []).find((x) => x.master_id === masterId);
+    const at = titles.findIndex((x) => x.master_id === masterId);
+    if (at >= 0) {
+      if (fresh) titles[at] = fresh;
+      else {
+        titles.splice(at, 1);
+        if (titleIdx > at) titleIdx -= 1;
+      }
+    }
+    titleIdx = Math.max(0, Math.min(titleIdx, titles.length - 1));
+    renderPaid(data.pay);
+    const y = window.scrollY;
+    renderGallery();
+    window.scrollTo(0, y);
+    refreshSummary();
+    if (wasOpen && fresh && (fresh.posters || []).length) {
+      titleIdx = titles.indexOf(fresh);
+      openLightbox(fresh, fresh.posters[0]);
+    } else if (wasOpen) {
+      closeLightbox();
+    }
   }
 
   // ── RETIRE TITLE — no good photo of this place exists ─────────────────

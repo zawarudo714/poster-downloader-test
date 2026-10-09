@@ -561,6 +561,11 @@ DEFAULTS: dict[str, Any] = {
     # its own default is "view", and the owner did not want the two tangled
     # (2026-09-11). Plain words, NOT a template, so no {title} is required.
     "google_refine_terms": "aerial\nlandscape\nphotography",
+    # QUICK NOTE buttons in the zoom's title bar on Worker Images and
+    # Changes Requested (owner, 2026-10-09). One note per line; each line is
+    # a button that types itself into the zoom's comment box, so a common
+    # reason for a flag is one click instead of typing it out every time.
+    "flag_quick_notes": "generic\ncamera angle",
     "brave_min_dimension": 300,
     # ── WORDS THAT MEAN "THIS IS NOT A PHOTOGRAPH OF THE PLACE" ──────────
     #

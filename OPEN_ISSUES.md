@@ -2,6 +2,34 @@
 
 ---
 
+## REMIND THE OWNER BEFORE PROMPT TUNING — open decision, 2026-10-06
+
+**He asked to be reminded of this before he starts testing prompts.** Raise
+it the moment prompt testing comes up, before he presses anything.
+
+`TRACED 2026-10-06`: the pipeline is set to DRAIN (reason "need tune
+prompt") so the 216 newly paid pictures do not paint with the old prompt.
+But DRAIN also stops PROMPT TEST rounds — `gpt_worker._cycle` asks
+`intake_open()` before claiming anything, rounds included — and it stops
+uploads. Test mode alone does not help either: it holds only REPAINTS, so
+switching back to RUN would paint the 216 new pictures with the main prompt.
+
+Two fixes were offered; he has not chosen:
+
+  1. Rounds paint even while draining. DRAIN keeps stopping everything
+     automatic; a round started by the button always paints. Smaller.
+  2. Test mode holds NEW pictures too (they join the pile), so rounds can
+     test on them. Reverses his earlier "new pictures are not affected".
+
+Also in flight the same day — the Sat/Sun payment, so the next session does
+not muddle the two: 1725 KES was sent on 2026-10-06. A run was recorded for
+2026-09-12 → 10-02 (215 pictures) at 1725, the note saying 650 KES was paid
+ahead for Sat 3 + Sun 4 Oct (130 pictures). Still to do: check those two
+days, record them with amount 0, and carry the credit (5 KES per picture
+flagged on those days) into the next payday.
+
+---
+
 ## THE FULL RESET TO ZERO — agreed 2026-09-09, to be done LAST
 
 The owner's plan, in his words: the production address is reset to absolute

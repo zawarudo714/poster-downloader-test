@@ -1884,6 +1884,22 @@ def _day_pay_summary(db: Session, worker: str, rows) -> dict:
         "paid_ids": sorted(touched),
     }
 
+@router.get("/api/quick_notes")
+def api_quick_notes(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """The QUICK NOTE buttons for the shared zoom (poster_lightbox.js), from
+    the dashboard setting `flag_quick_notes` — one note per line. Per
+    project, because a different niche flags for different reasons."""
+    from .. import pipeline as P
+    raw = str(P.get_setting(db, "flag_quick_notes",
+                            project=current_project(request, admin, db)) or "")
+    notes = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    return JSONResponse({"notes": notes[:20]})
+
+
 @router.get("/api/browse")
 def api_browse(
     request: Request,

@@ -336,6 +336,8 @@
     if (prev) prev.addEventListener('click', () => step(-1));
     if (next) next.addEventListener('click', () => step(1));
 
+    loadQuickNotes();
+
     // CHECK GOOGLE — through the admin add-on when it is installed (one tab
     // that then follows the zoom), otherwise a plain new tab. See above.
     const gBtn = $id('ib-lb-google');
@@ -369,6 +371,39 @@
       }
     });
     return true;
+  }
+
+  // ── QUICK NOTE buttons (owner, 2026-10-09) ────────────────────────────
+  // A common flag reason is one click: the button types its note into the
+  // zoom's comment box, after anything already there, and leaves the
+  // cursor in the box. It does NOT flag by itself — the note is often the
+  // start of a longer comment, and a flag sent by accident is a message to
+  // the worker that cannot be taken back. The notes come from the
+  // dashboard setting `flag_quick_notes`, one per line.
+  async function loadQuickNotes() {
+    const box = $id('ib-lb-quick');
+    if (!box) return;
+    let notes = [];
+    try {
+      const r = await fetch('/admin/api/quick_notes', { cache: 'no-store' });
+      if (r.ok) notes = (await r.json()).notes || [];
+    } catch (e) { notes = []; }
+    box.innerHTML = '';
+    notes.forEach((note) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn btn-ghost btn-tiny lb-quick-note';
+      b.textContent = note;
+      b.title = 'Type "' + note + '" into the comment box';
+      b.addEventListener('click', () => {
+        const input = $id('ib-lb-comment');
+        if (!input) return;
+        const cur = input.value.trim();
+        input.value = cur ? `${cur}, ${note}` : note;
+        input.focus();
+      });
+      box.appendChild(b);
+    });
   }
 
   window.PosterLightbox = {

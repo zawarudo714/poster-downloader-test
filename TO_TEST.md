@@ -1151,6 +1151,21 @@ On Changes Requested, click a thumbnail to zoom:
 - With the box off and the pile empty, DELETE ALL TEST DATA should empty
   the table. The paintings should still be there.
 
+## 100. NO RELOAD AFTER USE MY OWN PICTURE, AND QUICK NOTES — v250
+
+- On Worker Images, open a title in the zoom and use USE MY OWN PICTURE.
+  The page should not go blank or jump to the top. The zoom should stay
+  open on the same title, now showing your picture.
+- In the zoom, two small buttons should sit at the top right: "generic"
+  and "camera angle". Clicking one should type it into the comment box.
+  Clicking the other should add it after a comma. Nothing should be
+  flagged until you press FLAG FOR CHANGES.
+- On the Settings page, the SEARCH group should have a box called "Quick
+  note buttons in the zoom". Add a line, save, and reload Worker Images.
+  The new button should appear.
+- Open a picture's zoom on Changes Requested. The same buttons should be
+  there.
+
 ---
 
 ## NOT ON THIS LIST, ON PURPOSE

@@ -85,6 +85,8 @@
        'Where the GOOGLE button goes. {query} is filled in for you, already encoded. Normally https://www.google.com/search?q={query}&tbm=isch — a setting rather than a constant because it is somebody else\'s address and they can move it.'],
       ['brave_search_phrasings', 'textarea', 'Extra phrasing buttons',
        'One phrasing per line, and each line becomes ONE MORE BUTTON on the worker screen, in this order. Every line must contain {title}; {kind} is optional. Leave this blank and no extra buttons appear. For example: {title} {kind} scenic / {title} skyline / aerial view of {title}.'],
+      ['flag_quick_notes', 'textarea', 'Quick note buttons in the zoom',
+       'One note per line. Each line becomes a small button at the top of the zoomed picture on Worker Images and Changes Requested. Clicking it types that note into the comment box, ready for FLAG FOR CHANGES. For example: generic / camera angle / too dark. Leave blank for no buttons.'],
       ['google_refine_terms', 'textarea', 'Google extra-term buttons (phone add-on)',
        'One word or short phrase per line. On the phone add-on, each line becomes a button on the Google page that re-runs the search with that word added — for example "aerial", "skyline", "at night". These are plain words, NOT a template, so no {title} is needed: the place is already in the search. This is separate from the Brave buttons above on purpose. Leave blank for no extra buttons.'],
       ['brave_results_per_query', 'number', 'Results per search', 'How many images Brave is asked for each time. 50 is a full screen to scroll; 100 is the most it will give.'],

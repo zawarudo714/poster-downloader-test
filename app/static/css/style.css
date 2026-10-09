@@ -6537,3 +6537,7 @@ a.pulse-chip:hover {
            background: var(--bg); color: var(--text); border: 1px solid var(--border);
            border-radius: 4px; padding: 8px; resize: vertical; }
 .pt-size { width: 70px; }
+
+/* Quick note buttons in the zoom's title bar (v250). */
+.lb-quick-notes { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: auto; margin-right: 28px; align-self: center; }
+.lb-quick-notes:empty { display: none; }

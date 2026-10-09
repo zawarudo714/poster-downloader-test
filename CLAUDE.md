@@ -2964,6 +2964,12 @@ picture's painting stayed waiting on Approve Artwork) while DELETE had
 forgotten the queued uploads and the "is it being painted" check. They now
 share one `_withdraw_pictures` and one `_picture_cannot_leave`, and a
 GUARDED row makes any new caller ask.
+The screen twin: flagging on Worker Images learned "update the one card,
+never reload the day" on 2026-09-15, but USE MY OWN PICTURE on the same
+screen kept calling the full reload — blanking the gallery, re-sorting the
+picked title to the bottom and shutting the zoom — until the owner found it
+on 2026-10-09 (v250, `refreshTitleInPlace`). When one control on a screen
+stops reloading, grep the same file for every other `loadList()`.
 
 Now enforced mechanically: `preflight.py` has a GUARDED table — (file glob,
 the risky call, the calls that protect it) — so a new function that

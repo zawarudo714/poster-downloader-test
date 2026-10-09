@@ -1515,6 +1515,18 @@ GUARDED: list[tuple[str, str, tuple[str, ...], str]] = [
      ("_same_picture_refusal(",),
      "saves a worker picture without asking whether the exact same picture "
      "is already used for another title"),
+    # ── EVERY WORKER SAVE OBEYS THE PICTURES-PER-TITLE LIMIT ────────────
+    # The paste box answered "already has its picture" with "Save another?"
+    # while the grid offered a swap, so travel titles ended up holding two
+    # live pictures (owner's find, 2026-10-09: 100 titles, 102 images).
+    # This row proves a new door ASKS the shared limit; it cannot prove the
+    # door obeys the answer — Diagnostics' titles_hold_too_many_pictures
+    # watches that half.
+    ("app/routes/worker.py", "= SavedPoster(",
+     ("_image_limit(",),
+     "saves a worker picture without asking the shared pictures-per-title "
+     "limit (_image_limit), so it could add a second picture to a title "
+     "that takes one"),
     # ── NOTHING ALREADY MOVING MAY BE CHANGED BY A WORKER DOOR ───────────
     # Delete, REPLACE and SKIP let a worker reopen a finished title and
     # remove or swap a picture that was being painted or was live on the

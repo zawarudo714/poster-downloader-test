@@ -2179,15 +2179,19 @@ def check_current_image_was_discarded(db: Session, scope: Scope) -> CheckResult:
 
 def check_titles_hold_too_many_pictures(db: Session, scope: Scope) -> CheckResult:
     """
-    INVARIANT: a finished title holds no more live pictures than its
-    project takes per title.
+    INVARIANT: no title holds more live pictures than its project takes
+    per title — finished or still being worked on.
 
     Everything live on a finished title is sent to painting and then to the
     marketplace. With one picture per title (travel), a second live picture
     becomes a second listing of the same place, which FineArtAmerica renames
     "#2" — an address the listing check can never find. The old + ADD box
     did exactly this, quietly, until v239 replaced it with USE MY OWN
-    PICTURE, which takes the worker's picture down in the same step.
+    PICTURE, which takes the worker's picture down in the same step. The
+    paste-a-link box did it too, with a "Save another?" question, until
+    v255 made it swap like the search grid (owner's find, 2026-10-09).
+    Titles still being worked on are included: since v255 no worker door
+    can put a second picture on a title, so one there is already wrong.
     """
     per_title = {p.id: p.images_per_title
                  for p in db.query(Project).all() if p.images_per_title}
@@ -2198,7 +2202,7 @@ def check_titles_hold_too_many_pictures(db: Session, scope: Scope) -> CheckResul
     rows_q = (db.query(MasterTitle, func.count(SavedPoster.id))
                 .join(SavedPoster, SavedPoster.master_title_id == MasterTitle.id)
                 .filter(SavedPoster.deleted_at.is_(None),
-                        MasterTitle.status.in_(("complete", "complete_pending")),
+                        MasterTitle.status != "skipped",
                         scope.titles)
                 .group_by(MasterTitle.id)
                 .having(func.count(SavedPoster.id) > 1))
@@ -2214,8 +2218,8 @@ def check_titles_hold_too_many_pictures(db: Session, scope: Scope) -> CheckResul
     total = len(found)
     return _result(
         "titles_hold_too_many_pictures",
-        f"{total} finished title(s) hold more pictures than they take"
-        if total else "No finished title holds more pictures than it takes",
+        f"{total} title(s) hold more pictures than they take"
+        if total else "No title holds more pictures than it takes",
         "Every live picture on a finished title goes to painting and then "
         "to the marketplace, so the extra one would become a second listing "
         "of the same place. Open the title on Worker Images and remove the "

@@ -1199,6 +1199,21 @@ On Changes Requested, click a thumbnail to zoom:
 - Signed in as a worker, the address /admin/extension/google-addon.zip
   should refuse.
 
+## 104. THE PASTE BOX SWAPS INSTEAD OF ADDING A SECOND PICTURE — v255
+
+- As a worker, open a title that already has its picture. Paste a link to a
+  different picture into the paste box and press save.
+- A question should appear: "This title already has 1 of 1 image. Replace
+  it with this one?" Press Cancel. The title should keep its old picture and
+  still show 1 saved.
+- Paste again and press OK this time. The new picture should replace the
+  old one, and the title should still show 1 saved, not 2.
+- Optional: flag a picture, then replace it through the paste box as the
+  worker. The flag should arrive back with you on Changes Requested,
+  showing the new picture.
+- Diagnostics: "Titles holding more pictures than they take" should list
+  the titles that already hold two pictures, including unfinished ones.
+
 ---
 
 ## NOT ON THIS LIST, ON PURPOSE

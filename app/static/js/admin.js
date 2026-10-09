@@ -419,7 +419,10 @@
   function updateTitleCounter() {
     const el = $('ib-title-counter');
     if (!el || !titles.length) return;
-    el.textContent = `${titleIdx + 1} / ${titles.length} (${titlesLeft()} left)`;
+    // Says WHAT it counts: the zoom beside it counts pictures, and a title
+    // can hold more than one, so two bare "1 / 100" and "1 / 102" read as
+    // a bug (owner, 2026-10-09).
+    el.textContent = `title ${titleIdx + 1} / ${titles.length} (${titlesLeft()} left)`;
     el.title = 'Titles you have not kept or flagged yet';
   }
 

@@ -1487,12 +1487,18 @@
       url,
       confirm_duplicate:    opts.confirm_duplicate ? 1 : 0,
       confirm_cross_title:  opts.confirm_cross_title ? 1 : 0,
-      confirm_soft_limit:   opts.confirm_soft_limit ? 1 : 0,
+      replace:              opts.replace ? 1 : 0,
       confirm_low_quality:  opts.confirm_low_quality ? 1 : 0,
       confirm_same_picture: opts.confirm_same_picture ? 1 : 0,
     });
     if (r.ok) {
-      msgEl.textContent = `Saved ${r.data.filename} (${r.data.saved_count_for_title} on this title).`;
+      // A swap that answered a flag sends the flag back to the admin with
+      // the new picture, so the worker hears that it happened.
+      msgEl.textContent = r.data.replaced
+        ? (r.data.flag_submitted
+            ? `Replaced. The new ${PD.noun} has gone to the admin for approval.`
+            : `Replaced. Saved ${r.data.filename}.`)
+        : `Saved ${r.data.filename} (${r.data.saved_count_for_title} on this title).`;
       msgEl.className   = 'save-msg ok';
       flashEl.classList.add('flash');
       setTimeout(() => flashEl.classList.remove('flash'), 220);
@@ -1533,11 +1539,19 @@
       msgEl.textContent = 'Cancelled — same image was on another title.'; msgEl.className = 'save-msg';
       return;
     }
+    // The title already holds its picture. Like the search grid, this box
+    // offers to SWAP it — it never saves a second one beside it (2026-10-09:
+    // "Save another?" here is how travel titles ended up holding two).
     if (r.status === 409 && r.data && r.data.reason === 'soft_limit') {
-      if (confirm(r.data.message)) {
-        return doSave(urlInput, msgEl, flashEl, { ...opts, confirm_soft_limit: true });
+      if (r.data.can_replace && confirm(r.data.message)) {
+        return doSave(urlInput, msgEl, flashEl, { ...opts, replace: true });
       }
-      msgEl.textContent = 'Cancelled.'; msgEl.className = 'save-msg';
+      msgEl.textContent = 'Cancelled. The title keeps the picture it has.';
+      msgEl.className = 'save-msg';
+      return;
+    }
+    if (r.status === 409 && r.data && r.data.reason === 'in_pipeline') {
+      msgEl.textContent = r.data.message; msgEl.className = 'save-msg err';
       return;
     }
     msgEl.textContent = 'Save failed: ' + (r.data && r.data.detail || r.status);

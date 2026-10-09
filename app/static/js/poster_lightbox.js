@@ -138,7 +138,10 @@
     if (!posEl) return;
     const l = list();
     const at = l.findIndex((e) => e.p.poster_id === p.poster_id);
-    let txt = at >= 0 ? `${at + 1} / ${l.length}` : '';
+    // Named, because the gallery's counter beside it counts TITLES and a
+    // title can hold more than one picture (owner, 2026-10-09).
+    const word = (window.PD && window.PD.noun) || 'image';
+    let txt = at >= 0 ? `${word} ${at + 1} / ${l.length}` : '';
     if (txt && opts && typeof opts.leftCount === 'function') {
       const n = opts.leftCount();
       if (typeof n === 'number') txt += ` (${n} left)`;

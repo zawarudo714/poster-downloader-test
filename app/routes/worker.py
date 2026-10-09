@@ -918,6 +918,115 @@ def api_search(
     return JSONResponse(payload)
 
 
+# ── ONE PICTURE LIMIT, ONE SWAP, FOR EVERY WORKER DOOR ────────────────────
+#
+# The search grid (and the phone add-on, which posts to the same place) and
+# the paste-a-link box are the two doors a worker saves a picture through.
+# They used to answer "this title already has its picture" differently: the
+# grid offered to SWAP, the paste box asked "Save another?" and, on OK,
+# saved a second picture beside the first. On travel, which takes ONE
+# picture per title, that left titles holding two live pictures — both
+# headed for painting and the marketplace, where the second becomes a "#2"
+# listing (owner's find, 2026-10-09: 100 titles, 102 images on one day).
+# Both doors now share the limit, the swap and the flag hand-over below, so
+# neither can let a second picture through and neither can drift from the
+# other again.
+
+def _image_limit(db: Session, project) -> int:
+    """How many live pictures one title of this project may hold."""
+    return int(project.images_per_title
+               or get_setting(db, "soft_limit_per_title", project=project)
+               or SOFT_LIMIT_PER_TITLE)
+
+
+def _stand_down_for_swap(db: Session, user: User, t: MasterTitle, *,
+                         note: str, via: str):
+    """
+    Take every live picture off this title so a new pick can replace it.
+
+    Returns (replaced_ids, old_file_paths), or None when a picture is
+    already in the pipeline — money and a marketplace listing are attached
+    to it, so swapping it underneath would be a retraction, not a re-pick.
+    Raises 409 if the admin chose this title's picture himself.
+
+    The FILES are only collected here. The caller deletes them once the new
+    picture has passed every check; deleting first meant a refused swap
+    rolled the row back to live with its file already gone.
+    """
+    _refuse_if_admin_chose(db, title_id=t.id)
+    existing = (
+        db.query(SavedPoster)
+          .filter(SavedPoster.master_title_id == t.id,
+                  SavedPoster.deleted_at.is_(None))
+          .all()
+    )
+    if any((sp.pipeline_status or "") not in ("", "skipped") for sp in existing):
+        return None
+    paths = []
+    for sp in existing:
+        paths.append(saved_poster_path(sp))
+        sp.deleted_at = datetime.utcnow()
+        sp.delete_note = note
+        log_activity(db, user=user, action="poster_replaced",
+                     target_type="saved_poster", target_id=sp.id,
+                     details={"master_id": t.id, "via": via})
+    db.flush()
+    return [sp.id for sp in existing], paths
+
+
+_SWAP_IN_PIPELINE_MESSAGE = ("That image has already gone into processing, so "
+                             "it cannot be swapped here. Ask the admin to "
+                             "rerun or drop it.")
+
+
+def _hand_flags_to_successor(db: Session, replaced_ids: list, new_id: int) -> bool:
+    """
+    Move every open flag on the stood-down pictures onto the new one and
+    submit it for approval. Returns True if any flag moved.
+
+    A flag pinned to the old row used to just sit there, open, on a picture
+    that no longer existed: the admin's card showed a REPLACED pill over a
+    deleted-file placeholder while the real new image lived on a row no
+    screen rendered (owner's find, 2026-09-13, the Toronto card). So the
+    flag follows the picture, exactly as the paste-replacement flow does.
+    """
+    if not replaced_ids:
+        return False
+    moved_any = False
+    for r in (db.query(Revision)
+                .filter(Revision.saved_poster_id.in_(replaced_ids),
+                        Revision.status.in_(("open", "awaiting_approval")))
+                .all()):
+        r.saved_poster_id = new_id
+        r.status = "awaiting_approval"
+        r.submitted_at = datetime.utcnow()
+        r.worker_action = "replaced"
+        moved_any = True
+    # A similar-pair flag names its pictures in a list; a dead id there
+    # would leave the pair half-pointing at nothing, so it is swapped for
+    # the successor too.
+    for r in (db.query(Revision)
+                .filter(Revision.status.in_(("open", "awaiting_approval")),
+                        Revision.revision_type == "similar")
+                .all()):
+        try:
+            related = json.loads(r.related_poster_ids or "[]")
+        except Exception:
+            related = []
+        changed = False
+        for old_id in replaced_ids:
+            if old_id in related:
+                related[related.index(old_id)] = new_id
+                changed = True
+        if changed:
+            r.related_poster_ids = json.dumps(related)
+            r.status = "awaiting_approval"
+            r.submitted_at = datetime.utcnow()
+            r.worker_action = "replaced"
+            moved_any = True
+    return moved_any
+
+
 @router.post("/api/search_save/{master_id}")
 def api_search_save(
     master_id: int,
@@ -945,7 +1054,7 @@ def api_search_save(
         raise HTTPException(400, reason)
 
     project = resolve_project(db, t.project_id)
-    soft_limit = int(project.images_per_title or SOFT_LIMIT_PER_TITLE)
+    soft_limit = _image_limit(db, project)
     live = count_live_posters_for_master(db, t.id)
     replaced_ids: list[int] = []
     stood_down_paths: list = []
@@ -955,47 +1064,19 @@ def api_search_save(
         # "you already have 1 of 1", which left DELETE-then-search as the
         # only route (owner's ask, 2026-09-06). With replace=1 the images
         # this title already holds are stood down and the new pick takes
-        # their place — one action instead of three.
-        #
-        # ONLY images the pipeline has not touched may be replaced. Once a
-        # poster is greenlit, processing or uploaded, money and a
-        # marketplace listing are attached to it; swapping it silently
-        # underneath would be a retraction, not a re-pick.
+        # their place — one action instead of three. See _stand_down_for_swap.
         if replace:
-            existing = (
-                db.query(SavedPoster)
-                  .filter(SavedPoster.master_title_id == t.id,
-                          SavedPoster.deleted_at.is_(None))
-                  .all()
-            )
-            blocked = [sp for sp in existing
-                       if (sp.pipeline_status or "") not in ("", "skipped")]
-            if blocked:
+            swap = _stand_down_for_swap(
+                db, user, t, via="search_save",
+                note="Replaced by a different image from the search")
+            if swap is None:
                 return JSONResponse(
                     {"ok": False, "reason": "in_pipeline",
-                     "message": ("That image has already gone into "
-                                 "processing, so it cannot be swapped here. "
-                                 "Ask the admin to rerun or drop it."),
+                     "message": _SWAP_IN_PIPELINE_MESSAGE,
                      "current_count": live, "soft_limit": soft_limit},
                     status_code=409,
                 )
-            for sp in existing:
-                # The FILE is only remembered here and removed once the new
-                # picture has passed every check below. Deleting it first
-                # meant a failed download, a too-small refusal or a
-                # same-picture refusal rolled the ROW back to live while its
-                # file was already gone (found 2026-09-27 while adding the
-                # same-picture check).
-                stood_down_paths.append(saved_poster_path(sp))
-                sp.deleted_at = datetime.utcnow()
-                sp.delete_note = "Replaced by a different image from the search"
-                log_activity(db, user=user, action="poster_replaced",
-                             target_type="saved_poster", target_id=sp.id,
-                             details={"master_id": t.id, "via": "search_save"})
-            # Remembered so the new row (created below) can take over any
-            # flags still pinned to the rows this swap just stood down.
-            replaced_ids = [sp.id for sp in existing]
-            db.flush()
+            replaced_ids, stood_down_paths = swap
             live = count_live_posters_for_master(db, t.id)
         else:
             return JSONResponse(
@@ -1095,46 +1176,7 @@ def api_search_save(
     # row and is submitted for approval, exactly as the paste-replacement
     # flow does: the admin judges the image the decision is about, and
     # the worker's card reads "your replacement is awaiting approval".
-    flag_submitted = False
-    if replaced_ids:
-        moved = (
-            db.query(Revision)
-              .filter(Revision.saved_poster_id.in_(replaced_ids),
-                      Revision.status.in_(("open", "awaiting_approval")))
-              .all()
-        )
-        for r in moved:
-            r.saved_poster_id = sp.id
-            r.status = "awaiting_approval"
-            r.submitted_at = datetime.utcnow()
-            r.worker_action = "replaced"
-            flag_submitted = True
-        # A similar-pair flag names its posters in a list; a dead id there
-        # would leave the pair half-pointing at nothing, so it is swapped
-        # for the successor too.
-        import json as _json
-        sims = (
-            db.query(Revision)
-              .filter(Revision.status.in_(("open", "awaiting_approval")),
-                      Revision.revision_type == "similar")
-              .all()
-        )
-        for r in sims:
-            try:
-                related = _json.loads(r.related_poster_ids or "[]")
-            except Exception:
-                related = []
-            changed = False
-            for old_id in replaced_ids:
-                if old_id in related:
-                    related[related.index(old_id)] = sp.id
-                    changed = True
-            if changed:
-                r.related_poster_ids = _json.dumps(related)
-                r.status = "awaiting_approval"
-                r.submitted_at = datetime.utcnow()
-                r.worker_action = "replaced"
-                flag_submitted = True
+    flag_submitted = _hand_flags_to_successor(db, replaced_ids, sp.id)
 
     log_activity(db, user=user, action="saved", target_type="saved_poster",
                  target_id=sp.id,
@@ -1883,7 +1925,7 @@ def save_image(
     url: str = Form(...),
     confirm_duplicate: int = Form(0),
     confirm_cross_title: int = Form(0),
-    confirm_soft_limit: int = Form(0),
+    replace: int = Form(0),
     confirm_low_quality: int = Form(0),
     confirm_same_picture: int = Form(0),
     user: User = Depends(require_user),
@@ -1892,6 +1934,8 @@ def save_image(
     """
     Download a poster URL into the locked title's frozen folder.
     Returns 409 with reason='duplicate' / 'soft_limit' / 'low_quality' for client to confirm.
+    'soft_limit' is answered with replace=1, which swaps the title's picture
+    for this one — this door never saves a picture beyond the limit.
     """
     if user.locked_master_id is None:
         raise HTTPException(400, "No active title — open one first.")
@@ -1969,24 +2013,37 @@ def save_image(
                 status_code=409,
             )
 
-    # Soft warning at >= SOFT_LIMIT_PER_TITLE.
+    # ── THE LIMIT IS A LIMIT HERE TOO ───────────────────────────────────
+    # This door used to ask "Save another?" and add a second picture on OK,
+    # which is how travel titles ended up holding two (2026-10-09). It now
+    # does what the search grid does: offer to SWAP the title's picture for
+    # this one. See _stand_down_for_swap.
+    soft_limit = _image_limit(db, project)
     live = count_live_posters_for_master(db, t.id)
-    # Per-project cap: movies expect 3 images, MUSIK expects 2. Resolved
-    # through the settings cascade so a third niche needs no code change.
-    soft_limit = SOFT_LIMIT_PER_TITLE
-    try:
-        _proj = project
-        soft_limit = int(_proj.images_per_title
-                         or get_setting(db, "soft_limit_per_title", project=_proj))
-    except Exception:
-        pass
-    if live >= soft_limit and not confirm_soft_limit:
-        return JSONResponse(
-            {"ok": False, "reason": "soft_limit",
-             "message": f"This title already has {live} posters saved. Save another?",
-             "current_count": live, "soft_limit": soft_limit},
-            status_code=409,
-        )
+    replaced_ids: list[int] = []
+    stood_down_paths: list = []
+    if live >= soft_limit:
+        if not replace:
+            noun = getattr(project, "item_noun", None) or "image"
+            return JSONResponse(
+                {"ok": False, "reason": "soft_limit", "can_replace": True,
+                 "message": (f"This title already has {live} of {soft_limit} "
+                             f"{noun}{'' if soft_limit == 1 else 's'}. "
+                             f"Replace {'it' if live == 1 else 'them'} "
+                             f"with this one?"),
+                 "current_count": live, "soft_limit": soft_limit},
+                status_code=409,
+            )
+        swap = _stand_down_for_swap(db, user, t, via="paste_save",
+                                    note="Replaced by a pasted image")
+        if swap is None:
+            return JSONResponse(
+                {"ok": False, "reason": "in_pipeline",
+                 "message": _SWAP_IN_PIPELINE_MESSAGE,
+                 "current_count": live, "soft_limit": soft_limit},
+                status_code=409,
+            )
+        replaced_ids, stood_down_paths = swap
 
     today = local_today()
     _ensure_first_save_metadata(t, today)
@@ -2051,6 +2108,10 @@ def save_image(
         target_path.unlink(missing_ok=True)
         return refusal
 
+    # Every check has passed, so the pictures this swap stands down can go.
+    for old_path in stood_down_paths:
+        old_path.unlink(missing_ok=True)
+
     sp = SavedPoster(
         master_title_id    = t.id,
         user_id            = user.id,
@@ -2077,6 +2138,7 @@ def save_image(
     )
     db.add(sp)
     db.flush()
+    flag_submitted = _hand_flags_to_successor(db, replaced_ids, sp.id)
 
     log_activity(
         db, user=user, action="saved", target_type="saved_poster", target_id=sp.id,
@@ -2084,6 +2146,7 @@ def save_image(
             "master_id": t.id, "filename": target_name,
             "title_folder": t.title_folder_path, "url": src_url,
             "size": written, "source": "pasted",
+            "replaced": replaced_ids,
             "same_picture_confirmed": bool(confirm_same_picture),
         },
     )
@@ -2103,7 +2166,8 @@ def save_image(
         "saved_count_for_title": new_live,
         "saved_today": count_user_saves_for_date(db, user.username, today),
         "saved_week":  count_user_saves_for_week(db, user.username, today),
-        "soft_warning": new_live >= soft_limit,
+        "replaced": bool(replaced_ids),
+        "flag_submitted": flag_submitted,
     })
 
 

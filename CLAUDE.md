@@ -2968,7 +2968,12 @@ failed or refused swap rolled the record back to live with its file gone
 (found 2026-09-27 while adding the same-picture check). And the only
 duplicate guard lived in the paste box alone, comparing addresses, so the
 same file reached two titles through the grid. When a door learns a rule,
-list its sibling doors and teach them all in the same edit. Three admin
+list its sibling doors and teach them all in the same edit. The LIMIT was
+the next lesson to stay at one door: the grid swapped when a title already
+had its picture, while the paste box asked "Save another?" and added a
+second on OK — 100 travel titles held 102 images (owner, 2026-10-09). Both
+doors now call `_image_limit` and `_stand_down_for_swap`, and a GUARDED row
+fails any new save door that does not ask the limit. Three admin
 doors take pictures off a title — RETIRE, the admin DELETE and USE MY OWN
 PICTURE — and by v239 retire had forgotten the paintings (a withdrawn
 picture's painting stayed waiting on Approve Artwork) while DELETE had
@@ -3229,7 +3234,10 @@ So, before shipping any figure or label:
   works, rewrite it. "17 of 1543" needs you to know there are two different
   totals in play.
 * **Name the SCOPE of a count**, never just the number: "in this run", "in
-  the last 24 hours", "across all accounts".
+  the last 24 hours", "across all accounts". And name the THING counted when
+  two counters sit near each other: v251 put "1 / 100" under the gallery
+  (titles) and "1 / 102" in the zoom (pictures), and the owner read the
+  difference as a bug (2026-10-09). They now say "title" and "image".
 * **A mechanism should announce what it is doing**, in its own words —
   "waiting to try again at 23:44", not "retry_at set".
 * **A STATUS THAT IS TRUE AND ANSWERS NOTHING IS STILL A DEFECT.** The

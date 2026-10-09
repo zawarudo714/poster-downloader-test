@@ -35,6 +35,10 @@
         <button type="button" class="btn btn-accent" id="ib-zip">ZIP THIS DAY {{ info("Builds a single ZIP of every file under {user}/{date}/ for download.") }}</button>
         <button type="button" class="btn btn-ghost" id="ib-place-btn" hidden
                 title="Each image on this day beside what Google thinks the place is — the ones Google disagrees with at the top.">PLACE&nbsp;CHECK&nbsp;THIS&nbsp;DAY</button>
+        {# The admin's Google add-on, downloadable from any computer he signs
+           in from (owner, 2026-10-09). #}
+        <a class="btn btn-ghost btn-tiny" href="/admin/extension/google-addon.zip" download
+           title="The Chrome add-on that keeps one Google tab beside the zoom. Unzip it, open chrome://extensions, switch on Developer mode, press Load unpacked and choose the unzipped folder. The steps are also in README_INSTALL.md inside the ZIP.">⬇&nbsp;GOOGLE&nbsp;ADD-ON</a>
         <span class="muted mono" id="ib-zip-status"></span>
       </form>
 

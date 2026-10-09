@@ -105,6 +105,15 @@
     const lightbox = $id('ib-lightbox');
     if (!lightbox) return;
     lightbox.classList.toggle('lb-reviewed', !!p.reviewed);
+    // The KEEP button says what pressing it will do next.
+    const keepBtn = $id('ib-lb-keep');
+    // Drawn whether or not it is shown yet: open() draws this before it
+    // decides the button's visibility for the page.
+    if (keepBtn) {
+      keepBtn.textContent = p.reviewed ? 'KEPT ✓ — UNDO' : 'KEEP';
+      keepBtn.classList.toggle('btn-success', !p.reviewed);
+      keepBtn.classList.toggle('btn-ghost', !!p.reviewed);
+    }
     const host = $id('ib-lb-pills');
     if (!host) return;
     let pill = host.querySelector('.status-reviewed');
@@ -261,6 +270,13 @@
     }
     const flagBtn = $id('ib-lb-flag-btn');
     if (flagBtn) flagBtn.hidden = !f.flag;
+    // KEEP, as a button — only where the keep key works (reviewK not off).
+    const keepBtn = $id('ib-lb-keep');
+    if (keepBtn) {
+      keepBtn.hidden = f.reviewK === false;
+      const rk = String((typeof f.reviewKey === 'function' ? f.reviewKey() : f.reviewKey) || 'K').toUpperCase();
+      keepBtn.title = `Mark this picture as looked at — the same as pressing ${rk}. Press again to undo.`;
+    }
 
     // The page's own decision buttons (APPROVE / REJECT on Changes
     // Requested). The zoom only DRAWS them; what they do belongs to the
@@ -355,6 +371,19 @@
     const prev = $id('ib-lb-prev'), next = $id('ib-lb-next');
     if (prev) prev.addEventListener('click', () => step(-1));
     if (next) next.addEventListener('click', () => step(1));
+
+    // KEEP — the keep key as a button, for a phone (owner, 2026-10-09).
+    // Goes through the very same toggleReviewed, so the place check, the
+    // counts and the grid all follow exactly as they do for the key.
+    const keepBtn = $id('ib-lb-keep');
+    if (keepBtn) {
+      keepBtn.addEventListener('click', async () => {
+        if (!current) return;
+        keepBtn.disabled = true;
+        try { await toggleReviewed(current.master, current.poster); }
+        finally { keepBtn.disabled = false; }
+      });
+    }
 
     loadQuickNotes();
 

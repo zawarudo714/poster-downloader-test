@@ -45,7 +45,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
@@ -1886,6 +1886,35 @@ def _day_pay_summary(db: Session, worker: str, rows) -> dict:
         "unpaid": unpaid,
         "paid_ids": sorted(touched),
     }
+
+@router.get("/extension/google-addon.zip")
+def download_google_addon(admin: User = Depends(require_admin)):
+    """
+    The admin's "Google Beside Me" add-on, as a ZIP, for any computer he
+    signs in from (owner, 2026-10-09). Built fresh from the copy that ships
+    with the site (extensions/poster_admin_extension), so the download is
+    always the version this deploy carries — never a stale ZIP somebody
+    forgot to rebuild. Admins only: the add-on is no use to a worker and
+    names this server's address.
+    """
+    import io
+    import zipfile
+    from ..config import BASE_DIR
+    root = BASE_DIR / "extensions" / "poster_admin_extension"
+    if not (root / "manifest.json").is_file():
+        raise HTTPException(404, "The add-on is missing from this deploy.")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in sorted(root.rglob("*")):
+            if f.is_file() and "__pycache__" not in f.parts:
+                # Inside a folder of its own name, so unzipping gives the
+                # one folder Chrome's "Load unpacked" asks for.
+                zf.write(f, "poster_admin_extension/" + f.relative_to(root).as_posix())
+    return Response(
+        content=buf.getvalue(), media_type="application/zip",
+        headers={"Content-Disposition":
+                 'attachment; filename="poster_admin_extension.zip"'})
+
 
 @router.get("/api/quick_notes")
 def api_quick_notes(

@@ -1180,6 +1180,25 @@ On Changes Requested, click a thumbnail to zoom:
   coloured counts. The arrow should open the full list.
 - USE MY OWN PICTURE: the dialog should count seconds while it fetches.
 
+## 102. KEEP BUTTON IN THE ZOOM, FOR THE PHONE — v252
+
+- On your phone, open Worker Images and tap a picture. A green KEEP button
+  should sit beside FLAG FOR CHANGES.
+- Tap KEEP. The button should change to "KEPT ✓ — UNDO", the REVIEWED pill
+  should appear, and the "(x left)" number should drop by one.
+- Tap it again. Everything should go back.
+- On Changes Requested, the zoom should NOT show a KEEP button.
+
+## 103. DOWNLOAD THE GOOGLE ADD-ON FROM THE SITE — v253
+
+- On Worker Images, press ⬇ GOOGLE ADD-ON in the top bar. A file called
+  poster_admin_extension.zip should download.
+- Unzip it. You should get one folder, poster_admin_extension. In Chrome
+  open chrome://extensions, switch on Developer mode, press Load unpacked
+  and pick that folder. CHECK GOOGLE should then keep one Google tab.
+- Signed in as a worker, the address /admin/extension/google-addon.zip
+  should refuse.
+
 ---
 
 ## NOT ON THIS LIST, ON PURPOSE

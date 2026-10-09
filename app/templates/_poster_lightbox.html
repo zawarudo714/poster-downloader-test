@@ -34,6 +34,10 @@
          renders whatever the page supplies — APPROVE / REJECT on Changes
          Requested; nothing on Worker Images, whose buttons are below). #}
       <span id="ib-lb-actions" class="lb-actions"></span>
+      {# KEEP — the same as the keep key, as a button, so checking works on
+         a phone with no keyboard (owner, 2026-10-09). Hidden where the
+         page has no keep mark (Changes Requested: approving is the mark). #}
+      <button class="btn btn-success" id="ib-lb-keep" hidden>KEEP</button>
       <button class="btn btn-error" id="ib-lb-flag-btn">FLAG FOR CHANGES</button>
       <button class="btn btn-ghost" id="ib-lb-unflag-btn" hidden>CLEAR FLAG</button>
       <button class="btn btn-ghost" id="ib-lb-place-ack" hidden>CHECKED, IT'S FINE</button>

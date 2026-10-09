@@ -85,6 +85,7 @@ its work from scratch.
 | `CLAUDE_CODE.md` | How the owner runs a session in Claude Code on his own machine, and what to type. **The split is: build in Cowork, VERIFY there** — the Cowork sandbox has no network and no SQLAlchemy, so it can never run this app or query a real database |
 | `SETUP_VPS.md` · `SETUP_WINDOWS_NODE.md` | Building a box from nothing |
 | `README.md` | What the app is, for someone who has never seen it |
+| `extensions/poster_admin_extension/README_INSTALL.md` | The admin's Chrome add-on ("Google Beside Me"). **This folder is the master copy** — the site zips it for download (Worker Images, ⬇ GOOGLE ADD-ON), so change the add-on here, not in the old loose copy beside the repo |
 | `CHANGELOG.md` | Released changes, by version |
 
 ---

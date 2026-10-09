@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Poster Admin — Google Beside Me",
+  "version": "1.0",
+  "description": "For the admin only. Keeps ONE Google Images tab showing the place in the image zoom, and moves it along as you step through pictures.",
+
+  "permissions": ["storage"],
+
+  "background": { "service_worker": "background.js" },
+
+  "content_scripts": [
+    {
+      "matches": [
+        "http://178.105.34.144/admin/*",
+        "http://178.105.232.196/admin/*"
+      ],
+      "js": ["site.js"],
+      "run_at": "document_start"
+    }
+  ],
+
+  "icons": { "48": "icons/icon48.png", "128": "icons/icon128.png" }
+}

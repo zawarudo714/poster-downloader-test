@@ -154,11 +154,37 @@
     busy = true;
     p.go.disabled = true;
     p.cancel.disabled = true;
-    p.status.textContent = chosen ? 'Sending your file…' : 'Fetching the picture…';
     const current = job;
+    // A WAIT THAT SHOWS IT IS ALIVE, AND ENDS (owner, 2026-10-09: it sat on
+    // "Fetching the picture…" and the picture turned out to be saved after
+    // a reload). The seconds tick so a slow website reads as slow, not as
+    // frozen; past WAIT_S the screen stops waiting, says plainly that the
+    // picture may still have been saved, and has the page re-read the
+    // title so he can see which. The server gives up on a slow website
+    // after 60 seconds on its own (imagefetch.TOTAL_S), so WAIT_S is set
+    // above that.
+    const WAIT_S = 120;
+    const word = chosen ? 'Sending your file' : 'Fetching the picture';
+    const started = Date.now();
+    const tick = () => {
+      const s = Math.round((Date.now() - started) / 1000);
+      p.status.textContent = s < 3 ? `${word}…`
+        : `${word}… ${s}s${s >= 30
+            ? (chosen ? ' (the connection is slow)' : ' (this website is slow)') : ''}`;
+    };
+    tick();
+    const ticker = setInterval(tick, 1000);
+    const ctrl = new AbortController();
+    const giveUp = setTimeout(() => ctrl.abort(), WAIT_S * 1000);
     try {
-      const r = await fetch(`/admin/title/${current.masterId}/admin_pick`,
-                            { method: 'POST', body: fd });
+      let r;
+      try {
+        r = await fetch(`/admin/title/${current.masterId}/admin_pick`,
+                        { method: 'POST', body: fd, signal: ctrl.signal });
+      } finally {
+        clearInterval(ticker);
+        clearTimeout(giveUp);
+      }
       let d = {};
       try { d = await r.json(); } catch (e) { d = {}; }
       if (r.status === 409 && d.reason === 'flagged_title') {
@@ -191,7 +217,18 @@
       close();
       if (current.onDone) current.onDone(d, bits.join(' · ') + '.');
     } catch (e) {
-      p.status.textContent = 'Not saved: ' + e.message;
+      if (e && e.name === 'AbortError') {
+        // We stopped waiting; the server may still have finished. Re-read
+        // the title so what is on screen is the truth either way.
+        p.status.textContent = `No answer from the server after ${WAIT_S} `
+          + 'seconds. Your picture may still have been saved — the title '
+          + 'has been refreshed behind this box, so check it before trying again.';
+        if (current.onRefresh) {
+          try { await current.onRefresh(); } catch (e2) { /* the message above stands */ }
+        }
+      } else {
+        p.status.textContent = 'Not saved: ' + e.message;
+      }
     } finally {
       // Every way out leaves the dialog usable again (rule 8: a busy state
       // is a claim, and needs an exit on every path).

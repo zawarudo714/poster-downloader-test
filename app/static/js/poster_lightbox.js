@@ -121,6 +121,22 @@
     }
   }
 
+  // "2 / 102 (31 left)". The page says what "left" means (opts.leftCount);
+  // a page that does not is shown the position alone. Redrawn after a K
+  // press too, because the mark changes the number left.
+  function renderPos(p) {
+    const posEl = $id('ib-lb-pos');
+    if (!posEl) return;
+    const l = list();
+    const at = l.findIndex((e) => e.p.poster_id === p.poster_id);
+    let txt = at >= 0 ? `${at + 1} / ${l.length}` : '';
+    if (txt && opts && typeof opts.leftCount === 'function') {
+      const n = opts.leftCount();
+      if (typeof n === 'number') txt += ` (${n} left)`;
+    }
+    posEl.textContent = txt;
+  }
+
   // The K mark — "I have looked at this one". Saves, updates the object in
   // place, then hands the page a turn so everything DERIVED from the mark
   // (grid cell, title outline, day count) is redone by the code that owns it.
@@ -129,8 +145,17 @@
     if (!r.ok) { alert('Could not save the mark: ' + r.status); return; }
     const d = await r.json();
     p.reviewed = !!d.reviewed;
+    // Keeping also settles the place check, and un-keeping takes back an
+    // ack the keep made (server: admin_toggle_reviewed). The pill and the
+    // CHECKED, IT'S FINE button are drawn by open(), so redraw the zoom
+    // when that answer changed rather than only the K pill.
+    const placeChanged = ('place_acked' in d) && !!p.place_acked !== !!d.place_acked;
+    if ('place_acked' in d) p.place_acked = !!d.place_acked;
     if (opts && opts.onReviewed) opts.onReviewed(t, p);
-    if (current && current.poster.poster_id === p.poster_id) renderReviewed(p);
+    if (current && current.poster.poster_id === p.poster_id) {
+      if (placeChanged) open(t, p);
+      else { renderReviewed(p); renderPos(p); }
+    }
   }
 
   // ── The Google companion tab ────────────────────────────────────────────
@@ -194,12 +219,7 @@
     }
     const kindEl = $id('ib-lb-kind');
     if (kindEl) kindEl.innerHTML = window.SubjectKind ? window.SubjectKind.chip(t.kind) : '';
-    const posEl = $id('ib-lb-pos');
-    if (posEl) {
-      const l = list();
-      const at = l.findIndex((e) => e.p.poster_id === p.poster_id);
-      posEl.textContent = at >= 0 ? `${at + 1} / ${l.length}` : '';
-    }
+    renderPos(p);
 
     const lbImg = $id('ib-lb-img');
     lbImg.src = fileUrl(p);

@@ -2090,6 +2090,16 @@ API, an OS behaviour — the code must either read the value at runtime, take
 it from a setting, or be told it. Inventing it is not an option, and neither
 is inferring it from a plausible-looking pattern.**
 
+**A PER-READ TIMEOUT IS NOT A TIME LIMIT.** `download_bytes` had
+`timeout=20`, which `requests` applies to each read, so a website that
+trickles a little every few seconds could hold USE MY OWN PICTURE on
+"Fetching the picture…" for minutes (owner, 2026-10-09). A total deadline
+was added (`imagefetch.TOTAL_S`) — and the first version could not fire in
+time either, because `iter_content(64 KB)` blocks until all 64 KB arrive:
+measured against a local trickling server, one piece took over 30 seconds.
+Pieces are 8 KB now. When you cap how long something may take, check how
+OFTEN the cap is looked at, not only its value.
+
 **A TIMEOUT is a guessed duration wearing a number, and it decides whether
 healthy work gets killed.** `claim_timeout_min` is 45 minutes and both the
 claim reaper and the stalled-run sweeper compared it against `started_at` —

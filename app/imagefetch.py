@@ -40,6 +40,13 @@ import requests
 log = logging.getLogger("uvicorn.error")
 
 TIMEOUT_S = 20
+# The WHOLE download, not one read. TIMEOUT_S above is per read, so a
+# website that sends a trickle every few seconds could hold a request open
+# for many minutes while the screen sat on "Fetching the picture…" (owner,
+# 2026-10-09). 60 seconds is a GUESS, not a measurement: a normal picture
+# arrives in one or two; if real pictures from a slow site start failing
+# with the message below, raise it.
+TOTAL_S = 60
 MAX_BYTES = 25 * 1024 * 1024
 
 # First bytes of the formats we accept. Checked instead of trusting the URL's
@@ -102,7 +109,9 @@ def sniff_format(head: bytes) -> str | None:
 
 
 def download_bytes(url: str) -> bytes:
-    """Stream a URL into memory with a hard size cap."""
+    """Stream a URL into memory with a hard size cap and a hard time cap."""
+    import time
+    deadline = time.monotonic() + TOTAL_S
     try:
         with requests.get(
             url, stream=True, timeout=TIMEOUT_S,
@@ -113,12 +122,22 @@ def download_bytes(url: str) -> bytes:
                     f"Could not download that image: the website answered "
                     f"{resp.status_code}.", status=resp.status_code)
             buf = io.BytesIO()
-            for chunk in resp.iter_content(64 * 1024):
+            # Small pieces, so the time cap below is checked often: a read
+            # of 64 KB blocks until all 64 KB arrive, and a trickling site
+            # took over 30 seconds to fill ONE (measured 2026-10-09 against
+            # a local server sending 1 KB every half second).
+            for chunk in resp.iter_content(8 * 1024):
                 if not chunk:
                     continue
                 buf.write(chunk)
                 if buf.tell() > MAX_BYTES:
                     raise FetchError("That image is larger than 25 MB.")
+                if time.monotonic() > deadline:
+                    raise FetchError(
+                        f"That website was too slow: the picture had not "
+                        f"finished arriving after {TOTAL_S} seconds. Save "
+                        f"it to your computer from your browser and use "
+                        f"Choose File instead.")
             return buf.getvalue()
     except FetchError:
         raise

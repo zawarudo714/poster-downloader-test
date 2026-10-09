@@ -335,12 +335,45 @@
       head.appendChild(line);
       box.appendChild(head);
     }
-    // One colour per reason: red = open flag or waiting for your look,
-    // blue = saved after the day was paid, amber = waiting for the next
-    // payment, grey = never paid, because its title already was.
-    addUnpaidList(box, pay.unpaid || [], (n) => `${n} still to pay:`);
-    addUnpaidList(box, never, (n) => `${n} not paid again:`);
+    // ONE FOLDED LINE, NOT A WALL OF PILLS (owner, 2026-10-09: "looks
+    // untidy, make it a drop down"). Closed, it reads "98 still to pay"
+    // with a small coloured count per reason; the arrow opens the lists.
+    // One colour per reason, the same on the counts and the pills:
+    //   amber  waiting for the next payment
+    //   red    flag still open (waits on the worker)
+    //   purple a replacement you have not looked at (waits on you)
+    //   blue   saved after this day was paid
+    //   grey   never paid, because its title already was
+    const unpaid = pay.unpaid || [];
+    if (!unpaid.length && !never.length) return;
+    const drop = document.createElement('details');
+    drop.className = 'ib-unpaid-drop';
+    drop.open = paidOpen;
+    drop.addEventListener('toggle', () => { paidOpen = drop.open; });
+    const sum = document.createElement('summary');
+    const lead = document.createElement('span');
+    lead.className = 'ib-unpaid-lead';
+    lead.textContent = unpaid.length
+      ? `${unpaid.length} still to pay` : `${never.length} not paid again`;
+    sum.appendChild(lead);
+    const counts = {};
+    unpaid.concat(never).forEach((u) => { counts[u.kind] = (counts[u.kind] || 0) + 1; });
+    [['next', 'waiting'], ['flag', 'flag open'], ['look', 'your look'],
+     ['after', 'saved after paid'], ['title', 'not paid again']].forEach(([k, word]) => {
+      if (!counts[k]) return;
+      const c = document.createElement('span');
+      c.className = 'ib-unpaid-count is-' + k;
+      c.textContent = `${counts[k]} ${word}`;
+      sum.appendChild(c);
+    });
+    drop.appendChild(sum);
+    addUnpaidList(drop, unpaid, (n) => `${n} still to pay:`);
+    addUnpaidList(drop, never, (n) => `${n} not paid again:`);
+    box.appendChild(drop);
   }
+  // Whether the list above is open — kept while you work through the day,
+  // so updating one title does not fold it shut under you.
+  let paidOpen = false;
 
   function addUnpaidList(box, items, leadText) {
     if (!items.length) return;
@@ -354,7 +387,8 @@
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'ib-unpaid-item'
-        + ({ flag: ' is-flag', after: ' is-after', title: ' is-never' }[u.kind] || '');
+        + ({ flag: ' is-flag', look: ' is-look', after: ' is-after',
+             title: ' is-never' }[u.kind] || '');
       b.title = 'Open this picture';
       b.textContent = `${u.title} — ${u.why}`;
       b.addEventListener('click', () => {
@@ -374,7 +408,23 @@
   }
 
 
+  // "2 / 100 (61 left)": where you are, and how many titles still owe you
+  // a look — neither kept nor flagged (titleRank 0). The position alone
+  // misled after a reload, because kept titles sink to the bottom and you
+  // land on 1 again with no idea how far through the day you are (owner,
+  // 2026-10-09). Derived from the list every time, never counted by hand.
+  function titlesLeft() {
+    return titles.filter((t) => titleRank(t) === 0).length;
+  }
+  function updateTitleCounter() {
+    const el = $('ib-title-counter');
+    if (!el || !titles.length) return;
+    el.textContent = `${titleIdx + 1} / ${titles.length} (${titlesLeft()} left)`;
+    el.title = 'Titles you have not kept or flagged yet';
+  }
+
   function refreshSummary() {
+    updateTitleCounter();
     const nT = titles.length;
     const nP = titles.reduce((n, t) => n + (t.posters || []).length, 0);
     const un = titles.reduce(
@@ -459,7 +509,7 @@
       node.querySelector('.g-pick-btn').addEventListener('click', () => usePick(t));
       gallery.appendChild(node);
     });
-    $('ib-title-counter').textContent = `${titleIdx + 1} / ${titles.length}`;
+    updateTitleCounter();
     const cur = document.getElementById(`g-title-${titleIdx}`);
     if (cur) cur.scrollIntoView({ block: 'nearest' });
   }
@@ -653,7 +703,7 @@
       cur.classList.add('current');
       cur.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
-    $('ib-title-counter').textContent = `${titleIdx + 1} / ${titles.length}`;
+    updateTitleCounter();
     saveStateToUrl();
   }
 
@@ -670,6 +720,9 @@
       return out;
     },
     extraPills: (t, p) => (placeCheck.enabled ? [placePillNode(p)] : []),
+    // "(31 left)" beside the zoom's "2 / 102": pictures neither kept nor
+    // flagged — the same pictureOwed the day's count uses.
+    leftCount: () => allPosters().filter((r) => pictureOwed(r.p)).length,
     // Remembered open, so an interrupted visit reopens right here; a
     // deliberate close is remembered as closed — the next visit opens the
     // plain gallery, not a lightbox nobody asked for.
@@ -679,7 +732,8 @@
     // title outline, the day count. Deliberately NOT re-sorted here: the
     // page must never reorder under the cursor mid-review; reviewed ones
     // sink on the next load or when the order dropdown is touched.
-    onReviewed: () => { renderGallery(); refreshSummary(); },
+    // The place panel too: keeping a picture now settles its place check.
+    onReviewed: () => { renderGallery(); refreshSummary(); renderPlacePanel(); },
     // USE MY OWN PICTURE, beside the zoomed picture.
     actions: (t) => [{
       label: 'USE MY OWN PICTURE',
@@ -712,6 +766,8 @@
         await refreshTitleInPlace(t.master_id);
         if (window.toast) window.toast(msg);
       },
+      // The dialog gave up waiting: show whatever the title holds now.
+      onRefresh: () => refreshTitleInPlace(t.master_id),
     });
   }
 
@@ -869,6 +925,8 @@
     const card = gallery.querySelector(`.g-poster[data-poster-id="${poster.poster_id}"]`);
     const section = card ? card.closest('.g-title') : null;
     if (section) section.classList.toggle('flagged', anyFlagged);
+    // A flag changes how many titles are left, and the day's count.
+    refreshSummary();
   }
 
   const lbFlagBtn   = $('ib-lb-flag-btn');

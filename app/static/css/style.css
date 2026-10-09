@@ -1439,6 +1439,28 @@ textarea { font-family: inherit; resize: vertical; min-height: 80px; }
    owner, 2026-09-29). Grey: nothing to wait for and nothing to do. */
 .ib-unpaid-item.is-never { border-color: var(--subtext); color: var(--subtext); }
 .ib-unpaid-item.is-never:hover { background: var(--subtext); color: var(--bg); }
+/* A replacement you have not looked at — it waits on YOU, an open flag
+   waits on the worker, so the two get different shades (2026-10-09). */
+.ib-unpaid-item.is-look { border-color: var(--accent); color: var(--accent); }
+.ib-unpaid-item.is-look:hover { background: var(--accent); color: var(--bg); }
+
+/* The PAID band's list, folded into one line of coloured counts (v251). */
+.ib-unpaid-drop { margin-top: 8px; padding-top: 8px;
+                  border-top: 1px dashed rgba(212, 167, 58, 0.35); }
+.ib-unpaid-drop > summary { cursor: pointer; display: flex; flex-wrap: wrap;
+                            align-items: center; gap: 8px; list-style: none; }
+.ib-unpaid-drop > summary::-webkit-details-marker { display: none; }
+/* The arrow is drawn here because a flex summary loses the browser's own. */
+.ib-unpaid-drop > summary::before { content: '▸'; color: var(--skip); font-size: 12px; }
+.ib-unpaid-drop[open] > summary::before { content: '▾'; }
+.ib-unpaid-drop .ib-unpaid { border-top: none; margin-top: 6px; padding-top: 0; }
+.ib-unpaid-count { font-size: 11px; font-weight: 600; padding: 1px 7px;
+                   border-radius: 999px; border: 1px solid currentColor; }
+.ib-unpaid-count.is-next  { color: var(--skip); }
+.ib-unpaid-count.is-flag  { color: var(--error); }
+.ib-unpaid-count.is-look  { color: var(--accent); }
+.ib-unpaid-count.is-after { color: rgb(130, 195, 255); }
+.ib-unpaid-count.is-title { color: var(--subtext); }
 
 /* ── Lightbox modal ──────────────────────────────────────────────────── */
 .lightbox {

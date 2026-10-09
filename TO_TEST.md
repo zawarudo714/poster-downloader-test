@@ -1166,6 +1166,20 @@ On Changes Requested, click a thumbnail to zoom:
 - Open a picture's zoom on Changes Requested. The same buttons should be
   there.
 
+## 101. KEEP SETTLES THE PLACE CHECK, "LEFT" COUNTS, FOLDED PAID LIST — v251
+
+- Open a picture whose place check says it may be the wrong place, and
+  press the keep key. The place pill should change to checked as well.
+  Press the keep key again. Both should go back.
+- Press CHECKED, IT'S FINE on a picture first, then keep and un-keep it.
+  The CHECKED mark should stay, because you made it separately.
+- The counter under the gallery should read like "2 / 100 (61 left)", and
+  the zoom like "2 / 102 (31 left)". Keeping or flagging one should lower
+  the number left.
+- The PAID band should show one line, such as "98 still to pay", with small
+  coloured counts. The arrow should open the full list.
+- USE MY OWN PICTURE: the dialog should count seconds while it fetches.
+
 ---
 
 ## NOT ON THIS LIST, ON PURPOSE

@@ -1861,7 +1861,10 @@ def _day_pay_summary(db: Session, worker: str, rows) -> dict:
                           "why": UNPAYABLE_WORDS[r], "kind": "title"})
             continue
         if r in ("flag", "look"):
-            kind, why = "flag", UNPAYABLE_WORDS[r]
+            # Two kinds, two colours: an open flag waits on the WORKER, a
+            # replacement you have not looked at waits on YOU (owner,
+            # 2026-10-09: "there should be another shade").
+            kind, why = r, UNPAYABLE_WORDS[r]
         elif last_run is not None and sp.created_at and sp.created_at > last_run.created_at:
             kind, why = "after", "saved after this day was paid (a replacement picture)"
         else:
@@ -2338,15 +2341,43 @@ def admin_toggle_reviewed(
     if not sp or sp.deleted_at is not None:
         raise HTTPException(404, "Image not found.")
     now_reviewed = sp.reviewed_at is None
-    sp.reviewed_at = datetime.utcnow() if now_reviewed else None
+    now = datetime.utcnow()
+
+    # KEEPING A PICTURE ALSO SETTLES ITS PLACE CHECK (owner, 2026-10-09):
+    # a glance at Google often shows the place is right where the check
+    # missed it, and pressing CHECKED, IT'S FINE as well was a second click
+    # for one decision. The ack is stamped with the SAME instant as the
+    # mark, which is how un-keeping knows it may take the ack back: an ack
+    # made separately with CHECKED, IT'S FINE has its own time and is left
+    # alone. A check that has not answered yet is not acked — there is no
+    # verdict to settle, and a late "wrong place" must still show.
+    place_by_keep = False
+    if now_reviewed:
+        sp.reviewed_at = now
+        answered = sp.place_check_at is not None
+        already = (sp.place_check_acked_at is not None and answered
+                   and sp.place_check_acked_at >= sp.place_check_at)
+        if answered and not already:
+            sp.place_check_acked_at = now
+            place_by_keep = True
+    else:
+        if (sp.place_check_acked_at is not None
+                and sp.place_check_acked_at == sp.reviewed_at):
+            sp.place_check_acked_at = None       # it came with the keep
+            place_by_keep = True
+        sp.reviewed_at = None
+    place_acked = bool(sp.place_check_acked_at and sp.place_check_at
+                       and sp.place_check_acked_at >= sp.place_check_at)
     log_activity(
         db, user=admin,
         action="reviewed" if now_reviewed else "unreviewed",
         target_type="saved_poster", target_id=sp.id,
-        details={"filename": sp.filename, "master_id": sp.master_title_id},
+        details={"filename": sp.filename, "master_id": sp.master_title_id,
+                 "place_check_changed": place_by_keep},
     )
     db.commit()
-    return JSONResponse({"ok": True, "reviewed": now_reviewed})
+    return JSONResponse({"ok": True, "reviewed": now_reviewed,
+                         "place_acked": place_acked})
 
 
 @router.post("/title/{master_id}/retire")
@@ -2609,6 +2640,11 @@ def admin_pick_title(
     # with a large block of camera data, and an AVIF saved as ".jpg", both
     # read as "not a picture" with no reason given (owner, 2026-09-28).
     from ..imagefetch import FetchError, download_bytes, normalise_picture
+    # How long each part took goes into the activity log, so the next "it
+    # sat on Fetching the picture…" can be answered from a record instead
+    # of a guess (owner, 2026-10-09 — the cause that day was never found).
+    import time as _time
+    _t0 = _time.monotonic()
     try:
         if src_url:
             ok, why = _validate_image_url(src_url, db, project)
@@ -2621,6 +2657,7 @@ def admin_pick_title(
                 raise HTTPException(413, "That file is larger than the 25 MB limit.")
             if not data:
                 raise HTTPException(400, "That file is empty.")
+        _t_dl = _time.monotonic()
         stored, ext, img_w, img_h = normalise_picture(data)
     except FetchError as e:
         if e.status in (401, 403, 429):
@@ -2770,7 +2807,9 @@ def admin_pick_title(
                  "was_status": was,
                  "unretired": was == "unusable",
                  "retired_reason": was_reason if was == "unusable" else None,
-                 "sent_to_painting": gl.get("posters", 0)},
+                 "sent_to_painting": gl.get("posters", 0),
+                 "seconds": {"download": round(_t_dl - _t0, 1),
+                             "total": round(_time.monotonic() - _t0, 1)}},
     )
     db.commit()
 

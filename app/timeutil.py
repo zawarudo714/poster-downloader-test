@@ -99,3 +99,21 @@ def local_now() -> datetime:
     if APP_TZ is not None:
         return datetime.now(APP_TZ).replace(tzinfo=None)
     return datetime.now()
+
+
+def utc_start_of_local_day(d: date) -> datetime:
+    """
+    The moment local day `d` begins (midnight in APP_TZ), as a naive UTC
+    datetime — the form every created_at column is stored in.
+
+    Counters used to compare created_at against `datetime.combine(d,
+    midnight)` directly, i.e. UTC midnight, so in Nairobi (UTC+3) a
+    worker's "today" ran from 03:00 to 03:00 and anything saved after
+    midnight landed on yesterday (found 2026-10-09).
+    """
+    local_midnight = datetime.combine(d, datetime.min.time())
+    if APP_TZ is not None:
+        aware = local_midnight.replace(tzinfo=APP_TZ)
+    else:
+        aware = local_midnight.astimezone()     # system local zone
+    return aware.astimezone(timezone.utc).replace(tzinfo=None)

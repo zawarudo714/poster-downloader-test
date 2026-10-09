@@ -3250,7 +3250,14 @@ So, before shipping any figure or label:
   the last 24 hours", "across all accounts". And name the THING counted when
   two counters sit near each other: v251 put "1 / 100" under the gallery
   (titles) and "1 / 102" in the zoom (pictures), and the owner read the
-  difference as a bug (2026-10-09). They now say "title" and "image".
+  difference as a bug (2026-10-09). They now say "title" and "image". The
+  same day, the worker's TODAY read 96 against 58 he had saved, and kept
+  climbing while he was offline: it counted by the FOLDER's name, and the
+  owner's own picks live in the worker's folder. **Count by who did the
+  work, never by where it is filed** — and a "today" compared against a
+  UTC column must start at LOCAL midnight (`utc_start_of_local_day`;
+  preflight's `check_day_boundaries_are_local` fails any new
+  `datetime.combine` day boundary).
 * **A mechanism should announce what it is doing**, in its own words —
   "waiting to try again at 23:44", not "retry_at set".
 * **A STATUS THAT IS TRUE AND ANSWERS NOTHING IS STILL A DEFECT.** The

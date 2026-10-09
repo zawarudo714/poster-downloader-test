@@ -2993,6 +2993,45 @@ def check_no_magic_absent_value() -> None:
     _absent_word_literals()
 
 
+# ── A LOCAL DAY IS NOT A UTC DAY ───────────────────────────────────────────
+# Every DateTime column is stored in UTC. `datetime.combine(day, midnight)`
+# is LOCAL midnight written as if it were UTC, so comparing a column with it
+# shifts the day by the zone's offset — the worker's TODAY ran 03:00-03:00
+# in Nairobi until v258 (2026-10-09). Use timeutil.utc_start_of_local_day.
+# The two uses left are on purpose and listed with why; any NEW one fails,
+# so the next counter has to make the decision instead of inheriting it.
+DAY_BOUNDARY_ALLOWED = {
+    # The marketplace's daily cap: FAA's day is FAA's, not Nairobi's, and
+    # we have never measured which clock it uses — changing it would be a
+    # guess (3c-bis), so it stays as it was.
+    ("app/pipeline.py",
+     "start = datetime.combine(day, datetime.min.time())"),
+    # A date the owner typed as "the business starts here", compared with
+    # marketplace sale dates; an hour either side changes nothing.
+    ("app/earnings/service.py",
+     "start = max(start, datetime.combine(starts_on, datetime.min.time()))"),
+}
+
+
+def check_day_boundaries_are_local() -> None:
+    for path in sorted(APP.rglob("*.py")):
+        rel = path.relative_to(ROOT).as_posix()
+        if rel == "app/timeutil.py":
+            continue
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            code = line.split("#", 1)[0]
+            if "datetime.combine(" not in code:
+                continue
+            # Matched by the exact line, not the file, so a NEW use in the
+            # same file is still caught.
+            if (rel, code.strip()) in DAY_BOUNDARY_ALLOWED:
+                continue
+            fail(f"{rel}:{n} — datetime.combine() builds a LOCAL midnight but "
+                 f"the columns are UTC, so the day is shifted by the time zone. "
+                 f"Use timeutil.utc_start_of_local_day(), or add the file to "
+                 f"DAY_BOUNDARY_ALLOWED with the reason.")
+
+
 # ── THE RESET MUST HAVE AN OPINION ON EVERY TABLE ──────────────────────────
 # `scripts/reset_workflow.py` wipes the work and keeps the configuration.
 # Five tables added after it was written (earnings rows, sweeps, snapshots,
@@ -3636,6 +3675,7 @@ CHECKS = [
     ("javascript helpers are in scope", check_js_helpers_are_in_scope),
     ("absence is NULL, never a magic word", check_no_magic_absent_value),
     ("the reset has an opinion on every table", check_reset_covers_every_table),
+    ("a local day starts at local midnight", check_day_boundaries_are_local),
     ("every setting is read by something", check_every_default_is_read),
     ("storage calls name their project", check_storage_calls_name_their_project),
     ("years are guarded before drawing", check_years_are_guarded_before_drawing),

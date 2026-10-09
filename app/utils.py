@@ -24,7 +24,7 @@ from typing import Optional
 
 from .config import WORKSPACE_DIR
 from .parsing import IMAGE_EXTS
-from .timeutil import local_today
+from .timeutil import local_today, utc_start_of_local_day
 
 
 # ── Workspace layout ─────────────────────────────────────────────────────────
@@ -150,15 +150,29 @@ def week_range(d: Optional[date_type] = None) -> tuple[date_type, date_type]:
 # ── Counter helpers (use the DB, not the filesystem) ─────────────────────────
 # These are imported into routes; they take a SQLAlchemy session and return ints.
 
+# ── THE WORKER'S OWN SAVES, ON THE WORKER'S OWN CLOCK ──────────────────────
+# Two things these counters got wrong until v258 (owner, 2026-10-09: TODAY
+# read 96 while he had done 58, and kept climbing while he was offline):
+#   * The owner's USE MY OWN PICTURE pick is filed in the worker's folder,
+#     so it carries the worker's USERNAME — and these counted by username.
+#     38 of the owner's picks were added to the worker's day. A pick is
+#     never the worker's work (`added_by` is set), so it is left out.
+#   * The day began at UTC midnight (03:00 in Nairobi). It now begins at
+#     local midnight — utc_start_of_local_day.
+# A redo the worker saved today on an older title still counts: he did
+# that work today. Pay is unaffected — payments.payable_criteria has always
+# excluded the owner's picks and buckets by the title's day.
+
 def count_user_saves_for_date(db, username: str, d: date_type) -> int:
-    """Number of live saves authored by `username` whose created_at fell on `d`."""
+    """Live pictures `username` saved himself on local day `d`."""
     from .models import SavedPoster  # local import to avoid circular at module load
-    start = datetime.combine(d, datetime.min.time())
-    end   = datetime.combine(d + timedelta(days=1), datetime.min.time())
+    start = utc_start_of_local_day(d)
+    end   = utc_start_of_local_day(d + timedelta(days=1))
     q = (
         db.query(SavedPoster)
           .filter(
               SavedPoster.username == username,
+              SavedPoster.added_by.is_(None),
               SavedPoster.deleted_at.is_(None),
               SavedPoster.created_at >= start,
               SavedPoster.created_at <  end,
@@ -168,15 +182,16 @@ def count_user_saves_for_date(db, username: str, d: date_type) -> int:
 
 
 def count_user_saves_for_week(db, username: str, d: Optional[date_type] = None) -> int:
-    """Live saves authored this week (Mon–Sun) by created_at."""
+    """Live pictures `username` saved himself this week (Mon–Sun, local)."""
     from .models import SavedPoster
     monday, sunday = week_range(d)
-    start = datetime.combine(monday, datetime.min.time())
-    end   = datetime.combine(sunday + timedelta(days=1), datetime.min.time())
+    start = utc_start_of_local_day(monday)
+    end   = utc_start_of_local_day(sunday + timedelta(days=1))
     q = (
         db.query(SavedPoster)
           .filter(
               SavedPoster.username == username,
+              SavedPoster.added_by.is_(None),
               SavedPoster.deleted_at.is_(None),
               SavedPoster.created_at >= start,
               SavedPoster.created_at <  end,
@@ -188,12 +203,13 @@ def count_user_saves_for_week(db, username: str, d: Optional[date_type] = None) 
 def count_titles_worked_today(db, user_id: int, d: date_type) -> int:
     """Distinct master titles a user touched today (had a save on)."""
     from .models import SavedPoster
-    start = datetime.combine(d, datetime.min.time())
-    end   = datetime.combine(d + timedelta(days=1), datetime.min.time())
+    start = utc_start_of_local_day(d)
+    end   = utc_start_of_local_day(d + timedelta(days=1))
     q = (
         db.query(SavedPoster.master_title_id)
           .filter(
               SavedPoster.user_id == user_id,
+              SavedPoster.added_by.is_(None),
               SavedPoster.deleted_at.is_(None),
               SavedPoster.created_at >= start,
               SavedPoster.created_at <  end,

@@ -1214,6 +1214,27 @@ On Changes Requested, click a thumbnail to zoom:
 - Diagnostics: "Titles holding more pictures than they take" should list
   the titles that already hold two pictures, including unfinished ones.
 
+## 105. YOUR OWN PICKS REACH PAINTING — v256
+
+- After deploying, open Diagnostics. "Your own pictures are not on their
+  way to painting" should be clean, or show only titles that also hold a
+  worker's picture.
+- Use USE MY OWN PICTURE on a title the worker has NOT finished. The
+  title should finish and the pick should appear in "waiting to paint".
+
+## 106. PASTE A COPIED PICTURE — v257
+
+- In Google Images, right-click a full-size picture and choose Copy image.
+- On Worker Images, open a picture in the zoom and press Ctrl+V. USE MY OWN
+  PICTURE should open with your picture in it and its size underneath.
+  Press Enter or USE THIS PICTURE. The title should change in place.
+- Press PASTE PICTURE in the zoom instead: it should ask you to press
+  Ctrl+V, and the picture should appear when you do.
+- Click in the zoom's comment box and paste some words: they should go
+  into the box as normal, with no dialog.
+- On a phone, try press-and-hold in the paste box, then Paste. Tell me
+  whether the picture arrives; I could not test that here.
+
 ---
 
 ## NOT ON THIS LIST, ON PURPOSE

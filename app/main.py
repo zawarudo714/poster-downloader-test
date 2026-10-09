@@ -263,6 +263,19 @@ def on_startup():
             db.rollback()
             log.error("Could not record past rejections: %s", e)
 
+        # The owner's own picks that never reached painting (before v256 a
+        # pick on an unfinished title was never greenlit) go now — see
+        # utils.send_stranded_admin_picks_to_painting. Own guard.
+        try:
+            from .utils import send_stranded_admin_picks_to_painting
+            sent = send_stranded_admin_picks_to_painting(db)
+            db.commit()
+            if sent:
+                log.info("Sent %d title(s) of your own picks to painting", sent)
+        except Exception as e:
+            db.rollback()
+            log.error("Could not send stranded own picks to painting: %s", e)
+
         # Paintings of pictures already taken off their title leave Approve
         # Artwork — see utils.set_aside_withdrawn_paintings. Own guard, same
         # reason as the flag markers above.

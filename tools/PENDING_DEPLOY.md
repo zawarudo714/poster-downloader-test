@@ -1,28 +1,30 @@
 # Not yet deployed
 
-## v254 — the two position counters say what they count (2026-10-09)
+## v257 — paste a copied picture into USE MY OWN PICTURE (2026-10-09)
 
-- Worker Images: "title 1 / 100 (91 left)" under the gallery and
-  "image 1 / 102 (93 left)" in the zoom. They were bare numbers and read
-  as a disagreement; one counts titles, the other pictures.
-- Files: `static/js/admin.js`, `static/js/poster_lightbox.js`, `CLAUDE.md`,
-  `config.py`.
+- Copy an image in Google, open the zoom on Worker Images and press
+  Ctrl+V (or the new PASTE PICTURE button): USE MY OWN PICTURE opens with
+  the picture already in it, showing its size. Nothing is sent until USE
+  THIS PICTURE (or Enter).
+- The dialog takes a pasted picture on every screen that opens it.
+- On today's plain-http site the button cannot read the clipboard by
+  itself, so it asks for Ctrl+V. Phone pasting is not tested.
+- Files: `app/static/js/admin_pick.js`, `app/static/js/admin.js`,
+  `app/static/css/style.css`, `AUDIT.md`, `TO_TEST.md`, `config.py`.
 - The Windows node is not affected. No copying needed.
 
-## v255 — the paste box can no longer put a second picture on a title (2026-10-09)
+## v256 — your own picks reach painting; two saves can no longer race (2026-10-09)
 
-- The worker's paste-a-link box used to ask "Save another?" when the title
-  already had its picture, and saved a second one on OK. It now asks
-  "Replace it with this one?" and swaps, exactly like the search grid. A
-  picture already being painted or uploaded cannot be swapped.
-- Any open flag on the old picture moves to the new one and goes to the
-  admin for approval, the same as the grid swap.
-- Diagnostics: "Titles holding more pictures than they take" now also lists
-  titles still being worked on, not only finished ones.
-- Preflight: a new guard fails any new worker save door that does not ask
-  the shared picture limit.
-- Files: `app/routes/worker.py`, `app/static/js/user.js`, `app/diagnostics.py`,
-  `tools/preflight.py`, `CLAUDE.md`, `TO_TEST.md`, `config.py`.
+- USE MY OWN PICTURE on a title that was not already finished never sent
+  the pick to painting (16 found by Diagnostics). Fixed, and at startup the
+  stranded picks are sent to painting automatically (only titles where
+  every live picture is your own).
+- Two saves on one title at the same moment (a slow paste plus a phone
+  send) could both land. Both worker save doors now ask the limit again
+  after the download and offer a swap instead.
+- Files: `app/pipeline.py`, `app/utils.py`, `app/main.py`,
+  `app/routes/worker.py`, `tools/preflight.py`, `CLAUDE.md`, `TO_TEST.md`,
+  `config.py`.
 - The Windows node is not affected. No copying needed.
 
 Whoever changes code writes here what is waiting and why; the deploy tool

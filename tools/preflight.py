@@ -1527,6 +1527,13 @@ GUARDED: list[tuple[str, str, tuple[str, ...], str]] = [
      "saves a worker picture without asking the shared pictures-per-title "
      "limit (_image_limit), so it could add a second picture to a title "
      "that takes one"),
+    # And it must ask AGAIN after the download: the first answer is a
+    # minute old by then, and two saves racing on one title both read
+    # zero (five travel titles, 2026-10-09).
+    ("app/routes/worker.py", "= SavedPoster(",
+     ("_limit_reached_meanwhile(",),
+     "saves a worker picture without re-checking the picture limit after "
+     "the download, so two saves racing on one title can both land"),
     # ── NOTHING ALREADY MOVING MAY BE CHANGED BY A WORKER DOOR ───────────
     # Delete, REPLACE and SKIP let a worker reopen a finished title and
     # remove or swap a picture that was being painted or was live on the

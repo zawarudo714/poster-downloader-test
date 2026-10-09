@@ -569,3 +569,47 @@ def safe_under_workspace(p: Path) -> bool:
 
 # ── Misc ─────────────────────────────────────────────────────────────────────
 
+
+def send_stranded_admin_picks_to_painting(db) -> int:
+    """
+    Repair: send the owner's own picks that never reached painting.
+
+    Until v256, USE MY OWN PICTURE finished a title in memory and then asked
+    greenlight_titles() for titles that were finished IN THE DATABASE, so a
+    pick on a title that was not already finished was never greenlit (see
+    the flush at the top of greenlight_titles). Fixing that door does not
+    repair the picks it already left behind, so this does, at startup.
+
+    Only titles whose every live picture is one of the owner's own are
+    touched: an old + ADD pick can share a title with a worker's unpaid
+    picture, and greenlighting that title would send the worker's picture
+    to painting before it is paid. Those stay on Diagnostics for a person.
+    Returns how many titles were sent.
+    """
+    from .models import MasterTitle, SavedPoster
+    from .pipeline import awaiting_greenlight_poster_filter, greenlight_titles
+    candidates = {
+        tid for (tid,) in
+        db.query(SavedPoster.master_title_id)
+          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+          .filter(SavedPoster.added_by.isnot(None),
+                  SavedPoster.deleted_at.is_(None),
+                  awaiting_greenlight_poster_filter(),
+                  MasterTitle.status == "complete")
+          .distinct().all()
+    }
+    if not candidates:
+        return 0
+    mixed = {
+        tid for (tid,) in
+        db.query(SavedPoster.master_title_id)
+          .filter(SavedPoster.master_title_id.in_(candidates),
+                  SavedPoster.deleted_at.is_(None),
+                  SavedPoster.added_by.is_(None))
+          .distinct().all()
+    }
+    ids = sorted(candidates - mixed)
+    if not ids:
+        return 0
+    return greenlight_titles(db, ids, by="startup repair",
+                             reason="admin_pick").get("greenlit", 0)

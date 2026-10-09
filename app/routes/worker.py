@@ -974,6 +974,34 @@ def _stand_down_for_swap(db: Session, user: User, t: MasterTitle, *,
     return [sp.id for sp in existing], paths
 
 
+def _limit_reached_meanwhile(db: Session, t: MasterTitle, limit: int,
+                             target_path) -> Optional[JSONResponse]:
+    """
+    Ask the limit AGAIN, after the download, just before the row is written.
+
+    The first count happens before a download that can take a minute, and
+    the new row is only saved after it. Two saves on one title in that
+    window — a slow paste the worker gave up on, then the same place sent
+    from the phone — both counted zero and both saved, which is how five
+    travel titles came to hold two pictures each (owner, 2026-10-09; the
+    second file of each was named "2" while the first row was still
+    unsaved). Counting again here sees the save that finished first, so the
+    later one is refused and offered as a swap instead. The new file is
+    removed on refusal so it does not sit in the folder unowned.
+    """
+    live = count_live_posters_for_master(db, t.id)
+    if live < limit:
+        return None
+    target_path.unlink(missing_ok=True)
+    return JSONResponse(
+        {"ok": False, "reason": "soft_limit", "can_replace": True,
+         "message": (f"Another save on this title finished first, so it now "
+                     f"has {live} of {limit}. Replace it with this one?"),
+         "current_count": live, "soft_limit": limit},
+        status_code=409,
+    )
+
+
 _SWAP_IN_PIPELINE_MESSAGE = ("That image has already gone into processing, so "
                              "it cannot be swapped here. Ask the admin to "
                              "rerun or drop it.")
@@ -1135,6 +1163,10 @@ def api_search_save(
     if refusal is not None:
         target_path.unlink(missing_ok=True)
         return refusal
+
+    late = _limit_reached_meanwhile(db, t, soft_limit, target_path)
+    if late is not None:
+        return late
 
     # Every check has passed, so the pictures this swap stands down can go.
     for old_path in stood_down_paths:
@@ -2107,6 +2139,10 @@ def save_image(
     if refusal is not None:
         target_path.unlink(missing_ok=True)
         return refusal
+
+    late = _limit_reached_meanwhile(db, t, soft_limit, target_path)
+    if late is not None:
+        return late
 
     # Every check has passed, so the pictures this swap stands down can go.
     for old_path in stood_down_paths:

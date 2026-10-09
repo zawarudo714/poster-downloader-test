@@ -737,8 +737,15 @@
     // sink on the next load or when the order dropdown is touched.
     // The place panel too: keeping a picture now settles its place check.
     onReviewed: () => { renderGallery(); refreshSummary(); renderPlacePanel(); },
-    // USE MY OWN PICTURE, beside the zoomed picture.
+    // USE MY OWN PICTURE, beside the zoomed picture — and PASTE PICTURE,
+    // the same dialog opened ready for a picture copied in Google (owner,
+    // 2026-10-09: "like Photopea"). Ctrl+V in the zoom does the same; see
+    // the paste listener below.
     actions: (t) => [{
+      label: 'PASTE PICTURE',
+      className: 'btn btn-info',
+      onClick: () => usePick(t, { paste: true }),
+    }, {
       label: 'USE MY OWN PICTURE',
       className: 'btn btn-info',
       onClick: () => usePick(t),
@@ -760,9 +767,9 @@
 
   // USE MY OWN PICTURE, from the title box or from the zoom. The worker's
   // picture leaves this day's gallery and the owner's takes its place.
-  function usePick(t) {
+  function usePick(t, extra) {
     if (!window.AdminPick) return;
-    window.AdminPick.open({
+    window.AdminPick.open(Object.assign({}, extra || {}, {
       masterId: t.master_id,
       title: t.title,
       onDone: async (d, msg) => {
@@ -771,8 +778,32 @@
       },
       // The dialog gave up waiting: show whatever the title holds now.
       onRefresh: () => refreshTitleInPlace(t.master_id),
-    });
+    }));
   }
+
+  // Ctrl+V while the zoom is open and a picture is on the clipboard: open
+  // USE MY OWN PICTURE for the title on screen, with that picture already
+  // in it. Nothing is sent until USE THIS PICTURE (or Enter) is pressed —
+  // a paste replaces the worker's picture, so it is never a single key.
+  // Text pasted into the comment box is left alone, and the dialog takes
+  // its own pastes once it is open.
+  document.addEventListener('paste', (e) => {
+    if (!LB.isOpen()) return;
+    if (window.AdminPick && window.AdminPick.isOpen && window.AdminPick.isOpen()) return;
+    const items = (e.clipboardData && e.clipboardData.items) || [];
+    let img = null;
+    for (const it of items) {
+      if (it.kind === 'file' && /^image\//.test(it.type)) { img = it.getAsFile(); break; }
+    }
+    // In the comment box, a paste that carries words is typing — leave it.
+    const ae = document.activeElement;
+    const typing = ae && ['INPUT', 'SELECT', 'TEXTAREA'].includes(ae.tagName);
+    if (typing && e.clipboardData && e.clipboardData.getData('text/plain')) return;
+    const cur = LB.current();
+    if (!img || !cur) return;
+    e.preventDefault();
+    usePick(cur.master, { pasteImage: img });
+  });
 
   // ONE TITLE CHANGED — re-read the day and put back only that title, in
   // its old place. This used to call loadList(), which blanked the gallery

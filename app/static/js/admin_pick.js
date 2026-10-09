@@ -22,6 +22,95 @@
   let box = null;          // the dialog, built once
   let job = null;          // { masterId, title, onDone } while open
   let busy = false;
+  let pasted = null;       // { file, w, h, url } — a picture pasted from the clipboard
+
+  // ── PASTE A COPIED PICTURE (owner, 2026-10-09) ─────────────────────────
+  // "Like Photopea": copy an image in Google, then paste it here. Two ways
+  // in, because a BUTTON may only read the clipboard on a secure (https)
+  // page, and this site is plain http today — so on http the button cannot
+  // read anything by itself and the paste key (Ctrl+V) is the way. The
+  // PASTE event works on http, so Ctrl+V always works; the button appears
+  // only where the browser says it can read.
+  const canReadClipboard = () => !!(window.isSecureContext && navigator.clipboard
+                                    && navigator.clipboard.read);
+
+  // The clipboard usually holds a PNG even for a photograph, which can be
+  // ten times the JPEG the website served — on a slow link that is minutes
+  // of upload. So the picture is redrawn as a high-quality JPEG first; a
+  // photograph loses nothing you can see. Its real size is shown, so a
+  // thumbnail copied by mistake is obvious before it is sent.
+  async function takeImage(blob) {
+    const p = box._parts;
+    p.status.textContent = 'Reading the pasted picture…';
+    let bmp;
+    try {
+      bmp = await createImageBitmap(blob);
+    } catch (e) {
+      p.status.textContent = 'That was not a picture this browser can read. Copy the image again and paste.';
+      return false;
+    }
+    const c = document.createElement('canvas');
+    c.width = bmp.width;
+    c.height = bmp.height;
+    const g = c.getContext('2d');
+    g.fillStyle = '#fff';                 // a see-through PNG flattens onto white
+    g.fillRect(0, 0, c.width, c.height);
+    g.drawImage(bmp, 0, 0);
+    const jpeg = await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.95));
+    if (!jpeg) {
+      p.status.textContent = 'Could not prepare the pasted picture. Try copying it again.';
+      return false;
+    }
+    if (pasted && pasted.url) URL.revokeObjectURL(pasted.url);
+    pasted = { file: new File([jpeg], 'pasted.jpg', { type: 'image/jpeg' }),
+               w: bmp.width, h: bmp.height, url: URL.createObjectURL(jpeg) };
+    // One picture at a time: a paste replaces any link or file typed in,
+    // so what is sent is always what is on screen.
+    p.url.value = '';
+    p.file.value = '';
+    p.prevImg.src = pasted.url;
+    p.prevCap.textContent = `Pasted picture · ${pasted.w} × ${pasted.h} pixels`;
+    p.prev.hidden = false;
+    p.status.textContent = 'Ready. Press USE THIS PICTURE (or Enter).';
+    p.go.focus();
+    return true;
+  }
+
+  function clearPasted() {
+    if (!box) return;
+    if (pasted && pasted.url) URL.revokeObjectURL(pasted.url);
+    pasted = null;
+    const p = box._parts;
+    p.prev.hidden = true;
+    p.prevImg.removeAttribute('src');
+    p.prevCap.textContent = '';
+  }
+
+  // The first image on a paste event, or null. A pasted LINK is left for
+  // the browser to type into whichever box has the cursor.
+  function imageFromPaste(e) {
+    const items = (e.clipboardData && e.clipboardData.items) || [];
+    for (const it of items) {
+      if (it.kind === 'file' && /^image\//.test(it.type)) return it.getAsFile();
+    }
+    return null;
+  }
+
+  // The button's way in, where the browser allows it (https only).
+  async function readClipboard() {
+    const p = box._parts;
+    try {
+      const items = await navigator.clipboard.read();
+      for (const it of items) {
+        const t = it.types.find((x) => /^image\//.test(x));
+        if (t) return takeImage(await it.getType(t));
+      }
+      p.status.textContent = 'There is no picture on the clipboard. In Google, right-click the picture and choose Copy image.';
+    } catch (e) {
+      p.status.textContent = 'The browser would not let this page read the clipboard. Press Ctrl+V instead.';
+    }
+    return false;
+  }
 
   function el(tag, cls, text) {
     const n = document.createElement(tag);
@@ -61,6 +150,33 @@
     file.accept = 'image/jpeg,image/png,image/webp,image/gif';
     fileLab.appendChild(file);
 
+    // …or paste a copied picture. The zone is editable only so a phone
+    // offers its Paste menu on a long press; nothing typed into it is kept.
+    const pasteLab = el('div', 'filter-label', '…or paste a picture you copied');
+    const zone = el('div', 'admin-pick-paste',
+      'Press Ctrl+V to paste a copied picture. On a phone, press and hold here, then choose Paste.');
+    zone.contentEditable = 'true';
+    zone.spellcheck = false;
+    zone.addEventListener('beforeinput', (e) => e.preventDefault());
+    const clipBtn = el('button', 'btn btn-ghost btn-tiny', 'PASTE FROM CLIPBOARD');
+    clipBtn.type = 'button';
+    clipBtn.hidden = !canReadClipboard();
+    clipBtn.addEventListener('click', () => readClipboard());
+    const prev = el('div', 'admin-pick-preview');
+    prev.hidden = true;
+    const prevImg = el('img');
+    prevImg.alt = 'The pasted picture';
+    const prevCap = el('div', 'mono muted');
+    const prevClear = el('button', 'btn btn-ghost btn-tiny', 'REMOVE');
+    prevClear.type = 'button';
+    prevClear.addEventListener('click', () => { clearPasted(); box._parts.status.textContent = ''; });
+    prev.appendChild(prevImg);
+    prev.appendChild(prevCap);
+    prev.appendChild(prevClear);
+    pasteLab.appendChild(zone);
+    pasteLab.appendChild(clipBtn);
+    pasteLab.appendChild(prev);
+
     const whyLab = el('label', 'filter-label', 'Why? (optional — shown beside the ADMIN PICK label)');
     const why = el('input');
     why.type = 'text';
@@ -83,17 +199,28 @@
 
     // A link and a file are either/or: choosing one clears the other, so
     // what is sent is always what is on screen.
-    url.addEventListener('input', () => { if (url.value.trim()) file.value = ''; });
-    file.addEventListener('change', () => { if (file.files.length) url.value = ''; });
+    url.addEventListener('input', () => { if (url.value.trim()) { file.value = ''; clearPasted(); } });
+    file.addEventListener('change', () => { if (file.files.length) { url.value = ''; clearPasted(); } });
     url.addEventListener('keydown', (e) => { if (e.key === 'Enter') send({}); });
+    // After a paste the focus sits on USE THIS PICTURE, so Enter sends.
 
-    [urlLab, fileLab, whyLab, status, actions].forEach((n) => form.appendChild(n));
+    [urlLab, fileLab, pasteLab, whyLab, status, actions].forEach((n) => form.appendChild(n));
     [head, lead, form].forEach((n) => card.appendChild(n));
     box.appendChild(bg);
     box.appendChild(card);
     document.body.appendChild(box);
 
-    box._parts = { name, url, file, why, status, go, cancel };
+    box._parts = { name, url, file, why, status, go, cancel,
+                   zone, prev, prevImg, prevCap };
+    // A pasted PICTURE, anywhere in the open dialog, is the picture to use.
+    // A pasted link or text is left alone, so the link box still works.
+    document.addEventListener('paste', (e) => {
+      if (!box || box.hidden || busy) return;
+      const img = imageFromPaste(e);
+      if (!img) return;
+      e.preventDefault();
+      takeImage(img);
+    }, true);
     // While the dialog is up, keys belong to it: Escape closes it (not the
     // zoom underneath), and arrows or the keep key pressed outside its
     // boxes must not step or mark the picture behind it.
@@ -119,13 +246,27 @@
     p.why.value = '';
     p.status.textContent = '';
     p.go.disabled = false;
+    clearPasted();
     box.hidden = false;
-    p.url.focus();
+    // Opened by a paste (Ctrl+V in the zoom): the picture is already here.
+    if (opts.pasteImage) {
+      takeImage(opts.pasteImage);
+    } else if (opts.paste) {
+      // Opened by the zoom's PASTE PICTURE button.
+      if (canReadClipboard()) readClipboard();
+      else {
+        p.zone.focus();
+        p.status.textContent = 'Press Ctrl+V now to paste the picture you copied.';
+      }
+    } else {
+      p.url.focus();
+    }
   }
 
   function close() {
     if (busy || !box) return;      // never abandon a save half-way
     box.hidden = true;
+    clearPasted();
     job = null;
   }
 
@@ -136,9 +277,9 @@
     if (busy || !job) return;
     const p = box._parts;
     const link = p.url.value.trim();
-    const chosen = p.file.files && p.file.files[0];
+    const chosen = (pasted && pasted.file) || (p.file.files && p.file.files[0]);
     if (!link && !chosen) {
-      p.status.textContent = 'Paste a link or choose a file first.';
+      p.status.textContent = 'Paste a link, choose a file or paste a picture first.';
       p.url.focus();
       return;
     }
@@ -240,5 +381,5 @@
     }
   }
 
-  window.AdminPick = { open };
+  window.AdminPick = { open, isOpen: () => !!(box && !box.hidden) };
 })();

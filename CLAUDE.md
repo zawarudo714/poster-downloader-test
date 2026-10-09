@@ -2888,7 +2888,15 @@ travelled down a trigger nobody listed (traced 2026-09-27, while replacing
 that box with USE MY OWN PICTURE, which sends its pick to painting itself).
 When a thing is exempted from a step, list what that step SETS OFF and give
 the exempt thing its own way to each of them. Watched by
-`check_admin_picks_reach_painting`. The same box also saved the admin's
+`check_admin_picks_reach_painting` — which caught the next hole itself on
+2026-10-09: USE MY OWN PICTURE set the title to "complete" IN MEMORY and
+then called `greenlight_titles`, whose query filters on "complete" IN THE
+DATABASE. The session runs with `autoflush=False`, so 16 of 38 picks (every
+one on a title not already finished) were never sent. **A function that
+QUERIES by a state its caller may just have set must flush first** — the
+fix lives at the top of `greenlight_titles`, so every caller is covered,
+and `send_stranded_admin_picks_to_painting` repairs the rows already left
+behind at startup. The same box also saved the admin's
 picture under the WORKER's user_id, so the worker's delete button accepted
 it; v239 saves it under the admin's own id, which makes the wrong owner
 impossible rather than guarded (rule 5), and keeps a guard only for the
@@ -2973,7 +2981,12 @@ the next lesson to stay at one door: the grid swapped when a title already
 had its picture, while the paste box asked "Save another?" and added a
 second on OK — 100 travel titles held 102 images (owner, 2026-10-09). Both
 doors now call `_image_limit` and `_stand_down_for_swap`, and a GUARDED row
-fails any new save door that does not ask the limit. Three admin
+fails any new save door that does not ask the limit. **And a limit asked
+BEFORE a slow step is a minute old after it**: five titles still held two,
+one PASTED and one GOOGLE, the second file named "2" while the first row
+was not yet saved — a slow paste and a phone send racing, both counting
+zero. `_limit_reached_meanwhile` asks again just before the row is
+written, and has its own GUARDED row. Three admin
 doors take pictures off a title — RETIRE, the admin DELETE and USE MY OWN
 PICTURE — and by v239 retire had forgotten the paintings (a withdrawn
 picture's painting stayed waiting on Approve Artwork) while DELETE had

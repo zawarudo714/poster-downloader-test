@@ -2055,6 +2055,17 @@ def greenlight_titles(
     if not ids:
         return {"greenlit": 0, "skipped": 0, "posters": 0}
 
+    # ── THE CALLER'S UNSAVED CHANGES MUST BE VISIBLE TO THE QUERY BELOW ──
+    # SessionLocal runs with autoflush=False, so a title the caller has just
+    # set to "complete" in memory is still "in_progress" in the database,
+    # and the status filter below silently skipped it. USE MY OWN PICTURE
+    # does exactly that — finish the title, then greenlight it — so every
+    # pick on a title that was not already finished was never sent to
+    # painting (16 of 38 on 2026-10-09; Diagnostics'
+    # admin_picks_reach_painting found them). Flushing here protects every
+    # caller, not only the one that was caught.
+    db.flush()
+
     titles = (
         db.query(MasterTitle)
           .filter(MasterTitle.id.in_(ids), MasterTitle.status == "complete")

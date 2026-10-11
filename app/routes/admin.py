@@ -4105,6 +4105,7 @@ def payments_settings(
 ):
     """Save the per-poster rate (KES) + week start day (0=Mon..6=Sun)."""
     from ..payments import set_setting, parse_decimal
+    from ..pipeline import set_setting as pipeline_set_setting
     try:
         rate_dec = parse_decimal(rate_kes)
     except ValueError as e:
@@ -4113,7 +4114,10 @@ def payments_settings(
         raise HTTPException(400, "Rate must be non-negative.")
     if not (0 <= week_start_day <= 6):
         raise HTTPException(400, "week_start_day must be 0..6.")
-    set_setting(db, "pay_rate_kes",   str(rate_dec), by=admin.username)
+    # The rate lives in the pipeline cascade (payments.get_rate_kes reads
+    # pipeline.pay_rate_kes), so it is written there. Writing the bare key
+    # is what made SAVE look like it did nothing (2026-10-11).
+    pipeline_set_setting(db, "pay_rate_kes", str(rate_dec), by=admin.username)
     set_setting(db, "week_start_day", str(week_start_day), by=admin.username)
     log_activity(db, user=admin, action="payments_settings", target_type="settings",
                  details={"rate_kes": str(rate_dec), "week_start_day": week_start_day})

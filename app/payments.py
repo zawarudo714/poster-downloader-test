@@ -39,11 +39,27 @@ from .timeutil import local_today
 
 # ─── Settings helpers ──────────────────────────────────────────────────────
 
-DEFAULT_RATE_KES = "10"          # change defaults via Admin → Payments
 DEFAULT_WEEK_START = "0"         # 0 = Monday, 6 = Sunday (ISO weekday convention - 1)
 
 
+# ── ONE SETTING, ONE KEY ────────────────────────────────────────────────────
+# These two read and write a bare key ("week_start_day"). The pipeline's own
+# get_setting/set_setting store under "pipeline.<key>". The pay rate moved to
+# the pipeline cascade so it could differ per project — but the Payments
+# page's SAVE kept writing the bare "pay_rate_kes" row, which nothing read
+# any more, so the box snapped back to 5 on every save (owner, 2026-10-11:
+# he tried to raise the rate to 7). A key the pipeline owns is now REFUSED
+# here, loudly, instead of being written where nothing looks.
+def _not_a_pipeline_key(key: str) -> None:
+    from .pipeline import DEFAULTS as _PIPELINE_DEFAULTS
+    if key in _PIPELINE_DEFAULTS:
+        raise KeyError(f"{key!r} is a pipeline setting — use "
+                       f"pipeline.get_setting / pipeline.set_setting, which "
+                       f"store it under 'pipeline.{key}'.")
+
+
 def get_setting(db: Session, key: str, default: str) -> str:
+    _not_a_pipeline_key(key)
     row = db.query(AppSetting).filter_by(key=key).first()
     if row is None:
         return default
@@ -51,6 +67,7 @@ def get_setting(db: Session, key: str, default: str) -> str:
 
 
 def set_setting(db: Session, key: str, value: str, *, by: str | None = None) -> None:
+    _not_a_pipeline_key(key)
     row = db.query(AppSetting).filter_by(key=key).first()
     if row is None:
         row = AppSetting(key=key, value=value, updated_by=by)
@@ -80,12 +97,14 @@ def get_rate_kes(db: Session, project=None) -> str:
     `project=None` returns the global rate, which is what the legacy callers
     and any cross-project total want.
     """
-    from .pipeline import get_setting as pipeline_setting
+    from .pipeline import DEFAULTS, get_setting as pipeline_setting
     try:
         return str(pipeline_setting(db, "pay_rate_kes", project=project))
     except Exception:
-        # Never let a settings problem block a payment run.
-        return get_setting(db, "pay_rate_kes", DEFAULT_RATE_KES)
+        # Never let a settings problem block a payment run. The fallback is
+        # the SAME default the cascade ends in — it used to be a second
+        # default of its own ("10") read from a row nothing wrote any more.
+        return str(DEFAULTS["pay_rate_kes"])
 
 
 def split_poster_ids_by_project(db: Session, poster_ids: list[int]) -> dict:

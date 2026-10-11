@@ -2041,6 +2041,16 @@ form field name, a header, an ID format:
    account, for months. A fallback default belongs in ONE function that
    everything calls, never inlined at each use.
 
+   **And one setting in TWO STORES is the same defect.** The pay rate moved
+   to the pipeline cascade (`pipeline.pay_rate_kes`) so it could differ per
+   project, while the Payments page's SAVE kept writing the old bare
+   `pay_rate_kes` row — which nothing read any more — so raising the rate to
+   7 snapped back to 5 on every save, and the fallback carried a THIRD
+   default of its own, "10" (owner, 2026-10-11). The legacy
+   `payments.get_setting/set_setting` now refuse any key the pipeline owns,
+   and the box carries `data-setting` so `check_settings_are_reachable`
+   watches it.
+
    **AND THE SAME SHAPE COST A WHOLE SCREEN AGAIN ON 2026-09-10, THROUGH AN
    OPTIONAL ARGUMENT RATHER THAN A DEFAULT VALUE.** Every function in
    `storage_remote.py` took `project=None`. Writes passed the project;

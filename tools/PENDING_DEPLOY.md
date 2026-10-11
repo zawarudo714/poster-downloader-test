@@ -1,13 +1,14 @@
 # Not yet deployed
 
-## v258 — the worker's TODAY and WEEK count only his own work (2026-10-09)
+## v259 — the pay rate box saves (2026-10-11)
 
-- Your USE MY OWN PICTURE picks no longer count as the worker's saves on
-  the dashboard (TODAY, WEEK) or on his own screen. His redos still count.
-- Those days now start at midnight Kenya time, not 03:00.
-- Pay is not affected; it never counted your picks.
-- Files: `app/utils.py`, `app/timeutil.py`, `tools/preflight.py`,
-  `CLAUDE.md`, `config.py`.
+- SAVE SETTINGS on Payments wrote the rate where nothing read it, so it
+  snapped back to 5. It now saves to the setting the payments actually use.
+- The old store now refuses that key outright, and a hidden fallback that
+  said 10 KES is gone.
+- Files: `app/payments.py`, `app/routes/admin.py`,
+  `app/templates/admin_payments.html`, `tools/preflight.py`, `CLAUDE.md`,
+  `config.py`.
 - The Windows node is not affected. No copying needed.
 
 Whoever changes code writes here what is waiting and why; the deploy tool

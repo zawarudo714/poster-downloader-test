@@ -2100,7 +2100,7 @@ NOT_ON_THE_SETTINGS_FORMS = {
 # rule about something ABSENT has nothing to trip over. Clearing this list is
 # a job for the QoL stage or the Mega Audit.
 SETTINGS_WITH_NO_BOX_YET = {
-    "pay_rate_kes", "soft_limit_per_title",
+    "soft_limit_per_title",
     "allowed_image_hosts", "review_min_width_px",
     "earnings_sales_url", "earnings_balance_url", "earnings_retry_window_hours",
     "listing_check_alarm_ratio", "listing_check_max_attempts",

@@ -10,7 +10,7 @@
     <div class="panel-body">
       <form class="inline-form" method="post" action="/admin/payments/settings">
         <label class="filter-label">RATE (KES per {{ noun }})
-          <input type="text" name="rate_kes" value="{{ rate_kes }}" pattern="[0-9]+(\.[0-9]+)?" required>
+          <input type="text" name="rate_kes" data-setting="pay_rate_kes" value="{{ rate_kes }}" pattern="[0-9]+(\.[0-9]+)?" required>
         </label>
         <label class="filter-label">WEEK STARTS ON
           <select name="week_start_day">

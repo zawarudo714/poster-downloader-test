@@ -120,6 +120,8 @@
        'The key that marks the artwork to be left behind for editing, with a blue outline. It is NOT released when you press SAVE & RELEASE; it stays waiting until you edit it and keep it. For example when Photopea is down. 8 by default.'],
       ['review_key_keep', 'text', 'Key: KEEP',
        'The key that keeps the artwork on Approve Artwork. The SAME key marks a picture as looked-at on Worker Images, so one key means "this one is fine" on both screens. 9 by default.'],
+      ['review_key_paste', 'text', 'Key: PASTE PICTURE (Worker Images zoom)',
+       'In the Worker Images zoom, this key pastes the picture you copied into USE MY OWN PICTURE, the same as Ctrl+V. 3 by default, so your hand can stay on the number pad. On a plain http site the browser only lets a key read the clipboard after a one-time Chrome setting; until then the box opens and asks for Ctrl+V.'],
       ['review_batch_size',   'number', 'Review batch size',       'How many painted images REVIEW EVERYTHING WAITING loads at once, so you inspect and release a small set at a time instead of a hundred. For example 20. Set to 0 to load everything at once. Only affects the "everything waiting" button; reviewing a single date still loads that whole day.'],
     ],
     // The DEFAULT placement. Any one poster is nudged on the Approve

@@ -156,6 +156,7 @@
   // /admin/api/browse and is the SAME setting as KEEP on Approve Artwork
   // (9 by default), so one key means "this one is fine" on both screens.
   let keepKey = '9';
+  let pasteKey = '3';     // the zoom's paste key (review_key_paste)
   // The zoom itself lives in poster_lightbox.js (shared with Changes
   // Requested); this page wires its own buttons into it further down.
   const LB = window.PosterLightbox;
@@ -193,6 +194,7 @@
     titles = data.titles || [];
     placeCheck = data.place_check || placeCheck;
     if (data.keep_key) keepKey = String(data.keep_key);
+    if (data.paste_key) pasteKey = String(data.paste_key);
     renderPaid(data.pay);
     updatePlaceButton();
     sortTitles();
@@ -744,7 +746,7 @@
     actions: (t) => [{
       label: 'PASTE PICTURE',
       className: 'btn btn-info',
-      onClick: () => usePick(t, { paste: true }),
+      onClick: () => usePick(t, { paste: true, pasteKey }),
     }, {
       label: 'USE MY OWN PICTURE',
       className: 'btn btn-info',
@@ -802,7 +804,25 @@
     const cur = LB.current();
     if (!img || !cur) return;
     e.preventDefault();
-    usePick(cur.master, { pasteImage: img });
+    usePick(cur.master, { pasteImage: img, pasteKey });
+  });
+
+  // The PASTE KEY (3 by default) does what Ctrl+V does, for a hand that
+  // lives on the number pad (owner, 2026-10-12). A key press carries no
+  // clipboard, so the dialog reads it itself — which the browser allows
+  // only on a secure page; elsewhere the dialog opens and asks for Ctrl+V.
+  // Typing in a box is left alone, and the dialog handles the key itself
+  // once it is open.
+  document.addEventListener('keydown', (e) => {
+    if (!LB.isOpen()) return;
+    if (window.AdminPick && window.AdminPick.isOpen && window.AdminPick.isOpen()) return;
+    const ae = document.activeElement;
+    if (ae && ['INPUT', 'SELECT', 'TEXTAREA'].includes(ae.tagName)) return;
+    if (!window.PDKeys.matches(e, pasteKey)) return;
+    const cur = LB.current();
+    if (!cur) return;
+    e.preventDefault();
+    usePick(cur.master, { paste: true, pasteKey });
   });
 
   // ONE TITLE CHANGED — re-read the day and put back only that title, in

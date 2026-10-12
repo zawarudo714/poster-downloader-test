@@ -1237,6 +1237,18 @@ On Changes Requested, click a thumbnail to zoom:
 
 ---
 
+## 107. NUMBER PAD 3 PASTES IN THE ZOOM — v260
+
+- In Chrome, open chrome://flags/#unsafely-treat-insecure-origin-as-secure,
+  type http://178.105.34.144 in the box, set it to Enabled and relaunch.
+- Copy a picture in Google. On Worker Images, open the zoom and press 3 on
+  the number pad. The first time, Chrome asks to let the site see the
+  clipboard: allow it. The picture should appear in USE MY OWN PICTURE.
+- Press 3 again inside that box: it should paste again. Typing a 3 in the
+  link or reason box should just type a 3.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** No longer needed at all — corrected

@@ -96,6 +96,16 @@
     return null;
   }
 
+  // A key or button cannot read the clipboard on this page (plain http),
+  // so say exactly what to do instead of doing nothing.
+  function askForCtrlV() {
+    const p = box._parts;
+    p.zone.focus();
+    p.status.textContent = 'Press Ctrl+V now to paste the picture you copied. '
+      + '(The browser only lets a key or button read the clipboard on a secure '
+      + 'page — a one-time Chrome setting makes it work here.)';
+  }
+
   // The button's way in, where the browser allows it (https only).
   async function readClipboard() {
     const p = box._parts;
@@ -231,6 +241,17 @@
         close();
         return;
       }
+      // The paste key, pressed anywhere in the box except a text box,
+      // reads the clipboard — the same as PASTE FROM CLIPBOARD.
+      const typing = e.target && ['INPUT', 'TEXTAREA'].includes(e.target.tagName);
+      if (!typing && job && job.pasteKey && window.PDKeys
+          && window.PDKeys.matches(e, job.pasteKey) && !busy) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (canReadClipboard()) readClipboard();
+        else askForCtrlV();
+        return;
+      }
       if (!box.contains(e.target)) e.stopPropagation();
     }, true);
   }
@@ -254,10 +275,7 @@
     } else if (opts.paste) {
       // Opened by the zoom's PASTE PICTURE button.
       if (canReadClipboard()) readClipboard();
-      else {
-        p.zone.focus();
-        p.status.textContent = 'Press Ctrl+V now to paste the picture you copied.';
-      }
+      else askForCtrlV();
     } else {
       p.url.focus();
     }

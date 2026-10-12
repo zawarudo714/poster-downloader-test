@@ -2018,6 +2018,8 @@ def api_browse(
         # The "looked at it" key — the SAME setting as KEEP on Approve
         # Artwork, so one key means "this one is fine" on both screens.
         "keep_key": str(get_setting(db, "review_key_keep", project=project) or "9"),
+        # The zoom's paste key — Ctrl+V without leaving the number pad.
+        "paste_key": str(get_setting(db, "review_key_paste", project=project) or "3"),
         "title_count": len(titles),
         "poster_count": sum(len(t["posters"]) for t in titles.values()),
         "titles": list(titles.values()),

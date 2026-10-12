@@ -823,6 +823,11 @@ DEFAULTS: dict[str, Any] = {
     "review_key_rerun":     "7",
     "review_key_photoshop": "8",
     "review_key_keep":      "9",
+    # Worker Images' zoom: paste a copied picture into USE MY OWN PICTURE
+    # without leaving the number pad (owner, 2026-10-12 — his hand lives on
+    # the number pad, and Ctrl+V meant reaching across the keyboard). A key
+    # can only READ the clipboard on a secure page; see admin_pick.js.
+    "review_key_paste":     "3",
 
     # Node poll interval hint (seconds). The node honours this.
     "poll_interval_s":    30,

@@ -1,14 +1,14 @@
 # Not yet deployed
 
-## v259 — the pay rate box saves (2026-10-11)
+## v260 — number pad 3 pastes in the Worker Images zoom (2026-10-12)
 
-- SAVE SETTINGS on Payments wrote the rate where nothing read it, so it
-  snapped back to 5. It now saves to the setting the payments actually use.
-- The old store now refuses that key outright, and a hidden fallback that
-  said 10 KES is gone.
-- Files: `app/payments.py`, `app/routes/admin.py`,
-  `app/templates/admin_payments.html`, `tools/preflight.py`, `CLAUDE.md`,
-  `config.py`.
+- In the zoom, the paste key (3 by default, a setting beside KEEP on the
+  Pipeline settings) does what Ctrl+V does.
+- On today's plain-http site a key cannot read the clipboard, so until the
+  one-time Chrome setting is on, 3 opens the box and asks for Ctrl+V.
+- Files: `app/pipeline.py`, `app/routes/admin.py`, `app/static/js/admin.js`,
+  `app/static/js/admin_pick.js`, `app/static/js/admin_pipeline.js`,
+  `TO_TEST.md`, `config.py`.
 - The Windows node is not affected. No copying needed.
 
 Whoever changes code writes here what is waiting and why; the deploy tool

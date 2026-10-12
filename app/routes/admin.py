@@ -4132,11 +4132,14 @@ def payments_preview(
     worker_id: int = Query(...),
     start: str = Query(...),     # YYYY-MM-DD
     end:   str = Query(...),     # YYYY-MM-DD
+    pay_ahead: int = Query(0),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """
     Preview eligible posters and total for a worker over [start, end].
+    With pay_ahead=1, what a PAY AHEAD would cover instead: the pictures
+    still waiting on a check join in (`not_checked_count` says how many).
     Used by the JS to compute the totals as admin picks dates.
 
     Also returns `unpaid_dates_before` — a list of {"date", "count"} for
@@ -4146,7 +4149,7 @@ def payments_preview(
     """
     from ..payments import (
         eligible_poster_ids, get_rate_kes, parse_decimal,
-        unpaid_dates_before, local_today,
+        unpaid_dates_before, local_today, advance_shortfall,
     )
     try:
         start_d = date.fromisoformat(start)
@@ -4156,6 +4159,12 @@ def payments_preview(
     if end_d < start_d:
         raise HTTPException(400, "End is before start.")
     ids = eligible_poster_ids(db, worker_id=worker_id, start=start_d, end=end_d)
+    not_checked = 0
+    if pay_ahead:
+        from ..payments import advance_poster_ids
+        ahead = advance_poster_ids(db, worker_id=worker_id, start=start_d, end=end_d)
+        not_checked = len(set(ahead) - set(ids))
+        ids = ahead
     rate = get_rate_kes(db)
     rate_dec = parse_decimal(rate)
     total = rate_dec * len(ids)
@@ -4187,6 +4196,11 @@ def payments_preview(
         "by_day":       by_day,
         "poster_ids":   ids,
         "unpaid_before_outside_range": unpaid_outside,
+        "pay_ahead":    bool(pay_ahead),
+        "not_checked_count": not_checked,
+        # Paid-ahead pictures later removed without pay — offered as a
+        # deduction (or a waiver) in the MARK PAID box.
+        "advance_shortfall": advance_shortfall(db, worker_id),
     })
 
 
@@ -4200,6 +4214,9 @@ def payments_mark_paid(
     note: str = Form(""),
     push_to_worker: int = Form(0),
     include_back_pay_dates: str = Form(""),  # comma-separated YYYY-MM-DD list
+    pay_ahead: int = Form(0),
+    settle_ids: str = Form(""),       # paid-ahead pictures shown as removed
+    settle_mode: str = Form(""),      # "deducted" | "waived"
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -4232,8 +4249,14 @@ def payments_mark_paid(
         raise HTTPException(404, "Worker not found.")
     worker_username = worker.username
 
-    # Primary eligible IDs from the chosen [start, end] range.
-    ids = eligible_poster_ids(db, worker_id=worker_id, start=start_d, end=end_d)
+    # Primary eligible IDs from the chosen [start, end] range — or, for a
+    # PAY AHEAD, every picture on those days including ones not checked yet
+    # (payments.advance_poster_ids; see the column comment in models.py).
+    if pay_ahead:
+        from ..payments import advance_poster_ids
+        ids = advance_poster_ids(db, worker_id=worker_id, start=start_d, end=end_d)
+    else:
+        ids = eligible_poster_ids(db, worker_id=worker_id, start=start_d, end=end_d)
 
     # Optionally fold in older "back-pay" days admin explicitly included.
     back_pay_dates: list[str] = []
@@ -4255,6 +4278,25 @@ def payments_mark_paid(
     # Dedup defensively (shouldn't have duplicates but safer).
     ids = sorted(set(ids))
     rate = get_rate_kes(db)
+
+    # Paid-ahead pictures that were removed without pay, as the BOX showed
+    # them. Only ids that are still owed now are settled — the box's list is
+    # what he decided about, and anything that appeared since is left for
+    # next time (an implicit decision ranges over what was seen).
+    settled_json = None
+    if settle_mode in ("deducted", "waived") and settle_ids.strip():
+        from ..payments import advance_shortfall
+        owed = {it["poster_id"]: it for it in
+                advance_shortfall(db, worker_id)["items"]}
+        seen = set()
+        for raw in settle_ids.split(","):
+            raw = raw.strip()
+            if raw.isdigit() and int(raw) in owed:
+                seen.add(int(raw))
+        if seen:
+            kes = sum(parse_decimal(owed[i]["rate"]) for i in seen)
+            settled_json = json.dumps({settle_mode: sorted(seen),
+                                       "kes": str(kes)})
 
     # Per-day breakdown for receipt transparency.
     by_day = per_day_breakdown(db, poster_ids=ids)
@@ -4287,6 +4329,8 @@ def payments_mark_paid(
         by_day_json         = json.dumps(by_day),
         by_project_json     = json.dumps(by_project) if by_project else None,
         back_pay_dates_json = json.dumps(back_pay_dates) if back_pay_dates else None,
+        is_advance          = 1 if pay_ahead else 0,
+        advance_settled_json = settled_json,
         pushed_at           = datetime.utcnow() if push_to_worker else None,
         created_by          = admin.username,
     )
@@ -4296,7 +4340,8 @@ def payments_mark_paid(
         db, user=admin, action="paid", target_type="payment_run", target_id=run.id,
         details={"worker": worker_username, "start": start, "end": end,
                  "count": len(ids), "amount": str(amount), "pushed": bool(push_to_worker),
-                 "back_pay_dates": back_pay_dates},
+                 "back_pay_dates": back_pay_dates, "pay_ahead": bool(pay_ahead),
+                 "advance_settled": json.loads(settled_json) if settled_json else None},
     )
 
     # ── Pipeline hook: auto-greenlight what was just paid for ───────────
@@ -4311,7 +4356,13 @@ def payments_mark_paid(
     greenlit = None
     try:
         from .. import pipeline as P
-        greenlit = P.greenlight_for_payment_run(db, run, by=admin.username)
+        from ..payments import ready_to_paint_ids
+        # Only what has passed its checks goes on to painting — a pay-ahead
+        # run holds flagged pictures — plus earlier-paid pictures that have
+        # passed them since (ready_to_paint_ids).
+        greenlit = P.greenlight_for_payment_run(
+            db, run, by=admin.username,
+            poster_ids=ready_to_paint_ids(db, worker_id, ids))
         if greenlit.get("greenlit"):
             log_activity(
                 db, user=admin, action="pipeline_greenlight",

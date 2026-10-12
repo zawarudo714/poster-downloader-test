@@ -105,6 +105,9 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("users",         "last_project_id", "INTEGER"),
     ("master_titles", "greenlit_source", "VARCHAR(32)"),
     ("payment_runs",  "by_project_json", "TEXT"),
+    # PAY AHEAD (2026-10-12) — see the columns in models.py.
+    ("payment_runs",  "is_advance",           "INTEGER NOT NULL DEFAULT 0"),
+    ("payment_runs",  "advance_settled_json", "TEXT"),
     # ── Per-project vocabulary, upload rotation, workspace split ────────
     ("projects",      "upload_turn_size",  "INTEGER"),
     ("projects",      "item_noun",         "VARCHAR(32) NOT NULL DEFAULT 'poster'"),

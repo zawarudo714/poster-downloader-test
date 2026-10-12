@@ -173,6 +173,27 @@
       </div>
     </div>
 
+    {# PAY AHEAD (2026-10-12): money sent before the pictures are checked.
+       Covers every picture on these days, flagged ones included, so a later
+       fix or replacement is never paid again. #}
+    <div class="pay-dialog-ahead">
+      <label class="filter-checkbox">
+        <input type="checkbox" id="pay-dialog-ahead">
+        <span>PAY AHEAD — include pictures I have not checked yet</span>
+      </label>
+      <p class="muted" id="pay-dialog-ahead-note" hidden></p>
+    </div>
+
+    {# Paid-ahead pictures that were later removed without pay: the money
+       bought nothing, so it comes off this payment unless he unticks it. #}
+    <div class="pay-dialog-shortfall" id="pay-dialog-shortfall" hidden>
+      <label class="filter-checkbox">
+        <input type="checkbox" id="pay-dialog-shortfall-take" checked>
+        <span id="pay-dialog-shortfall-text"></span>
+      </label>
+      <div class="muted mono" id="pay-dialog-shortfall-list"></div>
+    </div>
+
     <div class="pay-dialog-form">
       <label class="filter-label">AMOUNT (KES)
         <input type="text" id="pay-dialog-amount" pattern="[0-9]+(\.[0-9]+)?" required>

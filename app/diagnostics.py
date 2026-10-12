@@ -2314,6 +2314,43 @@ def check_titles_are_paid_once(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def check_paid_ahead_pictures_settled(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: every picture in a PAY AHEAD run is still worth its money —
+    payable itself, or redone on its title by the same worker — or has been
+    settled (taken off a later payment, or waived).
+
+    The Payments box offers the unsettled ones at the next MARK PAID, so a
+    finding here is money sent for a picture that was later removed without
+    pay and that no payment has dealt with yet. Not an error: it waits for
+    payday. Listed so it is never invisible (payments.advance_shortfall).
+    """
+    from .models import User
+    from .payments import advance_shortfall
+    rows, total = [], 0
+    for w in db.query(User).filter(User.role == "worker").all():
+        sf = advance_shortfall(db, w.id)
+        if not sf["count"]:
+            continue
+        total += sf["count"]
+        for it in sf["items"][:MAX_ROWS]:
+            rows.append(Finding(
+                it["title"],
+                f"{w.username}: picture record {it['poster_id']} from {it['day']} "
+                f"was paid ahead at {it['rate']} KES and later removed without pay",
+                "/admin/payments"))
+    return _result(
+        "paid_ahead_pictures_settled",
+        f"{total} paid-ahead picture(s) were removed without pay and are not settled yet"
+        if total else "Every paid-ahead picture is still worth its money, or settled",
+        "Money was sent for these before they were checked, and they were "
+        "removed afterwards without pay. The next MARK PAID for that worker "
+        "offers to take the amount off (or let it go); either way it is "
+        "settled once and does not come back.",
+        "warn" if total else "ok", rows[:MAX_ROWS], total,
+    )
+
+
 def check_admin_picks_reach_painting(db: Session, scope: Scope) -> CheckResult:
     """
     INVARIANT: the owner's own picture on a finished title is on its way
@@ -3348,6 +3385,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_left_for_photoshop_is_reachable,
     check_titles_hold_too_many_pictures,
     check_titles_are_paid_once,
+    check_paid_ahead_pictures_settled,
     check_admin_picks_reach_painting,
     check_withdrawn_pictures_hold_no_waiting_painting,
     check_pictures_have_a_measured_size,

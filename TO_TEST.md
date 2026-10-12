@@ -1237,15 +1237,14 @@ On Changes Requested, click a thumbnail to zoom:
 
 ---
 
-## 107. NUMBER PAD 3 PASTES IN THE ZOOM — v260
+## 108. PAY AHEAD — v261
 
-- In Chrome, open chrome://flags/#unsafely-treat-insecure-origin-as-secure,
-  type http://178.105.34.144 in the box, set it to Enabled and relaunch.
-- Copy a picture in Google. On Worker Images, open the zoom and press 3 on
-  the number pad. The first time, Chrome asks to let the site see the
-  clipboard: allow it. The picture should appear in USE MY OWN PICTURE.
-- Press 3 again inside that box: it should paste again. Typing a 3 in the
-  link or reason box should just type a 3.
+- After the repair (run #6 converted), Payments with 09/12 → 10/11 should
+  show 2492, not 2499.
+- Open MARK PAID on a range with flagged pictures and tick PAY AHEAD. The
+  box should say how many pictures, and how many are not checked yet, and
+  the amount should go up to include them. Untick: it should go back.
+- Payment history: run #6 should read 130 × 5 = 650, run #5 215 × 5 = 1075.
 
 ---
 

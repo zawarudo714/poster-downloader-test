@@ -2165,11 +2165,17 @@ def awaiting_greenlight_poster_filter():
                SavedPoster.pipeline_status == "")
 
 
-def greenlight_for_payment_run(db: Session, run, *, by: str) -> dict[str, int]:
+def greenlight_for_payment_run(db: Session, run, *, by: str,
+                               poster_ids: Optional[list] = None) -> dict[str, int]:
     """
     Hook called from the payments flow. Greenlights exactly the posters that
     were just paid for — including any back-pay days folded into the run —
     which is why it works off poster_ids_json rather than the period bounds.
+
+    `poster_ids` overrides the run's own list. The payment route passes
+    payments.ready_to_paint_ids(): a PAY AHEAD run holds pictures that are
+    still flagged, which must not be painted yet, and earlier-paid pictures
+    that have passed their checks since must be (2026-10-12).
 
     Respects `greenlight_mode`: a no-op when the admin has chosen manual-only.
     """
@@ -2177,10 +2183,11 @@ def greenlight_for_payment_run(db: Session, run, *, by: str) -> dict[str, int]:
     if mode not in ("payment", "both"):
         return {"greenlit": 0, "skipped": 0, "posters": 0, "disabled": 1}
 
-    try:
-        poster_ids = json.loads(run.poster_ids_json or "[]")
-    except (TypeError, ValueError):
-        poster_ids = []
+    if poster_ids is None:
+        try:
+            poster_ids = json.loads(run.poster_ids_json or "[]")
+        except (TypeError, ValueError):
+            poster_ids = []
     if not poster_ids:
         return {"greenlit": 0, "skipped": 0, "posters": 0}
 

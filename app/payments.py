@@ -386,34 +386,10 @@ def unpayable_reasons(db: Session, worker_id: int, candidate_ids) -> dict:
             out[pid] = "title_paid"
     rest -= set(out)
 
-    # Open or awaiting flags, on the picture itself or in a similar pair.
-    flagged: set = set()
-    for chunk in _chunks(rest):
-        flagged |= {r[0] for r in (
-            db.query(Revision.saved_poster_id)
-              .filter(Revision.saved_poster_id.in_(chunk),
-                      Revision.status.in_(("open", "awaiting_approval")))
-              .all())}
-    for (raw,) in (db.query(Revision.related_poster_ids)
-                     .filter(Revision.status.in_(("open", "awaiting_approval")),
-                             Revision.revision_type == "similar")
-                     .all()):
-        if not raw:
-            continue
-        try:
-            flagged |= {i for i in json.loads(raw) if isinstance(i, int)}
-        except (TypeError, ValueError):
-            pass
-    for pid in rest & flagged:
-        out[pid] = "flag"
-    rest -= set(out)
-
-    # Replacements the owner has not looked at.
-    waiting = awaiting_your_look_by_title(
-        db, {info[p][0] for p in rest if p in info})
-    unseen = {sp.id for lst in waiting.values() for sp in lst}
-    for pid in rest & unseen:
-        out[pid] = "look"
+    # Open or awaiting flags, then replacements the owner has not looked
+    # at — one definition, shared with the pay-ahead and painting paths.
+    out.update(held_for_check(db, rest,
+                              title_of={p: info[p][0] for p in rest if p in info}))
     rest -= set(out)
 
     # Two unpaid pictures on one title with room for one: the older is paid,
@@ -431,6 +407,240 @@ def unpayable_reasons(db: Session, worker_id: int, candidate_ids) -> dict:
         for pid in pids[room:]:
             out[pid] = "title_paid"
     return {pid: why for pid, why in out.items() if pid in asked}
+
+
+
+def held_for_check(db: Session, poster_ids, *, title_of: dict | None = None) -> dict:
+    """
+    Which of these pictures are still waiting on a CHECK: {id: "flag"} for
+    an open or awaiting flag (on the picture or in a similar pair), {id:
+    "look"} for a replacement the owner has not looked at yet. Anything
+    missing has passed its checks.
+
+    ONE definition, asked by three things that must agree: whether a
+    picture can be paid now (unpayable_reasons), which pictures a PAY AHEAD
+    covers without them being checked yet, and which paid pictures may go
+    on to painting. A copy of this question in any of them would be the
+    "six doors, six definitions" defect again (CLAUDE.md, the flag marker).
+    """
+    from .models import Revision as _Rev
+    from .utils import awaiting_your_look_by_title
+
+    ids = {i for i in (poster_ids or []) if i is not None}
+    if not ids:
+        return {}
+    if title_of is None:
+        title_of = {}
+        for chunk in _chunks(ids):
+            for pid, tid in (db.query(SavedPoster.id, SavedPoster.master_title_id)
+                               .filter(SavedPoster.id.in_(chunk)).all()):
+                title_of[pid] = tid
+    out: dict = {}
+    flagged: set = set()
+    for chunk in _chunks(ids):
+        flagged |= {r[0] for r in (
+            db.query(_Rev.saved_poster_id)
+              .filter(_Rev.saved_poster_id.in_(chunk),
+                      _Rev.status.in_(("open", "awaiting_approval")))
+              .all())}
+    for (raw,) in (db.query(_Rev.related_poster_ids)
+                     .filter(_Rev.status.in_(("open", "awaiting_approval")),
+                             _Rev.revision_type == "similar")
+                     .all()):
+        if not raw:
+            continue
+        try:
+            flagged |= {i for i in json.loads(raw) if isinstance(i, int)}
+        except (TypeError, ValueError):
+            pass
+    for pid in ids & flagged:
+        out[pid] = "flag"
+    rest = ids - set(out)
+    waiting = awaiting_your_look_by_title(
+        db, {title_of[p] for p in rest if title_of.get(p) is not None})
+    unseen = {sp.id for lst in waiting.values() for sp in lst}
+    for pid in rest & unseen:
+        out[pid] = "look"
+    return out
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PAY AHEAD — money sent before the pictures were checked (owner, 2026-10-12)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# The owner sometimes pays for days he has not finished checking. Recording
+# only the pictures that were good at that moment left the flagged ones
+# looking unpaid, so each later fix came back on payday and he typed custom
+# amounts by hand (Padua: 2499 on screen, 2492 to send). A pay-ahead run
+# instead covers EVERY picture on its days, one per title; being in the run
+# is what "paid" means, so the existing rules finish the job:
+#   * a fix on the same picture -> "paid", never listed again;
+#   * a new picture on the title -> "title_paid", never paid again;
+#   * a picture removed WITHOUT pay -> money bought nothing: advance_shortfall
+#     lists it, and the next payment takes it off (or waives it) once.
+
+def _paid_count_by_title(db: Session, title_ids) -> dict:
+    every_paid = _every_paid_poster_id(db)
+    out: dict = {}
+    for chunk in _chunks(title_ids):
+        for pid, tid in (db.query(SavedPoster.id, SavedPoster.master_title_id)
+                           .filter(SavedPoster.master_title_id.in_(chunk)).all()):
+            if pid in every_paid:
+                out[tid] = out.get(tid, 0) + 1
+    return out
+
+
+def advance_poster_ids(db: Session, *, worker_id: int, start: date,
+                       end: date) -> list[int]:
+    """
+    What a PAY AHEAD over [start, end] covers: every picture that could be
+    paid now PLUS those still waiting on a check (flag or look) — never one
+    already paid, never a title already paid, and never more pictures on a
+    title than the project takes (the OLDER wins, as in unpayable_reasons).
+    """
+    from .models import MasterTitle, Project
+    from .pipeline import _default_project_id
+
+    cand = {r[0] for r in (
+        db.query(SavedPoster.id)
+          .filter(*payable_criteria(worker_id),
+                  SavedPoster.original_save_date >= start,
+                  SavedPoster.original_save_date <= end).all())}
+    if not cand:
+        return []
+    why = unpayable_reasons(db, worker_id, cand)
+    keep = {p for p in cand if why.get(p) not in ("paid", "title_paid")}
+    info: dict = {}
+    for chunk in _chunks(keep):
+        for pid, tid, created, proj in (
+                db.query(SavedPoster.id, SavedPoster.master_title_id,
+                         SavedPoster.created_at, MasterTitle.project_id)
+                  .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+                  .filter(SavedPoster.id.in_(chunk)).all()):
+            info[pid] = (tid, created, proj)
+    # unpayable_reasons settles "two on one title" only among pictures that
+    # passed their checks; a pay-ahead also takes checked-later ones, so the
+    # one-per-title rule is applied again over the whole set here.
+    default_pid = _default_project_id(db)
+    per_title = {p.id: int(p.images_per_title)
+                 for p in db.query(Project).all() if p.images_per_title}
+    paid_on = _paid_count_by_title(db, {t for t, _c, _p in info.values()})
+    by_title: dict = {}
+    for pid, (tid, _c, _p) in info.items():
+        by_title.setdefault(tid, []).append(pid)
+    out: list = []
+    for tid, pids in by_title.items():
+        proj = info[pids[0]][2]
+        lim = per_title.get(proj if proj is not None else default_pid)
+        pids.sort(key=lambda p: (info[p][1] is None, info[p][1], p))
+        if lim is None:
+            out.extend(pids)
+        else:
+            out.extend(pids[:max(lim - paid_on.get(tid, 0), 0)])
+    return sorted(out)
+
+
+def _settled_advance_ids(db: Session, worker_id: int) -> set:
+    done: set = set()
+    for (raw,) in (db.query(PaymentRun.advance_settled_json)
+                     .filter(PaymentRun.worker_id == worker_id,
+                             PaymentRun.advance_settled_json.isnot(None)).all()):
+        try:
+            d = json.loads(raw or "{}")
+        except (TypeError, ValueError):
+            continue
+        for key in ("deducted", "waived"):
+            done |= {i for i in d.get(key, []) if isinstance(i, int)}
+    return done
+
+
+def advance_shortfall(db: Session, worker_id: int) -> dict:
+    """
+    Paid-ahead pictures that ended up removed WITHOUT pay, so the money sent
+    for them bought nothing, and that no later payment has settled yet.
+
+    A paid-ahead picture is still worth its money when it is itself payable
+    (live, or removed with pay — retire, USE MY OWN PICTURE) or when the
+    same worker has a payable picture on its title (he redid it, and the
+    redo is the "title already paid" picture). Anything else is listed, at
+    the rate of the run that paid for it.
+
+    Returns {"count", "kes" (str), "items": [{poster_id, title, day, rate}]}.
+    """
+    from .models import MasterTitle
+
+    runs = (db.query(PaymentRun)
+              .filter(PaymentRun.worker_id == worker_id,
+                      PaymentRun.is_advance == 1).all())
+    settled = _settled_advance_ids(db, worker_id)
+    rate_of: dict = {}
+    for run in runs:
+        try:
+            ids = json.loads(run.poster_ids_json or "[]")
+        except (TypeError, ValueError):
+            ids = []
+        for pid in ids:
+            if isinstance(pid, int) and pid not in settled:
+                rate_of[pid] = run.rate_kes
+    if not rate_of:
+        return {"count": 0, "kes": "0", "items": []}
+
+    payable_now: set = set()
+    title_of: dict = {}
+    for chunk in _chunks(rate_of):
+        for pid, tid in (db.query(SavedPoster.id, SavedPoster.master_title_id)
+                           .filter(SavedPoster.id.in_(chunk)).all()):
+            title_of[pid] = tid
+        payable_now |= {r[0] for r in (
+            db.query(SavedPoster.id)
+              .filter(SavedPoster.id.in_(chunk), *payable_criteria(worker_id)).all())}
+    lost = [p for p in rate_of if p not in payable_now]
+    titles_redone: set = set()
+    for chunk in _chunks({title_of[p] for p in lost if title_of.get(p) is not None}):
+        titles_redone |= {r[0] for r in (
+            db.query(SavedPoster.master_title_id)
+              .filter(SavedPoster.master_title_id.in_(chunk),
+                      *payable_criteria(worker_id)).all())}
+    lost = [p for p in lost if title_of.get(p) not in titles_redone]
+
+    items, total = [], Decimal("0")
+    for pid in sorted(lost):
+        mt = db.get(MasterTitle, title_of.get(pid)) if title_of.get(pid) else None
+        sp = db.get(SavedPoster, pid)
+        rate = parse_decimal(rate_of[pid] or "0")
+        total += rate
+        items.append({"poster_id": pid,
+                      "title": (f"{mt.external_id}. {mt.title}" if mt else "?"),
+                      "day": sp.original_save_date.isoformat() if sp and sp.original_save_date else "",
+                      "rate": _trim(rate)})
+    return {"count": len(items), "kes": _trim(total), "items": items}
+
+
+def ready_to_paint_ids(db: Session, worker_id: int, run_ids) -> list[int]:
+    """
+    What a payment should send on to painting: the run's pictures that have
+    passed their checks, PLUS this worker's earlier-paid pictures that have
+    passed them since and are not in the pipeline yet.
+
+    Painting starts at payment. A paid-ahead picture that was still flagged
+    when it was paid — and a replacement on a title already paid — is never
+    in a later payment, so without the second half it would wait for ever
+    (the "a rule that leaves something out of one step leaves it out of
+    every step that step starts" shape, CLAUDE.md rule 8).
+    """
+    from .pipeline import awaiting_greenlight_poster_filter
+
+    run_ids = {i for i in (run_ids or []) if isinstance(i, int)}
+    clean = run_ids - set(held_for_check(db, run_ids))
+    waiting = {r[0] for r in (
+        db.query(SavedPoster.id)
+          .filter(*payable_criteria(worker_id),
+                  SavedPoster.deleted_at.is_(None),
+                  awaiting_greenlight_poster_filter()).all())}
+    why = unpayable_reasons(db, worker_id, waiting)
+    paid_before = {p for p, r in why.items() if r in ("paid", "title_paid")}
+    paid_before -= set(held_for_check(db, paid_before))
+    return sorted(clean | paid_before)
 
 
 def eligible_poster_ids(

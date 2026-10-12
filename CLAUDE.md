@@ -2887,7 +2887,15 @@ could be shown money the run would never send. Every screen that counts
 money now asks the one function; `check_titles_are_paid_once` reads the
 payment runs themselves. When a gate is added, list every later step that
 acts on what it guards (paying, painting, uploading) and ask whether each
-one consults it.
+one consults it. **And money sent AHEAD of the gate must be recorded
+against everything it paid for, not only what had passed.** The owner paid
+for two days before checking them; the record held only the 116 good
+pictures, so each later fix came back as "unpaid" and he typed custom
+amounts by hand (Padua, 2026-10-12). A PAY AHEAD run now covers every
+picture on its days (`payments.advance_poster_ids`), the existing "paid" and
+"title paid" rules do the rest, `ready_to_paint_ids` sends checked pictures
+on to painting at later paydays, and `check_paid_ahead_pictures_settled`
+lists money that bought a picture later removed without pay.
 
 **A RULE THAT LEAVES SOMETHING OUT OF ONE STEP LEAVES IT OUT OF EVERY STEP
 THAT STEP STARTS.** The admin's own pictures were rightly never paid for —

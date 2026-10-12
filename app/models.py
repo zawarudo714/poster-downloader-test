@@ -653,6 +653,22 @@ class PaymentRun(Base):
     # JSON list of date strings: ["2026-04-23", "2026-04-22"]
     back_pay_dates_json = Column(Text, nullable=True)
 
+    # ── PAID AHEAD (owner, 2026-10-12) ─────────────────────────────────────
+    # 1 = money sent BEFORE the pictures were checked: the run covers every
+    # picture on its days, flagged and not-yet-looked-at included, one per
+    # title. Being in poster_ids_json is what makes each one "paid", so a
+    # later fix is never paid again and a replacement on the title reads
+    # "title already paid" — the rules that already existed do the rest.
+    # Before this existed, a pay-ahead recorded only the pictures that were
+    # good at the time, and every later fix came back as "unpaid" (Padua,
+    # 2026-10-12: the owner had to type 2492 against a screen saying 2499).
+    is_advance      = Column(Integer, nullable=False, default=0)
+    # Paid-ahead pictures that were later REMOVED without pay (so the money
+    # bought nothing), settled in THIS run: {"deducted": [ids], "waived":
+    # [ids], "kes": "10"}. Stored per run so a settled picture never comes
+    # back — the observation is stored, not a silence (CLAUDE.md rule 8).
+    advance_settled_json = Column(Text, nullable=True)
+
     # Push-to-worker (receipt) flow — null until admin pushes.
     pushed_at       = Column(DateTime, nullable=True)
     ack_at          = Column(DateTime, nullable=True)

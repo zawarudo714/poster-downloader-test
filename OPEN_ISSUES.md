@@ -24,9 +24,11 @@ Two fixes were offered; he has not chosen:
 Also in flight the same day — the Sat/Sun payment, so the next session does
 not muddle the two: 1725 KES was sent on 2026-10-06. A run was recorded for
 2026-09-12 → 10-02 (215 pictures) at 1725, the note saying 650 KES was paid
-ahead for Sat 3 + Sun 4 Oct (130 pictures). Still to do: check those two
-days, record them with amount 0, and carry the credit (5 KES per picture
-flagged on those days) into the next payday.
+ahead for Sat 3 + Sun 4 Oct (130 pictures). Done 2026-10-09: the two days were
+recorded as run #6 at 0 KES (116 pictures). v261 (2026-10-12) adds PAY AHEAD
+and `scripts/convert_run_to_pay_ahead.py`, which turns run #6 into a
+pay-ahead (the 14 flagged pictures join it, 650 KES moves to it from run
+#5). After that, no custom amounts are needed.
 
 ---
 

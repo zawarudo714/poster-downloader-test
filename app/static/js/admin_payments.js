@@ -106,6 +106,7 @@
     tr._rate = data.rate_kes || rateKes;
     tr._previewIds = data.poster_ids || [];
     tr._unpaidOutside = data.unpaid_before_outside_range || [];
+    tr._shortfall = data.advance_shortfall || { count: 0, kes: '0', items: [] };
 
     // Render the "you forgot these days" warning row beneath this worker.
     renderUnpaidRow(wid, tr._unpaidOutside, tr._rate);
@@ -231,6 +232,12 @@
   const backPayWrap   = $('pay-dialog-backpay');
   const backPayList   = $('pay-dialog-backpay-list');
   const backPaySummary = $('pay-dialog-backpay-summary');
+  const aheadBox      = $('pay-dialog-ahead');
+  const aheadNote     = $('pay-dialog-ahead-note');
+  const shortWrap     = $('pay-dialog-shortfall');
+  const shortTake     = $('pay-dialog-shortfall-take');
+  const shortText     = $('pay-dialog-shortfall-text');
+  const shortList     = $('pay-dialog-shortfall-list');
 
   function closeDialog() { dialog.hidden = true; }
   document.querySelectorAll('[data-lightbox-close]').forEach((el) => {
@@ -241,6 +248,8 @@
   let dialogBaseTotal = 0;   // computed total from the picker range
   let dialogBaseCount = 0;
   let dialogRate = 0;
+  let dialogNormal = { count: 0, total: 0 };   // the range as normally paid
+  let dialogShort = { count: 0, kes: '0', items: [] };
 
   document.querySelectorAll('button[data-action="pay"]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -259,6 +268,30 @@
       dialogRef.value  = '';
       dialogNote.value = '';
       dialogPush.checked = true;
+      dialogNormal = { count: dialogBaseCount, total: dialogBaseTotal };
+
+      // PAY AHEAD starts off; ticking it re-asks the server what a
+      // pay-ahead over this range would cover.
+      aheadBox.checked = false;
+      aheadNote.hidden = true;
+      aheadNote.textContent = '';
+
+      // Paid-ahead pictures removed without pay — taken off by default.
+      dialogShort = tr._shortfall || { count: 0, kes: '0', items: [] };
+      if (dialogShort.count > 0) {
+        shortWrap.hidden = false;
+        shortTake.checked = true;
+        shortText.textContent =
+          `Take ${dialogShort.kes} KES off this payment — ${dialogShort.count} ` +
+          `paid-ahead ${dialogShort.count === 1 ? PD.noun : PD.nouns} ` +
+          `${dialogShort.count === 1 ? 'was' : 'were'} later removed without pay. ` +
+          `Untick to let it go instead; either way it will not come back.`;
+        shortList.textContent = dialogShort.items
+          .map((i) => `${i.title} (${i.day})`).join(' · ');
+      } else {
+        shortWrap.hidden = true;
+        shortList.textContent = '';
+      }
 
       // Build back-pay checkbox list from this row's stashed unpaid_outside.
       const unpaid = tr._unpaidOutside || [];
@@ -271,14 +304,14 @@
           <label class="pay-bp-item">
             <input type="checkbox" data-bp-date="${u.date}" data-bp-count="${u.count}">
             <span class="mono">${u.date}</span>
-            <span class="muted">(${u.count} poster${u.count === 1 ? '' : 's'} · ${formatAmount(u.count * dialogRate)} KES)</span>
+            <span class="muted">(${u.count} ${u.count === 1 ? PD.noun : PD.nouns} · ${formatAmount(u.count * dialogRate)} KES)</span>
           </label>
         `).join('');
         backPayList.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
           cb.addEventListener('change', recomputeDialogTotal);
         });
-        recomputeDialogTotal();
       }
+      recomputeDialogTotal();
       dialog.hidden = false;
       dialogAmount.focus();
     });
@@ -290,7 +323,9 @@
       extraCount += parseInt(cb.getAttribute('data-bp-count'), 10) || 0;
     });
     const totalCount = dialogBaseCount + extraCount;
-    const totalKes   = dialogBaseTotal + (extraCount * dialogRate);
+    const takeOff    = (dialogShort.count > 0 && shortTake.checked)
+      ? (parseFloat(dialogShort.kes) || 0) : 0;
+    const totalKes   = Math.max(dialogBaseTotal + (extraCount * dialogRate) - takeOff, 0);
     backPaySummary.textContent =
       extraCount === 0
         ? 'No back-pay selected.'
@@ -302,6 +337,44 @@
         `Total: ${totalCount} ${PD.nouns} (${dialogBaseCount} from picker range + ${extraCount} back-pay) · ${formatAmount(totalKes)} KES.`;
     }
   }
+
+  if (shortTake) shortTake.addEventListener('change', recomputeDialogTotal);
+
+  // PAY AHEAD ticked: ask the server what it would cover, and say plainly
+  // how many of those pictures have not been checked yet.
+  if (aheadBox) aheadBox.addEventListener('change', async () => {
+    if (!activeRow) return;
+    if (!aheadBox.checked) {
+      dialogBaseCount = dialogNormal.count;
+      dialogBaseTotal = dialogNormal.total;
+      aheadNote.hidden = true;
+      recomputeDialogTotal();
+      return;
+    }
+    aheadNote.hidden = false;
+    aheadNote.textContent = 'Counting every picture on these days…';
+    const params = new URLSearchParams({
+      worker_id: activeRow.getAttribute('data-worker-id'),
+      start: startInp.value, end: endInp.value, pay_ahead: '1' });
+    try {
+      const r = await fetch('/admin/api/payments/preview?' + params.toString());
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error(d.detail || r.status);
+      if (!aheadBox.checked) return;   // unticked while we waited
+      dialogBaseCount = d.poster_count;
+      dialogBaseTotal = parseFloat(d.computed_total_kes) || 0;
+      aheadNote.textContent =
+        `${d.poster_count} ${d.poster_count === 1 ? PD.noun : PD.nouns}, ` +
+        `${d.not_checked_count} of them not checked yet. All of them count as ` +
+        `paid now, so a later fix or a replacement on these titles is never ` +
+        `paid again. A paid-ahead ${PD.noun} you later remove without pay ` +
+        `comes off a future payment.`;
+      recomputeDialogTotal();
+    } catch (e) {
+      aheadBox.checked = false;
+      aheadNote.textContent = 'Could not count the pictures: ' + e.message;
+    }
+  });
 
   dialogConfirm.addEventListener('click', async () => {
     if (!activeRow) return;
@@ -321,6 +394,12 @@
     });
     if (bpDates.length > 0) {
       fd.append('include_back_pay_dates', bpDates.join(','));
+    }
+    if (aheadBox && aheadBox.checked) fd.append('pay_ahead', '1');
+    // The paid-ahead pictures the box SHOWED — settled either way, once.
+    if (dialogShort.count > 0) {
+      fd.append('settle_ids', dialogShort.items.map((i) => i.poster_id).join(','));
+      fd.append('settle_mode', shortTake.checked ? 'deducted' : 'waived');
     }
     dialogConfirm.disabled = true;
     dialogConfirm.textContent = 'SAVING…';

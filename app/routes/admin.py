@@ -72,7 +72,7 @@ from ..utils import (
     count_user_saves_for_date, count_user_saves_for_week,
     list_date_folders, list_users_with_workspaces, live_flag_title_ids,
     pictures_awaiting_your_look,
-    safe_under_workspace, saved_poster_folder, saved_poster_path,
+    safe_under_workspace, saved_later_on, saved_poster_folder, saved_poster_path,
 )
 
 
@@ -1759,6 +1759,9 @@ def _zoom_poster_payload(sp, rev) -> dict:
         # 'brave' / 'google' / 'pasted', or empty for saves that
         # predate the column — the screen then says nothing.
         "image_source": sp.image_source or "",
+        # The real save day when it is later than the title's day — the
+        # "saved 13 Oct" label (utils.saved_later_on). "" when the same.
+        "saved_later_on": saved_later_on(sp.created_at, sp.original_save_date),
         # The admin's K mark — green outline + sinks to the bottom on
         # the next sort. Cosmetic by design; see models.py.
         "reviewed": sp.reviewed_at is not None,
@@ -4150,6 +4153,7 @@ def payments_preview(
     from ..payments import (
         eligible_poster_ids, get_rate_kes, parse_decimal,
         unpaid_dates_before, local_today, advance_shortfall,
+        saved_later_by_day,
     )
     try:
         start_d = date.fromisoformat(start)
@@ -4198,6 +4202,9 @@ def payments_preview(
         "unpaid_before_outside_range": unpaid_outside,
         "pay_ahead":    bool(pay_ahead),
         "not_checked_count": not_checked,
+        # Pictures saved on a later day than their title's day, by that
+        # title's day — the "(1 saved later, on 13 Oct)" note.
+        "saved_later_by_day": saved_later_by_day(db, ids),
         # Paid-ahead pictures later removed without pay — offered as a
         # deduction (or a waiver) in the MARK PAID box.
         "advance_shortfall": advance_shortfall(db, worker_id),

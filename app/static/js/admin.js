@@ -555,6 +555,9 @@
     // inline here and had already drifted into a second copy once).
     const srcPill = LB.sourcePill(p);
     if (srcPill) pillsHost.appendChild(srcPill);
+    // "saved 13 Oct" when the picture came on a later day than its title.
+    const laterPill = LB.savedLaterPill(p);
+    if (laterPill) pillsHost.appendChild(laterPill);
     // The place check's verdict. A DOT marker rather than a rectangle, so
     // at a glance it cannot be confused with the source pill beside it —
     // "found via Google" and "Google says it is the right place" are two

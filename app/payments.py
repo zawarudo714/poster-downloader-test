@@ -755,7 +755,8 @@ def unpaid_dates_before(
     # query used to carry its own copy without the admin-added exclusion, so
     # it counted posters that could never be paid.
     rows = (
-        db.query(SavedPoster.id, SavedPoster.original_save_date)
+        db.query(SavedPoster.id, SavedPoster.original_save_date,
+                 SavedPoster.created_at)
           .filter(
               *payable_criteria(worker_id),
               SavedPoster.original_save_date < today,
@@ -765,20 +766,57 @@ def unpaid_dates_before(
     if not rows:
         return []
 
-    candidate = {pid for pid, _d in rows}
+    candidate = {pid for pid, _d, _c in rows}
     candidate -= set(unpayable_reasons(db, worker_id, candidate))
     if not candidate:
         return []
 
+    # "Saved after your last payment" — a day already paid can grow again
+    # when the worker finishes or redoes a title started on it (owner,
+    # 2026-10-13: Fatehpur Sikri, started 11 Oct, saved 13 Oct). The chip
+    # says so, instead of looking like a day the payment missed.
+    last_paid = (db.query(PaymentRun.created_at)
+                   .filter(PaymentRun.worker_id == worker_id)
+                   .order_by(PaymentRun.created_at.desc()).first())
+    last_paid = last_paid[0] if last_paid else None
+
     # Bucket survivors back into per-day counts.
     by_day: dict[date, int] = {}
-    for pid, d in rows:
+    after: dict[date, int] = {}
+    for pid, d, created in rows:
         if pid in candidate:
             by_day[d] = by_day.get(d, 0) + 1
+            if last_paid and created and created > last_paid:
+                after[d] = after.get(d, 0) + 1
     return [
-        {"date": d.isoformat(), "count": n}
+        {"date": d.isoformat(), "count": n, "after_last_payment": after.get(d, 0)}
         for d, n in sorted(by_day.items(), reverse=True)
     ]
+
+
+def saved_later_by_day(db: Session, poster_ids) -> dict:
+    """
+    For a list of pictures, the ones saved on a LATER day than their title's
+    day, grouped by the title's day: {"2026-10-11": {"count": 1, "on":
+    ["2026-10-13"]}}. Drives the "(1 saved later, on 13 Oct)" note in the
+    Payments per-day list — same question as utils.saved_later_on.
+    """
+    from .utils import saved_later_on
+    out: dict = {}
+    for chunk in _chunks({i for i in (poster_ids or []) if i is not None}):
+        for created, day in (db.query(SavedPoster.created_at,
+                                      SavedPoster.original_save_date)
+                               .filter(SavedPoster.id.in_(chunk)).all()):
+            real = saved_later_on(created, day)
+            if not real:
+                continue
+            slot = out.setdefault(day.isoformat(), {"count": 0, "on": []})
+            slot["count"] += 1
+            if real not in slot["on"]:
+                slot["on"].append(real)
+    for slot in out.values():
+        slot["on"].sort()
+    return out
 
 
 def per_day_breakdown(

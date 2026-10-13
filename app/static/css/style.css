@@ -3962,6 +3962,14 @@ body:has(#ib-bulk-bar:not([hidden])) { padding-bottom: 88px; }
 .admin-pick-paste:focus { border-color: var(--accent); }
 .admin-pick-preview { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
 .admin-pick-preview img { max-width: 120px; max-height: 90px; border-radius: 4px; }
+/* "saved 13 Oct" — saved on a later day than its title's day (v262). */
+.status-pill.status-saved-later {
+  background: rgba(158, 206, 106, 0.12);
+  color: #9ece6a;
+  border: 1px solid rgba(158, 206, 106, 0.45);
+}
+.pay-day-later { font-size: 11px; margin-left: 6px; }
+
 .status-pill.status-admin-pick {
   background: rgba(212, 175, 55, 0.18);
   color: #e3c35a;

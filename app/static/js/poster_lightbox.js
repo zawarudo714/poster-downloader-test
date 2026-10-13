@@ -52,6 +52,23 @@
     return s;
   }
 
+  // "saved 13 Oct" — the picture was saved on a LATER day than its title's
+  // day. A title stays filed under the day it was started (and is paid on
+  // that day), so without this a redo days later looked like a mystery
+  // entry on an old day (owner, 2026-10-13). Server: utils.saved_later_on.
+  function savedLaterPill(p) {
+    if (!p || !p.saved_later_on) return null;
+    const d = new Date(p.saved_later_on + 'T00:00:00');
+    const label = isNaN(d) ? p.saved_later_on
+      : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+    const s = document.createElement('span');
+    s.className = 'status-pill status-saved-later';
+    s.textContent = `saved ${label}`;
+    s.title = `Saved on ${p.saved_later_on}, after the day this title was `
+      + 'started. Titles stay under their first day, and are paid on it.';
+    return s;
+  }
+
   // One spelling of the ADMIN PICK label — the owner's own picture, put on
   // the title with USE MY OWN PICTURE. Shared by the zoom and the grids.
   function adminPickPill(p) {
@@ -254,6 +271,8 @@
       if (src) pillsHost.appendChild(src);
       const pick = adminPickPill(p);
       if (pick) pillsHost.appendChild(pick);
+      const later = savedLaterPill(p);
+      if (later) pillsHost.appendChild(later);
       if (opts && opts.extraPills) {
         (opts.extraPills(t, p) || []).forEach((n) => { if (n) pillsHost.appendChild(n); });
       }
@@ -460,7 +479,7 @@
 
   window.PosterLightbox = {
     init, open, close, step, isOpen, toggleReviewed, sourcePill,
-    adminPickPill,
+    adminPickPill, savedLaterPill,
     current: () => current,
   };
 })();

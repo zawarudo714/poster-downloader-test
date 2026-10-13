@@ -1248,6 +1248,16 @@ On Changes Requested, click a thumbnail to zoom:
 
 ---
 
+## 109. "SAVED LATER" LABELS — v262
+
+- Worker Images, 11 Oct: Fatehpur Sikri should show a green "saved 13 Oct"
+  label, in the gallery and in the zoom.
+- Payments, EVERYTHING BEFORE THIS WEEK: the 11 Oct line should read
+  "(1 saved later, on 13 Oct)". If the yellow chip shows 11 Oct, it should
+  add "(saved after your last payment)".
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** No longer needed at all — corrected

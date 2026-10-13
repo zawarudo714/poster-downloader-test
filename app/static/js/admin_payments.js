@@ -103,6 +103,7 @@
     totalCell.textContent = data.computed_total_kes;
     // Stash on the row for the per-day expander.
     tr._byDay = data.by_day || {};
+    tr._laterByDay = data.saved_later_by_day || {};
     tr._rate = data.rate_kes || rateKes;
     tr._previewIds = data.poster_ids || [];
     tr._unpaidOutside = data.unpaid_before_outside_range || [];
@@ -146,13 +147,21 @@
     let runningTotal = 0;
     let html = '<div class="pay-day-list">';
     html += '<div class="pay-day-list-head"><span>DATE</span><span>POSTERS</span><span>×&nbsp;RATE</span><span>SUBTOTAL</span></div>';
+    // A title is paid on the day it was STARTED, so a picture saved days
+    // later still lands on that day. Say so beside the day, with the real
+    // date (owner, 2026-10-13) — payments.saved_later_by_day.
+    const later = sourceRow._laterByDay || {};
     dates.forEach((d) => {
       const c = byDay[d];
       const sub = (c * rate);
       runningTotal += sub;
+      const l = later[d];
+      const note = l && l.count
+        ? ` <span class="muted pay-day-later">(${l.count} saved later, on ${l.on.map(shortDate).join(', ')})</span>`
+        : '';
       html += `
         <div class="pay-day-list-row">
-          <span class="mono">${d}</span>
+          <span class="mono">${d}${note}</span>
           <span class="mono pay-day-count">${c}</span>
           <span class="mono muted">× ${rate}</span>
           <span class="mono pay-day-amount">${formatAmount(sub)} KES</span>
@@ -167,6 +176,12 @@
       </div>`;
     html += '</div>';
     cell.innerHTML = html;
+  }
+
+  // "2026-10-13" -> "13 Oct", in the browser's own way of writing dates.
+  function shortDate(iso) {
+    const d = new Date(iso + 'T00:00:00');
+    return isNaN(d) ? iso : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
   }
 
   function formatAmount(n) {
@@ -199,9 +214,15 @@
     const totalCount = unpaidList.reduce((s, x) => s + x.count, 0);
     const rate = parseFloat(rateStr) || 0;
     const totalKes = (totalCount * rate);
-    let chips = unpaidList.map(u =>
-      `<button type="button" class="pay-unpaid-chip" data-go-date="${u.date}" data-tooltip="Click to set the picker to this day">${u.date} · ${u.count}</button>`
-    ).join('');
+    // A day you already paid can grow again when the worker finishes or
+    // redoes a title started on it; the chip says so (2026-10-13).
+    let chips = unpaidList.map(u => {
+      const after = u.after_last_payment || 0;
+      const tail = after
+        ? ` (${after === u.count ? '' : after + ' '}saved after your last payment)`
+        : '';
+      return `<button type="button" class="pay-unpaid-chip" data-go-date="${u.date}" data-tooltip="Click to set the picker to this day">${u.date} · ${u.count}${tail}</button>`;
+    }).join('');
     cell.innerHTML = `
       <div class="pay-unpaid-line">
         <span class="pay-unpaid-icon">⚠</span>

@@ -24,7 +24,25 @@ from typing import Optional
 
 from .config import WORKSPACE_DIR
 from .parsing import IMAGE_EXTS
-from .timeutil import local_today, utc_start_of_local_day
+from .timeutil import local_today, to_local, utc_start_of_local_day
+
+
+def saved_later_on(created_at, original_save_date) -> str:
+    """
+    The day (local, "YYYY-MM-DD") a picture was really saved, when that is
+    LATER than its title's day — else "".
+
+    A title is filed under the day it was first started and never moves
+    (immutable folders, and the day it is paid on). So a picture saved days
+    later still appears on the old day, which read as a mystery entry on a
+    day already paid (owner, 2026-10-13: Fatehpur Sikri, started 11 Oct,
+    redone 13 Oct after the payment). Every screen that lists pictures by
+    day asks this ONE question and says the real date beside it.
+    """
+    if not created_at or not original_save_date:
+        return ""
+    real = to_local(created_at).date()
+    return real.isoformat() if real > original_save_date else ""
 
 
 # ── Workspace layout ─────────────────────────────────────────────────────────

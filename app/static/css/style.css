@@ -2482,6 +2482,11 @@ html.theme-light .env-banner-name {
   color: var(--bg);
   border-bottom-right-radius: 3px;
 }
+/* A message on its way (v263): faded until the server has it. A failed one
+   keeps its words visible with the reason underneath. */
+.chat-msg-pending .chat-msg-bubble { opacity: 0.55; }
+.chat-msg-failed .chat-msg-bubble { opacity: 0.4; }
+.chat-msg-failed .chat-msg-meta { color: var(--error, #f7768e); }
 .chat-msg-theirs .chat-msg-bubble {
   background: rgba(255,255,255,0.06);
   color: var(--text);

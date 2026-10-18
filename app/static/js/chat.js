@@ -215,30 +215,94 @@
   if (attachClear) attachClear.addEventListener('click', clearAttach);
 
   // ── Send ────────────────────────────────────────────────────────────────
+  // ── ONE SEND AT A TIME, AND SAY IT IS SENDING (2026-10-18) ─────────────
+  // On a slow link nothing happened for seconds after SEND, so the worker
+  // pressed again — six times — and the owner's rapid clicks sent one image
+  // three times. Only the text box was disabled; the SEND button and the
+  // Enter key kept working. Now: a second press while one is on its way is
+  // ignored, the button and box are locked, a "Sending…" bubble appears in
+  // the conversation where the message will land (not on the button), and
+  // every way out unlocks again (finally). The server also drops an exact
+  // repeat sent within seconds (chat.send_message), for any client.
+  const sendBtn = formEl ? formEl.querySelector('button[type="submit"]') : null;
+  let sending = false;
+
+  function showPending(text, hasImage) {
+    // A retry replaces the earlier "Not sent" bubble rather than stacking.
+    stream.querySelectorAll('.chat-msg-failed').forEach((el) => el.remove());
+    const wrap = document.createElement('div');
+    wrap.className = 'chat-msg chat-msg-mine chat-msg-pending';
+    const bubble = document.createElement('div');
+    bubble.className = 'chat-msg-bubble';
+    if (text) {
+      const t = document.createElement('div');
+      t.className = 'chat-msg-text';
+      t.textContent = text;
+      bubble.appendChild(t);
+    }
+    if (hasImage) {
+      const t = document.createElement('div');
+      t.className = 'chat-msg-text muted';
+      t.textContent = '🖼 image';
+      bubble.appendChild(t);
+    }
+    const meta = document.createElement('div');
+    meta.className = 'chat-msg-meta mono muted';
+    meta.textContent = 'Sending…';
+    wrap.appendChild(bubble);
+    wrap.appendChild(meta);
+    clearLoadingHint();
+    stream.appendChild(wrap);
+    scrollToBottom();
+    return { wrap, meta };
+  }
+
   if (formEl) {
     formEl.addEventListener('submit', async (e) => {
       e.preventDefault();
+      if (sending) return;              // already on its way — ignore repeats
       const body = (inputEl.value || '').trim();
       const file = fileInput && fileInput.files[0];
       const link = (linkInput && linkInput.value.trim()) || '';
       // Nothing to send is nothing to do — text, a file or a link is enough.
       if (!body && !file && !link) return;
+      sending = true;
       inputEl.disabled = true;
+      if (sendBtn) { sendBtn.disabled = true; }
       const fd = new FormData();
       fd.append('body', body);
       if (file) fd.append('file', file);
       else if (link) fd.append('image_url', link);
-      const r = await fetch(urlSend(), { method: 'POST', body: fd });
-      inputEl.disabled = false;
-      if (r.ok) {
-        inputEl.value = '';
-        clearAttach();
-        await poll();
-        scrollToBottom();
+      const pending = showPending(body, !!(file || link));
+      const started = Date.now();
+      const tick = setInterval(() => {
+        const s = Math.round((Date.now() - started) / 1000);
+        if (s >= 3) pending.meta.textContent = `Sending… ${s}s`;
+      }, 1000);
+      try {
+        const r = await fetch(urlSend(), { method: 'POST', body: fd });
+        if (r.ok) {
+          pending.wrap.remove();
+          inputEl.value = '';
+          clearAttach();
+          await poll();
+          scrollToBottom();
+        } else {
+          const data = await r.json().catch(() => ({}));
+          pending.wrap.classList.add('chat-msg-failed');
+          pending.meta.textContent = 'Not sent: ' + (data.detail || r.status)
+            + ' — your message is still in the box, press SEND to try again.';
+        }
+      } catch (err) {
+        pending.wrap.classList.add('chat-msg-failed');
+        pending.meta.textContent = 'Not sent — the connection dropped. Your message '
+          + 'is still in the box, press SEND to try again.';
+      } finally {
+        clearInterval(tick);
+        sending = false;
+        inputEl.disabled = false;
+        if (sendBtn) sendBtn.disabled = false;
         inputEl.focus();
-      } else {
-        const data = await r.json().catch(() => ({}));
-        alert('Send failed: ' + (data.detail || r.status));
       }
     });
     // Enter to send, Shift+Enter for newline.

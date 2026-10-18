@@ -59,6 +59,28 @@ def save_chat_image(upload) -> str:
     return rel
 
 
+REPEAT_WINDOW_S = 30
+
+
+def _is_repeat(prev, body: str, image_path, image_url) -> bool:
+    """Is this send the same as `prev`, moments later? See send_message."""
+    from datetime import datetime as _dt
+    from .config import WORKSPACE_DIR
+    if not prev.created_at or (_dt.utcnow() - prev.created_at).total_seconds() > REPEAT_WINDOW_S:
+        return False
+    if (prev.body or "") != body or (prev.image_url or None) != image_url:
+        return False
+    if bool(prev.image_path) != bool(image_path):
+        return False
+    if image_path:
+        try:
+            return ((WORKSPACE_DIR / prev.image_path).read_bytes()
+                    == (WORKSPACE_DIR / image_path).read_bytes())
+        except OSError:
+            return False
+    return True
+
+
 def send_message(
     db: Session,
     *,
@@ -84,6 +106,24 @@ def send_message(
         raise ValueError("That image link is too long.")
     if not body and not image_path and not image_url:
         raise ValueError("Empty message.")
+
+    # ── AN EXACT REPEAT WITHIN SECONDS IS A DOUBLE PRESS, NOT A MESSAGE ───
+    # On a slow link the worker pressed SEND six times in 18 seconds and the
+    # owner's rapid clicks sent one image three times (2026-10-18). The page
+    # now locks while sending, but the server is the only place every client
+    # passes, so it also refuses the repeat: same sender, same thread, same
+    # words, same link, same image bytes, within REPEAT_WINDOW_S of the last
+    # one — the earlier message is returned and the new file thrown away.
+    prev = (db.query(ChatMessage)
+              .filter(ChatMessage.worker_id == worker_id,
+                      ChatMessage.sender_id == sender.id)
+              .order_by(ChatMessage.id.desc()).first())
+    if prev is not None and _is_repeat(prev, body, image_path, image_url):
+        if image_path:
+            from .config import WORKSPACE_DIR
+            (WORKSPACE_DIR / image_path).unlink(missing_ok=True)
+        prev._is_repeat = True
+        return prev
 
     msg = ChatMessage(
         worker_id   = worker_id,

@@ -3016,6 +3016,10 @@ def chat_send(
                            image_path=image_path, image_url=image_url)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    if getattr(msg, "_is_repeat", False):
+        # A double press of the same message — nothing new was written.
+        return JSONResponse({"ok": True, "repeat": True,
+                             "message": serialize_message(msg)})
     log_activity(db, user=user, action="chat_sent", target_type="chat", target_id=msg.id,
                  details={"image": bool(msg.image_path or msg.image_url)})
     db.commit()

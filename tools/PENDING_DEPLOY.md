@@ -1,14 +1,14 @@
 # Not yet deployed
 
-## v262 — "saved later" labels (2026-10-13)
+## v263 — chat cannot be double-sent (2026-10-18)
 
-- A picture saved on a later day than its title's day now says so: a
-  "saved 13 Oct" label on Worker Images (gallery and zoom), "(1 saved
-  later, on 13 Oct)" beside the day on Payments, and "saved after your last
-  payment" on the yellow unpaid chips. Nothing about pay or filing changes.
-- Files: `app/utils.py`, `app/payments.py`, `app/routes/admin.py`,
-  `app/static/js/poster_lightbox.js`, `app/static/js/admin.js`,
-  `app/static/js/admin_payments.js`, `app/static/css/style.css`,
+- While a message is sending, SEND and Enter are locked and a faded
+  "Sending…" bubble shows in the conversation (with seconds after 3s). A
+  failed send says why and keeps the words in the box.
+- The server drops an exact repeat (same sender, same words, same picture)
+  sent within 30 seconds, for admin and worker alike.
+- Files: `app/chat.py`, `app/routes/admin.py`, `app/routes/worker.py`,
+  `app/static/js/chat.js`, `app/static/css/style.css`, `CLAUDE.md`,
   `TO_TEST.md`, `config.py`.
 - The Windows node is not affected. No copying needed.
 

@@ -3038,7 +3038,14 @@ Two rules came out of it, and both generalise past this button:
 
   * **Whatever enters a busy state must leave it on every path, including
     the one where nothing went wrong.** Put the exit in a `finally` if there
-    is any branching at all.
+    is any branching at all. **And while it is busy, a second press must do
+    nothing.** Chat locked only the text box while sending; the SEND button
+    and Enter still worked, nothing showed for seconds on a slow link, and
+    the worker sent one message six times while the owner sent one image
+    three times (2026-10-18). A send needs an in-flight guard, a visible
+    "Sending…" where the message will land, and a server that drops an
+    exact repeat (`chat._is_repeat`) — the page guard covers one client,
+    the server covers all of them.
   * **Show progress NEXT TO THE THING THAT IS CHANGING, not on the control
     that started it.** The picture was arriving in the saved-images panel,
     so that is where the spinner belongs. A control that renames itself

@@ -1258,6 +1258,15 @@ On Changes Requested, click a thumbnail to zoom:
 
 ---
 
+## 110. CHAT CANNOT BE DOUBLE-SENT — v263
+
+- Type a message and press SEND several times quickly. One message should
+  arrive, and a faded "Sending…" bubble should show while it travels.
+- Send the same short message again straight away: it should not appear a
+  second time. Wait 30 seconds and send it again: now it should.
+
+---
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** No longer needed at all — corrected

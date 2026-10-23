@@ -2,24 +2,42 @@
 
 ---
 
-## REMIND THE OWNER BEFORE PROMPT TUNING — open decision, 2026-10-06
+## THE PROMPT REWRITE — CLOSED 2026-10-23: current prompt kept, test mode removed
 
-**He asked to be reminded of this before he starts testing prompts.** Raise
-it the moment prompt testing comes up, before he presses anything.
+**Outcome, the owner's words:** the new prompts (including the two-step
+landscape-then-lettering idea) were still bad, so he keeps his CURRENT
+prompt, and PROMPT TEST MODE was **removed from the site in v264**. The
+laptop tester stays, for the day a new GPT image model comes out.
 
-`TRACED 2026-10-06`: the pipeline is set to DRAIN (reason "need tune
-prompt") so the 216 newly paid pictures do not paint with the old prompt.
-But DRAIN also stops PROMPT TEST rounds — `gpt_worker._cycle` asks
-`intake_open()` before claiming anything, rounds included — and it stops
-uploads. Test mode alone does not help either: it holds only REPAINTS, so
-switching back to RUN would paint the 216 new pictures with the main prompt.
+  * The tool is `../site_prompt_tester/` beside this repo (START.bat). It
+    paints rounds of 20 sample pictures, he marks each GOOD or BAD, and the
+    rounds table compares scores and estimated cost. Samples come from
+    `DOWNLOAD_SAMPLES_COMMAND.txt` in that folder (read-only).
+  * **Its request is copied from `app/gpt_images.py generate()`** (style
+    picture first, no moderation, no output_format), checked against that
+    function with the same inputs. If `generate()` changes, the tester must
+    change with it, or its scores stop predicting the site. It is NOT the
+    old `../prompt_tester/`, which copies the playground instead.
+  * It can also paint a TWO-STEP poster in one click (landscape with no
+    lettering, then the title on top), cutting his one JSON prompt in two
+    with `split_two_step()`. Tried 2026-10-23 and judged "still bad".
+  * `QUESTION`, not a finding: his prompt calls the style picture
+    'Reference Image.jpg', but the file the site sends is named
+    `travel.png` (2026-10-23). Whether the model reads upload file names at
+    all is unmeasured; the style picture goes FIRST, so the model may be
+    going by order.
 
-Two fixes were offered; he has not chosen:
-
-  1. Rounds paint even while draining. DRAIN keeps stopping everything
-     automatic; a round started by the button always paints. Smaller.
-  2. Test mode holds NEW pictures too (they join the pile), so rounds can
-     test on them. Reverses his earlier "new pictures are not affected".
+**What v264 removed, and what it deliberately left:** `app/prompt_test.py`,
+its five routes, the Approve Artwork panel and script, the round mode of the
+review screen, the painter's pile hook and prompt override, the Diagnostics
+check, two settings, and the `rerun_hold_at` filter in the five "waiting to
+paint" counts. LEFT in existing databases, read by nothing: the columns
+`saved_posters.rerun_hold_at` / `prompt_round_id` and the tables
+`prompt_test_prompts` / `_rounds` / `_items`. Because nothing reads the pile
+mark any more, a picture that was waiting in the pile is now an ordinary
+picture waiting to paint — no release step was needed. A round painting
+still awaiting review simply appears on Approve Artwork like any other.
+The FULL RESET below should drop those three dead tables when it runs.
 
 Also in flight the same day — the Sat/Sun payment, so the next session does
 not muddle the two: 1725 KES was sent on 2026-10-06. A run was recorded for
@@ -29,6 +47,68 @@ recorded as run #6 at 0 KES (116 pictures). v261 (2026-10-12) adds PAY AHEAD
 and `scripts/convert_run_to_pay_ahead.py`, which turns run #6 into a
 pay-ahead (the 14 flagged pictures join it, 650 KES moves to it from run
 #5). After that, no custom amounts are needed.
+
+---
+
+## THE WORKER MACHINE GOING OFFLINE — three events, logged for context, 2026-10-22
+
+**The owner's instruction: no fix for now.** Opening `launch1` on the
+Windows desktop brings everything back. This entry exists so that, if
+outages start piling up, the next session has the history instead of
+starting from nothing. **Three events, three DIFFERENT causes** — do not
+merge them into one theory.
+
+**Clock first, `MEASURED 2026-10-22`:** the Windows machine's clock is ONE
+HOUR BEHIND the website (Windows 8:31 AM beside the site's 9:31 AM, same
+moment). The website shows Nairobi time. Convert before comparing any
+Windows log with any "last checked in" on the site.
+
+1. **2026-10-18, off for ~14 hours — a power-off from OUTSIDE Windows.**
+   `MEASURED` from the Windows System log: 5:48 PM (Windows clock) event
+   1074, `winlogon.exe` powering off "on behalf of NT AUTHORITY\SYSTEM",
+   reason code `0x500ff`, then a clean shutdown (6006). Back on at 6:44 PM
+   (6005); the next boot said the last shutdown succeeded, and there is no
+   6008 or 41, so it was not a crash or a power cut. The site's last
+   check-in was 18:45 Nairobi = 5:45 PM Windows, three minutes before the
+   power-off, which matches the agent's 3-minute idle check-in.
+   `LEAD`: that event pattern is what a "power button" signal leaves, which
+   on a rented server means the Contabo side (its panel, or host
+   maintenance). Not confirmed against Contabo's records. Windows Update is
+   ruled out — nothing installed before it needed a restart.
+   **Why it cost 14 hours rather than one:** the machine came back at
+   6:44 PM, but the agent only starts after a Windows sign-in, and
+   automatic sign-in (SETUP_WINDOWS_NODE.md, Phase 9a) is NOT working on
+   this box. It sat at the sign-in screen until he connected at 7:56 AM.
+
+2. **2026-10-19 morning, ~2h20m — the agent FROZE in its window.**
+   `MEASURED` from the agent's console: "Nothing to process" at 07:57:46,
+   then the very next line of the same round at 10:17:36, the moment he
+   pressed Enter, followed by "Idle for 141m". `LEAD`, strong: Windows
+   console QuickEdit mode — a click inside the black window starts a text
+   selection, and any program printing to that window is paused until Enter
+   or Escape. The agent cannot check in while paused, so the site calls the
+   machine down. Not yet reproduced on purpose. Fix offered, not built: untick
+   QuickEdit in the window's Defaults, or have `agent.py` switch it off at
+   start (would need an AGENT_VERSION bump and a folder copy).
+
+3. **2026-10-22, last check-in 08:54 Nairobi (07:54 Windows) — the agent
+   window was GONE, with NO restart.** `TRACED`: the PowerShell window on
+   his screen still showed the event-log output from 10-19 (its 2-day
+   filter returned 10-18 rows, which a run on 10-22 could not), so Windows
+   had not restarted since. The agent's own black window was simply not
+   there, and `launch1` brought it back. **Cause unknown** — closed by
+   hand, killed, or crashed. Next time, before relaunching, run this in
+   PowerShell; it lists program crashes and errors from the last day:
+   `Get-WinEvent -FilterHashtable @{LogName='Application'; Level=2; StartTime=(Get-Date).AddDays(-1)} | Select-Object TimeCreated, Id, ProviderName, Message | Format-List`
+
+`LEAD`, seen 2026-10-22: the Windows tray shows the update icon with a red
+dot, which usually means an update is waiting for a restart. Windows may
+restart by itself soon, and without automatic sign-in that is another
+overnight outage of type 1.
+
+If these become frequent, the order to fix them is: automatic sign-in first
+(turns any restart into minutes), then QuickEdit, then whatever event 3
+turns out to be.
 
 ---
 

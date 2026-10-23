@@ -1133,24 +1133,6 @@ On Changes Requested, click a thumbnail to zoom:
   colour, as before.
 - On the Settings page, the new box "BOTTOM colour" should read #000000.
 
-## 99. PROMPT TEST MODE — v249
-
-- Open Approve Artwork. A PROMPT TEST MODE panel should sit under WAITING
-  FOR REVIEW, with the box unticked.
-- Tick the box. Review something and mark one picture RERUN, then save.
-  The panel should say 1 picture is in the pile, and nothing should paint.
-- Type a name and a prompt, set PICTURES PER ROUND to 1, and press TEST THE
-  PROMPT ON 1. A round should appear in the table as "still painting".
-- When it is painted, press REVIEW on its row. The screen should offer
-  only KEEP and RERUN, with no Photoshop, Photopea or UNUSABLE.
-- Mark it RERUN and save. The round's score should read 0 kept, 1 rerun,
-  and TRY THIS ROUND AGAIN should appear. Pressing it should start a new
-  round marked "retry of 1".
-- Untick the box. A new RERUN should paint straight away again. Anything
-  still in the pile should stay there, with the button still showing.
-- With the box off and the pile empty, DELETE ALL TEST DATA should empty
-  the table. The paintings should still be there.
-
 ## 100. NO RELOAD AFTER USE MY OWN PICTURE, AND QUICK NOTES — v250
 
 - On Worker Images, open a title in the zoom and use USE MY OWN PICTURE.
@@ -1264,6 +1246,16 @@ On Changes Requested, click a thumbnail to zoom:
   arrive, and a faded "Sending…" bubble should show while it travels.
 - Send the same short message again straight away: it should not appear a
   second time. Wait 30 seconds and send it again: now it should.
+
+## 111. PROMPT TEST MODE IS GONE, RERUNS PAINT AGAIN — v264
+
+- Open Approve Artwork. The PROMPT TEST MODE panel should no longer be
+  there. Everything else on the screen should look the same.
+- Mark a picture RERUN and save, with the pipeline set to RUN. The picture
+  should go back to painting with the main prompt, as before test mode
+  existed. It should not wait anywhere.
+- Any pictures that were waiting in the old test pile now count as
+  "waiting to paint" and will paint once the pipeline runs.
 
 ---
 

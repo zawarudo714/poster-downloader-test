@@ -55,11 +55,6 @@
   let decisions = new Map(); // poster_id -> {action, reason}
   let chosen    = new Map(); // poster_id -> processed_id being looked at
   let mode     = 'pending';
-  // PROMPT TEST MODE: which round is open when mode is 'round'. A round is
-  // judged KEEP or RERUN only (app/prompt_test.py) — no Photoshop, no
-  // Photopea, no unusable — because it asks one question: did this prompt
-  // get it right.
-  let roundId  = 0;
   let batchSize = 0;        // 0 = review all at once; N = load N at a time
 
   const esc = (v) => String(v == null ? '' : v)
@@ -127,9 +122,7 @@
 
   async function openRange(start, end, status, opts) {
     mode = status || 'pending';
-    roundId = mode === 'round' ? Number((opts && opts.roundId) || 0) : 0;
     const qs = new URLSearchParams({ status: mode });
-    if (mode === 'round') qs.set('round_id', String(roundId));
     if (start) qs.set('start', start);
     if (end)   qs.set('end', end);
     // The remembered queue order rides on every door.
@@ -163,9 +156,6 @@
     decisions = new Map();
     kept.forEach((d, posterId) => {
       if (!inRange.has(posterId)) return;
-      // A mark remembered from an ordinary sitting that a round cannot
-      // carry is dropped rather than sent — the server would refuse it.
-      if (mode === 'round' && (d.action === 'photoshop' || d.action === 'unusable')) return;
       decisions.set(posterId, d);
     });
     saveDecisions();
@@ -179,7 +169,7 @@
     }
 
     // Which door this review came through, for the resume memory.
-    lastDoor = { start: start || '', end: end || '', status: mode, roundId };
+    lastDoor = { start: start || '', end: end || '', status: mode };
 
     // Come back in where you left, if that design is in what just loaded.
     index = lastSeenIndex();
@@ -192,11 +182,7 @@
     // Say plainly whether this is a batch and how much is still behind it,
     // so releasing feels like clearing a slice, not the whole pile.
     const waiting = Number(d.total_waiting || titles.length);
-    if (mode === 'round') {
-      $('[data-review-range]').textContent =
-        `prompt test round${opts && opts.roundLabel ? ' ' + opts.roundLabel : ''}`
-        + ' — KEEP (9) or RERUN (7) each picture';
-    } else if (mode === 'rerun') {
+    if (mode === 'rerun') {
       $('[data-review-range]').textContent = 'reruns';
     } else if (mode === 'held') {
       $('[data-review-range]').textContent =
@@ -213,23 +199,13 @@
     return true;
   }
 
-  // THE PICKER AND THE TEST PANEL GO TOGETHER. Both are "choose what to
-  // review"; the stage is "review it". One function flips all three, so a
-  // new way of opening or closing the stage cannot forget the test panel.
+  // The picker is "choose what to review"; the stage is "review it". One
+  // function flips both, so no way of opening or closing the stage can
+  // leave the two showing at once.
   function showPicker(show) {
     picker.hidden = !show;
     stage.hidden = show;
-    const tp = document.querySelector('[data-prompt-test]');
-    if (tp) tp.hidden = !show;
-    if (show && window.PromptTest) window.PromptTest.refresh();
   }
-
-  // The prompt test panel (admin_prompt_test.js) opens a round through
-  // here, so the round is reviewed by the same screen as everything else.
-  window.ReviewScreen = {
-    openRound: (id, label) => openRange('', '', 'round',
-                                        { roundId: id, roundLabel: label }),
-  };
 
   // ── The reviewer ─────────────────────────────────────────────────────────
 
@@ -1036,10 +1012,10 @@
           ${editBarHtml()}
           <div class="review-img-actions">
             <button class="btn btn-skip btn-tiny"    data-img-action="rerun"     data-poster="${img.poster_id}">RERUN <span class="mono">(${esc(keyLabel('rerun'))})</span></button>
-            ${mode === 'round' ? '' : `<button class="btn btn-info btn-tiny"    data-img-action="photoshop" data-poster="${img.poster_id}"
-                    title="Leave this one for editing: when you save it moves to its own Photoshop queue (JUST THE PHOTOSHOP ONES) and is not released">LEAVE FOR PHOTOSHOP <span class="mono">(${esc(keyLabel('photoshop'))})</span></button>`}
+            <button class="btn btn-info btn-tiny"    data-img-action="photoshop" data-poster="${img.poster_id}"
+                    title="Leave this one for editing: when you save it moves to its own Photoshop queue (JUST THE PHOTOSHOP ONES) and is not released">LEAVE FOR PHOTOSHOP <span class="mono">(${esc(keyLabel('photoshop'))})</span></button>
             <button class="btn btn-success btn-tiny" data-img-action="approve"   data-poster="${img.poster_id}">KEEP <span class="mono">(${esc(keyLabel('keep'))})</span></button>
-            ${mode === 'round' ? '' : `<button class="btn btn-error btn-tiny"   data-img-action="unusable"  data-poster="${img.poster_id}">UNUSABLE <span class="mono">(U)</span></button>`}
+            <button class="btn btn-error btn-tiny"   data-img-action="unusable"  data-poster="${img.poster_id}">UNUSABLE <span class="mono">(U)</span></button>
           </div>
           ${state ? `<span class="review-img-state">${esc(markWord(state))}</span>` : ''}
         </figure>`;
@@ -1248,10 +1224,6 @@
   // with no mark (and so NOT released until it gets one). Without this, an
   // accidental tap could only be undone by discarding the whole session.
   function toggleDecision(posterId, action) {
-    if (mode === 'round' && (action === 'photoshop' || action === 'unusable')) {
-      toast('A prompt test round is judged KEEP or RERUN only.');
-      return;
-    }
     const existing = decisions.get(posterId);
     if (existing && existing.action === action) {
       decisions.delete(posterId);
@@ -1529,7 +1501,6 @@
     // One editor, once. A double-click used to start two fetches and two
     // boots of the iframe racing each other (owner's find, 2026-09-14).
     if (pea.open || pea.loading) return;
-    if (mode === 'round') return;
     const t = current();
     if (!t || !t.images.length) return;
     const v = shownVersion(t.images[0]);
@@ -1649,7 +1620,7 @@
       peaClose();
       if (lastDoor) {
         await openRange(lastDoor.start, lastDoor.end, lastDoor.status,
-                        { quiet: true, roundId: lastDoor.roundId });
+                        { quiet: true });
       }
     } catch (err) {
       toast('Could not save the edit: ' + err.message, 'error');
@@ -1663,9 +1634,6 @@
   // home-made heal brush entirely (owner's word, 2026-09-14: no second
   // tool he will not use when the better one is right there).
   function editBarHtml() {
-    // No Photopea in a prompt test round: the round judges the prompt, and
-    // an edited copy would leave the round and be judged somewhere else.
-    if (mode === 'round') return '';
     return `
       <div class="review-edit-bar">
         <button class="btn btn-ghost btn-tiny" data-action="pea-open"
@@ -1808,7 +1776,7 @@
           toast(`Deleted ${d.label}.`);
           if (lastDoor) {
             await openRange(lastDoor.start, lastDoor.end, lastDoor.status,
-                            { quiet: true, roundId: lastDoor.roundId });
+                            { quiet: true });
           }
         } catch (err) {
           toast('Could not delete: ' + err.message, 'error');
@@ -2143,7 +2111,7 @@
     if (!seen || !seen.door) return;
     const door = seen.door;
     const ok = await openRange(door.start, door.end, door.status,
-                               { quiet: true, roundId: door.roundId });
+                               { quiet: true });
     if (ok && seen.zoom) syncZoom();
   })();
 })();

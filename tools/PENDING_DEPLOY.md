@@ -1,16 +1,18 @@
 # Not yet deployed
 
-## v263 — chat cannot be double-sent (2026-10-18)
+## v264 — PROMPT TEST MODE removed (2026-10-23)
 
-- While a message is sending, SEND and Enter are locked and a faded
-  "Sending…" bubble shows in the conversation (with seconds after 3s). A
-  failed send says why and keeps the words in the box.
-- The server drops an exact repeat (same sender, same words, same picture)
-  sent within 30 seconds, for admin and worker alike.
-- Files: `app/chat.py`, `app/routes/admin.py`, `app/routes/worker.py`,
-  `app/static/js/chat.js`, `app/static/css/style.css`, `CLAUDE.md`,
-  `TO_TEST.md`, `config.py`.
-- The Windows node is not affected. No copying needed.
+Server only. **The worker machine does NOT need copying** — nothing in
+`worker_service/` changed.
+
+- The owner keeps his current prompt; prompts are tested on the laptop
+  (`../site_prompt_tester`). PROMPT TEST MODE is gone from Approve Artwork,
+  the painter, the routes, Diagnostics and two settings.
+- A RERUN paints straight away again, as before v249. Pictures that were
+  waiting in the old pile now count as waiting to paint and paint once the
+  pipeline is on RUN.
+- No schema change. The old columns and tables stay, unread.
+- To test: TO_TEST item 111.
 
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.

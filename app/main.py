@@ -302,6 +302,13 @@ def on_startup():
         # down. Started only if a project actually declares processor='gpt'.
         from .gpt_worker import start_background_worker
         start_background_worker()
+
+        # Painting follows the owner's K mark (v265): once a minute, every
+        # picture that is paid, kept and unflagged goes to painting — see
+        # pipeline.pictures_ready_to_paint. For every project, whichever
+        # machine paints it.
+        from .pipeline import start_release_loop
+        start_release_loop()
     except Exception as e:
         db.rollback()
         log.error("Could not sync projects: %s", e)

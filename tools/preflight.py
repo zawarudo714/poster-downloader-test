@@ -1537,19 +1537,49 @@ GUARDED: list[tuple[str, str, tuple[str, ...], str]] = [
     # ── NOTHING ALREADY MOVING MAY BE CHANGED BY A WORKER DOOR ───────────
     # Delete, REPLACE and SKIP let a worker reopen a finished title and
     # remove or swap a picture that was being painted or was live on the
-    # marketplace (found 2026-09-27). Each must ask _held_by_pipeline.
+    # marketplace (found 2026-09-27). Since v265 each asks the ONE question,
+    # pipeline.picture_can_change, AND takes the picture out with
+    # take_out_of_pipeline — asking without taking out would leave an
+    # unapproved painting of the OLD picture on Approve Artwork.
     ("app/routes/worker.py", "sp.delete_note = note.strip()",
-     ("_held_by_pipeline(",),
+     ("picture_can_change(",),
      "lets a worker delete a picture without checking it is not already "
      "being painted or live on the marketplace"),
+    ("app/routes/worker.py", "sp.delete_note = note.strip()",
+     ("take_out_of_pipeline(",),
+     "lets a worker delete a picture without taking it out of the painting "
+     "queue, leaving its painting on Approve Artwork"),
     ("app/routes/worker.py", "tmp_target.replace(",
-     ("_held_by_pipeline(",),
+     ("picture_can_change(",),
      "lets a worker swap a picture's file without checking it is not "
      "already being painted or live on the marketplace"),
+    ("app/routes/worker.py", "tmp_target.replace(",
+     ("take_out_of_pipeline(",),
+     "lets a worker swap a picture's file without taking the old one out "
+     "of the painting queue, so the old picture's painting would stay"),
     ("app/routes/worker.py", '"auto-deleted: title skipped"',
-     ("_held_by_pipeline(",),
+     ("picture_can_change(",),
      "lets a worker skip a title, deleting its pictures, without checking "
      "none is already being painted or live on the marketplace"),
+    ("app/routes/worker.py", '"auto-deleted: title skipped"',
+     ("take_out_of_pipeline(",),
+     "lets a worker skip a title without taking its pictures out of the "
+     "painting queue"),
+    # ── A PICTURE THAT IS ABOUT TO CHANGE IS NOT PAINTED (v265) ──────────
+    # Painting follows the K mark. Un-pressing K, opening a flag and
+    # re-opening one after a rejected fix must each take a picture that is
+    # only QUEUED back out, or money is spent painting a picture about to
+    # be swapped, and the worker's swap is refused while it waits.
+    ("app/routes/admin.py", "= Revision(",
+     ("pull_back_pictures(",),
+     "opens a flag without taking the picture out of the painting queue"),
+    ("app/routes/admin.py", 'rev.status = "open"',
+     ("pull_back_pictures(",),
+     "re-opens a flag without taking the picture out of the painting queue"),
+    ("app/routes/admin.py", "sp.reviewed_at = None",
+     ("pull_back_pictures(",),
+     "un-presses K without taking a queued picture back out of painting, "
+     "so a K pressed by mistake would still be painted"),
     # ── THE OWNER'S OWN PICK IS OUT OF EVERY WORKER'S REACH ──────────────
     # USE MY OWN PICTURE (v239) finishes a title with the owner's picture.
     # Picks made by the old + ADD box carry the worker's user_id, and the

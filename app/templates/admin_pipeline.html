@@ -168,17 +168,21 @@
     <section class="panel">
       <div class="panel-head">
         <span>GREENLIGHT MODE
-          {{ info("'Payment' auto-greenlights work when you mark a payment run as paid — so paying for a week releases that week into the pipeline. 'Manual' means only the buttons below promote work. 'Both' gives you the auto behaviour plus manual control.") }}
+          {{ info("Since v265 painting follows your K mark, not the payment. 'Automatic' sends a picture to painting by itself once it is PAID (or paid ahead), you have pressed K on it, it has no open flag and its title is finished. Un-press K within the waiting time and nothing is spent. Your own pasted pictures go at once. 'Manual' means only the buttons below send work to painting.") }}
         </span>
       </div>
       <div class="panel-body">
         <div class="filter-row">
           <label>MODE
             <select data-greenlight-mode>
-              <option value="both">Both — auto on payment, manual also allowed</option>
-              <option value="payment">Payment only — auto when paid</option>
+              <option value="both">Automatic — paid and kept (K), manual buttons also allowed</option>
+              <option value="payment">Automatic only — paid and kept (K)</option>
               <option value="manual">Manual only</option>
             </select>
+          </label>
+          <label>MINUTES AFTER K BEFORE PAINTING
+            <input type="number" min="0" max="1440" style="width:70px" data-keep-wait data-setting="keep_wait_min"
+                   title="How long a K must stand before its picture goes to painting. Un-pressing K inside this time costs nothing.">
           </label>
           <button type="button" class="btn btn-accent btn-tiny" data-action="save-greenlight-mode">SAVE</button>
           <span class="muted mono" data-greenlight-mode-status></span>

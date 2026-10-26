@@ -370,6 +370,9 @@
 
     const modeSel = q('[data-greenlight-mode]');
     if (modeSel) modeSel.value = overview.greenlight_mode;
+    const waitBox = q('[data-keep-wait]');
+    // Not while he is typing in it — the overview refreshes on a timer.
+    if (waitBox && document.activeElement !== waitBox) waitBox.value = overview.keep_wait_min;
     return true;
   }
 
@@ -2411,7 +2414,8 @@
         setStatus(statusEl, 'Saving…');
         try {
           await postJSON(API + '/settings', {
-            settings: { greenlight_mode: q('[data-greenlight-mode]').value },
+            settings: { greenlight_mode: q('[data-greenlight-mode]').value,
+                        keep_wait_min: String(q('[data-keep-wait]').value || '0') },
             project_id: projectId, scope: 'project',
           });
           setStatus(statusEl, 'Saved.', 'ok');

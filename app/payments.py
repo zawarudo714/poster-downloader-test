@@ -224,10 +224,33 @@ def _already_paid_poster_ids(db: Session, worker_id: int) -> set[int]:
 
 
 def _every_paid_poster_id(db: Session) -> set[int]:
-    """Every saved_poster ID any payment run has ever paid, for any worker.
+    """Every saved_poster ID any payment run has ever paid, for any worker,
+    MINUS paid-ahead pictures whose money was later taken back.
     "A title is never paid twice" is about the TITLE, so it must see a
-    picture paid to somebody else too."""
-    return _paid_ids_from(db.query(PaymentRun.poster_ids_json).all())
+    picture paid to somebody else too.
+
+    Why the deducted ones leave (owner, 2026-10-26): a worker deletes a
+    paid-ahead picture, the next payment takes its 7 KES back, and two weeks
+    later he redoes the title. Counting the deducted picture as "paid" made
+    the redo "title already paid" — the money was gone AND the redo was
+    never paid. A WAIVED one stays counted: he kept that money."""
+    return (_paid_ids_from(db.query(PaymentRun.poster_ids_json).all())
+            - deducted_advance_ids(db))
+
+
+def deducted_advance_ids(db: Session) -> set[int]:
+    """Paid-ahead pictures whose money a later payment took back, across
+    every worker. Read from the runs' advance_settled_json, so it is a fact
+    about the money actually sent."""
+    out: set = set()
+    for (raw,) in (db.query(PaymentRun.advance_settled_json)
+                     .filter(PaymentRun.advance_settled_json.isnot(None)).all()):
+        try:
+            d = json.loads(raw or "{}")
+        except (TypeError, ValueError):
+            continue
+        out |= {i for i in d.get("deducted", []) if isinstance(i, int)}
+    return out
 
 
 def _paid_ids_from(rows) -> set[int]:
@@ -614,33 +637,6 @@ def advance_shortfall(db: Session, worker_id: int) -> dict:
                       "day": sp.original_save_date.isoformat() if sp and sp.original_save_date else "",
                       "rate": _trim(rate)})
     return {"count": len(items), "kes": _trim(total), "items": items}
-
-
-def ready_to_paint_ids(db: Session, worker_id: int, run_ids) -> list[int]:
-    """
-    What a payment should send on to painting: the run's pictures that have
-    passed their checks, PLUS this worker's earlier-paid pictures that have
-    passed them since and are not in the pipeline yet.
-
-    Painting starts at payment. A paid-ahead picture that was still flagged
-    when it was paid — and a replacement on a title already paid — is never
-    in a later payment, so without the second half it would wait for ever
-    (the "a rule that leaves something out of one step leaves it out of
-    every step that step starts" shape, CLAUDE.md rule 8).
-    """
-    from .pipeline import awaiting_greenlight_poster_filter
-
-    run_ids = {i for i in (run_ids or []) if isinstance(i, int)}
-    clean = run_ids - set(held_for_check(db, run_ids))
-    waiting = {r[0] for r in (
-        db.query(SavedPoster.id)
-          .filter(*payable_criteria(worker_id),
-                  SavedPoster.deleted_at.is_(None),
-                  awaiting_greenlight_poster_filter()).all())}
-    why = unpayable_reasons(db, worker_id, waiting)
-    paid_before = {p for p, r in why.items() if r in ("paid", "title_paid")}
-    paid_before -= set(held_for_check(db, paid_before))
-    return sorted(clean | paid_before)
 
 
 def eligible_poster_ids(

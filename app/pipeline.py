@@ -312,6 +312,10 @@ DEFAULTS: dict[str, Any] = {
     # 'payment' — marking a PaymentRun paid greenlights that date range
     # 'both'    — payment auto-greenlights, and manual still available
     "greenlight_mode": "both",
+    # Minutes a K mark must stand before its picture goes to painting
+    # (owner, 2026-10-26: "default is 5 mins"). Un-pressing K inside this
+    # time costs nothing. Only worker pictures wait; his own picks go at once.
+    "keep_wait_min": 5,
 
     # ── Photoshop stage ──────────────────────────────────────────────────
     "process_script":     DEFAULT_PROCESS_SCRIPT,
@@ -2156,40 +2160,284 @@ def awaiting_greenlight_poster_filter():
                SavedPoster.pipeline_status == "")
 
 
-def greenlight_for_payment_run(db: Session, run, *, by: str,
-                               poster_ids: Optional[list] = None) -> dict[str, int]:
+# ═════════════════════════════════════════════════════════════════════════
+#  PAINTING FOLLOWS YOUR K MARK (owner, 2026-10-26, v265)
+# ═════════════════════════════════════════════════════════════════════════
+#
+# Until v265 PAYING started painting: every unflagged picture in a payment
+# went to the painter at once. The owner pays every Monday for work he has
+# not looked at yet (PAY AHEAD), so "not flagged" was standing in for
+# "checked" — the gate asked about the mechanism instead of the fact
+# (CLAUDE.md rule 8). And a picture already on its way to painting could no
+# longer be swapped by the worker, so a flag raised days later was stuck.
+#
+# Now ONE rule, asked per picture, decides when painting starts:
+#
+#   * the owner has looked at THESE bytes — `reviewed_at`, the K mark on
+#     Worker Images (approving a fix in Changes Requested sets it too) — at
+#     least `keep_wait_min` minutes ago, so a K pressed by mistake can be
+#     undone for free;
+#   * it is PAID: in a payment run, or a replacement on a title that was
+#     already paid ("title_paid"). Work kept mid-week waits for Monday;
+#   * no open flag on it, and no unseen replacement (payments.held_for_check);
+#   * its title is finished, and it is not in the pipeline already.
+#
+# The owner's own picks (USE MY OWN PICTURE) are never paid and need no K:
+# he chose them, so they go at once — their own door greenlights them, and
+# this rule catches any that door missed.
+#
+# Nothing here is a switch with a second edge: the rule is a QUERY, run by
+# the payment and by a small loop every minute (start_release_loop), so a
+# picture becomes ready the moment its last condition comes true, whatever
+# made it true. `greenlight_mode` = 'manual' turns the automatic part off;
+# the manual buttons on the Greenlight tab still work as an override.
+
+RELEASE_EVERY_S = 60
+
+
+def keep_wait_minutes(db: Session, project=None) -> int:
+    """How long a K mark must stand before its picture is painted."""
+    try:
+        return max(0, int(get_setting(db, "keep_wait_min", project=project) or 0))
+    except (TypeError, ValueError):
+        return int(DEFAULTS["keep_wait_min"])
+
+
+def greenlight_posters(db: Session, poster_ids: Iterable[int], *, by: str,
+                       reason: str) -> dict[str, int]:
     """
-    Hook called from the payments flow. Greenlights exactly the posters that
-    were just paid for — including any back-pay days folded into the run —
-    which is why it works off poster_ids_json rather than the period bounds.
-
-    `poster_ids` overrides the run's own list. The payment route passes
-    payments.ready_to_paint_ids(): a PAY AHEAD run holds pictures that are
-    still flagged, which must not be painted yet, and earlier-paid pictures
-    that have passed their checks since must be (2026-10-12).
-
-    Respects `greenlight_mode`: a no-op when the admin has chosen manual-only.
+    Promote exactly these pictures into the pipeline — per PICTURE, unlike
+    greenlight_titles, which promotes every live picture on a title. A
+    picture is promoted only from not-in-the-pipeline-yet, and only while
+    its title is finished; the title gets the same stamp greenlight_titles
+    gives it.
     """
-    mode = get_setting(db, "greenlight_mode")
-    if mode not in ("payment", "both"):
-        return {"greenlit": 0, "skipped": 0, "posters": 0, "disabled": 1}
-
-    if poster_ids is None:
-        try:
-            poster_ids = json.loads(run.poster_ids_json or "[]")
-        except (TypeError, ValueError):
-            poster_ids = []
-    if not poster_ids:
+    ids = sorted({int(i) for i in (poster_ids or [])})
+    if not ids:
         return {"greenlit": 0, "skipped": 0, "posters": 0}
+    db.flush()          # see greenlight_titles: autoflush is off
+    posters: list = []
+    for at in range(0, len(ids), 500):
+        posters += (db.query(SavedPoster)
+                      .filter(SavedPoster.id.in_(ids[at:at + 500]),
+                              SavedPoster.deleted_at.is_(None))
+                      .all())
+    titles = {t.id: t for t in db.query(MasterTitle).filter(
+        MasterTitle.id.in_(sorted({p.master_title_id for p in posters})),
+        MasterTitle.status == "complete").all()} if posters else {}
+    now = datetime.utcnow()
+    promoted = skipped = 0
+    touched: dict = {}
+    default_project_id: Optional[int] = None
+    for poster in posters:
+        title = titles.get(poster.master_title_id)
+        if title is None or (poster.pipeline_status or "") != "":
+            skipped += 1
+            continue
+        poster.pipeline_status = "greenlit"
+        poster.process_attempts = 0
+        poster.process_error = None
+        poster.claimed_at = None
+        poster.claimed_by = None
+        promoted += 1
+        touched[title.id] = title
+    for title in touched.values():
+        if title.greenlit_at is None:
+            title.greenlit_at = now
+            title.greenlit_by = by
+            title.greenlit_source = reason
+        if title.project_id is None:
+            if default_project_id is None:
+                default_project_id = ensure_default_project(db).id
+            title.project_id = default_project_id
+        recompute_title_status(db, title)
+    return {"greenlit": len(touched), "skipped": skipped, "posters": promoted}
 
-    title_ids = [
-        r[0] for r in
-        db.query(SavedPoster.master_title_id)
-          .filter(SavedPoster.id.in_(poster_ids))
-          .distinct()
-          .all()
-    ]
-    return greenlight_titles(db, title_ids, by=by, reason=f"payment:{run.id}")
+
+def pictures_ready_to_paint(db: Session, *, as_of: Optional[datetime] = None) -> list[int]:
+    """
+    THE rule above, as a list of picture ids, across every project — each
+    project's own `greenlight_mode` and `keep_wait_min` decide for its
+    pictures (both are saved per project by the Greenlight tab). `as_of`
+    lets Diagnostics ask "what was already ready an hour ago?".
+    """
+    from .payments import held_for_check, unpayable_reasons
+
+    now = as_of or datetime.utcnow()
+    default_pid = _default_project_id(db)
+    ready: set = set()
+    for project in db.query(Project).all():
+        mode = get_setting(db, "greenlight_mode", project=project)
+        if mode not in ("payment", "both"):
+            continue
+        cutoff = now - timedelta(minutes=keep_wait_minutes(db, project))
+        rows = (db.query(SavedPoster.id, SavedPoster.user_id,
+                         SavedPoster.added_by, SavedPoster.reviewed_at)
+                  .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+                  .filter(SavedPoster.deleted_at.is_(None),
+                          awaiting_greenlight_poster_filter(),
+                          MasterTitle.status == "complete",
+                          or_(SavedPoster.reviewed_at.isnot(None),
+                              SavedPoster.added_by.isnot(None)),
+                          project_scope(project.id, default_project_id=default_pid))
+                  .all())
+        by_worker: dict = {}
+        for pid, uid, added_by, seen in rows:
+            if added_by:
+                ready.add(pid)               # his own pick: no pay, no wait
+            elif seen is not None and seen <= cutoff:
+                by_worker.setdefault(uid, []).append(pid)
+        for uid, ids in by_worker.items():
+            why = unpayable_reasons(db, uid, ids)
+            paid = {i for i in ids if why.get(i) in ("paid", "title_paid")}
+            paid -= set(held_for_check(db, paid))
+            ready |= paid
+    return sorted(ready)
+
+
+def release_kept_pictures(db: Session, *, by: str = "auto") -> dict[str, int]:
+    """Send every picture the rule says is ready to painting. Commits
+    nothing; the caller does."""
+    ids = pictures_ready_to_paint(db)
+    if not ids:
+        return {"greenlit": 0, "skipped": 0, "posters": 0}
+    result = greenlight_posters(db, ids, by=by, reason="kept")
+    if result["posters"]:
+        from .audit import log as _log
+        _log(db, user=None, action="pipeline_greenlight",
+             target_type="pipeline",
+             details={"via": "kept", "by": by, **result, "poster_ids": ids[:200]})
+    return result
+
+
+_release_state: dict = {"thread": None, "last_run": None, "last_error": None,
+                        "released": 0}
+
+
+def release_loop_health() -> dict:
+    """What the minute loop last did — read by Diagnostics."""
+    t = _release_state["thread"]
+    return {"alive": bool(t and t.is_alive()),
+            "last_run": _release_state["last_run"],
+            "last_error": _release_state["last_error"],
+            "released": _release_state["released"]}
+
+
+def start_release_loop() -> None:
+    """Run release_kept_pictures once a minute, for ever (idempotent)."""
+    import logging
+    import threading
+    import time
+
+    t = _release_state["thread"]
+    if t is not None and t.is_alive():
+        return
+    log = logging.getLogger("uvicorn.error")
+
+    def _loop():
+        from .db import SessionLocal
+        while True:
+            db = SessionLocal()
+            try:
+                result = release_kept_pictures(db)
+                db.commit()
+                _release_state["last_error"] = None
+                if result["posters"]:
+                    _release_state["released"] += result["posters"]
+                    log.info("Sent %d kept picture(s) to painting", result["posters"])
+            except Exception as e:                       # noqa: BLE001
+                db.rollback()
+                # Kept, not only logged: an error written to a log on the
+                # server does not exist for the owner (CLAUDE.md rule 8).
+                _release_state["last_error"] = f"{type(e).__name__}: {e}"
+                log.error("Releasing kept pictures failed: %s", e)
+            finally:
+                db.close()
+                _release_state["last_run"] = datetime.utcnow()
+            time.sleep(RELEASE_EVERY_S)
+
+    t = threading.Thread(target=_loop, name="kept-picture-release", daemon=True)
+    t.start()
+    _release_state["thread"] = t
+
+
+# ── Taking a picture back out, when it changes before it is painted ──────
+#
+# A picture QUEUED for painting is pulled back when the owner un-presses K
+# or flags it, so nothing is spent on a picture about to change. And a
+# picture PAINTED but not yet approved may still be swapped by the worker:
+# the painting leaves Approve Artwork and the new picture waits for a K.
+# Anything being painted this minute, approved, uploading or listed stays
+# put — a node holds it, or a listing points at it (RECALL first).
+
+_CHANGEABLE_STATES = ("", "skipped", "greenlit", "failed_processing",
+                      "failed_upload", "unusable")
+
+
+def picture_can_change(db: Session, sp) -> bool:
+    """May this picture still be swapped, replaced or deleted by the worker?"""
+    # The STATE decides, never times_listed: a RECALLED picture has its
+    # state reset on purpose so the worker can redo it.
+    status = sp.pipeline_status or ""
+    if status in _CHANGEABLE_STATES:
+        return True
+    if status == "processed":
+        approved = (db.query(ProcessedImage.id)
+                      .filter(ProcessedImage.saved_poster_id == sp.id,
+                              ProcessedImage.review_status == "approved")
+                      .first())
+        return approved is None
+    return False
+
+
+def take_out_of_pipeline(db: Session, sp) -> bool:
+    """
+    Undo a picture's place in the pipeline before it changes: queued or
+    painted-not-approved goes back to not-greenlit, and its paintings leave
+    Approve Artwork. The update is CONDITIONAL on the state just read, so a
+    painter claiming the picture in the same instant wins and this returns
+    False rather than yanking work out from under it. Commits nothing.
+    """
+    status = sp.pipeline_status or ""
+    if status in ("", "skipped", "unusable"):
+        return True
+    if not picture_can_change(db, sp):
+        return False
+    changed = (db.query(SavedPoster)
+                 .filter(SavedPoster.id == sp.id,
+                         SavedPoster.pipeline_status == sp.pipeline_status)
+                 .update({SavedPoster.pipeline_status: None,
+                          SavedPoster.process_attempts: 0,
+                          SavedPoster.process_error: None,
+                          SavedPoster.claimed_at: None,
+                          SavedPoster.claimed_by: None},
+                         synchronize_session=False))
+    if changed != 1:
+        return False
+    db.expire(sp, ["pipeline_status", "process_attempts", "process_error",
+                   "claimed_at", "claimed_by"])
+    for pi in (db.query(ProcessedImage)
+                 .filter(ProcessedImage.saved_poster_id == sp.id,
+                         ProcessedImage.is_current == 1).all()):
+        pi.is_current = 0
+        if (pi.review_status or "") in ("pending", "held"):
+            pi.review_status = "superseded"
+    title = db.query(MasterTitle).filter_by(id=sp.master_title_id).first()
+    if title is not None:
+        recompute_title_status(db, title)
+    return True
+
+
+def pull_back_pictures(db: Session, posters) -> int:
+    """Take back pictures that are only QUEUED for painting (greenlit, not
+    yet claimed). Used when the owner un-presses K or flags a picture.
+    Returns how many came back. Commits nothing."""
+    back = 0
+    for sp in posters or []:
+        if sp is not None and (sp.pipeline_status or "") == "greenlit":
+            if take_out_of_pipeline(db, sp):
+                back += 1
+    return back
 
 
 def ungreenlight_titles(db: Session, title_ids: Iterable[int]) -> int:

@@ -55,7 +55,8 @@ from ..models import (ActivityLog, DELETION_VERDICT_PREFIX, MasterTitle,
 # how v130 shipped and broke every paste-a-URL save. One import at the top
 # cannot do that, and preflight's undefined-name check found the fifth
 # instance of it before this deploy rather than after.
-from ..pipeline import (get_setting, resolve_project, search_text,
+from ..pipeline import (get_setting, picture_can_change, resolve_project,
+                        search_text, take_out_of_pipeline,
                         phrasing_cache_key as P_phrasing_cache_key,
                         search_phrasings as P_search_phrasings)
 from ..projects import (
@@ -944,10 +945,13 @@ def _stand_down_for_swap(db: Session, user: User, t: MasterTitle, *,
     """
     Take every live picture off this title so a new pick can replace it.
 
-    Returns (replaced_ids, old_file_paths), or None when a picture is
-    already in the pipeline — money and a marketplace listing are attached
-    to it, so swapping it underneath would be a retraction, not a re-pick.
-    Raises 409 if the admin chose this title's picture himself.
+    Returns (replaced_ids, old_file_paths), or None when a picture can no
+    longer change: it is being painted this minute, its painting is
+    approved, or it is on the marketplace (pipeline.picture_can_change).
+    One only QUEUED for painting, or painted but not yet approved, is taken
+    back out first and its painting leaves Approve Artwork (v265, so a flag
+    raised weeks later can still be fixed). Raises 409 if the admin chose
+    this title's picture himself.
 
     The FILES are only collected here. The caller deletes them once the new
     picture has passed every check; deleting first meant a refused swap
@@ -960,8 +964,11 @@ def _stand_down_for_swap(db: Session, user: User, t: MasterTitle, *,
                   SavedPoster.deleted_at.is_(None))
           .all()
     )
-    if any((sp.pipeline_status or "") not in ("", "skipped") for sp in existing):
+    if not all(picture_can_change(db, sp) for sp in existing):
         return None
+    for sp in existing:
+        if not take_out_of_pipeline(db, sp):
+            return None              # the painter claimed it this instant
     paths = []
     for sp in existing:
         paths.append(saved_poster_path(sp))
@@ -1002,9 +1009,10 @@ def _limit_reached_meanwhile(db: Session, t: MasterTitle, limit: int,
     )
 
 
-_SWAP_IN_PIPELINE_MESSAGE = ("That image has already gone into processing, so "
-                             "it cannot be swapped here. Ask the admin to "
-                             "rerun or drop it.")
+_SWAP_IN_PIPELINE_MESSAGE = ("That image is being painted right now, or its "
+                             "painting is already approved, so it cannot be "
+                             "swapped here. Try again in a few minutes, or ask "
+                             "the admin to rerun or drop it.")
 
 
 def _hand_flags_to_successor(db: Session, replaced_ids: list, new_id: int) -> bool:
@@ -2210,29 +2218,23 @@ def save_image(
 # ── Delete / replace a saved poster ──────────────────────────────────────────
 
 # ── A PICTURE ALREADY MOVING IS NOT THE WORKER'S TO CHANGE ────────────────
-# Once a picture is greenlit it is being painted, painted, uploading, or
-# live on FineArtAmerica. The search-grid swap already refused to touch
-# such a picture ("in_pipeline"); its three siblings did not — a worker
-# could reopen a finished title and DELETE, REPLACE or SKIP away a picture
-# whose listing was live, leaving the listing pointing at nothing, or swap
-# the photograph under a painting made from the old one (found 2026-09-27
-# while auditing for work that moves on unseen). One test for delete,
-# REPLACE and SKIP; the grid swap keeps its own, stricter one.
-#
-# The pipeline state alone, not times_listed: a live listing is 'uploaded',
-# and a RECALLED picture has its state reset on purpose so the worker can
-# redo it — blocking on "was ever listed" would break that flow.
-_MOVING_STATES = frozenset({"greenlit", "processing", "processed",
-                            "uploading", "uploaded"})
+# A worker could once reopen a finished title and DELETE, REPLACE or SKIP
+# away a picture whose listing was live, or swap the photograph under a
+# painting made from the old one (found 2026-09-27). Every door — the grid
+# swap, the paste swap, REPLACE, DELETE and SKIP — now asks ONE question,
+# pipeline.picture_can_change, and takes the picture out with
+# pipeline.take_out_of_pipeline. Since v265 a picture only QUEUED for
+# painting, or painted but not yet approved, may still change: a flag can
+# arrive weeks later, and its unapproved painting simply leaves Approve
+# Artwork. Being painted this minute, approved, uploading or uploaded still
+# refuses. The pipeline STATE decides, not times_listed: a RECALLED picture
+# has its state reset on purpose so the worker can redo it.
 
 
-def _held_by_pipeline(sp) -> bool:
-    return sp.pipeline_status in _MOVING_STATES
-
-
-_HELD_MESSAGE = ("That image has already gone into processing or is on the "
-                 "marketplace, so it cannot be changed here. Ask the admin "
-                 "to recall it or rerun it.")
+_HELD_MESSAGE = ("That image is being painted right now, its painting is "
+                 "already approved, or it is on the marketplace, so it cannot "
+                 "be changed here. Try again in a few minutes, or ask the "
+                 "admin to recall it or rerun it.")
 
 
 # ── THE ADMIN'S OWN PICK IS OUT OF EVERY WORKER'S REACH ────────────────────
@@ -2317,7 +2319,7 @@ def delete_poster(
        revision_ids: [...]}              — flags recorded closed (case b)
     """
     sp = _load_my_poster(db, user, poster_id)
-    if _held_by_pipeline(sp):
+    if not picture_can_change(db, sp) or not take_out_of_pipeline(db, sp):
         raise HTTPException(409, _HELD_MESSAGE)
     fs_path = saved_poster_path(sp)
     fs_path.unlink(missing_ok=True)
@@ -2462,7 +2464,7 @@ def replace_poster(
     limit on BOTH sides; the client can re-call with confirm_low_quality=1.
     """
     sp = _load_my_poster(db, user, poster_id)
-    if _held_by_pipeline(sp):
+    if not picture_can_change(db, sp):
         raise HTTPException(409, _HELD_MESSAGE)
     _mt = db.query(MasterTitle).filter_by(id=sp.master_title_id).first()
     ok, reason = _validate_image_url(
@@ -2525,6 +2527,13 @@ def replace_poster(
             tmp_target.unlink(missing_ok=True)
             return refusal
 
+        # Accepted. Only NOW does the picture leave the painting queue (or
+        # its unapproved painting leave Approve Artwork): doing it before
+        # the download would have dropped a painting for a swap that was
+        # then refused. A painter claiming it this instant wins.
+        if not take_out_of_pipeline(db, sp):
+            tmp_target.unlink(missing_ok=True)
+            raise HTTPException(409, _HELD_MESSAGE)
         old_fs.unlink(missing_ok=True)
         target = folder / new_name
         if target.exists() and target != tmp_target:
@@ -2816,9 +2825,11 @@ def title_skip(
     # Skipping deletes every live picture on the title, so it gets the same
     # guard as a single delete: nothing already moving may vanish this way.
     _refuse_if_admin_chose(db, title_id=t.id)
-    if any(_held_by_pipeline(sp) for sp in db.query(SavedPoster).filter(
-            SavedPoster.master_title_id == t.id,
-            SavedPoster.deleted_at.is_(None)).all()):
+    _live = db.query(SavedPoster).filter(
+        SavedPoster.master_title_id == t.id,
+        SavedPoster.deleted_at.is_(None)).all()
+    if not all(picture_can_change(db, sp) for sp in _live) \
+            or not all(take_out_of_pipeline(db, sp) for sp in _live):
         raise HTTPException(409, _HELD_MESSAGE)
 
     t.status = "skipped"

@@ -2270,6 +2270,12 @@ def check_titles_are_paid_once(db: Session, scope: Scope) -> CheckResult:
             if isinstance(pid, int) and when is not None:
                 if pid not in paid_at or when > paid_at[pid]:
                     paid_at[pid] = when
+    # Money taken back for a paid-ahead picture means that picture was in
+    # the end NOT paid, so a later redo on its title is not a second payment
+    # (payments._every_paid_poster_id says the same, for the same reason).
+    from .payments import deducted_advance_ids
+    for pid in deducted_advance_ids(db):
+        paid_at.pop(pid, None)
     if not paid_at:
         return _result("titles_are_paid_once",
                        "No title was paid more than once",
@@ -2356,11 +2362,11 @@ def check_admin_picks_reach_painting(db: Session, scope: Scope) -> CheckResult:
     INVARIANT: the owner's own picture on a finished title is on its way
     to painting (or past it).
 
-    Painting normally follows PAYMENT, and the owner's own picture is never
-    paid — so a pick that is not sent to painting when it is made will wait
-    for ever, looking perfectly normal. That was the old + ADD box's quiet
-    failure; USE MY OWN PICTURE sends its pick straight on. This watches
-    for any pick, old or new, that is still sitting at the start.
+    A worker's picture is painted once it is PAID and KEPT (v265,
+    pipeline.pictures_ready_to_paint), and the owner's own picture is never
+    paid — so his picks are released without payment, by their own door and
+    by the minute loop. That was the old + ADD box's quiet failure; this
+    watches for any pick, old or new, still sitting at the start.
     """
     from .pipeline import awaiting_greenlight_poster_filter
     q = (db.query(SavedPoster, MasterTitle)
@@ -2379,10 +2385,91 @@ def check_admin_picks_reach_painting(db: Session, scope: Scope) -> CheckResult:
         "admin_picks_reach_painting",
         f"{total} of your own pictures are not on their way to painting"
         if total else "Every picture of your own is on its way to painting",
-        "Your own pictures are never paid for, and painting normally starts "
-        "when a picture is paid — so these would wait for ever. Replace "
-        "each one with USE MY OWN PICTURE (it sends the new one straight to "
-        "painting), or greenlight the title by hand on the Pipeline page.",
+        "Your own pictures are never paid for, so they are sent to painting "
+        "without payment — by USE MY OWN PICTURE itself, and by the check "
+        "that runs every minute. These were missed. A title that is not "
+        "finished is not painted; otherwise greenlight it by hand on the "
+        "Pipeline page and tell me which picture it was.",
+        "warn" if total else "ok", rows, total,
+    )
+
+
+def check_kept_pictures_reach_painting(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: a picture that is paid, kept (K) and unflagged is on its way
+    to painting within minutes.
+
+    Since v265 painting follows the K mark, released by the payment and by
+    a loop that runs every minute (pipeline.start_release_loop). If that loop
+    dies or keeps failing, nothing looks wrong anywhere — kept pictures just
+    quietly stop moving. This asks the SAME rule as of an hour ago: anything
+    it already called ready then and that is still not in the pipeline now
+    means the release is not happening.
+    """
+    from datetime import datetime as _dt, timedelta as _td
+    from .pipeline import pictures_ready_to_paint, release_loop_health
+    stale = set(pictures_ready_to_paint(db, as_of=_dt.utcnow() - _td(hours=1)))
+    rows: list = []
+    if stale:
+        q = (db.query(SavedPoster, MasterTitle)
+               .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+               .filter(SavedPoster.id.in_(sorted(stale)[:2000]), scope.titles))
+        found = q.all()
+        rows = [Finding(scope.title_of(mt),
+                        f"picture record {sp.id} is paid and kept, but has not "
+                        f"gone to painting",
+                        "/admin/pipeline", project=scope.label(mt.project_id))
+                for sp, mt in found[:MAX_ROWS]]
+        total = len(found)
+    else:
+        total = 0
+    h = release_loop_health()
+    note = ""
+    if not h["alive"]:
+        note = " The every-minute check is not running at all."
+    elif h["last_error"]:
+        note = f" Its last run failed: {h['last_error']}"
+    return _result(
+        "kept_pictures_reach_painting",
+        f"{total} paid and kept picture(s) have not gone to painting"
+        if total else "Every paid and kept picture has gone to painting",
+        "A picture goes to painting once it is paid, you have pressed K on "
+        "it, it has no open flag and its title is finished. These have met "
+        "all of that for over an hour and are still waiting, so the check "
+        "that sends them has stopped." + note + " Restarting the server "
+        "starts it again; tell me what this says.",
+        "error" if total else "ok", rows, total,
+    )
+
+
+def check_nothing_queued_without_a_look(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: a worker's picture waiting to be painted carries the owner's
+    K mark. The automatic release (v265) only ever sends kept pictures; one
+    without the mark got there by a manual greenlight button, or was queued
+    before v265 — worth knowing, because it will be painted unseen.
+    """
+    q = (db.query(SavedPoster, MasterTitle)
+           .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+           .filter(SavedPoster.pipeline_status == "greenlit",
+                   SavedPoster.deleted_at.is_(None),
+                   SavedPoster.added_by.is_(None),
+                   SavedPoster.reviewed_at.is_(None),
+                   scope.titles))
+    total = q.count()
+    rows = [Finding(scope.title_of(mt),
+                    f"picture record {sp.id} is waiting to be painted, but you "
+                    f"have not pressed K on it",
+                    "/admin/pipeline", project=scope.label(mt.project_id))
+            for sp, mt in q.limit(MAX_ROWS).all()]
+    return _result(
+        "nothing_queued_without_a_look",
+        f"{total} picture(s) wait to be painted without your K"
+        if total else "Every picture waiting to be painted has your K",
+        "Painting normally starts only after you press K. These were sent by "
+        "a greenlight button on the Pipeline page, or before this rule "
+        "existed, so they will be painted without your look. If that is not "
+        "what you meant, look at them on Worker Images now.",
         "warn" if total else "ok", rows, total,
     )
 
@@ -3329,6 +3416,8 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_titles_are_paid_once,
     check_paid_ahead_pictures_settled,
     check_admin_picks_reach_painting,
+    check_kept_pictures_reach_painting,
+    check_nothing_queued_without_a_look,
     check_withdrawn_pictures_hold_no_waiting_painting,
     check_pictures_have_a_measured_size,
     check_generations_share_a_file,

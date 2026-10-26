@@ -409,6 +409,7 @@ def api_overview(
         "jobs": jobs,
         "failures": {"processing": process_failures, "upload": upload_failures},
         "greenlight_mode": P.get_setting(db, "greenlight_mode", project=project),
+        "keep_wait_min": P.get_setting(db, "keep_wait_min", project=project),
         # Whether this project is running, draining or halted, plus why.
         "run_mode": P.run_mode_state(db, project),
         "history": P.upload_history(db, days=30),

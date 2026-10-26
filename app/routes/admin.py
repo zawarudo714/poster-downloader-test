@@ -60,7 +60,7 @@ from ..models import (
     ImportJob, MasterTitle, PaymentRun, ProcessedImage, Project, Revision,
     SavedPoster, UploadAccount, UploadTracking, User, UserProject,
 )
-from ..pipeline import ensure_default_project
+from ..pipeline import ensure_default_project, pull_back_pictures
 from ..projects import (
     active_project, allowed_projects, project_by_slug, remember_project,
     scope_titles, set_project_cookie,
@@ -2361,10 +2361,12 @@ def admin_toggle_reviewed(
 ):
     """
     Toggle the admin's "I have looked at this one" mark (the K key on the
-    Worker Images screen). A place-keeper for a review interrupted halfway,
-    nothing more: it gates no pipeline step, no approval and no payment —
-    see the column comment in models.py. Toggling, not setting, because a
-    mis-press must be undoable with the same key.
+    Worker Images screen). Since v265 it is also what starts painting: a
+    paid, unflagged picture with this mark goes to the painter once the mark
+    has stood for `keep_wait_min` minutes (pipeline.pictures_ready_to_paint).
+    Toggling, not setting, because a mis-press must be undoable with the same
+    key — and un-pressing takes a picture still only QUEUED for painting back
+    out, so the mistake costs nothing. It gates no approval and no payment.
     """
     sp = db.query(SavedPoster).filter_by(id=poster_id).first()
     if not sp or sp.deleted_at is not None:
@@ -2395,6 +2397,8 @@ def admin_toggle_reviewed(
             sp.place_check_acked_at = None       # it came with the keep
             place_by_keep = True
         sp.reviewed_at = None
+    # Un-pressed K: a picture already queued for painting comes back out.
+    pulled_back = 0 if now_reviewed else pull_back_pictures(db, [sp])
     place_acked = bool(sp.place_check_acked_at and sp.place_check_at
                        and sp.place_check_acked_at >= sp.place_check_at)
     log_activity(
@@ -2402,11 +2406,13 @@ def admin_toggle_reviewed(
         action="reviewed" if now_reviewed else "unreviewed",
         target_type="saved_poster", target_id=sp.id,
         details={"filename": sp.filename, "master_id": sp.master_title_id,
-                 "place_check_changed": place_by_keep},
+                 "place_check_changed": place_by_keep,
+                 "pulled_back_from_painting": pulled_back},
     )
     db.commit()
     return JSONResponse({"ok": True, "reviewed": now_reviewed,
-                         "place_acked": place_acked})
+                         "place_acked": place_acked,
+                         "pulled_back": pulled_back})
 
 
 @router.post("/title/{master_id}/retire")
@@ -2876,6 +2882,10 @@ def flag_poster(
           )
           .first()
     )
+    # A flagged picture must not be painted while it waits for a fix, and
+    # the worker must be able to swap it: if it is only QUEUED, it comes
+    # back out (v265). One already being painted is left to finish.
+    pull_back_pictures(db, [sp])
     if existing:
         existing.comment       = comment.strip() or None
         existing.flagged_by    = admin.username
@@ -3049,6 +3059,7 @@ def mark_similar(
         related_poster_ids = _json.dumps([p.id for p in posters]),
     )
     db.add(rev)
+    pull_back_pictures(db, posters)       # same reason as a single flag
 
     # Mark the master as needing revision so it surfaces on the worker side.
     mt = db.query(MasterTitle).filter_by(id=primary.master_title_id).first()
@@ -3123,6 +3134,8 @@ def reject_revision(
         raise HTTPException(400, "Revision is not awaiting approval.")
     rev.status = "open"
     rev.admin_verdict = verdict.strip() or None
+    # The flag is open again, so its picture must not paint meanwhile.
+    pull_back_pictures(db, [db.query(SavedPoster).filter_by(id=rev.saved_poster_id).first()])
     # Keep submitted_at so the worker side can detect this is a re-opened-after-rejection.
     # The combination (status=open AND admin_verdict set) is the "REJECTED" indicator.
     # Append the verdict to the comment so the worker sees it as the new instruction
@@ -4346,31 +4359,18 @@ def payments_mark_paid(
                  "advance_settled": json.loads(settled_json) if settled_json else None},
     )
 
-    # ── Pipeline hook: auto-greenlight what was just paid for ───────────
-    # Paying for a batch is the natural signal that it's approved for
-    # post-production, which is the workflow you already follow manually.
-    # Driven off the run's poster_ids so back-pay days are included and
-    # unpaid days never leak in. Respects the `greenlight_mode` setting, so
-    # setting it to 'manual' disables this without touching code.
-    #
-    # Deliberately non-fatal: recording the payment must never fail because
-    # of a pipeline problem (e.g. migration not yet run).
+    # ── Painting: whatever this payment made ready goes now ─────────────
+    # Since v265 painting follows the owner's K mark, not the payment
+    # (pipeline.pictures_ready_to_paint): a picture is painted once it is
+    # PAID and KEPT and unflagged. This payment just made its kept pictures
+    # paid, so they go at once rather than at the next minute's loop.
+    # Unchecked ones wait for his K. Deliberately non-fatal: recording the
+    # payment must never fail because of a pipeline problem.
     greenlit = None
     try:
         from .. import pipeline as P
-        from ..payments import ready_to_paint_ids
-        # Only what has passed its checks goes on to painting — a pay-ahead
-        # run holds flagged pictures — plus earlier-paid pictures that have
-        # passed them since (ready_to_paint_ids).
-        greenlit = P.greenlight_for_payment_run(
-            db, run, by=admin.username,
-            poster_ids=ready_to_paint_ids(db, worker_id, ids))
-        if greenlit.get("greenlit"):
-            log_activity(
-                db, user=admin, action="pipeline_greenlight",
-                target_type="payment_run", target_id=run.id,
-                details={"via": "payment", **greenlit},
-            )
+        db.flush()
+        greenlit = P.release_kept_pictures(db, by=admin.username)
     except Exception as e:
         greenlit = {"error": str(e)}
 

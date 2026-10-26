@@ -157,9 +157,10 @@ Open <http://localhost:8000>.
 
 What it does, briefly:
 
-- **Greenlight** — paying a payment run auto-approves exactly the posters paid
-  for, releasing them into the pipeline. Manual greenlight by date or title is
-  also available. Configurable (`manual` / `payment` / `both`).
+- **Greenlight** — a picture goes to painting once it is paid (the owner pays
+  ahead every week), the owner has pressed K on it, and it has no open flag.
+  Manual greenlight by date or title is also available. Configurable
+  (`manual` / `payment` / `both`) on the Pipeline page's Greenlight tab.
 - **Remote Photoshop** — a Windows worker node pulls greenlit images, runs the
   painterly effect one image at a time, and archives the result to a mounted
   storage box. The JSX is **edited in the dashboard**, not in the repo.

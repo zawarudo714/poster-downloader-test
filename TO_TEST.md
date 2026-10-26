@@ -1257,6 +1257,25 @@ On Changes Requested, click a thumbnail to zoom:
 - Any pictures that were waiting in the old test pile now count as
   "waiting to paint" and will paint once the pipeline runs.
 
+## 112. PAINTING FOLLOWS YOUR K — v265
+
+- On Pipeline, open the GREENLIGHT tab. MODE should read "Automatic — paid
+  and kept (K)…" and a box "MINUTES AFTER K BEFORE PAINTING" should show 5.
+  If you set MANUAL earlier, set it back to Automatic and press SAVE.
+- On Payments, press MARK PAID. The PAY AHEAD box should already be ticked,
+  and CONFIRM should stay greyed for a moment while the count arrives.
+- After paying, the message should say how many already-checked pictures
+  went to painting. Pictures you have not pressed K on should NOT start
+  painting.
+- On Worker Images, press K on a paid picture. Within about 6 minutes it
+  should go to painting (the status strip's "to paint" number goes up).
+- Press K on another paid picture and press K again within a minute. It
+  should never go to painting.
+- Flag a paid picture you had already pressed K on, before it is painted.
+  The worker should be able to swap it.
+- Press K on a picture saved this week (not paid yet). It should wait until
+  next Monday's payment.
+
 ---
 
 ## NOT ON THIS LIST, ON PURPOSE

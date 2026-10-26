@@ -1009,7 +1009,8 @@ app/
   pipeline.py          ALL post-production policy. Settings resolution,
                        greenlight, dispatch/claiming, templates, encryption.
                        DEFAULTS is the only place a pipeline literal belongs.
-  payments.py          Eligibility + payment runs. Greenlight hooks in here.
+  payments.py          Eligibility + payment runs. Painting does NOT start
+                       here since v265 — see pipeline.pictures_ready_to_paint.
   earnings/            Money coming IN. Sibling of diagnostics.py, NOT of the
                        pipeline — nothing here dispatches or changes a design.
     faa.py             Parsers for FineArtAmerica's Sales and Balance pages.
@@ -1273,6 +1274,31 @@ re-export of `migrate_schema` that made a disposable script load-bearing for
 The Windows node is updated by COPYING `worker_service/`. That has no
 receipt, so `AGENT_VERSION` is bumped in the same edit and read back on the
 Nodes tab.
+
+### THE SERVER IS SHARED — `DECIDED 2026-10-24`
+
+The owner is putting a SECOND, unrelated project on `178.105.34.144`, run
+from a different chat. **This project owns only these, and must touch
+nothing else on the box:**
+
+  * the folder `/opt/poster` (code, `docker-compose.yml`, `.env`) and
+    everything under `/opt/poster/data` (database, pictures, backups);
+  * the Docker Compose project `poster` and its one service, `web`;
+  * port **80** on the host (`"80:8000"` in `docker-compose.yml`).
+
+Anything else on the server — another folder under `/opt`, another
+container, another port, a cron job, a web server — belongs to the other
+project. Do not read its secrets, stop it, edit it or "tidy" it. And never
+run anything that acts on EVERY project at once: `docker system prune`,
+`docker image prune -a`, `docker volume prune`, `docker network prune`,
+restarting the Docker service, rebooting the server, changing the firewall
+or SSH settings, or upgrading the operating system. Those need the owner's
+explicit go-ahead in the moment, because they reach the other project too.
+
+`LEAD`, not yet settled: if the other project also needs port 80/443 or a
+domain name, both will have to sit behind one front-door program (a reverse
+proxy), which means changing this project's port line. Plan that with the
+owner; never let either project quietly take the port.
 
 ---
 
@@ -2086,6 +2112,15 @@ form field name, a header, an ID format:
      fails the deploy if a call site forgets it. When you add an argument
      to a function with several call sites, grep the call sites and count
      them — the one that predates the argument is the one that misses it.
+
+     And again on 2026-10-26: the Greenlight tab saves `greenlight_mode`
+     as a PROJECT override, while the payment hook read it with no project
+     — so choosing MANUAL there never stopped payment from starting
+     painting, for as long as the tab existed. Found while building the K
+     rule, which reads the mode per project. `LEAD`, not yet audited: about
+     forty `get_setting(db, key)` calls pass no project; each one whose key
+     the Settings page saves per project has the same defect.
+
 2. **Can I read it from the source at runtime?** Parsing the form off the
    login page beats hardcoding its action, because it survives a redesign.
 3. **Can I ask the owner?** He has the account open in a browser. One
@@ -2898,13 +2933,22 @@ for two days before checking them; the record held only the 116 good
 pictures, so each later fix came back as "unpaid" and he typed custom
 amounts by hand (Padua, 2026-10-12). A PAY AHEAD run now covers every
 picture on its days (`payments.advance_poster_ids`), the existing "paid" and
-"title paid" rules do the rest, `ready_to_paint_ids` sends checked pictures
-on to painting at later paydays, and `check_paid_ahead_pictures_settled`
-lists money that bought a picture later removed without pay.
+"title paid" rules do the rest, and `check_paid_ahead_pictures_settled`
+lists money that bought a picture later removed without pay. **And money
+taken BACK must stop counting as paid.** A deducted picture still sat in
+its run's list, so a redo two weeks later was "title already paid" and the
+worker was never paid for it (traced 2026-10-26 while designing the K
+rule); `payments.deducted_advance_ids` now leaves it out of every "is this
+title paid" count, and `check_titles_are_paid_once` reads the same.
+**Since v265 the gate is the fact itself: painting follows the owner's K
+mark, not the payment** — "not flagged" had been standing in for "looked
+at", which is the mechanism-for-the-fact shape this whole rule is about.
+One query decides (`pipeline.pictures_ready_to_paint`), run by payment and
+by a minute loop, watched by `check_kept_pictures_reach_painting`.
 
 **A RULE THAT LEAVES SOMETHING OUT OF ONE STEP LEAVES IT OUT OF EVERY STEP
 THAT STEP STARTS.** The admin's own pictures were rightly never paid for —
-and painting is started BY payment, so the old + ADD box's pictures were
+and painting was started BY payment, so the old + ADD box's pictures were
 never painted either, unless something else on the same title happened to
 be paid. Nothing was broken in any single line; the exclusion simply
 travelled down a trigger nobody listed (traced 2026-09-27, while replacing

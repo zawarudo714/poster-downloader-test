@@ -397,7 +397,12 @@ class SavedPoster(Base):
     # THE ADMIN'S "I HAVE LOOKED AT THIS ONE" MARK on the Worker Images
     # screen — pressed K, turned green, a place-keeper so a review
     # interrupted halfway does not restart from the top (owner's ask,
-    # 2026-09-18). No pipeline step and no payment reads it.
+    # 2026-09-18). No payment reads it.
+    #
+    # SINCE v265 (2026-10-26) IT STARTS PAINTING: a paid, unflagged picture
+    # carrying it goes to the painter once it has stood keep_wait_min
+    # minutes, and un-pressing it takes a queued picture back out — see
+    # pipeline.pictures_ready_to_paint.
     #
     # ONE decision reads it since 2026-09-27, because it is exactly the fact
     # that decision needs — "has the owner seen these bytes?": a picture

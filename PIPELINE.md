@@ -58,7 +58,7 @@ marketplace. Lose the marketplace account and nothing else is affected.
 | Stage | Where | What happens |
 |---|---|---|
 | Save | Linux VPS | Worker saves an image the way the PROJECT declares (in-page Brave grid for travel; an external-site URL box for projects that search elsewhere); app downloads to the frozen folder path |
-| Greenlight | Linux VPS | Payment (or manual click) sets `greenlit_at`, posters → `greenlit` |
+| Greenlight | Linux VPS | A picture that is PAID and KEPT (K) and unflagged → `greenlit`, by the payment or the minute loop (v265); manual click still works |
 | Process | Windows VPS | Downloads source, runs the JSX on **one image**, writes `_Painted.jpg` to the Storage Box, reports dimensions/size/duration |
 | Queue | Linux VPS | On a successful process, a `pending` upload row is created for **every enabled account** in the project |
 | Upload | Windows VPS | Reads from the mount, one browser tab, one image at a time, reports **per image** |
@@ -356,11 +356,20 @@ Contabo VPS M or better (~€13/mo, 6 vCPU / 16 GB — Photoshop wants the RAM).
 
 ## 6. Operating it
 
-### Greenlight
-`greenlight_mode` is `both` by default: paying a run auto-greenlights exactly
-the posters paid for (driven off `poster_ids_json`, so back-pay days are
-included and unpaid days can't leak in), and manual greenlight stays available.
-Set to `manual` to disable the hook entirely — no code change.
+### Greenlight — painting follows the K mark (v265, 2026-10-26)
+`greenlight_mode` is `both` by default. Automatic means ONE per-picture rule,
+`pipeline.pictures_ready_to_paint`: the picture is paid (or a replacement on a
+paid title), the owner has pressed K on it at least `keep_wait_min` minutes
+ago (default 5), it has no open flag or unseen replacement, and its title is
+finished. The owner's own picks need neither payment nor K. The rule is run
+by every payment and by a loop once a minute (`start_release_loop`), so a
+picture goes the moment its last condition comes true. Un-pressing K, or
+flagging, takes a picture that is only QUEUED back out; a picture painted but
+not yet approved can still be swapped by the worker, and its painting leaves
+Approve Artwork. `manual` turns the automatic part off; the buttons on the
+Greenlight tab still work. Both settings are saved PER PROJECT and read per
+project — before v265 the payment hook read the mode without the project, so
+choosing MANUAL on the Greenlight tab had no effect on payment.
 
 ### When uploads start failing
 1. **Failures** tab → open the screenshot. It shows what the browser saw.

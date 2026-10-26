@@ -2,6 +2,20 @@
 
 ---
 
+## SETTINGS READ WITHOUT THEIR PROJECT — `LEAD`, found 2026-10-26, not audited
+
+The Greenlight tab saved `greenlight_mode` as a PROJECT override while the
+payment hook read it with no project, so MANUAL there never stopped payment
+from starting painting. v265 removed that reader (the K rule reads per
+project). About forty other `get_setting(db, key)` calls pass no project.
+Each one whose key the Settings page saves per project has the same defect:
+the owner's change is stored, shown back to him, and ignored. Audit: list
+the keys the Settings page saves with `scope: 'project'`, and every
+project-less read of each. Not done yet — say so if a setting "does
+nothing".
+
+---
+
 ## THE PROMPT REWRITE — CLOSED 2026-10-23: current prompt kept, test mode removed
 
 **Outcome, the owner's words:** the new prompts (including the two-step
@@ -44,7 +58,7 @@ not muddle the two: 1725 KES was sent on 2026-10-06. A run was recorded for
 2026-09-12 → 10-02 (215 pictures) at 1725, the note saying 650 KES was paid
 ahead for Sat 3 + Sun 4 Oct (130 pictures). Done 2026-10-09: the two days were
 recorded as run #6 at 0 KES (116 pictures). v261 (2026-10-12) adds PAY AHEAD
-and `scripts/convert_run_to_pay_ahead.py`, which turns run #6 into a
+and `scripts/convert_run_to_pay_ahead.py` (applied once, deleted in v265), which turned run #6 into a
 pay-ahead (the 14 flagged pictures join it, 650 KES moves to it from run
 #5). After that, no custom amounts are needed.
 

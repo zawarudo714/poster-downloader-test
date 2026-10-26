@@ -291,8 +291,9 @@
       dialogPush.checked = true;
       dialogNormal = { count: dialogBaseCount, total: dialogBaseTotal };
 
-      // PAY AHEAD starts off; ticking it re-asks the server what a
-      // pay-ahead over this range would cover.
+      // PAY AHEAD starts ON since v265: the owner pays every Monday for
+      // work he has not checked yet, and painting no longer starts from
+      // payment (it follows his K mark). Unticking gives the old count.
       aheadBox.checked = false;
       aheadNote.hidden = true;
       aheadNote.textContent = '';
@@ -335,6 +336,10 @@
       recomputeDialogTotal();
       dialog.hidden = false;
       dialogAmount.focus();
+      // Ticked through its own handler, so the count shown is the server's
+      // answer for a pay-ahead, never a number the page assumed.
+      aheadBox.checked = true;
+      aheadBox.dispatchEvent(new Event('change'));
     });
   });
 
@@ -377,6 +382,9 @@
     const params = new URLSearchParams({
       worker_id: activeRow.getAttribute('data-worker-id'),
       start: startInp.value, end: endInp.value, pay_ahead: '1' });
+    // No paying while the count is on its way: the amount box would still
+    // hold the old figure (every busy state leaves on every path — finally).
+    dialogConfirm.disabled = true;
     try {
       const r = await fetch('/admin/api/payments/preview?' + params.toString());
       const d = await r.json();
@@ -394,6 +402,11 @@
     } catch (e) {
       aheadBox.checked = false;
       aheadNote.textContent = 'Could not count the pictures: ' + e.message;
+      dialogBaseCount = dialogNormal.count;
+      dialogBaseTotal = dialogNormal.total;
+      recomputeDialogTotal();
+    } finally {
+      dialogConfirm.disabled = false;
     }
   });
 
@@ -432,7 +445,10 @@
       closeDialog();
       const bpMsg = (data.back_pay_dates && data.back_pay_dates.length)
         ? ` (incl. back-pay from ${data.back_pay_dates.join(', ')})` : '';
-      alert(`Payment recorded — ${data.poster_count} ${PD.nouns} marked as paid${bpMsg}.`);
+      const sent = (data.greenlit && data.greenlit.posters) || 0;
+      alert(`Payment recorded — ${data.poster_count} ${PD.nouns} marked as paid${bpMsg}.\n\n`
+            + (sent ? `${sent} you had already checked (K) went to painting now. ` : '')
+            + `The rest go to painting when you press K on them.`);
       location.reload();
     } else {
       alert('Failed: ' + (data.detail || r.status));

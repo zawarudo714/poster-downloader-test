@@ -2415,6 +2415,12 @@ def delete_poster(
               .filter(SavedPoster.deleted_at.is_(None))
               .count()
         )
+        # The reset is WHOLE: it used to keep started_at, the frozen save
+        # date and folder, and the old name — the next worker could not
+        # RETURN UNWORKED it, and his save was filed under the first
+        # worker's date, possibly in a period already paid (site audit,
+        # 2026-10-29, v278). A COMPLETE title emptied this way is left for
+        # the owner to send back or skip (Diagnostics "complete_empty").
         if remaining == 0 and mt.status in ("in_progress", "complete_pending"):
             mt.status = "pending"
             mt.needs_revision = 0
@@ -2426,6 +2432,11 @@ def delete_poster(
                 if u and u.locked_master_id == mt.id:
                     u.locked_master_id = None
             mt.claimed_by_id = None
+            mt.claimed_by_name = None
+            mt.claimed_at = None
+            mt.started_at = None
+            mt.original_save_date = None
+            mt.title_folder_path = None
             # Clean up empty date/title folder on disk
             import shutil
             title_dir = saved_poster_path(sp).parent

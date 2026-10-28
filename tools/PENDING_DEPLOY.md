@@ -27,5 +27,13 @@
   - Live today: this has never happened.
   - The worker folder does **not** need copying for this one.
 
+- **v278 — deleting the last picture on a title now returns it to the pool cleanly.**
+  - Before, the title went back to the pool but kept the first worker's start time, save date and folder.
+  - The next worker could not press RETURN UNWORKED on it, and their picture was filed under the old date. That date could be in a week you had already paid.
+  - Now everything from the first worker is cleared.
+  - A finished title emptied this way is not changed. Diagnostics already shows it in red, and you choose to send it back or skip it.
+  - A new Diagnostics check warns if a title in the pool still carries an old worker's start. Live today: none.
+  - The worker folder does **not** need copying for this one.
+
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.

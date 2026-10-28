@@ -3465,6 +3465,10 @@ So, before shipping any figure or label:
   door refused a closed title, the search grid checked only the claim
   (which skip and complete keep) and saved onto it (v277; preflight
   "closed titles refuse new pictures", list `SAVES_ONTO_A_TITLE`).
+  And a reset to a state resets EVERY field that state promises: a title
+  sent back to "pending" by deleting its last picture kept the old
+  worker's start time, save date and folder, so the next worker's save
+  was filed under the old date (v278; `check_pending_titles_are_clean`).
   A key that acts on several things at once SETS them; it does not
   toggle each one — the review screen's title KEEP flipped a KEEP
   already made back off on a pair (v275; preflight "title key sets,

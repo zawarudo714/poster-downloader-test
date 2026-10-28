@@ -1479,6 +1479,48 @@ def check_closed_flags_stay_closed(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def check_pending_titles_are_clean(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: a title waiting in the pool carries nothing of the last
+    worker who had it — no claim, no start time, no frozen save date or
+    folder.
+
+    Deleting the last picture put a title back to "pending" but kept its
+    start time, save date and folder. The next worker could not RETURN
+    UNWORKED it (that needs no start time), and his save was filed under
+    the first worker's date, which can be in a period already paid. Since
+    v278 delete_poster resets it whole; this watches every other path.
+    """
+    q = (
+        db.query(MasterTitle)
+          .filter(MasterTitle.status == "pending",
+                  or_(MasterTitle.claimed_by_id.isnot(None),
+                      MasterTitle.started_at.isnot(None),
+                      MasterTitle.original_save_date.isnot(None)),
+                  scope.titles)
+    )
+    total = q.count()
+    rows = [
+        Finding(scope.title_of(t),
+                f"title record {t.id} is waiting in the pool but still carries "
+                f"{t.claimed_by_name or 'a worker'}'s start"
+                + (f" (save date {t.original_save_date})" if t.original_save_date else ""),
+                "/admin/master?q=" + (t.title or ""),
+                project=scope.label(t.project_id))
+        for t in q.limit(MAX_ROWS).all()
+    ]
+    return _result(
+        "pending_titles_are_clean",
+        f"{total} title(s) in the pool still carry an earlier worker's start"
+        if total else "Every title in the pool starts clean",
+        "These titles are waiting for a worker, but they still hold the date "
+        "and folder of the last one. The next worker's picture would be "
+        "filed under that old date. Tell me the title numbers and I will "
+        "clear them.",
+        "warn" if total else "ok", rows, total,
+    )
+
+
 def check_duplicate_hashes(db: Session, scope: Scope) -> CheckResult:
     """The identical file saved more than once."""
     dupes = (
@@ -3772,6 +3814,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_complete_without_posters,
     check_open_revisions_on_deleted,
     check_closed_flags_stay_closed,
+    check_pending_titles_are_clean,
     check_stale_claims,
     check_projects_match_registry,
     check_sheet_columns_all_or_nothing,

@@ -2476,7 +2476,7 @@ def check_settled_pictures_were_paid(db: Session, scope: Scope) -> CheckResult:
             rows.append(Finding(
                 f"Payment {run.id} to {run.worker_username}",
                 f"settled {len(lost)} picture(s) that no payment paid for any more "
-                f"(e.g. #{min(lost)})",
+                f"(e.g. picture record {min(lost)})",
                 "/admin/payments"))
     return _result(
         "settled_pictures_were_paid",

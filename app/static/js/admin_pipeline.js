@@ -647,10 +647,12 @@
             <td class="mono">${esc(i.node || '—')}</td>
             <td class="mono">${fmtElapsed(i.elapsed_s)}
                 ${i.stale ? '<span class="status-pill status-error">STALE</span>' : ''}</td>
-            <td><button class="btn btn-ghost btn-tiny"
+            <td>${String(i.node || '').startsWith('batch:')
+                  ? '<span class="muted" title="Sent to OpenAI in a batch, which can take up to 24 hours. To take it back, STOP the batch on the AI panel.">at OpenAI</span>'
+                  : `<button class="btn btn-ghost btn-tiny"
                   data-release-stage="${i.stage}"
                   data-release-id="${i.stage === 'processing' ? i.poster_id : i.tracking_id}"
-                  title="Hand this item back to the queue">RELEASE</button></td>
+                  title="Hand this item back to the queue">RELEASE</button>`}</td>
           </tr>`).join('')}
         </tbody>
       </table>
@@ -660,7 +662,10 @@
         </button>
       </div>` : ''}
       <p class="setting-help" style="margin-top:8px">
-        An image usually takes a minute or two here. STALE means the machine
+        An image usually takes a minute or two here. A picture sent to OpenAI
+        in a batch (machine "batch:…") can take up to 24 hours and has no
+        RELEASE button: to take it back, STOP its batch on the AI panel.
+        STALE means the machine
         working on it has gone quiet past the timeout — the work frees itself
         automatically, but only when a machine next asks for work, so RELEASE
         puts a stuck image straight back in the queue instead of waiting.
@@ -2955,10 +2960,17 @@
     if (action === 'reset-gpt-prompt') {
       // Server-side default, so "reset" means the same thing here as it does
       // for every other setting rather than a copy pasted into the JS.
+      //
+      // scope 'project', the same place SAVE writes to. Without it the reset
+      // cleared the GENERAL prompt, and the project's own prompt — the one
+      // actually used — stayed exactly as it was (v270).
+      if (!confirm('Replace this prompt with the built-in starting prompt?\n\n'
+                 + 'Your current prompt will be removed. A copy is kept in the '
+                 + 'activity log, but copy it somewhere first if you may want it back.')) return;
       const r = await fetch(`${API}/settings/reset`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: 'openai_prompt' }),
+        body: JSON.stringify({ key: 'openai_prompt', scope: 'project' }),
       });
       if (r.ok) { await load(); promptStatus.textContent = 'reset to default'; }
       return;

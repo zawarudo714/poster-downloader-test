@@ -1010,6 +1010,30 @@ DEFAULTS: dict[str, Any] = {
 }
 
 
+# ONE VALUE FOR THE WHOLE SITE (v270). These describe the worker machine,
+# the server's own timers, the marketplace account or the earnings read —
+# none of them belongs to a niche — and the code reads them with no project.
+# The Settings page saves every group PER PROJECT, so before this a SAVE
+# wrote a travel row that nothing ever read: the field kept its new value on
+# screen while the site ran on the old one (found by the v267 audit).
+# set_setting() writes these to the general row whatever it is handed, and
+# get_setting()/all_settings() never look for a project row. Preflight's
+# "settings read without a project are site-wide" keeps the list honest.
+SITE_WIDE = frozenset({
+    "claim_timeout_min",
+    "poll_interval_s", "schedule_mode", "daily_start_hour",
+    "poll_interval_idle_s", "poll_idle_after_min", "node_log_retention_days",
+    "upload_gap_enabled", "upload_gap_hours", "upload_pause_after_failures",
+    "failure_evidence_keep",
+    "earnings_daily_run_started_at", "earnings_last_run_at",
+    "earnings_last_run_day", "earnings_max_pages_per_run",
+    "earnings_quiet_from", "earnings_retry_window_hours", "earnings_run_at",
+    "earnings_start_date",
+    "listing_check_alarm_ratio", "listing_check_chunk", "listing_check_gap_ms",
+    "listing_check_max_attempts", "listing_check_min_sample",
+})
+
+
 def _setting_row(db: Session, key: str) -> Optional[AppSetting]:
     return db.query(AppSetting).filter_by(key=key).first()
 
@@ -1074,6 +1098,8 @@ def get_setting(db: Session, key: str, *, project: Optional[Project | str] = Non
     default = DEFAULTS[key]
 
     slug = project.slug if isinstance(project, Project) else project
+    if key in SITE_WIDE:
+        slug = None     # one value for the whole site (v270)
     if slug:
         row = _setting_row(db, f"{SETTINGS_ROOT}.{slug}.{key}")
         if row is not None and row.value != "":
@@ -1101,6 +1127,8 @@ def set_setting(
     _reject_a_value_the_key_cannot_hold(key, value)
 
     slug = project.slug if isinstance(project, Project) else project
+    if key in SITE_WIDE:
+        slug = None     # one value for the whole site (v270)
     full = f"{SETTINGS_ROOT}.{slug}.{key}" if slug else f"{SETTINGS_ROOT}.{key}"
 
     if isinstance(value, (dict, list)):
@@ -1243,6 +1271,8 @@ def search_phrasings(db: Session, *, project=None) -> list[str]:
 def clear_setting(db: Session, key: str, *, project: Optional[Project | str] = None) -> None:
     """Remove an override so the next tier down applies again."""
     slug = project.slug if isinstance(project, Project) else project
+    if key in SITE_WIDE:
+        slug = None     # one value for the whole site (v270)
     full = f"{SETTINGS_ROOT}.{slug}.{key}" if slug else f"{SETTINGS_ROOT}.{key}"
     row = _setting_row(db, full)
     if row is not None:
@@ -1272,7 +1302,7 @@ def all_settings(db: Session, *, project: Optional[Project | str] = None) -> dic
     out: dict[str, Any] = {}
     for key, default in DEFAULTS.items():
         raw = None
-        if slug is not None:
+        if slug is not None and key not in SITE_WIDE:
             raw = stored.get(f"{SETTINGS_ROOT}.{slug}.{key}")
         if raw is None:
             raw = stored.get(f"{SETTINGS_ROOT}.{key}")
@@ -4125,7 +4155,11 @@ def report_upload_failure(
 
     poster = db.query(SavedPoster).filter_by(id=tracking.saved_poster_id).first()
     if poster is not None:
-        max_attempts = int(get_setting(db, "upload_max_attempts"))
+        # The project's own cap, the same one the node is sent in
+        # upload_settings_payload() — read without it, a cap saved on the
+        # Settings page was ignored here (v270).
+        max_attempts = int(get_setting(db, "upload_max_attempts",
+                                       project=resolve_project(db, tracking.project_id)))
         # Only mark the image itself failed once retries are exhausted —
         # otherwise a transient blip would light up the dashboard in red.
         if tracking.attempts >= max_attempts:

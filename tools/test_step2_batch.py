@@ -202,6 +202,24 @@ ok(retried.pipeline_status == "processing" and retried.claimed_by == f"batch:{b1
    "a batch painting is claimed with NO claim time (the reaper cannot free it), mark KEPT while away")
 P.reap_stale_claims(db); db.commit(); db.refresh(retried)
 ok(retried.pipeline_status == "processing", "the stale-claim reaper leaves a batch claim alone")
+from app.routes import pipeline_admin as PA
+r = json.loads(PA.api_release_inflight({"poster_ids": [retried.id]}, admin=a, db=db).body)
+db.refresh(retried)
+ok(retried.pipeline_status == "processing" and retried.claimed_by == f"batch:{b1.id}"
+   and r["released_posters"] == 0 and r["left_in_batch"] == 1,
+   "RELEASE leaves a picture that is out at OpenAI in a batch alone (no second payment)")
+r = json.loads(PA.api_retry_failures({"kind": "processing", "poster_ids": [retried.id]},
+                                     admin=a, db=db).body)
+db.refresh(retried)
+ok(retried.pipeline_status == "processing" and retried.claimed_by == f"batch:{b1.id}"
+   and r["requeued"] == 0 and r["left_alone"] == 1,
+   "RETRY leaves a picture that is being painted alone")
+chk = D.check_batch_pictures_stay_in_their_batch(db, D.Scope(db, proj.id))
+ok(chk.count == 0 and chk.severity == "ok", "Diagnostics: every picture in the open batch is still in it")
+retried.pipeline_status = "greenlit"; retried.claimed_by = None; db.commit()
+chk = D.check_batch_pictures_stay_in_their_batch(db, D.Scope(db, proj.id))
+ok(chk.count == 1 and chk.severity == "warn", "Diagnostics: a picture taken out of an open batch is flagged")
+retried.pipeline_status = "processing"; retried.claimed_by = f"batch:{b1.id}"; db.commit()
 ok(GW.step2_queue(db, proj).count() == 0, "paintings at OpenAI are not sent twice")
 ok(not AB.send_due(db, proj), "no second send inside the gather window")
 
@@ -337,5 +355,25 @@ ok(p_p.paint_requested_at is None, "a permanent refusal ends the mark too (RETRY
 # ── NAMING: a redo of step 2 never overwrites the first ────────────────────
 names = GW.step2_names(db, t1, p_pending, pi_pending, proj)
 ok(names["master"].endswith("_step2-2.png"), f"a second step 2 from one painting gets its own name ({names['master']})")
+
+# ── RESET TO DEFAULT on the painting prompt (v270) ─────────────────────────
+P.set_setting(db, "openai_prompt", "MY OWN PROMPT", project=proj, by="t"); db.commit()
+PA.api_reset_setting(None, {"key": "openai_prompt", "scope": "project", "project_id": proj.id},
+                     admin=a, db=db)
+ok(P.get_setting(db, "openai_prompt", project=proj) == P.DEFAULTS["openai_prompt"],
+   "RESET on the project's prompt brings back the built-in one")
+last_log = (db.query(M.ActivityLog).filter_by(action="setting_reset")
+              .order_by(M.ActivityLog.id.desc()).first())
+ok(last_log is not None and "MY OWN PROMPT" in (last_log.details or ""),
+   "and the removed prompt is kept in the activity log")
+
+# ── A SITE-WIDE setting saved from a project's Settings page (v270) ────────
+P.set_setting(db, "upload_gap_hours", 7, project=proj, by="t"); db.commit()
+ok(db.query(M.AppSetting).filter_by(key="pipeline.upload_gap_hours").first() is not None
+   and db.query(M.AppSetting).filter_by(key="pipeline.travel.upload_gap_hours").first() is None,
+   "SAVE of a site-wide setting from the travel page writes the one general value")
+ok(float(P.get_setting(db, "upload_gap_hours")) == 7
+   and float(P.all_settings(db, project=proj)["upload_gap_hours"]) == 7,
+   "and the code that reads it with no project sees what was saved")
 
 print("\nALL STEP 2 / BATCH CHECKS PASSED")

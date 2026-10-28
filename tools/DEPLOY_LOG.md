@@ -15,6 +15,7 @@ cost far more to read, answer a different question, and on a mounted working
 copy `git status` cannot refresh its index — it reports stale answers with
 no warning.
 
+- **2026-10-29 00:35** · `[178.105.34.144]` · `8db47f68` · v268 · deploy v268 (with v267): dead TeePublic timer jobs removed; hand-named pictures keep their mark until painted
 - **2026-10-28 23:43** · `[178.105.34.144]` · `ae58e24a` · v266 · deploy v266
 - **2026-10-26 12:28** · `[178.105.34.144]` · `a39cf543` · v265 · deploy v265
 - **2026-10-23 12:56** · `[178.105.34.144]` · `98e09ed3` · v264 · deploy v264
@@ -44,4 +45,3 @@ no warning.
 - **2026-09-27 12:43** · `[178.105.34.144]` · `19658dc2` · v234 · deploy v234
 - **2026-09-27 12:42** · `[178.105.34.144]` · `5baef9d1` · v234 · deploy v234
 - **2026-09-27 12:29** · `[178.105.34.144]` · `f37a72a4` · v233 · deploy v233
-- **2026-09-27 12:11** · `[178.105.34.144]` · `804747d9` · v232 · deploy v232

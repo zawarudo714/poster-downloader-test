@@ -2143,9 +2143,22 @@ form field name, a header, an ID format:
      as a PROJECT override, while the payment hook read it with no project
      — so choosing MANUAL there never stopped payment from starting
      painting, for as long as the tab existed. Found while building the K
-     rule, which reads the mode per project. `LEAD`, not yet audited: about
-     forty `get_setting(db, key)` calls pass no project; each one whose key
-     the Settings page saves per project has the same defect.
+     rule, which reads the mode per project.
+
+     Closed on 2026-10-29 (v270) for the whole class, not per call:
+     `pipeline.SITE_WIDE` names every key that has ONE value for the whole
+     site (claim timeout, schedule, upload gap, earnings, listing check).
+     `get_setting`/`set_setting`/`clear_setting` force those keys to the
+     global row whatever project is passed, so the Settings page (which
+     always sends `scope: 'project'`) can no longer hide them in a project
+     row nobody reads. Every OTHER key read with no project is a defect,
+     and preflight's "settings read without a project are site-wide" fails
+     the deploy on one. A new site-wide key goes into SITE_WIDE; a new
+     per-project key is read with `project=`. The same day: RESET on the
+     GPT prompt sent no scope, so it cleared the empty global row and the
+     owner's project prompt survived while the screen said "reset" —
+     "setting resets name their tier" now requires a scope on every reset
+     call, and the reset logs the value it removed.
 
 2. **Can I read it from the source at runtime?** Parsing the form off the
    login page beats hardcoding its action, because it survives a redesign.
@@ -2187,6 +2200,14 @@ A picture sent in an OpenAI BATCH (v266) may honestly take 24 hours, so its
 claim carries NO claim time at all — the reaper only frees claims with one
 — and its liveness is the batch row instead, watched by
 `check_batch_claims_have_an_open_batch` and repaired at start-up.
+**And no BUTTON may free it either.** Until v269 RELEASE on the In-flight
+list and RETRY on Needs Attention took any picture id they were given, so a
+batch picture — whose row looked "stuck" next to help text promising "a
+minute or two" — could be sent again and paid for twice, its first answer
+dropped. Both now leave a batch claim alone (its way out is STOP on the
+batch); the test drives both endpoints, and
+`check_batch_pictures_stay_in_their_batch` watches every other path. Any new
+button that changes a picture's state checks the state it is LEAVING.
 Liveness is the last thing it SAID — `PipelineJob.last_report_at`, stamped
 by `append_job_log`. `started_at` is only the fallback for something that
 never reported at all. And whenever you add a timeout, find the longest

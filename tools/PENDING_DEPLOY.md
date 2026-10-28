@@ -1,46 +1,43 @@
 # Not yet deployed
 
-## v268 — pictures named by hand keep their mark until they are painted (2026-10-29)
+## v270 — RESET on the GPT prompt really resets it; site-wide settings save where they are read (2026-10-29)
 
 Server only. **The worker machine does NOT need copying** — nothing in
 `worker_service/` changed.
 
-- While step 1 is off, the site paints only the pictures you named by hand
-  (RETRY, REPAINT). Each one carries a "named by hand" mark.
-- Until now, the site removed that mark when it sent the picture out. If the
-  picture came back unpainted — for example OpenAI refused the batch, you
-  stopped the batch, a temporary error, a restart, or RELEASE — it went back
-  in the queue without the mark. It was then never painted until step 1 was
-  switched on, and nothing on screen said so.
-- Now the mark stays while the picture is out. It is removed only when the
-  picture is painted, or when its last try fails (RETRY sets it again).
-  Changed in `app/gpt_worker.py` and `app/ai_batches.py`.
-- New preflight check, "hand-named mark ends with the painting": it fails if
-  any other code removes the mark. Tested by putting the old lines back (red).
-- `tools/test_step2_batch.py` now checks the mark after a refused batch, a
-  restart, a temporary error, a last failed try and a successful painting.
-  It fails on the old code and passes on the new.
-- To test: nothing extra to click. It matters during TO_TEST 113. If OpenAI
-  refuses the batch, the 95 pictures should still show as named by hand in
-  the AI panel, not join the "waiting" pile.
+- RESET next to the GPT prompt said it put the starting prompt back. It
+  did not: it cleared an empty site-wide copy and left your own prompt in
+  place. Now it removes your prompt for this project, after asking you
+  first. The removed prompt is kept in the activity log.
+- Some settings have one value for the whole site: claim timeout, the
+  schedule, the upload gap, the earnings reader times, the listing check.
+  The Settings page saved them for the current project only, where the
+  program never read them. So a change there did nothing. Now they are
+  saved for the whole site. The live data had no such hidden values, so
+  nothing you set was lost.
+- Two settings were read without the project: the upload retry limit and
+  the storage folder. They now read the project's value.
+- Two new deploy checks: every RESET says which level it resets, and a
+  setting read without a project must be a site-wide one.
 
-## v267 — two dead TeePublic jobs removed from the server's timer (2026-10-29)
+## v269 — RELEASE and RETRY no longer re-send a picture that is out at OpenAI (2026-10-29)
 
 Server only. **The worker machine does NOT need copying** — nothing in
 `worker_service/` changed.
 
-- The server's once-a-minute timer still ran two jobs that looked after
-  TeePublic store listings. Their file was deleted with TeePublic in v147
-  (2026-09-06), so both jobs failed and wrote an error into the server log
-  every minute for seven weeks. Nothing was lost, because TeePublic is gone,
-  but the noise could hide a real error. Both jobs are removed
-  (`app/backups.py`).
-- New preflight check, "imports point at real files": it fails when any
-  code asks for a file, or a name inside a file, that no longer exists.
-  Tested by putting the old lines back (red) and by misspelling a name (red).
-- To test: nothing to click. After the deploy, the server log should no
-  longer show "Listing-sweep retry failed" or "Stalled listing-run sweep
-  failed".
+- A picture sent to OpenAI in a batch can take up to 24 hours. On the
+  In-flight list it looked stuck, and it had a RELEASE button. Pressing
+  RELEASE, or RETRY on Needs Attention, sent it again. You paid twice, and
+  the first painting was thrown away.
+- Now RELEASE and RETRY leave such a picture alone. RETRY also only takes
+  pictures that are not being painted.
+- On the In-flight list, a batch picture now says "at OpenAI" instead of
+  showing a RELEASE button. The help text says to STOP its batch on the AI
+  panel to take it back.
+- New Diagnostics check: "Every picture in an open batch is still held by
+  it". It warns if a picture leaves a batch that OpenAI is still painting.
+- `tools/test_step2_batch.py` presses both buttons on a batch picture. It
+  fails on the old code and passes on the new.
 
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.

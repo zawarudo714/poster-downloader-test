@@ -2042,7 +2042,7 @@ def check_place_check_is_answering(db: Session, scope: Scope) -> CheckResult:
     """
     from .pipeline import get_setting
     try:
-        enabled = bool(int(get_setting(db, "place_check_enabled", project=None) or 0))
+        enabled = bool(int(get_setting(db, "place_check_enabled", project=scope.project) or 0))
     except Exception:
         enabled = False
     if not enabled:
@@ -3450,6 +3450,45 @@ def check_batch_claims_have_an_open_batch(db: Session, scope: Scope) -> CheckRes
     )
 
 
+def check_batch_pictures_stay_in_their_batch(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: while a painting batch is open, each of its pictures is still
+    held by it.
+
+    The mirror of the check above. A picture taken out of an open batch —
+    RELEASE or RETRY did it until v269 — goes back in the paint queue and is
+    painted AGAIN, paid twice, and the batch's own answer is then dropped as
+    "changed while at OpenAI". The buttons now refuse; this watches every
+    path that is not a button.
+    """
+    from .models import AIBatch, AIBatchItem
+    q = (db.query(SavedPoster, MasterTitle, AIBatch)
+           .join(AIBatchItem, AIBatchItem.saved_poster_id == SavedPoster.id)
+           .join(AIBatch, AIBatch.id == AIBatchItem.batch_id)
+           .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+           .filter(AIBatch.collected_at.is_(None), AIBatch.stage == 1,
+                   AIBatchItem.outcome.is_(None),
+                   SavedPoster.deleted_at.is_(None), scope.titles))
+    left = [(sp, mt, b) for sp, mt, b in q.all()
+            if sp.claimed_by != f"batch:{b.id}"]
+    rows = [Finding(scope.title_of(mt),
+                    f"picture record {sp.id} is in open batch {b.id} but is now "
+                    f"'{sp.pipeline_status}'", "/admin/pipeline",
+                    project=scope.label(mt.project_id))
+            for sp, mt, b in left[:MAX_ROWS]]
+    return _result(
+        "batch_pictures_stay_in_their_batch",
+        f"{len(left)} picture(s) left a batch that OpenAI is still painting"
+        if left else "Every picture in an open batch is still held by it",
+        "These pictures were sent to OpenAI in a batch that has not come back "
+        "yet, but something took them out of it. They may be painted a second "
+        "time and paid for twice, and the batch's answer for them will be "
+        "thrown away. Tell whoever maintains this which button or action you "
+        "used on them.",
+        "warn" if left else "ok", rows, len(left),
+    )
+
+
 def check_batches_are_answered_in_time(db: Session, scope: Scope) -> CheckResult:
     """
     INVARIANT: an open batch is collected within a few hours of OpenAI's own
@@ -3558,6 +3597,7 @@ def check_queued_uploads_point_at_released_pictures(db: Session, scope: Scope) -
 
 CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_batch_claims_have_an_open_batch,
+    check_batch_pictures_stay_in_their_batch,
     check_batches_are_answered_in_time,
     check_step2_work_can_move,
     check_queued_uploads_point_at_released_pictures,

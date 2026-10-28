@@ -889,12 +889,21 @@ def api_reset_setting(
         raise HTTPException(400, "key is required.")
     scope = payload.get("scope", "global")
     project = _project(request, admin, db, payload.get("project_id"))
-    P.clear_setting(db, key, project=project if scope == "project" else None)
+    target = project if scope == "project" else None
+    # What is about to be removed goes into the log, so a reset pressed by
+    # mistake — on a prompt that took him days to write — can be undone by
+    # reading it back (v270).
+    slug = target.slug if target is not None and key not in P.SITE_WIDE else None
+    row = P._setting_row(db, f"{P.SETTINGS_ROOT}.{slug}.{key}" if slug
+                         else f"{P.SETTINGS_ROOT}.{key}")
+    previous = row.value if row is not None else None
+    P.clear_setting(db, key, project=target)
     # A settings change is exactly what you want to find when behaviour
     # changes and nobody remembers touching anything.
     log_activity(db, user=admin, action="setting_reset", target_type="setting",
                  details={"key": key, "scope": scope,
-                          "project": project.slug if project and scope == "project" else None})
+                          "project": project.slug if project and scope == "project" else None,
+                          "previous": previous})
     db.commit()
     return JSONResponse({"ok": True})
 
@@ -1508,6 +1517,7 @@ def api_release_inflight(
     `poster_ids` / `tracking_ids`.
     """
     released_posters = released_uploads = 0
+    in_batch = 0
     now = datetime.utcnow()
 
     if payload.get("all_stale"):
@@ -1538,6 +1548,12 @@ def api_release_inflight(
                       SavedPoster.pipeline_status == "processing")
               .all()
         ) if poster_ids else []
+        # A picture out at OpenAI in a BATCH is not stuck: it may honestly
+        # take 24 hours. Freeing it sends it again — paid twice, and the
+        # first answer is dropped as "changed while at OpenAI" (v269). Its
+        # way out is STOP on the batch, which puts it back with the mark.
+        in_batch = sum(1 for p in posters if (p.claimed_by or "").startswith("batch:"))
+        posters = [p for p in posters if not (p.claimed_by or "").startswith("batch:")]
         rows = (
             db.query(UploadTracking)
               .filter(UploadTracking.id.in_(tracking_ids),
@@ -1577,6 +1593,7 @@ def api_release_inflight(
         "ok": True,
         "released_posters": released_posters,
         "released_uploads": released_uploads,
+        "left_in_batch": in_batch,
     })
 
 
@@ -1670,7 +1687,14 @@ def api_retry_failures(
         poster_ids = payload.get("poster_ids") or []
         if not poster_ids:
             raise HTTPException(400, "poster_ids is required.")
-        posters = db.query(SavedPoster).filter(SavedPoster.id.in_(poster_ids)).all()
+        # Only a picture that is NOT being painted. Without this, a row
+        # ticked on a page that was a few minutes old could take a picture
+        # that is out at OpenAI (live or in a batch) and send it again —
+        # paid twice — or put a finished one back to be repainted (v269).
+        posters = (db.query(SavedPoster)
+                     .filter(SavedPoster.id.in_(poster_ids),
+                             SavedPoster.pipeline_status.in_(("failed_processing", "greenlit")))
+                     .all())
         for poster in posters:
             poster.pipeline_status = "greenlit"
             poster.process_attempts = 0
@@ -1689,7 +1713,8 @@ def api_retry_failures(
                      details={"kind": "processing", "count": len(posters),
                               "poster_ids": poster_ids})
         db.commit()
-        return JSONResponse({"ok": True, "requeued": len(posters)})
+        return JSONResponse({"ok": True, "requeued": len(posters),
+                             "left_alone": len(set(poster_ids)) - len(posters)})
 
     tracking_ids = payload.get("tracking_ids") or []
     if not tracking_ids:

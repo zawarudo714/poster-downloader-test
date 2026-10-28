@@ -363,7 +363,8 @@ def download_processed(
     if processed is None:
         raise HTTPException(404, "No processed derivative recorded.")
 
-    root = str(P.get_setting(db, "storage_root"))
+    root = str(P.get_setting(db, "storage_root",
+                             project=P.resolve_project(db, tracking.project_id)))
     candidate = Path(root) / processed.storage_path
     if not candidate.is_file():
         raise HTTPException(

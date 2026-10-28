@@ -738,6 +738,80 @@ def check_call_arity() -> None:
                     check_one(path, node.lineno, f"{fn.id}()", sig, node)
 
 
+def check_settings_read_without_a_project_are_site_wide() -> None:
+    """
+    `get_setting(db, "<key>")` with no project, for a key that is NOT in
+    pipeline.SITE_WIDE.
+
+    The Settings page saves every group per project. A key read with no
+    project then never sees what was saved: the field shows the new value
+    and the site runs on the old one, with nothing to say so. Until v270
+    that was true of the node schedule, the upload gaps, the claim timeout
+    and more — found by the v267 site audit, live nowhere yet only because
+    nobody had pressed SAVE on those groups. A key read with no project must
+    either be declared site-wide or be read with its project.
+    """
+    tree = ast.parse((APP / "pipeline.py").read_text(encoding="utf-8"))
+    site_wide = None
+    for node in tree.body:
+        if (isinstance(node, ast.Assign)
+                and any(getattr(t, "id", "") == "SITE_WIDE" for t in node.targets)
+                and isinstance(node.value, ast.Call) and node.value.args):
+            site_wide = {e.value for e in node.value.args[0].elts}
+    if site_wide is None:
+        fail("app/pipeline.py: SITE_WIDE is missing, so settings read without "
+             "a project cannot be checked")
+        return
+    for path in sorted(APP.rglob("*.py")):
+        try:
+            t = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue
+        for n in ast.walk(t):
+            if not isinstance(n, ast.Call):
+                continue
+            f = n.func
+            name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")
+            if name != "get_setting" or len(n.args) != 2:
+                continue
+            if not (isinstance(n.args[1], ast.Constant) and isinstance(n.args[1].value, str)):
+                continue
+            proj = [k for k in n.keywords if k.arg == "project"]
+            no_project = not proj or (isinstance(proj[0].value, ast.Constant)
+                                      and proj[0].value.value is None)
+            if no_project and n.args[1].value not in site_wide:
+                fail(f"{path.relative_to(ROOT)}:{n.lineno}: reads "
+                     f"'{n.args[1].value}' with no project, but the Settings "
+                     f"page saves it per project — pass project=, or add it "
+                     f"to SITE_WIDE in app/pipeline.py if it is one value "
+                     f"for the whole site")
+
+
+def check_setting_resets_name_their_scope() -> None:
+    """
+    A call to /settings/reset from a page that does not say WHICH tier it
+    clears.
+
+    The endpoint defaults to the general tier. Every Settings group saves
+    per project, so a reset with no scope removes a row nobody reads and
+    leaves the one that is used — the button "works" and nothing changes.
+    The painting prompt's RESET TO DEFAULT did exactly that until v270,
+    found by the v267 site audit.
+    """
+    if not JS.is_dir():
+        return
+    for path in sorted(JS.glob("*.js")):
+        lines = path.read_text(encoding="utf-8").splitlines()
+        for n, line in enumerate(lines):
+            if "/settings/reset" not in line:
+                continue
+            call = " ".join(lines[n:n + 6])
+            if "scope" not in call:
+                fail(f"{path.relative_to(ROOT)}:{n + 1}: resets a setting without "
+                     f"saying which tier (scope: 'project' or 'global') — the "
+                     f"server then clears the general one")
+
+
 def check_js_parses() -> None:
     if not JS.is_dir():
         return
@@ -3840,6 +3914,8 @@ CHECKS = [
     ("cross-module calls exist",  check_module_attributes),
     ("imports point at real files", check_imports_resolve),
     ("hand-named mark ends with the painting", check_paint_mark_spent_where_painting_ends),
+    ("setting resets name their tier", check_setting_resets_name_their_scope),
+    ("settings read without a project are site-wide", check_settings_read_without_a_project_are_site_wide),
     ("calls pass the right arguments", check_call_arity),
     ("javascript parses",         check_js_parses),
     ("template tags balance",     check_template_tags_balance),

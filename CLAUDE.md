@@ -3456,6 +3456,10 @@ So, before shipping any figure or label:
   `check_closed_flags_stay_closed`). Every admin path already checked
   first. And a save that runs in pieces refuses a second start while the
   first runs (the review screen's `commit()` now checks `commitBusy`).
+  A key that acts on several things at once SETS them; it does not
+  toggle each one — the review screen's title KEEP flipped a KEEP
+  already made back off on a pair (v275; preflight "title key sets,
+  never flips", `tools/test_title_keep.py`).
 * **A STATUS THAT IS TRUE AND ANSWERS NOTHING IS STILL A DEFECT.** The
   status strip read "machine on · idle". Both words were correct and the
   owner still could not tell a finished day from a jam, because idle with a

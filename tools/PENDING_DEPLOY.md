@@ -7,5 +7,11 @@
   - Nothing was pressed and no listing was touched while testing.
   - The worker folder does **not** need copying for this one.
 
+- **v275 — the title KEEP key no longer removes a KEEP you already made.**
+  - On a title with two pictures, if one was already KEEP, pressing KEEP for the title used to switch that one off and the other on.
+  - Now it marks both. Pressing it again, when both are KEEP, clears both.
+  - The same goes for the other title keys. UNUSABLE now asks for the reason once, not once per picture.
+  - The worker folder does **not** need copying for this one.
+
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.

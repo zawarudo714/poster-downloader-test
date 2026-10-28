@@ -1266,10 +1266,33 @@
   // Apply a decision to every poster of the title on screen. There is
   // normally one, but a title with a pair must not need two keystrokes when
   // one key is what the legend promises.
+  // It SETS the mark on every picture, and clears only when all of them
+  // already wear it — toggling each one flipped a KEEP the owner had already
+  // made back off on a pair (site audit, 2026-10-29, v275).
   function decideThisTitle(action) {
     const t = current();
     if (!t) return;
-    t.images.forEach((img) => toggleDecision(img.poster_id, action));
+    const missing = t.images.filter((img) => {
+      const d = decisions.get(img.poster_id);
+      return !(d && d.action === action);
+    });
+    if (!missing.length) {
+      t.images.forEach((img) => decisions.delete(img.poster_id));
+      render();
+      return;
+    }
+    if (missing.length === 1) { toggleDecision(missing[0].poster_id, action); return; }
+    if (action === 'unusable') {
+      const reason = prompt(
+        'Why can these images never be used?\n\n' +
+        'e.g. "AI merges her with the background every time"\n\n' +
+        'This is kept permanently — the files and the worker\'s pay are not affected.');
+      if (!reason || !reason.trim()) return;
+      missing.forEach((img) => decisions.set(img.poster_id, { action, reason: reason.trim() }));
+    } else {
+      missing.forEach((img) => decisions.set(img.poster_id, { action, reason: '' }));
+    }
+    render();
   }
 
   function clearTitleMarks() {

@@ -884,6 +884,31 @@ def check_swap_button_counts_one_run() -> None:
                  "limited to this project")
 
 
+def check_title_key_sets_not_flips() -> None:
+    """
+    The review screen's title-level key toggling each picture on its own.
+
+    On a pair where one picture was already KEEP, pressing KEEP for the
+    title flipped that one OFF and the other on (site audit, 2026-10-29).
+    Since v275 `decideThisTitle` sets the mark on every picture and clears
+    only when all of them already wear it.
+    """
+    path = JS / "admin_review_images.js"
+    if not path.is_file():
+        return
+    text = path.read_text(encoding="utf-8")
+    at = text.find("function decideThisTitle(")
+    if at < 0:
+        fail("admin_review_images.js: no decideThisTitle — if it was renamed, "
+             "update check_title_key_sets_not_flips")
+        return
+    end = text.find("\n  function ", at + 10)
+    body = text[at:end if end > 0 else len(text)]
+    if re.search(r"forEach\(\s*\(?img\)?\s*=>\s*toggleDecision", body):
+        fail("admin_review_images.js decideThisTitle: toggles each picture on its "
+             "own, so a KEEP already made flips off — set the missing ones instead")
+
+
 # The files where the server downloads an address a PERSON typed or picked.
 # Other outbound calls (OpenAI, Brave, Google Vision) go to fixed addresses.
 FETCHES_TYPED_ADDRESSES = ("imagefetch.py", "routes/worker.py")
@@ -4029,6 +4054,7 @@ CHECKS = [
     ("typed addresses check every redirect", check_typed_addresses_check_every_redirect),
     ("spending buttons ask first", check_spending_buttons_ask_first),
     ("swap button counts one run", check_swap_button_counts_one_run),
+    ("title key sets, never flips", check_title_key_sets_not_flips),
     ("calls pass the right arguments", check_call_arity),
     ("javascript parses",         check_js_parses),
     ("template tags balance",     check_template_tags_balance),

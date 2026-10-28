@@ -95,8 +95,28 @@ ADM.payments_mark_paid(
     settle_mode="waived", admin=a, db=db)
 ok(PAY.advance_shortfall(db, w.id)["count"] == 0, "waiving the rest clears it")
 
-# Diagnostics: quiet on these runs, warns on one written the old way.
+# v276: the payment that paid ahead cannot be deleted while a later one
+# settled its pictures — the later one would go on charging for nothing.
+from fastapi import HTTPException
 from app import diagnostics as D
+paid_check = lambda: D.check_settled_pictures_were_paid(db, D.Scope(db, None))
+ok(paid_check().severity == "ok", f"Diagnostics quiet: {paid_check().title}")
+first = db.query(M.PaymentRun).order_by(M.PaymentRun.id).first()
+try:
+    ADM.payments_delete_run(first.id, admin=a, db=db)
+    ok(False, "deleting the paid-ahead payment is refused")
+except HTTPException as e:
+    db.rollback()
+    ok(e.status_code == 409 and db.get(M.PaymentRun, first.id) is not None,
+       f"deleting the paid-ahead payment is refused: {e.detail}")
+db.delete(first); db.flush()
+ok(paid_check().severity == "warn", f"Diagnostics warns when it is gone anyway: {paid_check().title}")
+db.rollback()
+last = db.query(M.PaymentRun).order_by(M.PaymentRun.id.desc()).first()
+ADM.payments_delete_run(last.id, admin=a, db=db)
+ok(db.get(M.PaymentRun, last.id) is None, "a payment nothing depends on still deletes")
+
+# Diagnostics: quiet on these runs, warns on one written the old way.
 check = lambda: D.check_deductions_fit_their_payment(db, D.Scope(db, None))
 ok(check().severity == "ok", f"Diagnostics quiet: {check().title}")
 db.add(M.PaymentRun(worker_id=w.id, worker_username="humphrey", period_start=date(2026, 10, 29),

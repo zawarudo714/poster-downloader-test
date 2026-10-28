@@ -507,7 +507,11 @@
       btn.disabled = true;
       const r = await fetch(`/admin/payments/${id}/delete`, { method: 'POST' });
       if (r.ok) location.reload();
-      else { btn.disabled = false; alert('Delete failed.'); }
+      else {
+        btn.disabled = false;
+        const why = await r.json().catch(() => ({}));
+        alert(why.detail || 'Delete failed.');
+      }
     });
   });
 

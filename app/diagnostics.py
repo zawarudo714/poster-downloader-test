@@ -2443,6 +2443,53 @@ def check_deductions_fit_their_payment(db: Session, scope: Scope) -> CheckResult
     )
 
 
+def check_settled_pictures_were_paid(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: every picture a payment settled (took money back for, or
+    waived) is still in some payment's list of pictures paid.
+
+    A settlement is about money paid AHEAD. Deleting the payment that paid
+    ahead left the later one still taking that money back, so the worker
+    was charged for money he never got; since v276 the delete refuses
+    until the later payment is deleted first (admin.payments_delete_run).
+    This reads the runs themselves, so any other path is caught too.
+    """
+    import json as _json
+    from .models import PaymentRun
+    paid: set = set()
+    settling = []
+    for run in db.query(PaymentRun).all():
+        try:
+            paid |= {i for i in _json.loads(run.poster_ids_json or "[]") if isinstance(i, int)}
+            if run.advance_settled_json:
+                s = _json.loads(run.advance_settled_json)
+                settling.append((run, set(s.get("deducted", []) + s.get("waived", []))))
+        except (TypeError, ValueError, AttributeError):
+            continue
+    rows, total = [], 0
+    for run, ids in settling:
+        lost = ids - paid
+        if not lost:
+            continue
+        total += 1
+        if len(rows) < MAX_ROWS:
+            rows.append(Finding(
+                f"Payment {run.id} to {run.worker_username}",
+                f"settled {len(lost)} picture(s) that no payment paid for any more "
+                f"(e.g. #{min(lost)})",
+                "/admin/payments"))
+    return _result(
+        "settled_pictures_were_paid",
+        f"{total} payment(s) settle pictures nobody paid for"
+        if total else "Every settled picture was paid for",
+        "Each of these payments took money back (or let it go) for pictures "
+        "paid ahead, but the payment that paid ahead for them is gone. If it "
+        "took money back, the worker was charged for money he never got. "
+        "Give that money back on his next payment.",
+        "warn" if total else "ok", rows, total,
+    )
+
+
 def check_admin_picks_reach_painting(db: Session, scope: Scope) -> CheckResult:
     """
     INVARIANT: the owner's own picture on a finished title is on its way
@@ -3696,6 +3743,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_titles_are_paid_once,
     check_paid_ahead_pictures_settled,
     check_deductions_fit_their_payment,
+    check_settled_pictures_were_paid,
     check_admin_picks_reach_painting,
     check_kept_pictures_reach_painting,
     check_nothing_queued_without_a_look,

@@ -13,5 +13,12 @@
   - The same goes for the other title keys. UNUSABLE now asks for the reason once, not once per picture.
   - The worker folder does **not** need copying for this one.
 
+- **v276 — deleting a payment can no longer leave a later payment charging for nothing.**
+  - When you pay ahead, and a later payment takes money back for some of those pictures, the later payment depends on the first one.
+  - Deleting the first one used to leave the later one still taking that money back, for money that was no longer recorded as paid.
+  - Now the delete refuses and says which payment to delete first. The page shows that reason instead of "Delete failed."
+  - A new Diagnostics check warns if a payment ever settles pictures that no payment paid for. Live today: no payment has taken money back, so nothing is affected.
+  - The worker folder does **not** need copying for this one.
+
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.

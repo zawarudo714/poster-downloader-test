@@ -4465,6 +4465,23 @@ def payments_delete_run(
     run = db.query(PaymentRun).filter_by(id=run_id).first()
     if run is None:
         raise HTTPException(404, "Run not found.")
+    # A later payment that took money back (or waived it) for pictures THIS
+    # run paid ahead for would be left settling a debt that no longer
+    # exists — the worker charged for money he never got (site audit,
+    # 2026-10-29, v276). That one is undone first.
+    mine = set(json.loads(run.poster_ids_json or "[]"))
+    for other in (db.query(PaymentRun)
+                    .filter(PaymentRun.id != run.id,
+                            PaymentRun.advance_settled_json.isnot(None)).all()):
+        try:
+            settled = json.loads(other.advance_settled_json or "{}")
+        except (TypeError, ValueError):
+            continue
+        hit = mine & set(settled.get("deducted", []) + settled.get("waived", []))
+        if hit:
+            raise HTTPException(409, (
+                f"Payment {other.id} settled {len(hit)} picture(s) this payment "
+                f"paid ahead for. Delete payment {other.id} first, then this one."))
     snap = {"worker": run.worker_username, "amount": run.amount_kes,
             "count": run.poster_count, "period": f"{run.period_start}..{run.period_end}"}
     db.delete(run)

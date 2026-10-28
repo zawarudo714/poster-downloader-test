@@ -3034,7 +3034,12 @@ bigger than the week's pay was partly forgiven, silently (site audit,
 only while they fit the run's own value; the rest stays owed. The page
 (`settleNow`) and the server compute the same list, and
 `check_deductions_fit_their_payment` reads the runs. The general shape: a
-clamp that hides a remainder must also keep the remainder somewhere.
+clamp that hides a remainder must also keep the remainder somewhere. A
+settlement also DEPENDS on the payment that paid ahead: deleting that one
+left the later run charging for money never sent, so since v276
+`payments_delete_run` refuses until the settling run is deleted first,
+and `check_settled_pictures_were_paid` warns on a settled picture no run
+paid. Undo payments newest first.
 **Since v265 the gate is the fact itself: painting follows the owner's K
 mark, not the payment** — "not flagged" had been standing in for "looked
 at", which is the mechanism-for-the-fact shape this whole rule is about.

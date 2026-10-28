@@ -2834,7 +2834,14 @@ then called `start()` and `login()` outside any handler. Chrome failing to
 launch left every item at 'uploading' with the reason written only to a
 console on an unattended VPS. The reaper released them, the next cycle
 claimed them, and it stranded them again — forever, looking alive the whole
-time.
+time. The mirror image: **a SETTING that fails every item alike is checked
+once, before anything is claimed, never recorded as each item's fault.**
+A missing style picture was raised per photo while building a send, so
+every photo of it was marked failed for good (attempts 999) for one
+missing file (site audit, 2026-10-29). Since v279
+`gpt_images.settings_problem` is asked first by the batch send and the
+one-at-a-time loop; while it answers, nothing is claimed, the reason is on
+the AI panel, and `check_style_picture_is_there` is red.
 
 **A MARK THAT DECIDES WHETHER WORK IS PICKED UP IS SPENT WHEN THE WORK
 ENDS, NEVER WHEN IT IS TAKEN.** With step 1 off, `paint_requested_at` (the

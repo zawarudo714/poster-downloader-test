@@ -35,5 +35,12 @@
   - A new Diagnostics check warns if a title in the pool still carries an old worker's start. Live today: none.
   - The worker folder does **not** need copying for this one.
 
+- **v279 — a missing style picture no longer fails your photos for good.**
+  - If the prompt is set to use a style picture and that file is missing, every photo in the send used to be marked as failed, permanently, as if each photo were the problem.
+  - Now painting simply waits. Nothing is sent and no photo is marked failed.
+  - The reason shows on the AI panel, and a new Diagnostics check turns red until the picture is uploaded again or the setting is switched off.
+  - This applies to sends in batches and to one-at-a-time painting.
+  - The worker folder does **not** need copying for this one.
+
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.

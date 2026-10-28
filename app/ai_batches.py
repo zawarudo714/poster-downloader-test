@@ -233,15 +233,24 @@ def send_due(db: Session, project) -> bool:
     if last and last[0] > datetime.utcnow() - timedelta(minutes=gather):
         return False
 
+    from . import gpt_images as G
     sent = 0
     if step2_active(db, project) and not _recently_refused(db, project, 2):
         work = step2_queue(db, project).limit(cap).all()
-        if work:
+        # A SETTING that fails every picture alike stops this step's send
+        # before anything is claimed, instead of failing each picture (v279).
+        problem = G.settings_problem(db, project, stage=2) if work else None
+        if problem:
+            note_error(project, problem)
+        elif work:
             sent += _send(db, project, stage=2, work=work)
     room = cap - sent
     if room > 0 and not _recently_refused(db, project, 1):
         work = paint_queue(db, project).limit(room).all()
-        if work:
+        problem = G.settings_problem(db, project, stage=1) if work else None
+        if problem:
+            note_error(project, problem)
+        elif work:
             sent += _send(db, project, stage=1, work=work)
     return sent > 0
 

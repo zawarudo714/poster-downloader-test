@@ -1521,6 +1521,39 @@ def check_pending_titles_are_clean(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def check_style_picture_is_there(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: a project set to send a style picture has that picture on
+    the server.
+
+    A missing one used to fail every photo of a send for good (attempts
+    999), each recorded as that photo's own fault. Since v279 the painting
+    loop asks `gpt_images.settings_problem` first and sends nothing while
+    it answers; this says so here, where the owner looks.
+    """
+    from . import gpt_images as G
+    from .pipeline import step2_active
+    q = db.query(Project).filter(Project.is_active == 1, Project.processor == "gpt")
+    if scope.project_id:
+        q = q.filter(Project.id == scope.project_id)
+    rows = []
+    for p in q.all():
+        for stage in ((1, 2) if step2_active(db, p) else (1,)):
+            problem = G.settings_problem(db, p, stage=stage)
+            if problem:
+                rows.append(Finding(f"{p.name}, step {stage}", problem,
+                                    "/admin/pipeline", project=scope.label(p.id)))
+    return _result(
+        "style_picture_is_there",
+        f"{len(rows)} step(s) are set to send a style picture that is missing"
+        if rows else "Every style picture that is used is on the server",
+        "Painting is held back for these steps until the picture is uploaded "
+        "again on the Pipeline page, or the setting that sends it is "
+        "switched off. No photo is marked failed meanwhile.",
+        "error" if rows else "ok", rows,
+    )
+
+
 def check_duplicate_hashes(db: Session, scope: Scope) -> CheckResult:
     """The identical file saved more than once."""
     dupes = (
@@ -3815,6 +3848,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_open_revisions_on_deleted,
     check_closed_flags_stay_closed,
     check_pending_titles_are_clean,
+    check_style_picture_is_there,
     check_stale_claims,
     check_projects_match_registry,
     check_sheet_columns_all_or_nothing,

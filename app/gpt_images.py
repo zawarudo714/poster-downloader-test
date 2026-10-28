@@ -234,6 +234,31 @@ def api_key_for(db: Session, project) -> str:
     return api_key
 
 
+def settings_problem(db: Session, project, *, stage: int) -> Optional[str]:
+    """
+    A problem with the project's SETTINGS that would fail every picture of
+    this step alike — today, a style picture the prompt asks for that is
+    not on disk. Asked BEFORE any picture is claimed: raised per picture,
+    it marked each photo of a send as permanently failed (attempts 999)
+    for what was one missing file (site audit, 2026-10-29, v279).
+    """
+    from .pipeline import get_setting
+    from .config import WORKSPACE_DIR
+    rel = str(get_setting(db, "openai_style_image", project=project) or "")
+    style = WORKSPACE_DIR / rel if rel else Path("")
+    if stage == 2:
+        if bool(get_setting(db, "step2_send_style", project=project)) and not style.is_file():
+            return ("Step 2 is set to send the style picture, but it is not on the "
+                    "server. Upload it again on the Pipeline page, or switch off "
+                    "sending it. Nothing was sent; the pictures wait.")
+        return None
+    if bool(get_setting(db, "openai_use_style_image", project=project)) and not style.is_file():
+        return ("The prompt is set to use a style reference image, but it is not on "
+                "the server. Upload it again on the Pipeline page, or turn off "
+                "'Send the style reference image'. Nothing was sent; the photos wait.")
+    return None
+
+
 def step1_images(db: Session, project, *, source: Path, style: Path) -> list:
     """
     The pictures a PAINTING request carries, as (name, bytes, mime), in the

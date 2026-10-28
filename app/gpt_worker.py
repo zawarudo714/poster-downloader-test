@@ -721,6 +721,10 @@ def _cycle() -> bool:
             # and the flatten is what the owner is waiting to look at.
             if step2_active(db, project):
                 row = step2_queue(db, project).first()
+                problem2 = G.settings_problem(db, project, stage=2) if row is not None else None
+                if problem2:
+                    AB.note_error(project, problem2)       # same as step 1 below (v279)
+                    row = None
                 if row is not None:
                     painting, poster2, title2 = row
                     pid2 = painting.id
@@ -746,6 +750,12 @@ def _cycle() -> bool:
             # asked for the whole spend feature to go, so nothing on this
             # server now limits what a night of painting can cost. His
             # OpenAI account's own spend limit is what governs it.
+            # A missing style picture fails every photo alike: say so and
+            # claim nothing, rather than fail each photo for good (v279).
+            problem = G.settings_problem(db, project, stage=1)
+            if problem:
+                AB.note_error(project, problem)
+                continue
             poster, title = _claim_next(db, project)
             if poster is None:
                 continue

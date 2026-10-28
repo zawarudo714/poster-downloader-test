@@ -2158,7 +2158,7 @@ function wireSearch(box, title) {
           }
           ({ r, d } = await send(swapped, true));
         }
-        if (!r.ok || !d.ok) { alert(d.message || 'Save failed.'); break; }
+        if (!r.ok || !d.ok) { alert(d.message || d.detail || 'Save failed.'); break; }
         // A swap that answered a flag was silently absorbing the flag —
         // now the server moves it onto the new image and submits it, and
         // the worker deserves to hear that happened.

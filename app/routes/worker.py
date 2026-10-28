@@ -1084,6 +1084,16 @@ def api_search_save(
     from ..imagefetch import FetchError, fetch_as_jpeg
 
     t = _load_my_master(db, user, master_id)
+    # Skip and complete both KEEP the claim, so the claim check alone let a
+    # stale grid tab (or the phone add-on) save onto a closed title — a live,
+    # payable picture on a skipped one (site audit, 2026-10-29, v277). The
+    # same words as the paste door; a flag is answered on a REOPENED title
+    # (go_to_title), so this never stands in its way.
+    if t.status in ("complete", "skipped"):
+        raise HTTPException(409, f"This title is marked {t.status}. Reopen it to add posters.")
+    if t.status == "unusable":
+        raise HTTPException(
+            410, "This title was retired by the admin — it is not worked any more.")
     ok, reason = _validate_image_url(
         url, db, resolve_project(db, t.project_id))
     if not ok:

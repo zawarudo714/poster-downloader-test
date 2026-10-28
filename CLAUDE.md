@@ -3461,6 +3461,10 @@ So, before shipping any figure or label:
   `check_closed_flags_stay_closed`). Every admin path already checked
   first. And a save that runs in pieces refuses a second start while the
   first runs (the review screen's `commit()` now checks `commitBusy`).
+  Every DOOR to the same action asks the same FROM question: the paste
+  door refused a closed title, the search grid checked only the claim
+  (which skip and complete keep) and saved onto it (v277; preflight
+  "closed titles refuse new pictures", list `SAVES_ONTO_A_TITLE`).
   A key that acts on several things at once SETS them; it does not
   toggle each one — the review screen's title KEEP flipped a KEEP
   already made back off on a pair (v275; preflight "title key sets,

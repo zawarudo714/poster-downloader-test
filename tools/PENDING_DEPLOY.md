@@ -20,5 +20,12 @@
   - A new Diagnostics check warns if a payment ever settles pictures that no payment paid for. Live today: no payment has taken money back, so nothing is affected.
   - The worker folder does **not** need copying for this one.
 
+- **v277 — the search grid can no longer save onto a skipped or finished title.**
+  - Skipping or finishing a title keeps the worker's name on it. The grid only checked the name, so an old open tab could still add a picture, and that picture counted for pay.
+  - Now the grid refuses, with the same words as the paste box: "This title is marked skipped. Reopen it to add posters."
+  - Fixing a flag is not affected. Going to a flagged title reopens it first.
+  - Live today: this has never happened.
+  - The worker folder does **not** need copying for this one.
+
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.

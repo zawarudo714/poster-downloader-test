@@ -909,6 +909,37 @@ def check_title_key_sets_not_flips() -> None:
              "own, so a KEEP already made flips off — set the missing ones instead")
 
 
+# Worker routes that save a NEW picture onto a title. Each refuses a closed
+# (complete / skipped) title itself; the claim check alone is not enough.
+SAVES_ONTO_A_TITLE = ("save_image", "api_search_save")
+
+
+def check_closed_titles_refuse_new_pictures() -> None:
+    """
+    A worker route in SAVES_ONTO_A_TITLE without the closed-title refusal.
+
+    Skip and complete keep the claim, so `api_search_save` — which checked
+    only the claim — saved a live, payable picture onto a title the worker
+    had already skipped, from a stale grid tab (site audit, 2026-10-29).
+    The paste door always refused; since v277 both do.
+    """
+    path = APP / "routes" / "worker.py"
+    if not path.is_file():
+        return
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+    for name in SAVES_ONTO_A_TITLE:
+        fn = funcs.get(name)
+        if fn is None:
+            fail(f"worker.py: no function {name} — if it was renamed, rename it in "
+                 f"SAVES_ONTO_A_TITLE too")
+            continue
+        src = ast.get_source_segment(path.read_text(encoding="utf-8"), fn) or ""
+        if '("complete", "skipped")' not in src:
+            fail(f"worker.py:{fn.lineno}: {name} saves a picture onto a title without "
+                 f"refusing a complete or skipped one")
+
+
 # The files where the server downloads an address a PERSON typed or picked.
 # Other outbound calls (OpenAI, Brave, Google Vision) go to fixed addresses.
 FETCHES_TYPED_ADDRESSES = ("imagefetch.py", "routes/worker.py")
@@ -4055,6 +4086,7 @@ CHECKS = [
     ("spending buttons ask first", check_spending_buttons_ask_first),
     ("swap button counts one run", check_swap_button_counts_one_run),
     ("title key sets, never flips", check_title_key_sets_not_flips),
+    ("closed titles refuse new pictures", check_closed_titles_refuse_new_pictures),
     ("calls pass the right arguments", check_call_arity),
     ("javascript parses",         check_js_parses),
     ("template tags balance",     check_template_tags_balance),

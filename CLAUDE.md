@@ -3435,8 +3435,13 @@ So, before shipping any figure or label:
   time. The AI panel said "N other photos wait" with N counting the named
   ones again, and "M will go in the next send" past the per-send cap
   (`batch_max_items`). All found by the site audit, 2026-10-29, fixed in
-  v273. Say what the button DOES to the outside world first, and count
-  each thing once.
+  v273. SWAP N LIVE LISTINGS NOW counted every waiting listing while one
+  job takes one account and at most 500; since v274 the button, the toast
+  and the job's list all read `P.swap_next_run` (preflight's "swap button
+  counts one run"), and its "already queued" check is per project. Say
+  what the button DOES to the outside world first, count each thing once,
+  and **a button's number is what ONE press does** — a number the press
+  only partly covers reads it from the same helper the work uses.
 * **A button that spends money or publishes asks first, every time.**
   SWITCH STEP 1 ON started paying for every held-back photo in one click
   while the catch-up and the swap both asked. Preflight's "spending

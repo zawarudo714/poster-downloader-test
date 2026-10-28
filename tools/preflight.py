@@ -845,6 +845,45 @@ def check_spending_buttons_ask_first() -> None:
                  f"or publishes and does not ask first (confirm)")
 
 
+def check_swap_button_counts_one_run() -> None:
+    """
+    The SWAP button, the swap endpoint or the swap job's list counting
+    listings some other way than `pipeline.swap_next_run`.
+
+    One swap job takes one account and at most 500 listings, but the button
+    said "SWAP 620" from the whole waiting count and the toast echoed it,
+    while the job quietly did 500 (site audit, 2026-10-29). All three read
+    the one helper since v274, so they cannot drift apart again.
+    """
+    js = JS / "admin_pipeline.js"
+    if js.is_file():
+        line = next((l for l in js.read_text(encoding="utf-8").splitlines()
+                     if 'data-action="ai-swap"' in l), "")
+        if "swap_this_run" not in line or "SWAP ${d.swap_waiting}" in line:
+            fail("admin_pipeline.js: the SWAP button's number is not d.swap_this_run "
+                 "(what one run swaps) — see pipeline.swap_next_run")
+    for rel, where in (("routes/pipeline_api.py", 'job.kind == "listing_swap"'),
+                       ("routes/pipeline_admin.py", "def api_ai_swap(")):
+        path = ROOT / "app" / rel
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        at = text.find(where)
+        if at < 0:
+            fail(f"{rel}: cannot find `{where}` — update check_swap_button_counts_one_run")
+            continue
+        block = text[at:at + 2500]
+        if "swap_next_run(" not in block:
+            fail(f"{rel}: the swap code does not take its list from P.swap_next_run")
+    admin = ROOT / "app" / "routes" / "pipeline_admin.py"
+    if admin.is_file():
+        text = admin.read_text(encoding="utf-8")
+        at = text.find("def api_ai_swap(")
+        if at >= 0 and "PipelineJob.project_id == project.id" not in text[at:at + 2500]:
+            fail("pipeline_admin.py api_ai_swap: the 'already queued' check is not "
+                 "limited to this project")
+
+
 # The files where the server downloads an address a PERSON typed or picked.
 # Other outbound calls (OpenAI, Brave, Google Vision) go to fixed addresses.
 FETCHES_TYPED_ADDRESSES = ("imagefetch.py", "routes/worker.py")
@@ -3989,6 +4028,7 @@ CHECKS = [
     ("settings read without a project are site-wide", check_settings_read_without_a_project_are_site_wide),
     ("typed addresses check every redirect", check_typed_addresses_check_every_redirect),
     ("spending buttons ask first", check_spending_buttons_ask_first),
+    ("swap button counts one run", check_swap_button_counts_one_run),
     ("calls pass the right arguments", check_call_arity),
     ("javascript parses",         check_js_parses),
     ("template tags balance",     check_template_tags_balance),

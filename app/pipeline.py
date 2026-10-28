@@ -2689,6 +2689,25 @@ def swap_waiting(db: Session, project: Project):
                           UploadTracking.processed_image_id != ProcessedImage.id)))
 
 
+# One swap job covers one account and at most this many listings (v274).
+SWAP_JOB_CAP = 500
+
+
+def swap_next_run(db: Session, project: Project) -> list:
+    """
+    The (UploadTracking, ProcessedImage) rows the NEXT swap job will take:
+    the lowest account id that has any waiting, at most SWAP_JOB_CAP of
+    them. The button's count, the toast and the job payload all read this,
+    so the owner is never told "620" while the machine does 500.
+    """
+    q = swap_waiting(db, project)
+    first = (q.with_entities(func.min(UploadTracking.account_id)).scalar())
+    if first is None:
+        return []
+    return (q.filter(UploadTracking.account_id == first)
+             .order_by(UploadTracking.id).limit(SWAP_JOB_CAP).all())
+
+
 def restore_live_status(db: Session, poster: SavedPoster) -> None:
     """
     A LIVE poster that went round again (a repaint of one of the 417) comes

@@ -428,7 +428,8 @@
          </div>` : '';
     const swap = d.swap_waiting
       ? `<div class="filter-row" style="margin-top:8px">
-           <button type="button" class="btn btn-accent btn-tiny" data-action="ai-swap">SWAP ${d.swap_waiting} LIVE LISTING${d.swap_waiting === 1 ? '' : 'S'} NOW</button>
+           <button type="button" class="btn btn-accent btn-tiny" data-action="ai-swap" data-count="${d.swap_this_run}">SWAP ${d.swap_this_run} LIVE LISTING${d.swap_this_run === 1 ? '' : 'S'} NOW</button>
+           ${d.swap_this_run < d.swap_waiting ? `<span class="muted"><strong>${d.swap_waiting} are waiting;</strong> one run takes ${d.swap_this_run} (one account at a time, at most 500). Press again after it finishes for the rest.</span>` : ''}
            <span class="muted">these are live on the marketplace and have a new approved picture.
            The worker machine opens each one, presses Change Image, uploads the new file and Submit.
            Title, address and keywords stay. The log is under RECENT JOBS; STOP there ends it.</span>
@@ -2572,13 +2573,14 @@
         break;
       }
       case 'ai-swap': {
-        if (!confirm('Swap the picture on every live listing that has a new approved one?\n\n'
+        if (!confirm(`Swap the picture on ${btn.dataset.count} live listing(s) that have a new approved one?\n\n`
                    + 'The worker machine does them one after another — roughly 30 to 60 '
                    + 'seconds each. It changes only the picture.')) break;
         try {
           const d = await postJSON(API + '/ai/swap', {});
           toast(d.already ? `A swap job (#${d.job_id}) is already queued or running.`
-                          : `Queued job #${d.job_id} for ${d.waiting} listing(s).`);
+                          : `Queued job #${d.job_id} for ${d.this_run} listing(s)`
+                            + (d.this_run < d.waiting ? ` — ${d.waiting - d.this_run} more wait for the next run.` : '.'));
         } catch (e) { toast(e.message, 'error'); }
         loadOverview();
         break;

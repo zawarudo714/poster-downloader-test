@@ -696,12 +696,10 @@ def _resolve_job_payload(
         # when the button was pressed — so a listing approved in between is
         # included and one swapped meanwhile is not sent twice.
         from .. import listing_check as LC
-        cap = max(1, int(payload.get("limit") or 500))
-        rows = P.swap_waiting(db, project).limit(cap).all()
+        rows = P.swap_next_run(db, project)
         if not rows:
             return {**resolved, "error": "Nothing is waiting to be swapped."}
-        account_ids = {t.account_id for t, _pi in rows}
-        account = db.query(UploadAccount).filter_by(id=sorted(account_ids)[0]).first()
+        account = db.query(UploadAccount).filter_by(id=rows[0][0].account_id).first()
         if account is None:
             return {**resolved, "error": "The listings' account no longer exists."}
         if not (account.artist_name or "").strip():

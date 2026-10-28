@@ -2397,6 +2397,7 @@ def _ai_counts(db: Session, project) -> dict:
                          _PI.review_status == "step2_failed",
                          SavedPoster.deleted_at.is_(None))
                  .scalar() or 0)
+    swap_all = P.swap_waiting(db, project).count()
     return {
         "step1_enabled": P.step1_open(db, project),
         "step2_active": P.step2_active(db, project),
@@ -2416,7 +2417,9 @@ def _ai_counts(db: Session, project) -> dict:
         "step2_in_batch": away2,
         "step2_failed": failed2,
         "catchup": P.painted_before_step2(db, project).count(),
-        "swap_waiting": P.swap_waiting(db, project).count(),
+        "swap_waiting": swap_all,
+        # What ONE press swaps: one account, at most P.SWAP_JOB_CAP (v274).
+        "swap_this_run": len(P.swap_next_run(db, project)) if swap_all else 0,
     }
 
 
@@ -2523,19 +2526,25 @@ def api_ai_swap(
     waiting = P.swap_waiting(db, project).count()
     if not waiting:
         raise HTTPException(409, "Nothing is waiting to be swapped.")
+    # This project's open job only: another project's swap is not this one (v274).
     open_job = (db.query(PipelineJob)
                   .filter(PipelineJob.kind == "listing_swap",
+                          PipelineJob.project_id == project.id,
                           PipelineJob.status.in_(("queued", "running")))
                   .first())
     if open_job is not None:
         return JSONResponse({"ok": True, "job_id": open_job.id, "already": True,
                              "waiting": waiting})
+    # One job takes one account and at most P.SWAP_JOB_CAP — say so, not "waiting".
+    this_run = len(P.swap_next_run(db, project))
     job = P.create_job(db, kind="listing_swap", project_id=project.id,
-                       payload={"limit": 500}, requested_by=admin.username)
+                       payload={"limit": P.SWAP_JOB_CAP}, requested_by=admin.username)
     log_activity(db, user=admin, action="listing_swap_queued", target_type="pipeline",
-                 details={"project": project.slug, "waiting": waiting, "job": job.id})
+                 details={"project": project.slug, "waiting": waiting,
+                          "this_run": this_run, "job": job.id})
     db.commit()
-    return JSONResponse({"ok": True, "job_id": job.id, "waiting": waiting})
+    return JSONResponse({"ok": True, "job_id": job.id, "waiting": waiting,
+                         "this_run": this_run})
 
 
 @router.post("/api/ai/batch/{batch_id}/cancel")

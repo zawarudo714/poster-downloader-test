@@ -1276,6 +1276,43 @@ On Changes Requested, click a thumbnail to zoom:
 - Press K on a picture saved this week (not paid yet). It should wait until
   next Monday's payment.
 
+## 113. STEP 2, BATCHES AND THE 417 SWAP — v266
+
+Deploy with the pipeline still PAUSED. Then:
+
+- On Pipeline, the new **AI PAINTING** panel should say **STEP 1 — OFF**,
+  STEP 2 on, and "Sending: as BATCHES".
+- On Settings → Processing, a new **STEP 2 (THE FLATTEN) AND BATCHES** panel
+  should show your step 2 prompt word for word, gpt-image-2-2026-04-21,
+  medium, opaque.
+- Top up OpenAI. On Needs Attention press **RETRY ALL AFFECTED** on the 95.
+  The AI PAINTING panel should then say about 95 "named by hand".
+- On the AI PAINTING panel press **SEND 689 PAINTED PICTURES TO STEP 2** (the
+  number may differ a little). Then press **RESUME**.
+- Within about 10 minutes the panel should list two batches: one "step 2
+  (flatten)" with about 689 pictures and one "step 1 (painting)" with about
+  95. If OpenAI refuses, Needs Attention shows "OpenAI refused a batch" with
+  its reason, and nothing is charged.
+- Within 24 hours the step 2 batch should read "finished", and the pictures
+  should be on **Approve Artwork**. Each should show its version as "v1 step
+  2" and have **no colour controls**. The buttons should read REPAINT (7),
+  **REDO STEP 2 (6)**, LEAVE FOR PHOTOSHOP (8), KEEP (9).
+- Pick an older painting version in the version bar (for example v1) and
+  press REDO STEP 2. After SAVE it should go back into a step 2 batch, and
+  no new painting should be made.
+- KEEP one and save. Its print file should carry your signature.
+- Once some of the 417 are kept, the panel should show **SWAP N LIVE
+  LISTINGS NOW**. Make sure the artist name on the Listing check tab reads
+  exactly "Illusination Travel Posterz". Copy the worker machine folder
+  first (see the deploy note), then press the button and watch RECENT JOBS.
+  Check one listing on FineArtAmerica the next day: same title and address,
+  new picture.
+- Press STOP on a batch you do not mind losing. The panel should say
+  "stopping", then "stopped", and the unfinished pictures should go back in
+  the queue.
+- When you are happy, switch **STEP 1 ON** on the AI PAINTING panel, and set
+  the account's daily limit back to 100.
+
 ---
 
 ## NOT ON THIS LIST, ON PURPOSE

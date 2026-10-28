@@ -43,6 +43,7 @@ from typing import Optional
 from .client import PipelineClient, PipelineError, load_config
 from .processor import ProcessStage
 from .listing_check import ListingCheckStage
+from .listing_swap import ListingSwapStage
 from .uploader import UploadStage
 
 
@@ -59,7 +60,7 @@ from .uploader import UploadStage
 # either way. `check_worker_agent_current` in diagnostics.py now compares
 # what the machine reports against what this file says, so a stale copy is
 # reported instead of assumed.
-AGENT_VERSION = "1.31.0"
+AGENT_VERSION = "1.32.0"
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_CONFIG = HERE / "config.json"
@@ -82,6 +83,9 @@ class Agent:
         # Marketplace listing health: scan, deactivate, reactivate. Rides on
         # the upload capability — same browser, same accounts, same profiles.
         self.listing_check = ListingCheckStage(self.client, config, self.log)
+        # Swapping the picture on a listing that is already live — the 417
+        # (v266). Same browser and account as an upload; deleted after.
+        self.listing_swap = ListingSwapStage(self.client, config, self.log)
 
         self.hostname = socket.gethostname()
         self._last_idle_log = 0.0
@@ -259,6 +263,8 @@ class Agent:
                 result = self.uploader.read_earnings(job_id, payload)
             elif kind == "listing_check":
                 result = self.listing_check.run(job_id, payload)
+            elif kind == "listing_swap":
+                result = self.listing_swap.run(job_id, payload)
             elif kind == "test_upload":
                 result = self.uploader.test_upload(job_id, payload)
             elif kind == "process":

@@ -115,13 +115,7 @@ def process_one(db: Session, poster, title, project) -> bool:
     recorded on the poster so the dashboard can explain it.
     """
     from . import gpt_images as G
-    from .imagefetch import (flatten_onto,
-                             has_transparency, make_preview,
-                             upscale_to_width)
-    from .pipeline import (default_background, get_setting,
-                           recompute_title_status, storage_path_for)
-    from .models import ProcessedImage
-    from .storage_remote import StorageError, write_bytes
+    from .pipeline import get_setting
     from .utils import saved_poster_path
     from .config import WORKSPACE_DIR
 
@@ -137,31 +131,9 @@ def process_one(db: Session, poster, title, project) -> bool:
         # `title` column as the poster text.
         gen = G.generate(db, source=source, style=style, project=project,
                          location=(title.title or ""))
-    except G.PermanentFailure as e:
-        # Never retried automatically. GPT's own words are kept so the admin
-        # can judge, and so a policy change a year from now is actionable.
-        poster.pipeline_status = "failed_processing"
-        poster.process_error = f"[{e.kind}] {e}"
-        poster.claimed_at = None
-        poster.claimed_by = None
-        # Attempts pushed past the cap so no automatic retry can pick it up.
-        poster.process_attempts = 999
-        recompute_title_status(db, title)
+    except (G.PermanentFailure, G.TransientFailure) as e:
+        record_paint_failure(db, poster, title, project, e)
         db.commit()
-        log.warning("GPT permanently rejected poster %s: %s", poster.id, e)
-        return False
-    except G.TransientFailure as e:
-        poster.pipeline_status = "greenlit"     # back in the queue
-        poster.process_error = str(e)
-        poster.process_attempts = (poster.process_attempts or 0) + 1
-        poster.claimed_at = None
-        poster.claimed_by = None
-        max_attempts = int(get_setting(db, "process_max_attempts", project=project) or 3)
-        if poster.process_attempts >= max_attempts:
-            poster.pipeline_status = "failed_processing"
-        recompute_title_status(db, title)
-        db.commit()
-        log.warning("GPT transient failure on poster %s: %s", poster.id, e)
         return False
 
     # Spend metering was REMOVED in v172 at the owner's instruction. OpenAI's
@@ -169,6 +141,53 @@ def process_one(db: Session, poster, title, project) -> bool:
     # ever duplicated it less accurately. The token counts OpenAI returns are
     # still on `gen` if anything ever wants them again.
     db.commit()
+    return file_painting(db, poster, title, project, gen)
+
+
+def record_paint_failure(db: Session, poster, title, project, err) -> None:
+    """
+    A painting that did not come back, recorded on the poster. ONE spelling
+    for the live call and for a batch line, so a refusal at OpenAI reads the
+    same on Needs Attention whichever way it was sent. Commits nothing.
+    """
+    from . import gpt_images as G
+    from .pipeline import get_setting, recompute_title_status
+    poster.claimed_at = None
+    poster.claimed_by = None
+    if isinstance(err, G.PermanentFailure):
+        # Never retried automatically. GPT's own words are kept so the admin
+        # can judge, and so a policy change a year from now is actionable.
+        poster.pipeline_status = "failed_processing"
+        poster.process_error = f"[{err.kind}] {err}"
+        # Attempts pushed past the cap so no automatic retry can pick it up.
+        poster.process_attempts = 999
+        log.warning("GPT permanently rejected poster %s: %s", poster.id, err)
+    else:
+        poster.pipeline_status = "greenlit"     # back in the queue
+        poster.process_error = str(err)
+        poster.process_attempts = (poster.process_attempts or 0) + 1
+        max_attempts = int(get_setting(db, "process_max_attempts", project=project) or 3)
+        if poster.process_attempts >= max_attempts:
+            poster.pipeline_status = "failed_processing"
+        log.warning("GPT transient failure on poster %s: %s", poster.id, err)
+    recompute_title_status(db, title)
+
+
+def file_painting(db: Session, poster, title, project, gen) -> bool:
+    """
+    File a PAINTING that came back — from the live call or from a batch —
+    and record its row. Raises nothing it can catch; the caller owns the
+    commit on failure paths it handles itself.
+    """
+    from .imagefetch import (flatten_onto,
+                             has_transparency, make_preview,
+                             upscale_to_width)
+    from .pipeline import (default_background, get_setting,
+                           recompute_title_status, step2_active,
+                           storage_path_for)
+    from .models import ProcessedImage
+    from .storage_remote import StorageError, write_bytes
+    from .config import WORKSPACE_DIR
 
     # WHICH GENERATION THIS IS, DECIDED BEFORE THE FILENAME IS BUILT.
     #
@@ -340,7 +359,10 @@ def process_one(db: Session, poster, title, project) -> bool:
         is_current=1,
         attempt=attempt,
         preview_path=preview_rel,
-        review_status="pending" if gate else None,
+        # With STEP 2 on, a new painting goes on to be flattened instead of
+        # to the owner — he reviews the step-2 result (v266).
+        review_status=(("step2" if step2_active(db, project) else "pending")
+                       if gate else None),
         master_path=master_rel,
         # The colour ALREADY baked into storage_path, not a request for one.
         # Recording it is what lets the review screen know whether a change
@@ -374,22 +396,233 @@ def process_one(db: Session, poster, title, project) -> bool:
     return True
 
 
+# ── Step 2: the flatten, made from a painting (v266) ────────────────────────
+
+def step2_still_wanted(db: Session, painting, poster) -> bool:
+    """
+    Is this painting still the one waiting for step 2? Asked again when an
+    answer comes back — from a live call it is seconds later, from a batch it
+    may be a day later, and in that time the worker may have swapped the
+    picture, the owner may have pressed REPAINT, or the picture may be gone.
+    An answer for a painting nobody is waiting on any more is not filed.
+    """
+    db.refresh(painting)
+    db.refresh(poster)
+    return (poster.deleted_at is None
+            and (poster.pipeline_status or "") in ("processed", "uploaded")
+            and painting.is_current == 1
+            and (painting.review_status or "") == "step2")
+
+
+def record_step2_failure(db: Session, painting, project, err) -> None:
+    """A step-2 try that did not come back, recorded on the PAINTING."""
+    from . import gpt_images as G
+    from .pipeline import get_setting
+    if isinstance(err, G.PermanentFailure):
+        painting.review_status = "step2_failed"
+        painting.step2_error = f"[{err.kind}] {err}"[:4000]
+        painting.step2_attempts = 999
+        log.warning("Step 2 refused for painting %s: %s", painting.id, err)
+        return
+    painting.step2_error = str(err)[:4000]
+    painting.step2_attempts = (painting.step2_attempts or 0) + 1
+    cap = int(get_setting(db, "step2_max_attempts", project=project) or 3)
+    if painting.step2_attempts >= cap:
+        painting.review_status = "step2_failed"
+    log.warning("Step 2 transient failure on painting %s: %s", painting.id, err)
+
+
+def step2_names(db: Session, title, poster, painting, project) -> dict:
+    """
+    Where a step-2 picture is filed: in the poster's own folder, named after
+    the painting it came from, so the folder reads as one family —
+
+        Kyoto_v2_master.png   the painting (v2)
+        Kyoto_v2_step2.png    step 2 made from it, exactly as OpenAI sent it
+        Kyoto_v2_step2.jpg    the print file, built when it is approved
+
+    A redo of step 2 on the same painting gets its own name (_step2-2, …),
+    so nothing ever overwrites an older picture.
+    """
+    from .models import ProcessedImage
+    from .pipeline import storage_path_for
+    n = 1 + (db.query(ProcessedImage.id)
+               .filter(ProcessedImage.saved_poster_id == poster.id,
+                       ProcessedImage.step2_from == painting.id,
+                       ProcessedImage.variant.is_(None)).count())
+    base_rel, base_name = storage_path_for(db, title, poster, project=project,
+                                           attempt=painting.attempt or 1)
+    stem = base_rel.rsplit(".", 1)[0]
+    name_stem = base_name.rsplit(".", 1)[0]
+    tag = "_step2" if n == 1 else f"_step2-{n}"
+    print_rel = f"{stem}{tag}.jpg"
+    bits = print_rel.rsplit("/", 1)
+    return {
+        "master": f"{stem}{tag}.png",
+        "print": print_rel,
+        "preview": (bits[0] + "/previews/" + bits[1]) if len(bits) == 2
+                   else f"previews/{print_rel}",
+        "filename": f"{name_stem}{tag}.jpg",
+    }
+
+
+def file_step2(db: Session, painting, poster, title, project, gen,
+               *, processed_by: str = "server") -> bool:
+    """
+    File a STEP-2 picture that came back, as a new generation row of the
+    same poster. Returns False (and files nothing) when the painting is no
+    longer the one waiting — see step2_still_wanted.
+
+    The print file is NOT built here. Like a painting, it is built when the
+    owner approves, with the signature, by `_build_print_file` — which reads
+    `master_path`, here the picture exactly as OpenAI returned it.
+    """
+    import io
+    from PIL import Image
+    from .imagefetch import make_preview
+    from .models import ProcessedImage
+    from .pipeline import get_setting, recompute_title_status
+    from .storage_remote import StorageError, write_bytes
+    from .config import WORKSPACE_DIR
+
+    if not step2_still_wanted(db, painting, poster):
+        log.info("Step 2 for painting %s came back after it stopped waiting — "
+                 "not filed", painting.id)
+        return False
+
+    names = step2_names(db, title, poster, painting, project)
+    with Image.open(io.BytesIO(gen.image_bytes)) as probe:
+        src_w, src_h = probe.size
+    width = int(get_setting(db, "upscale_width_px", project=project) or 4000)
+    out_h = max(1, round(src_h * (width / max(1, src_w))))
+
+    tmp_dir = WORKSPACE_DIR / "_gpt_tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    raw = tmp_dir / f"s2_{painting.id}.png"
+    prev = tmp_dir / f"s2_{painting.id}_prev.jpg"
+    try:
+        raw.write_bytes(gen.image_bytes)
+        make_preview(raw, prev)
+        write_bytes(db, names["master"], raw.read_bytes(), project=project)
+        write_bytes(db, names["preview"], prev.read_bytes(), project=project)
+        from .review_cache import clear as _clear_review_cache
+        _clear_review_cache([names["master"], names["preview"], names["print"]])
+    except StorageError as e:
+        # Paid for, but not filed. Counted as a transient failure on the
+        # painting, so a Storage Box having a moment retries rather than
+        # losing the picture — and stops after step2_max_attempts.
+        record_step2_failure(db, painting, project, e)
+        db.commit()
+        log.error("Could not store step 2 for painting %s: %s", painting.id, e)
+        return False
+    finally:
+        raw.unlink(missing_ok=True)
+        prev.unlink(missing_ok=True)
+
+    # The painting steps aside but KEEPS its files: 'painted' means "went
+    # through step 2, still here to redo step 2 from".
+    db.query(ProcessedImage).filter(
+        ProcessedImage.saved_poster_id == poster.id,
+        ProcessedImage.is_current == 1,
+    ).update({ProcessedImage.is_current: 0}, synchronize_session=False)
+    painting.review_status = "painted"
+    painting.step2_error = None
+
+    row = ProcessedImage(
+        saved_poster_id=poster.id,
+        project_id=project.id,
+        storage_path="",                   # built at approval, like a painting
+        filename=names["filename"],
+        file_size=len(gen.image_bytes),
+        output_width=width,
+        output_height=out_h,
+        script_version=str(get_setting(db, "step2_model", project=project)),
+        processed_by=processed_by,
+        duration_ms=gen.duration_ms,
+        is_current=1,
+        attempt=painting.attempt or 1,
+        preview_path=names["preview"],
+        review_status="pending",
+        master_path=names["master"],
+        background_color=None,
+        signature_json=painting.signature_json,
+        stage=2,
+        step2_from=painting.id,
+    )
+    db.add(row)
+    db.flush()
+    recompute_title_status(db, title)
+    db.commit()
+    return True
+
+
+def process_step2_one(db: Session, painting, poster, title, project) -> bool:
+    """One step 2 at full price, now (batch switched off)."""
+    from . import gpt_images as G
+    from .pipeline import get_setting
+    from .storage_remote import StorageError, read_bytes
+    from .config import WORKSPACE_DIR
+
+    style_rel = str(get_setting(db, "openai_style_image", project=project) or "")
+    style = WORKSPACE_DIR / style_rel if style_rel else Path("")
+    try:
+        master = read_bytes(db, painting.master_path or painting.storage_path,
+                            project=project)
+        png, size = G.step2_input(master)
+        gen = G.generate_step2(db, painting_png=png, input_size=size,
+                               style=style, project=project,
+                               location=(title.title or ""))
+    except StorageError as e:
+        record_step2_failure(db, painting, project, G.TransientFailure(
+            f"could not read the painting: {e}"))
+        db.commit()
+        return False
+    except (G.PermanentFailure, G.TransientFailure) as e:
+        record_step2_failure(db, painting, project, e)
+        db.commit()
+        return False
+    return file_step2(db, painting, poster, title, project, gen)
+
+
+def step2_queue(db: Session, project):
+    """
+    Query: (painting, poster, title) waiting for step 2 and NOT already at
+    OpenAI in an open batch, oldest first. Shared by the one-at-a-time path
+    and the batch sender, so both take work in the same order.
+    """
+    from .models import MasterTitle, ProcessedImage, SavedPoster
+    from .pipeline import get_setting, waiting_for_step2
+    from .ai_batches import open_item_ids
+    cap = int(get_setting(db, "step2_max_attempts", project=project) or 3)
+    away = open_item_ids(db, project, stage=2)
+    q = (waiting_for_step2(db, project)
+           .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+           .filter(ProcessedImage.step2_attempts < cap)
+           .with_entities(ProcessedImage, SavedPoster, MasterTitle)
+           .order_by(SavedPoster.original_save_date.asc(), ProcessedImage.id.asc()))
+    if away:
+        q = q.filter(ProcessedImage.id.notin_(away))
+    return q
+
+
 # ── The loop ────────────────────────────────────────────────────────────────
 
-def _claim_next(db: Session, project):
+def paint_queue(db: Session, project):
     """
-    Take the oldest waiting image for this project and mark it in progress.
+    Query: (poster, title) waiting to be PAINTED in this project, oldest
+    first. Shared by the one-at-a-time painter and the batch sender.
 
-    Same claim discipline as the node's, for the same reason: a restart
-    mid-image must leave something the reaper can free, not a row that looks
-    finished.
+    STEP 1 SWITCHED OFF (v266) narrows it to the pictures the owner named
+    by hand — RETRY, REPAINT — so step 2 can run on what is already painted
+    while the rest of the photos wait (owner, 2026-10-28).
     """
     from .models import MasterTitle, SavedPoster
-    from .pipeline import get_setting, project_scope, _default_project_id
+    from .pipeline import (get_setting, project_scope, _default_project_id,
+                           step1_open)
     from sqlalchemy import or_
 
     max_attempts = int(get_setting(db, "process_max_attempts", project=project) or 3)
-    row = (
+    q = (
         db.query(SavedPoster, MasterTitle)
           .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
           .filter(SavedPoster.deleted_at.is_(None),
@@ -399,14 +632,29 @@ def _claim_next(db: Session, project):
                   project_scope(project.id,
                                 default_project_id=_default_project_id(db)))
           .order_by(SavedPoster.original_save_date.asc(), SavedPoster.id.asc())
-          .first()
     )
+    if not step1_open(db, project):
+        q = q.filter(SavedPoster.paint_requested_at.isnot(None))
+    return q
+
+
+def _claim_next(db: Session, project):
+    """
+    Take the oldest waiting image for this project and mark it in progress.
+
+    Same claim discipline as the node's, for the same reason: a restart
+    mid-image must leave something the reaper can free, not a row that looks
+    finished.
+    """
+    row = paint_queue(db, project).first()
     if row is None:
         return None, None
     poster, title = row
     poster.pipeline_status = "processing"
     poster.claimed_at = datetime.utcnow()
     poster.claimed_by = "server"
+    # A hand-named picture's mark is spent by being taken (v266).
+    poster.paint_requested_at = None
     db.commit()
     return poster, title
 
@@ -425,14 +673,62 @@ def _cycle() -> bool:
               .filter(Project.is_active == 1, Project.processor == "gpt")
               .all()
         )
-        from .pipeline import intake_open
+        from .pipeline import batch_enabled, intake_open, step2_active
+        from . import ai_batches as AB
 
         for project in projects:
+            # BATCHES ALREADY AT OPENAI ARE ALWAYS LOOKED AFTER — asked how
+            # they are doing, and their answers filed — even while paused or
+            # with batch switched off. Collecting is finishing work already
+            # paid for, not handing out new work, the same way a drain lets
+            # claimed work report back (v266).
+            try:
+                if AB.poll(db, project):
+                    did_work = True
+            except Exception as e:                       # noqa: BLE001
+                db.rollback()
+                AB.note_error(project, f"checking batches: {type(e).__name__}: {e}")
+                log.error("Batch check failed for %s: %s", project.slug, e)
+
             # Paused or draining. The loop keeps ticking (so the heartbeat
             # stays fresh and the watchdog does not "revive" a worker that is
             # deliberately idle) — it simply claims nothing.
             if not intake_open(db, project):
                 continue
+
+            if batch_enabled(db, project):
+                # Everything waiting — step 2 and step 1 — goes out in the
+                # next send; nothing is painted one at a time.
+                try:
+                    if AB.send_due(db, project):
+                        did_work = True
+                except Exception as e:                   # noqa: BLE001
+                    db.rollback()
+                    AB.note_error(project, f"sending: {type(e).__name__}: {e}")
+                    log.error("Batch send failed for %s: %s", project.slug, e)
+                continue
+
+            # ONE AT A TIME. Step 2 first: the painting is already paid for,
+            # and the flatten is what the owner is waiting to look at.
+            if step2_active(db, project):
+                row = step2_queue(db, project).first()
+                if row is not None:
+                    painting, poster2, title2 = row
+                    pid2 = painting.id
+                    try:
+                        if process_step2_one(db, painting, poster2, title2, project):
+                            did_work = True
+                    except Exception as e:               # noqa: BLE001
+                        db.rollback()
+                        from . import gpt_images as _G
+                        from .models import ProcessedImage as _PI
+                        again = db.query(_PI).filter_by(id=pid2).first()
+                        if again is not None:
+                            record_step2_failure(db, again, project, _G.TransientFailure(
+                                f"{type(e).__name__}: {e}"))
+                            db.commit()
+                        log.error("Step 2: painting %s failed unexpectedly: %s", pid2, e)
+                    continue
 
             # THE MONTHLY SPEND CAP WAS REMOVED HERE IN v172, and this is the
             # one place where that removal takes a real protection away. It
@@ -493,6 +789,15 @@ def _run() -> None:
         try:
             freed = release_claims_for_node(_db, "server")
             _db.commit()
+            # A batch caught half-way through SENDING by a restart never
+            # reached OpenAI; its pictures go straight back in the queue
+            # (v266, rule 8 — claimed work must end in a reported state).
+            from .ai_batches import recover_unsent
+            unsent = recover_unsent(_db)
+            _db.commit()
+            if unsent:
+                log.warning("GPT: %s batch send(s) were cut short by a restart — "
+                            "their pictures are back in the queue", unsent)
             if freed["posters"] or freed["uploads"]:
                 log.warning("GPT: released %s claim(s) left over from a "
                             "previous run", freed["posters"] + freed["uploads"])

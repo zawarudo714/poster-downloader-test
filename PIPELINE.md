@@ -63,6 +63,36 @@ marketplace. Lose the marketplace account and nothing else is affected.
 | Queue | Linux VPS | On a successful process, a `pending` upload row is created for **every enabled account** in the project |
 | Upload | Windows VPS | Reads from the mount, one browser tab, one image at a time, reports **per image** |
 
+### Step 1, step 2 and batches — GPT projects (v266, 2026-10-28)
+
+For a GPT project the Process row above is two steps, both on the Linux VPS:
+
+| Step | What | Lands as |
+|---|---|---|
+| Step 1 — painting | the worker's photo + the painting prompt (`openai_*`), see-through | a painting row; with step 2 on, `review_status='step2'` (never shown for review) |
+| Step 2 — flatten | that painting + the step 2 prompt (`step2_*`), opaque | a new row with `stage=2`, `step2_from` = the painting; `pending` on Approve Artwork |
+
+- **Step 1 can be switched off** (`step1_enabled`) while step 2 keeps going.
+  Off, only pictures named by hand (RETRY, REPAINT — `paint_requested_at`)
+  are painted.
+- **Batch** (`openai_batch_enabled`) sends both steps as OpenAI Batch API
+  jobs: half price, answered within 24 hours. `app/ai_batches.py` sends,
+  polls and collects them inside the painting thread. A step-1 picture in a
+  batch is `processing`, claimed by `batch:<id>` with NO claim time, so the
+  stale-claim reaper never frees it; a step-2 painting stays `step2` and an
+  open `AIBatchItem` says it is away.
+- **Files.** A step-2 picture sits in the poster's own folder, named after
+  the painting it came from: `X_v2_step2.png` (as OpenAI sent it), and the
+  print file `X_v2_step2.jpg`, built when it is approved. A redo is
+  `_step2-2`. Paintings keep their files until an approval settles the poster.
+- **Live listings (the 417).** Approving a step-2 picture of a poster that
+  is already live does not queue a new listing; it puts the listing on the
+  swap list (`pipeline.swap_waiting`, derived). SWAP N LIVE LISTINGS NOW
+  queues one `listing_swap` job for the Windows node, which presses Edit →
+  Change Image → Upload Image → Submit on each listing
+  (`worker_service/listing_swap.py`) and points the upload row at the new
+  picture.
+
 ---
 
 ## 2. Design rules — do not break these

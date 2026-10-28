@@ -212,15 +212,35 @@ def generate(db: Session, *, source: Path, style: Path, project=None,
 
     Raises PermanentFailure or TransientFailure. Never returns partial work.
     """
-    from .pipeline import get_secret, get_setting
-
     def emit(msg, level="info"):
         if log_fn:
             log_fn(msg, level=level)
 
+    api_key = api_key_for(db, project)
+    data = request_fields(db, project, stage=1, location=location)
+    parts = step1_images(db, project, source=source, style=style)
+    emit("sending the style reference and the photo" if len(parts) == 2
+         else "sending the photo only — the style reference is switched off")
+    files = [("image[]", p) for p in parts]
+    headers = {"Authorization": f"Bearer {api_key}"}
+    return _send_and_read(headers, data, files, emit)
+
+
+def api_key_for(db: Session, project) -> str:
+    from .pipeline import get_secret
     api_key = get_secret(db, "openai_api_key", project=project)
     if not api_key:
         raise PermanentFailure("No OpenAI API key configured.", kind="auth")
+    return api_key
+
+
+def step1_images(db: Session, project, *, source: Path, style: Path) -> list:
+    """
+    The pictures a PAINTING request carries, as (name, bytes, mime), in the
+    order the prompt refers to them. Shared by the live call and the batch
+    file, so "which images, in which order" is decided in one place.
+    """
+    from .pipeline import get_setting
     use_style = bool(get_setting(db, "openai_use_style_image", project=project))
     if use_style and not style.is_file():
         raise PermanentFailure(
@@ -230,46 +250,237 @@ def generate(db: Session, *, source: Path, style: Path, project=None,
             kind="bad_request")
     if not source.is_file():
         raise PermanentFailure(f"Source image is missing: {source}", kind="bad_request")
+    # The reference FIRST. Every prompt that mentions two pictures calls the
+    # reference "the first image", so the order is part of the instruction
+    # rather than a detail — swap it and the model styles the reference to
+    # look like the photograph.
+    return [_part(style), _part(source)] if use_style else [_part(source)]
 
-    # {LOCATION} is filled in HERE, before the prompt is sent. It was the
-    # one placeholder the generation prompt never resolved — the upload
-    # title/keywords/description have always been rendered, but the prompt
-    # went out raw, so the model invented the poster text from the picture.
-    # Both cases are replaced so a prompt written either way works.
-    prompt = str(get_setting(db, "openai_prompt", project=project))
-    prompt = (prompt.replace("{LOCATION}", location)
-                    .replace("{location}", location))
-    data = {
-        "model":  str(get_setting(db, "openai_model", project=project)),
-        "prompt": prompt,
-        "n": "1",
-    }
-    size = str(get_setting(db, "openai_size", project=project) or "auto")
-    quality = str(get_setting(db, "openai_quality", project=project) or "auto")
-    background = str(get_setting(db, "openai_background", project=project) or "auto")
+
+# The sizes gpt-image-2 accepts, for step 2's "same shape as the painting".
+_SHAPES = (("1024x1536", 1024 / 1536), ("1024x1024", 1.0), ("1536x1024", 1536 / 1024))
+
+
+def same_shape_size(width: int, height: int) -> str:
+    """The accepted size closest in shape to a picture — the tester's rule."""
+    ratio = (width or 1) / (height or 1)
+    return min(_SHAPES, key=lambda s: abs(s[1] - ratio))[0]
+
+
+def request_fields(db: Session, project, *, stage: int, location: str,
+                   input_size: Optional[tuple] = None) -> dict:
+    """
+    Everything a request says apart from its pictures: model, prompt, size,
+    quality, background. Stage 1 reads the openai_* settings, stage 2 the
+    step2_* ones. Shared by the live call and the batch file.
+
+    {LOCATION} is filled in HERE, before the prompt is sent. It was the one
+    placeholder the generation prompt never resolved — the upload title,
+    keywords and description have always been rendered, but the prompt went
+    out raw, so the model invented the poster text from the picture.
+    """
+    from .pipeline import get_setting
+    if stage == 2:
+        prompt = str(get_setting(db, "step2_prompt", project=project) or "").strip()
+        if not prompt:
+            raise PermanentFailure(
+                "Step 2 is switched on but its prompt is empty. Write it on "
+                "the Settings page (Step 2), or switch step 2 off.",
+                kind="bad_request")
+        model = str(get_setting(db, "step2_model", project=project))
+        size = str(get_setting(db, "step2_size", project=project) or "auto")
+        if size == "same":
+            size = same_shape_size(*(input_size or (1024, 1536)))
+        quality = str(get_setting(db, "step2_quality", project=project) or "auto")
+        background = str(get_setting(db, "step2_background", project=project) or "auto")
+    else:
+        prompt = str(get_setting(db, "openai_prompt", project=project))
+        model = str(get_setting(db, "openai_model", project=project))
+        size = str(get_setting(db, "openai_size", project=project) or "auto")
+        quality = str(get_setting(db, "openai_quality", project=project) or "auto")
+        background = str(get_setting(db, "openai_background", project=project) or "auto")
+    prompt = prompt.replace("{LOCATION}", location).replace("{location}", location)
+    data = {"model": model, "prompt": prompt, "n": "1"}
+    # "auto" means omit the parameter entirely, letting the API decide.
+    # Transparent is the owner's production look for the PAINTING (MEASURED
+    # 2026-09-05); step 2 is opaque by his test (2026-10-28).
     if size != "auto":
         data["size"] = size
     if quality != "auto":
         data["quality"] = quality
-    # "auto" means omit the parameter entirely, letting the API decide.
-    # Transparent is the owner's production look (MEASURED 2026-09-05) and
-    # the flatten step downstream depends on knowing it may come back
-    # see-through — which it detects from the file itself, not from here.
     if background != "auto":
         data["background"] = background
+    return data
 
-    if use_style:
-        # The reference FIRST. Every prompt that mentions two pictures calls
-        # the reference "the first image", so the order is part of the
-        # instruction rather than a detail — swap it and the model styles the
-        # reference to look like the photograph.
-        files = [("image[]", _part(style)), ("image[]", _part(source))]
-        emit("sending the style reference and the photo")
-    else:
-        files = [("image[]", _part(source))]
-        emit("sending the photo only — the style reference is switched off")
+
+# Step 2 sends the painting at no more than this on its long side — what the
+# laptop tester sent when the owner settled the prompt (SEND_MAX_EDGE there).
+# A painting is ~1024x1536 already, so this normally changes nothing.
+STEP2_MAX_EDGE = 1536
+
+
+def step2_input(master_bytes: bytes) -> tuple[bytes, tuple[int, int]]:
+    """
+    The painting as step 2 receives it: the see-through original as a PNG,
+    see-through parts KEPT (the owner's tested input), no bigger than
+    STEP2_MAX_EDGE. Returns (png bytes, (width, height)).
+    """
+    import io
+    from PIL import Image
+    with Image.open(io.BytesIO(master_bytes)) as im:
+        im.load()
+        if im.mode in ("RGBA", "LA", "PA") or (im.mode == "P" and "transparency" in im.info):
+            im = im.convert("RGBA")
+        else:
+            im = im.convert("RGB")
+        if max(im.size) > STEP2_MAX_EDGE:
+            im.thumbnail((STEP2_MAX_EDGE, STEP2_MAX_EDGE), Image.LANCZOS)
+        out = io.BytesIO()
+        im.save(out, "PNG")
+        return out.getvalue(), im.size
+
+
+def step2_images(db: Session, project, *, painting_png: bytes,
+                 style: Path) -> list:
+    """The pictures a STEP-2 request carries: the painting, plus the style
+    picture first only if step2_send_style asks (off in his tests)."""
+    from .pipeline import get_setting
+    parts = [("painting.png", painting_png, "image/png")]
+    if bool(get_setting(db, "step2_send_style", project=project)):
+        if not style.is_file():
+            raise PermanentFailure(
+                "Step 2 is set to send the style picture, but none has been "
+                "uploaded.", kind="bad_request")
+        parts.insert(0, _part(style))
+    return parts
+
+
+def generate_step2(db: Session, *, painting_png: bytes, input_size: tuple,
+                   style: Path, project, location: str = "",
+                   log_fn=None) -> Generation:
+    """STEP 2, one at a time at full price (batch switched off)."""
+    def emit(msg, level="info"):
+        if log_fn:
+            log_fn(msg, level=level)
+    api_key = api_key_for(db, project)
+    data = request_fields(db, project, stage=2, location=location,
+                          input_size=input_size)
+    files = [("image[]", p) for p in step2_images(
+        db, project, painting_png=painting_png, style=style)]
     headers = {"Authorization": f"Bearer {api_key}"}
+    return _send_and_read(headers, data, files, emit)
 
+
+# ════════════════════════════════════════════════════════════════════════════
+#  THE BATCH API — half price, answered within 24 hours (v266)
+# ════════════════════════════════════════════════════════════════════════════
+#
+# Shapes read from OpenAI's own pages on 2026-10-28, not guessed:
+#   · a JSONL file, one line per request:
+#       {"custom_id", "method": "POST", "url": "/v1/images/edits", "body"}
+#     where `body` is the JSON form of the edit request, and pictures go in
+#     `images: [{"image_url": "<data URL>"}]` (each at most 20,971,520
+#     characters);
+#   · the file goes up to /v1/files with purpose "batch" (200 MB at most);
+#   · /v1/batches {input_file_id, endpoint, completion_window: "24h"};
+#   · results come back as an output file, one line per success, and an
+#     error file for the rest — matched by custom_id, NOT by order.
+# OpenAI's batch guide names the gpt-image-2.5 models for images and its
+# gpt-image-2 model page lists Batch as supported; the owner chose to start
+# without a test batch (2026-10-28). If OpenAI refuses the model, the send
+# fails loudly with OpenAI's words and nothing is charged.
+
+BATCH_FILE_MAX_BYTES = 180 * 1024 * 1024     # under OpenAI's 200 MB, with room
+DATA_URL_MAX_CHARS = 20_971_520
+API_ROOT = "https://api.openai.com/v1"
+
+
+def data_url(part: tuple) -> str:
+    _name, raw, mime = part
+    return f"data:{mime};base64," + base64.b64encode(raw).decode("ascii")
+
+
+def batch_body(fields: dict, parts: list) -> dict:
+    """The JSON body of one batch line: the request fields plus pictures."""
+    body = {k: v for k, v in fields.items() if k != "n"}
+    body["n"] = 1
+    images = []
+    for part in parts:
+        url = data_url(part)
+        if len(url) > DATA_URL_MAX_CHARS:
+            raise PermanentFailure(
+                f"The picture {part[0]} is too big to send in a batch "
+                f"({len(part[1]) // (1024 * 1024)} MB).", kind="bad_request")
+        images.append({"image_url": url})
+    body["images"] = images
+    return body
+
+
+def _api(method: str, path: str, api_key: str, **kw):
+    try:
+        resp = requests.request(method, f"{API_ROOT}{path}",
+                                headers={"Authorization": f"Bearer {api_key}"},
+                                timeout=kw.pop("timeout", 300), **kw)
+    except requests.RequestException as e:
+        raise TransientFailure(f"network error: {e}")
+    if resp.status_code >= 400:
+        raise _classify(resp.status_code, resp.text)
+    return resp
+
+
+def batch_upload_file(api_key: str, path: Path) -> str:
+    with open(path, "rb") as fh:
+        resp = _api("POST", "/files", api_key, timeout=1800,
+                    data={"purpose": "batch"},
+                    files={"file": (path.name, fh, "application/jsonl")})
+    return resp.json()["id"]
+
+
+def batch_create(api_key: str, input_file_id: str) -> dict:
+    return _api("POST", "/batches", api_key, json={
+        "input_file_id": input_file_id,
+        "endpoint": "/v1/images/edits",
+        "completion_window": "24h",
+    }).json()
+
+
+def batch_get(api_key: str, batch_id: str) -> dict:
+    return _api("GET", f"/batches/{batch_id}", api_key, timeout=60).json()
+
+
+def batch_cancel(api_key: str, batch_id: str) -> dict:
+    return _api("POST", f"/batches/{batch_id}/cancel", api_key, timeout=60).json()
+
+
+def file_download(api_key: str, file_id: str, dest: Path) -> None:
+    """Stream a result file to disk — a few hundred pictures is gigabytes."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with requests.get(f"{API_ROOT}/files/{file_id}/content",
+                          headers={"Authorization": f"Bearer {api_key}"},
+                          stream=True, timeout=600) as resp:
+            if resp.status_code >= 400:
+                raise _classify(resp.status_code, resp.text)
+            with open(dest, "wb") as fh:
+                for chunk in resp.iter_content(1024 * 1024):
+                    fh.write(chunk)
+    except requests.RequestException as e:
+        raise TransientFailure(f"network error: {e}")
+
+
+def classify_line_error(status: int, body) -> Exception:
+    """A failed batch line, judged by the same rules as a live failure."""
+    text = body if isinstance(body, str) else json.dumps(body or {})
+    return _classify(int(status or 0), text)
+
+
+def _send_and_read(headers: dict, data: dict, files: list, emit) -> Generation:
+    """
+    POST one edit request with the retry rules above, and read the picture
+    out of the answer. Shared by step 1 (`generate`) and step 2
+    (`generate_step2`) so the two can never disagree about what is worth a
+    retry and what is not.
+    """
     started = time.time()
     for attempt in range(1, MAX_RETRIES + 1):
         if attempt > 1:
@@ -308,8 +519,16 @@ def generate(db: Session, *, source: Path, style: Path, project=None,
     else:
         raise TransientFailure("no response after retries")
 
-    payload = resp.json()
-    items = payload.get("data") or []
+    return parse_image_payload(resp.json(), started)
+
+
+def parse_image_payload(payload: dict, started: float) -> Generation:
+    """
+    The picture and token counts out of an images/edits answer. ONE reader
+    for the live call and for a Batch API result line, whose `body` is the
+    very same JSON — two readers of one shape would be two chances to drift.
+    """
+    items = (payload or {}).get("data") or []
     if not items:
         raise TransientFailure("response contained no image data")
 

@@ -3406,7 +3406,161 @@ def check_retired_titles_hold_nothing(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+# ════════════════════════════════════════════════════════════════════════════
+#  STEP 2 AND BATCHES (v266)
+# ════════════════════════════════════════════════════════════════════════════
+
+def check_batch_claims_have_an_open_batch(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: a picture held by a batch ("batch:<n>") belongs to a batch that
+    is still open at OpenAI.
+
+    A batch claim carries no claim time on purpose — a batch may honestly
+    take 24 hours, which the stale-claim reaper would read as abandoned — so
+    the reaper never frees these. That makes this check the ONLY thing that
+    would notice a batch that was closed while a picture was still marked as
+    being in it: the picture would sit at 'processing' for ever, in no queue.
+    Every exit of ai_batches puts its pictures back; this holds whatever the
+    next exit does.
+    """
+    from .models import AIBatch
+    open_ids = {f"batch:{i}" for (i,) in
+                db.query(AIBatch.id).filter(AIBatch.collected_at.is_(None)).all()}
+    q = (db.query(SavedPoster, MasterTitle)
+           .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+           .filter(SavedPoster.pipeline_status == "processing",
+                   SavedPoster.claimed_by.like("batch:%"),
+                   SavedPoster.deleted_at.is_(None), scope.titles))
+    stranded = [(sp, mt) for sp, mt in q.all() if sp.claimed_by not in open_ids]
+    rows = [Finding(scope.title_of(mt),
+                    f"picture record {sp.id} is held by {sp.claimed_by}, which "
+                    f"is already closed", "/admin/pipeline",
+                    project=scope.label(mt.project_id))
+            for sp, mt in stranded[:MAX_ROWS]]
+    return _result(
+        "batch_claims_have_an_open_batch",
+        f"{len(stranded)} picture(s) are held by a batch that has ended"
+        if stranded else "Every picture held by a batch is in an open one",
+        "These pictures are marked as being painted in a batch at OpenAI, but "
+        "that batch has already been collected, so nothing would bring them "
+        "back. Restarting the site puts them back in the paint queue (the "
+        "painter's start-up repair does it). Tell whoever maintains this too — "
+        "the batch code should have done it itself.",
+        "error" if stranded else "ok", rows, len(stranded),
+    )
+
+
+def check_batches_are_answered_in_time(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: an open batch is collected within a few hours of OpenAI's own
+    24-hour deadline. Past that, the site has stopped asking about it — the
+    painting thread is down, or every check of it is failing — and its
+    pictures wait with nothing on screen moving.
+    """
+    from .models import AIBatch
+    cutoff = datetime.utcnow() - timedelta(hours=3)
+    q = db.query(AIBatch).filter(AIBatch.collected_at.is_(None),
+                                 AIBatch.expires_at.isnot(None),
+                                 AIBatch.expires_at < cutoff)
+    if scope.project_id:
+        q = q.filter(AIBatch.project_id == scope.project_id)
+    late = q.all()
+    rows = [Finding(f"batch record {b.id} (step {b.stage})",
+                    f"OpenAI's deadline was {b.expires_at:%Y-%m-%d %H:%M} UTC; "
+                    f"last checked {b.last_checked_at:%Y-%m-%d %H:%M} UTC"
+                    if b.last_checked_at else
+                    f"OpenAI's deadline was {b.expires_at:%Y-%m-%d %H:%M} UTC; never checked",
+                    "/admin/pipeline")
+            for b in late[:MAX_ROWS]]
+    return _result(
+        "batches_answered_in_time",
+        f"{len(late)} batch(es) are past their deadline and not collected"
+        if late else "No batch is overdue",
+        "OpenAI promises every batch within 24 hours, and the site collects it "
+        "a few minutes after. These have gone well past that. The AI PAINTING "
+        "panel on the Pipeline page shows the last problem met while checking.",
+        "error" if late else "ok", rows, len(late),
+    )
+
+
+def check_step2_work_can_move(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: a painting waiting for step 2 is in a project where step 2 is
+    switched on. Switched off, nothing will ever send it, it is not on
+    Approve Artwork, and it is not in any upload queue — the quietest place
+    in the system for a picture to be lost.
+    """
+    from .pipeline import step2_active
+    rows, total = [], 0
+    for proj in db.query(Project).filter(Project.is_active == 1).all():
+        if scope.project_id and proj.id != scope.project_id:
+            continue
+        if step2_active(db, proj):
+            continue
+        n = (db.query(func.count(ProcessedImage.id))
+               .join(SavedPoster, ProcessedImage.saved_poster_id == SavedPoster.id)
+               .filter(ProcessedImage.project_id == proj.id,
+                       ProcessedImage.is_current == 1,
+                       ProcessedImage.review_status.in_(("step2", "step2_failed")),
+                       SavedPoster.deleted_at.is_(None)).scalar() or 0)
+        if n:
+            total += n
+            rows.append(Finding(proj.name, f"{n} painting(s) wait for step 2, "
+                                           f"which is switched off here",
+                                "/admin/pipeline/settings#processing"))
+    return _result(
+        "step2_work_can_move",
+        f"{total} painting(s) wait for a step 2 that is switched off"
+        if total else "Every painting waiting for step 2 can get it",
+        "Switch step 2 back on (Settings → Step 2), or ask for these to be "
+        "put back on Approve Artwork as plain paintings.",
+        "error" if total else "ok", rows, total,
+    )
+
+
+def check_queued_uploads_point_at_released_pictures(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: an upload waiting in the queue points at the CURRENT,
+    released picture of its poster.
+
+    Since v266 the uploader refuses any other row — step 2 can take an
+    approved painting back to be flattened, and its queued row must not
+    send the painting. A row the uploader refuses is a row that waits for
+    ever, so this lists them: approving the new picture on Approve Artwork
+    points each one at it (ensure_upload_rows).
+    """
+    q = (db.query(UploadTracking, ProcessedImage, MasterTitle)
+           .join(ProcessedImage, UploadTracking.processed_image_id == ProcessedImage.id)
+           .join(SavedPoster, UploadTracking.saved_poster_id == SavedPoster.id)
+           .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+           .filter(UploadTracking.status.in_(("pending", "failed")),
+                   SavedPoster.deleted_at.is_(None),
+                   or_(ProcessedImage.is_current != 1,
+                       ~func.coalesce(ProcessedImage.review_status, "approved")
+                        .in_(("approved",))),
+                   scope.titles))
+    total = q.count()
+    rows = [Finding(scope.title_of(mt),
+                    f"upload row {t.id} points at a picture that is "
+                    f"{'not the current one' if pi.is_current != 1 else repr(pi.review_status)}",
+                    "/admin/pipeline/review", project=scope.label(mt.project_id))
+            for t, pi, mt in q.limit(MAX_ROWS).all()]
+    return _result(
+        "queued_uploads_point_at_released_pictures",
+        f"{total} queued upload(s) point at a picture that is not released"
+        if total else "Every queued upload points at its released picture",
+        "The uploader will not send these, because the picture they point at "
+        "is not the one you approved — usually because it went to step 2. "
+        "They move again once the new picture is approved on Approve Artwork.",
+        "warn" if total else "ok", rows, total,
+    )
+
+
 CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
+    check_batch_claims_have_an_open_batch,
+    check_batches_are_answered_in_time,
+    check_step2_work_can_move,
+    check_queued_uploads_point_at_released_pictures,
     check_healed_versions_are_sound,
     check_number_settings_hold_numbers,
     check_approved_without_a_print_file,

@@ -2,6 +2,30 @@
 
 ---
 
+## STEP 2, BATCHES AND THE SWAP (v266) — what is NOT proven yet, 2026-10-28
+
+Built and tested against fakes (`tools/test_step2_batch.py`, 43 checks);
+never run against the real OpenAI or the real FineArtAmerica. Each is a
+`LEAD` until the first real run says otherwise:
+
+- **Batch for gpt-image-2.** OpenAI's model page lists Batch as supported;
+  its batch guide names only the 2.5 models for images, and one community
+  report says gpt-image-2 was refused. The owner chose to start without a
+  test batch. If refused, Needs Attention shows "OpenAI refused a batch" with
+  OpenAI's words; nothing is charged, and switching batches off on Settings
+  paints one at a time at full price.
+- **The JSON form of an image edit** (`images: [{image_url: data URL}]`) is
+  read from the API reference, not sent by us before. The live path still
+  sends multipart, as it always has.
+- **The swap job's clicks** come from the owner's three saved pages of the
+  2026 edit form. FineArtAmerica serves older forms at random; the job
+  stops on that listing, says which, and goes on. The title check means it
+  can never swap onto the wrong listing.
+- **Measured:** a step 2 at medium costs 4.8–5.4 cents (four tester runs,
+  real token counts). Batch halves it.
+
+---
+
 ## SETTINGS READ WITHOUT THEIR PROJECT — `LEAD`, found 2026-10-26, not audited
 
 The Greenlight tab saved `greenlight_mode` as a PROJECT override while the
@@ -35,6 +59,13 @@ laptop tester stays, for the day a new GPT image model comes out.
   * It can also paint a TWO-STEP poster in one click (landscape with no
     lettering, then the title on top), cutting his one JSON prompt in two
     with `split_two_step()`. Tried 2026-10-23 and judged "still bad".
+  * FIX AN AREA window (2026-10-27): paint red marks on one poster, type
+    what to fix, get back the original, the AI's whole repainted picture,
+    and the original with only the marked spots pasted in from the AI. Built
+    because his ChatGPT Markup test fixed bad lettering well but repainted
+    the whole poster (brighter, and a good T got worse). If it scores well,
+    the same thing becomes an AI FIX button on Approve Artwork, saved as a
+    lettered version like a Photopea edit.
   * `QUESTION`, not a finding: his prompt calls the style picture
     'Reference Image.jpg', but the file the site sends is named
     `travel.png` (2026-10-23). Whether the model reads upload file names at

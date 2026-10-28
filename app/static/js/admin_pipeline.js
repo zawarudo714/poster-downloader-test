@@ -122,7 +122,38 @@
        'The key that keeps the artwork on Approve Artwork. The SAME key marks a picture as looked-at on Worker Images, so one key means "this one is fine" on both screens. 9 by default.'],
       ['review_key_paste', 'text', 'Key: PASTE PICTURE (Worker Images zoom)',
        'In the Worker Images zoom, this key pastes the picture you copied into USE MY OWN PICTURE, the same as Ctrl+V. 3 by default, so your hand can stay on the number pad. On a plain http site the browser only lets a key read the clipboard after a one-time Chrome setting; until then the box opens and asks for Ctrl+V.'],
+      ['review_key_step2', 'text', 'Key: REDO STEP 2',
+       'On Approve Artwork, flattens the picture again WITHOUT a new painting — from the painting on screen (pick v1, v2… in the version bar) or from the painting behind a step 2 picture. Only shown where step 2 is switched on. 6 by default.'],
       ['review_batch_size',   'number', 'Review batch size',       'How many painted images REVIEW EVERYTHING WAITING loads at once, so you inspect and release a small set at a time instead of a hundred. For example 20. Set to 0 to load everything at once. Only affects the "everything waiting" button; reviewing a single date still loads that whole day.'],
+    ],
+    // ── STEP 2 AND BATCHES (v266) ─────────────────────────────────────
+    step2: [
+      ['step2_enabled', 'bool', 'Step 2 is on',
+       'On, every new painting is flattened with the prompt below before you see it, and Approve Artwork shows the step 2 result. Off, you review the paintings as before.'],
+      ['step1_enabled', 'bool', 'Step 1 (painting new photos) is on',
+       'Off, nothing new is painted EXCEPT pictures you RETRY or REPAINT by hand, while step 2 carries on with what is already painted. The same switch is on the Pipeline page.'],
+      ['step2_prompt', 'textarea', 'Step 2 prompt',
+       'Sent with every painting in step 2. {LOCATION} is replaced by the title. Changing it does not touch pictures already made.'],
+      ['step2_model', 'text', 'Step 2 model',
+       'gpt-image-2-2026-04-21 is the pinned version you tested. A pinned name cannot change under you; plain gpt-image-2 can.'],
+      ['step2_quality', 'select', 'Step 2 quality',
+       'medium is what you tested. Quality only changes the size of the picture coming back, so it is the part of the price that moves.', ['auto', 'low', 'medium', 'high']],
+      ['step2_background', 'select', 'Step 2 background',
+       'opaque is what you tested: the model paints the sky itself, so there is no colour to choose afterwards.', ['opaque', 'transparent', 'auto']],
+      ['step2_size', 'select', 'Step 2 size',
+       '"same" picks the size closest to the painting\'s own shape, which is what the laptop tester did.', ['same', 'auto', '1024x1536', '1024x1024', '1536x1024']],
+      ['step2_send_style', 'bool', 'Send the style picture to step 2 too',
+       'Off in your tests: step 2 is sent the painting alone.'],
+      ['step2_max_attempts', 'number', 'Step 2 tries before giving up',
+       'How many times step 2 is tried for one painting before it is parked on Needs Attention. A refusal by OpenAI parks it at once.'],
+      ['openai_batch_enabled', 'bool', 'Send to OpenAI as batches',
+       'On, both steps go to OpenAI as batches: half the price, answered within 24 hours. Off, one at a time at full price, answered in seconds.'],
+      ['batch_gather_min', 'number', 'Minutes between sends',
+       'How often a new batch may be sent. Everything waiting goes out together when it does, so a big catch-up is one send.'],
+      ['batch_poll_min', 'number', 'Minutes between progress checks',
+       'How often the site asks OpenAI how a batch is doing, and collects it when it is done.'],
+      ['batch_max_items', 'number', 'Most pictures per send',
+       'A brake on a mistake: one send never puts more than this many pictures in flight. Split over as many files as OpenAI needs.'],
     ],
     // The DEFAULT placement. Any one poster is nudged on the Approve
     // Artwork screen; these are what a brand new picture starts from.
@@ -347,6 +378,114 @@
     ['failed_upload',       'Failed upload',       'error'],
   ];
 
+  // ── AI PAINTING: step 1, step 2 and batches (v266) ─────────────────────
+  // Refreshed with the overview, but at most every 15 seconds: these are
+  // counts over the whole catalogue, and a batch moves in minutes, not in
+  // the 3 seconds the funnel ticks at.
+  let aiAt = 0;
+  function maybeLoadAI(force) {
+    if (!q('[data-ai-state]')) return;
+    if (!force && Date.now() - aiAt < 15000) return;
+    aiAt = Date.now();
+    loadAI();
+  }
+
+  const BATCH_WORD = {
+    sending: 'sending to OpenAI', validating: 'OpenAI is checking the file',
+    in_progress: 'OpenAI is working on it', finalizing: 'OpenAI is finishing',
+    completed: 'finished', failed: 'OpenAI rejected the file',
+    expired: 'ran out of time (24 h)', cancelling: 'stopping',
+    cancelled: 'stopped', send_failed: 'never reached OpenAI',
+  };
+
+  async function loadAI() {
+    const el = q('[data-ai-state]');
+    if (!el) return;
+    let d;
+    try {
+      d = await getJSON(withProject(API + '/ai'));
+    } catch (e) {
+      el.innerHTML = '<div class="muted">Could not load: ' + esc(e.message) + '</div>';
+      return;
+    }
+    const step1 = d.step1_enabled
+      ? `<span class="status-pill status-reviewed">ON</span> new photos are painted as they are released.
+         <button type="button" class="btn btn-ghost btn-tiny" data-action="ai-step1-off">SWITCH STEP 1 OFF</button>`
+      : `<span class="status-pill status-error">OFF</span> only pictures you RETRY or REPAINT are painted —
+         ${d.named_by_hand} of those waiting. ${d.waiting_to_paint} other photo(s) wait for you to switch it on.
+         <button type="button" class="btn btn-accent btn-tiny" data-action="ai-step1-on">SWITCH STEP 1 ON</button>`;
+    const step2 = d.step2_active
+      ? `${d.step2_waiting} waiting to be sent · ${d.step2_in_batch} at OpenAI now`
+        + (d.step2_failed ? ` · <strong>${d.step2_failed} gave up</strong> — see NEEDS ATTENTION` : '')
+      : '<span class="muted">switched off for this project</span>';
+    const catchup = (d.step2_active && d.catchup)
+      ? `<div class="filter-row" style="margin-top:8px">
+           <button type="button" class="btn btn-accent btn-tiny" data-action="ai-catchup"
+                   data-count="${d.catchup}">SEND ${d.catchup} PAINTED PICTURE${d.catchup === 1 ? '' : 'S'} TO STEP 2</button>
+           <span class="muted">paintings made before step 2 — waiting for review, left for Photoshop,
+           approved, or already live. Each keeps its painting; nothing is repainted.</span>
+         </div>` : '';
+    const swap = d.swap_waiting
+      ? `<div class="filter-row" style="margin-top:8px">
+           <button type="button" class="btn btn-accent btn-tiny" data-action="ai-swap">SWAP ${d.swap_waiting} LIVE LISTING${d.swap_waiting === 1 ? '' : 'S'} NOW</button>
+           <span class="muted">these are live on the marketplace and have a new approved picture.
+           The worker machine opens each one, presses Change Image, uploads the new file and Submit.
+           Title, address and keywords stay. The log is under RECENT JOBS; STOP there ends it.</span>
+         </div>` : '';
+    const rows = (d.batches || []).map((b) => {
+      const word = BATCH_WORD[b.status] || b.status;
+      const progress = b.open
+        ? `${b.openai_done} of ${b.openai_total || b.items} done${b.openai_failed ? ` · ${b.openai_failed} failed` : ''}`
+        : `${b.filed} filed${b.failed ? ` · ${b.failed} failed` : ''}${b.back_in_queue ? ` · ${b.back_in_queue} back in the queue` : ''}${b.dropped ? ` · ${b.dropped} not filed (changed meanwhile)` : ''}`;
+      const cancel = (b.open && b.status !== 'sending' && b.status !== 'cancelling')
+        ? `<button type="button" class="btn btn-error btn-tiny" data-action="ai-cancel" data-batch="${b.id}">STOP</button>` : '';
+      return `<tr>
+        <td class="mono">#${b.id}</td>
+        <td>${b.stage === 2 ? 'step 2 (flatten)' : 'step 1 (painting)'}</td>
+        <td>${esc(word)}</td>
+        <td class="mono">${esc(progress)}</td>
+        <td class="mono">${esc(fmtWhen(b.created_at))}</td>
+        <td class="mono">${b.open && b.expires_at ? 'by ' + esc(fmtWhen(b.expires_at)) : ''}</td>
+        <td>${cancel}</td>
+      </tr>
+      ${b.error ? `<tr><td></td><td colspan="6" class="mono pipe-error-cell">${esc(b.error)}</td></tr>` : ''}`;
+    }).join('');
+    el.innerHTML = `
+      <p><strong>STEP 1 — painting:</strong> ${step1}</p>
+      <p class="muted">${d.painting_in_batch} being painted at OpenAI now · ${d.will_paint} will go in the next send</p>
+      <p style="margin-top:8px"><strong>STEP 2 — flatten:</strong> ${step2}</p>
+      ${catchup}
+      <p style="margin-top:8px"><strong>Sending:</strong> ${d.batch_enabled
+        ? 'as BATCHES — half price, answered within 24 hours. OpenAI often answers sooner, and the counts below sometimes sit at 0 and then jump; that is normal.'
+        : 'one at a time, at full price (batches are switched off on the Settings page).'}</p>
+      ${swap}
+      ${d.last_error ? `<p class="mono pipe-error-cell">Last problem (${esc(fmtWhen(d.last_error.at))}): ${esc(d.last_error.text)}</p>` : ''}
+      ${rows ? `<table class="data-table" style="margin-top:8px">
+        <thead><tr><th>BATCH</th><th>STEP</th><th>STATE</th><th>PROGRESS</th><th>SENT</th><th>DUE</th><th></th></tr></thead>
+        <tbody>${rows}</tbody></table>`
+        : '<p class="muted" style="margin-top:8px">No batches sent yet.</p>'}`;
+  }
+
+  function fmtWhen(iso) {
+    if (!iso) return '';
+    const dt = new Date(iso);
+    return isNaN(dt) ? iso : dt.toLocaleString([], { month: 'short', day: 'numeric',
+                                                      hour: '2-digit', minute: '2-digit' });
+  }
+
+  async function setStep1(on) {
+    try {
+      await postJSON(API + '/settings', {
+        settings: { step1_enabled: on },
+        project_id: projectId,
+        scope: 'project',
+      });
+      toast(on ? 'Step 1 is ON — new photos will be painted.'
+               : 'Step 1 is OFF — only pictures you retry or repaint are painted.');
+    } catch (e) { toast(e.message, 'error'); }
+    maybeLoadAI(true);
+  }
+
   async function loadOverview() {
     try {
       overview = await getJSON(withProject(API + '/overview'));
@@ -367,6 +506,7 @@
     renderHistoryChart();
     renderBadges();
     renderRunMode();
+    maybeLoadAI();
 
     const modeSel = q('[data-greenlight-mode]');
     if (modeSel) modeSel.value = overview.greenlight_mode;
@@ -1976,6 +2116,10 @@
     rejected:      ['retry_rejected', 'unusable'],
     process_failed:['retry_process', 'unusable'],
     config_blocked:['retry_process_all'],
+    // v266: the flatten gave up; RETRY STEP 2 sends the ticked paintings
+    // (or, with nothing ticked, asks to send every one) back to step 2.
+    step2_failed:  ['retry_step2'],
+    batch_refused: [],
     title_held:    ['retitle'],
     upload_failed: ['retry_upload', 'mark_removed', 'skip_upload'],
     stalled:       ['release'],
@@ -1992,6 +2136,7 @@
     retry_process:      'RETRY',
     retry_rejected:     'SEND BACK TO PAINTING',
     retry_process_all:  'RETRY ALL AFFECTED',
+    retry_step2:        'RETRY STEP 2',
     retry_upload:       'RETRY',
     unusable:           'MARK UNUSABLE',
     return_to_pipeline: 'RETURN TO PIPELINE',
@@ -2075,7 +2220,7 @@
            + `${i.restarts ? ` · ${i.restarts} restart(s)` : ''}</p>`;
     }
 
-    if (f.key === 'config_blocked') {
+    if (f.key === 'config_blocked' || f.key === 'batch_refused') {
       return `<table class="data-table"><tbody>${f.items.map((i) => `
         <tr><td class="mono">${i.count}</td>
             <td class="mono pipe-error-cell">${esc(i.error)}</td></tr>`).join('')}
@@ -2294,8 +2439,16 @@
         if (!confirm('Retry every image affected by this? Fix the setting first.')) return;
         const d = await postJSON(API + '/attention/retry_group', { key: groupKey });
         toast(`Requeued ${d.requeued}.`);
+      } else if (action === 'retry_step2' && !posters.length) {
+        // Nothing ticked: the usual case after a fix is "all of them".
+        if (!confirm('Send EVERY painting on this list back to step 2?')) return;
+        const d = await postJSON(API + '/ai/step2/retry', { all: true });
+        toast(`Sent ${d.requeued} back to step 2.`);
       } else if (!posters.length && !trackings.length) {
         return toast('Tick the rows you want this to apply to.', 'error');
+      } else if (action === 'retry_step2') {
+        const d = await postJSON(API + '/ai/step2/retry', { poster_ids: posters });
+        toast(`Sent ${d.requeued} back to step 2.`);
       } else if (action === 'retry_process') {
         const d = await postJSON(API + '/failures/retry',
                                  { kind: 'processing', poster_ids: posters });
@@ -2384,6 +2537,44 @@
 
     switch (action) {
       case 'refresh-overview': loadOverview(); break;
+      case 'ai-refresh':  maybeLoadAI(true); break;
+      case 'ai-step1-on': await setStep1(true); break;
+      case 'ai-step1-off': await setStep1(false); break;
+      case 'ai-catchup': {
+        const n = btn.dataset.count;
+        if (!confirm(`Send ${n} painted picture(s) to step 2?\n\n`
+                   + `Each one is flattened with your step 2 prompt and comes back to `
+                   + `Approve Artwork. Already-live ones are swapped on the marketplace `
+                   + `after you approve them. Nothing is repainted and no painting is deleted.`)) break;
+        try {
+          const d = await postJSON(API + '/ai/catchup', {});
+          toast(`Sent ${d.sent} to step 2 — they go out with the next send.`);
+        } catch (e) { toast(e.message, 'error'); }
+        maybeLoadAI(true);
+        break;
+      }
+      case 'ai-swap': {
+        if (!confirm('Swap the picture on every live listing that has a new approved one?\n\n'
+                   + 'The worker machine does them one after another — roughly 30 to 60 '
+                   + 'seconds each. It changes only the picture.')) break;
+        try {
+          const d = await postJSON(API + '/ai/swap', {});
+          toast(d.already ? `A swap job (#${d.job_id}) is already queued or running.`
+                          : `Queued job #${d.job_id} for ${d.waiting} listing(s).`);
+        } catch (e) { toast(e.message, 'error'); }
+        loadOverview();
+        break;
+      }
+      case 'ai-cancel': {
+        if (!confirm('Stop this batch at OpenAI?\n\nWhat has already finished is still '
+                   + 'paid for and still filed. Everything else goes back in the queue.')) break;
+        try {
+          const d = await postJSON(API + `/ai/batch/${btn.dataset.batch}/cancel`, {});
+          toast(d.note ? `Batch: ${d.note}.` : 'Stopping — the rest come back to the queue in a few minutes.');
+        } catch (e) { toast(e.message, 'error'); }
+        maybeLoadAI(true);
+        break;
+      }
 
       case 'release-stale':
         if (!confirm('Release all stale claims back to the queue?\n\n'

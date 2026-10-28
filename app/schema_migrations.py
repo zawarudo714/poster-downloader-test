@@ -201,6 +201,14 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     # link (image_url). Nullable: every existing message is text-only.
     ("chat_messages", "image_path", "VARCHAR(512)"),
     ("chat_messages", "image_url",  "VARCHAR(1024)"),
+    # ── Step 2, the flatten, and batch painting (v266) ──────────────────
+    # All nullable or defaulted: every existing row is a painting (stage
+    # NULL) that has never been through step 2, which is the truth.
+    ("processed_images", "stage",          "INTEGER"),
+    ("processed_images", "step2_from",     "INTEGER"),
+    ("processed_images", "step2_attempts", "INTEGER NOT NULL DEFAULT 0"),
+    ("processed_images", "step2_error",    "TEXT"),
+    ("saved_posters",    "paint_requested_at", "DATETIME"),
 ]
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -251,6 +259,8 @@ NEW_INDEXES: list[tuple[str, str, str]] = [
     # felt. This is a tidy-up that was hiding behind a wrong diagnosis, and
     # it matters more as the table grows — celebrity portraits are coming.
     ("ix_master_project_status",         "master_titles", "project_id, status"),
+    # Step 2 asks "which current paintings wait for step 2" on every pass.
+    ("ix_processed_review_current",      "processed_images", "review_status, is_current"),
 ]
 
 

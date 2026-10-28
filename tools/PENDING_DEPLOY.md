@@ -1,22 +1,26 @@
 # Not yet deployed
 
-## v265 — painting follows your K mark (2026-10-26)
+## v266 — step 2 (the flatten), the Step 1 switch, OpenAI batches, the 417 swap
 
-Server only. **The worker machine does NOT need copying** — nothing in
-`worker_service/` changed.
+Written 2026-10-28. **Deploy with the pipeline still PAUSED.** Then follow
+TO_TEST.md item 113.
 
-- A picture goes to painting once it is PAID, you have pressed K on it at
-  least 5 minutes ago, it has no open flag and its title is finished. A
-  payment no longer starts painting by itself. Your own pastes go at once.
-- Un-pressing K or flagging takes a picture back out of the painting queue.
-  A painted but not yet approved picture can still be swapped by the
-  worker; its painting leaves Approve Artwork.
-- Money: a picture whose 7 KES was taken back no longer blocks paying a
-  later redo of the same title.
-- PAY AHEAD is ticked by default. New Greenlight setting: minutes after K.
-- Fixed on the way: the Greenlight tab's MANUAL never applied to payments.
-- Deleted `scripts/convert_run_to_pay_ahead.py` (one-off, already applied).
-- To test: TO_TEST item 112. Behaviour test: tools/test_painting_follows_k.py.
+- Step 2: every new painting is flattened with the owner's step 2 prompt
+  (gpt-image-2-2026-04-21, medium, opaque) and Approve Artwork shows that.
+  REPAINT (7) and REDO STEP 2 (6) on Approve Artwork; no colour controls on
+  step-2 pictures.
+- Step 1 switch: travel starts with step 1 OFF; only pictures named by hand
+  (RETRY, REPAINT) are painted until it is switched on.
+- Batches: both steps go to OpenAI's Batch API (half price, within 24 h).
+  AI PAINTING panel on Pipeline shows progress and STOP.
+- One-click catch-up: SEND N PAINTED PICTURES TO STEP 2.
+- The uploader now only sends a row whose picture is current and approved.
+- The 417: SWAP N LIVE LISTINGS NOW queues a `listing_swap` job on the
+  worker machine.
+- Four new Diagnostics checks; new tables ai_batches / ai_batch_items and
+  five new columns (added automatically at startup).
 
-Whoever changes code writes here what is waiting and why; the deploy tool
-empties this file once the server is confirmed to be running it.
+**The worker machine needs its folder copied** (AGENT_VERSION 1.31.0 →
+1.32.0): `worker_service/agent.py` and the new `listing_swap.py`. No new
+pip packages. Only needed before pressing SWAP; everything else works
+without it.

@@ -56,6 +56,10 @@
   let chosen    = new Map(); // poster_id -> processed_id being looked at
   let mode     = 'pending';
   let batchSize = 0;        // 0 = review all at once; N = load N at a time
+  // Whether this project has STEP 2 (v266). On: RERUN repaints both steps
+  // and is labelled REPAINT, and REDO STEP 2 flattens again without a new
+  // painting — from the painting on screen, or the one behind a step-2 picture.
+  let step2On = false;
 
   const esc = (v) => String(v == null ? '' : v)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -144,7 +148,9 @@
       reviewKeys.rerun = d.review_keys.rerun || '7';
       reviewKeys.photoshop = d.review_keys.photoshop || '8';
       reviewKeys.keep = d.review_keys.keep || '9';
+      reviewKeys.step2 = d.review_keys.step2 || '6';
     }
+    step2On = !!d.step2;
     refreshKeyLabels();
     colors.clear();
     // Decisions come back from the last sitting rather than being wiped.
@@ -771,12 +777,12 @@
   // default at the owner's ask (2026-09-27): he steps with the number pad's
   // 4 and 6, so the row above sits under the same hand. PDKeys.matches (in
   // keys.js) also accepts the number-pad key with Num Lock off.
-  const reviewKeys = { rerun: '7', photoshop: '8', keep: '9' };
+  const reviewKeys = { rerun: '7', photoshop: '8', keep: '9', step2: '6' };
   const keyLabel = (name) => String(reviewKeys[name] || '').toUpperCase();
   // The words a mark is SHOWN with. 'approve' is stored for KEEP; the word
   // on screen is the one on the button.
   const MARK_WORD = { approve: 'keep', rerun: 'rerun', unusable: 'unusable',
-                      photoshop: 'left for Photoshop' };
+                      photoshop: 'left for Photoshop', step2: 'redo step 2' };
   const markWord = (action) => MARK_WORD[action] || action;
 
   // THE MARK A PICTURE WEARS ON SCREEN — one answer for the card and the
@@ -915,6 +921,12 @@
   // ── The version picker ─────────────────────────────────────────────────
   // Only drawn when there is actually a choice to make. One generation is
   // the normal case and a row of buttons reading "v1" would be furniture.
+  // "v2" for a painting, "v2 step 2" for the flatten made from it (v266).
+  // The server names it; older payloads fall back to the plain number.
+  function versionLabel(v) {
+    return v.label || `v${v.attempt || 1}${v.variant || ''}`;
+  }
+
   function versionBarHtml(img) {
     const list = versionsOf(img);
     if (list.length < 2) return '';
@@ -928,14 +940,14 @@
                   data-pick-version="${v.processed_id}"
                   data-poster="${img.poster_id}"
                   title="${esc(v.filename)}${v.variant ? ' · edited — no generation spent' : ''}${v.is_current ? ' · newest' : ''}">
-            v${v.attempt}${esc(v.variant || '')}${i < 9 ? ` <span class="mono">(${i + 1})</span>` : ''}
+            ${esc(versionLabel(v))}${i < 9 ? ` <span class="mono">(${i + 1})</span>` : ''}
           </button>`).join('')}
         <span class="muted">press 1-9, or V to step through</span>
         ${showing.variant ? `
           <button class="btn btn-ghost btn-tiny" data-action="variant-delete"
                   data-pid="${showing.processed_id}"
                   title="Delete this edited version and its files — paid generations are never deletable">
-            🗑 DELETE v${showing.attempt}${esc(showing.variant)}</button>` : ''}
+            🗑 DELETE ${esc(versionLabel(showing))}</button>` : ''}
       </div>`;
   }
 
@@ -1004,14 +1016,17 @@
           <figcaption>
             <span class="mono">${esc(v.filename)}</span>
             <span class="muted mono">${v.width || '?'}×${v.height || '?'}${
-              versionsOf(img).length > 1 ? ' · generation ' + (v.attempt || 1) : ''}</span>
+              versionsOf(img).length > 1 || v.stage === 2 ? ' · ' + esc(versionLabel(v)) : ''}</span>
           </figcaption>
           ${versionBarHtml(img)}
           ${colorBarHtml(v, 'card')}
           ${sigBarHtml(v, 'card')}
           ${editBarHtml()}
           <div class="review-img-actions">
-            <button class="btn btn-skip btn-tiny"    data-img-action="rerun"     data-poster="${img.poster_id}">RERUN <span class="mono">(${esc(keyLabel('rerun'))})</span></button>
+            <button class="btn btn-skip btn-tiny"    data-img-action="rerun"     data-poster="${img.poster_id}"
+                    title="${step2On ? 'Paint it again from the worker’s photo — both steps, so a new painting is paid for' : 'Paint it again'}">${step2On ? 'REPAINT' : 'RERUN'} <span class="mono">(${esc(keyLabel('rerun'))})</span></button>
+            ${step2On ? `<button class="btn btn-skip btn-tiny" data-img-action="step2" data-poster="${img.poster_id}"
+                    title="Flatten again WITHOUT a new painting — from the painting on screen (pick v1, v2… in the version bar), or from the painting behind this step-2 picture">REDO STEP 2 <span class="mono">(${esc(keyLabel('step2'))})</span></button>` : ''}
             <button class="btn btn-info btn-tiny"    data-img-action="photoshop" data-poster="${img.poster_id}"
                     title="Leave this one for editing: when you save it moves to its own Photoshop queue (JUST THE PHOTOSHOP ONES) and is not released">LEAVE FOR PHOTOSHOP <span class="mono">(${esc(keyLabel('photoshop'))})</span></button>
             <button class="btn btn-success btn-tiny" data-img-action="approve"   data-poster="${img.poster_id}">KEEP <span class="mono">(${esc(keyLabel('keep'))})</span></button>
@@ -1192,21 +1207,24 @@
     let out = 0;
     titles.forEach((t) => t.images.forEach((img) => {
       const d = decisions.get(img.poster_id);
-      if (d && (d.action === 'rerun' || d.action === 'unusable')) return;
+      if (d && (d.action === 'rerun' || d.action === 'unusable'
+                || d.action === 'step2')) return;
       if (imageFate(t, img) === 'send') out += 1;
     }));
     return out;
   }
 
   function updateTally() {
-    const marked = { rerun: 0, unusable: 0, approve: 0, photoshop: 0 };
+    const marked = { rerun: 0, unusable: 0, approve: 0, photoshop: 0, step2: 0 };
     decisions.forEach((d) => { marked[d.action] = (marked[d.action] || 0) + 1; });
     // What SAVE would do, and how many pictures still have no mark — the
     // second number is the one that stops SAVE & RELEASE (v244).
     const approving = releasedCount();
     const bare = unmarkedCount();
     $('[data-review-tally]').textContent =
-      `${approving} will be released · ${marked.rerun} rerun · ${marked.unusable} retired`
+      `${approving} will be released · ${marked.rerun} ${step2On ? 'repaint' : 'rerun'}`
+      + (marked.step2 ? ` · ${marked.step2} redo step 2` : '')
+      + ` · ${marked.unusable} retired`
       + (leftCount()
           ? (mode === 'held'
               ? ` · ${leftCount()} still left for Photoshop`
@@ -1520,7 +1538,7 @@
     pea.slideTold = false;
     pea.pid = v.processed_id;
     $('[data-pea-title]').textContent =
-      `editing v${v.attempt}${v.variant || ''} — SAVE files it as a new lettered version`;
+      `editing ${versionLabel(v)} — SAVE files it as a new lettered version`;
     $('[data-pea]').hidden = false;
     setPeaBusy(true, 'Loading the picture into the editor…');
 
@@ -1532,8 +1550,11 @@
     // picture, never the web preview: the transparent master when there is
     // one, else the full opaque file — editing the preview would quietly
     // downgrade the print.
-    const url = v.master_url ? `${v.master_url}?full=1`
-                             : `/admin/pipeline/review/full/${v.processed_id}`;
+    // edit_url (v266) names the full-size picture for every kind of
+    // version — a step-2 picture has no print file until it is approved, so
+    // it edits its master. The old rule stays as the fallback.
+    const url = v.edit_url || (v.master_url ? `${v.master_url}?full=1`
+                             : `/admin/pipeline/review/full/${v.processed_id}`);
     let bytes = null, booted = false;
     const handToEditor = () => {
       if (!bytes || !booted || !pea.open) return;
@@ -1885,6 +1906,7 @@
     if (K(e, reviewKeys.rerun))     { decideThisTitle('rerun');     e.preventDefault(); return; }
     if (K(e, reviewKeys.photoshop)) { decideThisTitle('photoshop'); e.preventDefault(); return; }
     if (K(e, reviewKeys.keep))      { decideThisTitle('approve');   e.preventDefault(); return; }
+    if (step2On && K(e, reviewKeys.step2)) { decideThisTitle('step2'); e.preventDefault(); return; }
 
     if (e.key >= '1' && e.key <= '9') {
       pickVersionByNumber(Number(e.key));
@@ -1995,7 +2017,7 @@
     const CHUNK = 5;
     const all = payload.decisions;
     const tally = { approved: 0, held: 0, rerun: 0, unusable: 0, withdrawn: 0,
-                    files_removed: 0 };
+                    files_removed: 0, step2: 0 };
     // From here until the save ends, leaving the page costs unsent work —
     // so the browser's own "leave site?" prompt is armed (commitBusy), and
     // a running tally is written down so a cut-short save can explain
@@ -2031,12 +2053,14 @@
         tally.withdrawn += d.withdrawn || 0;
         tally.rerun += d.rerun || 0;
         tally.unusable += d.unusable || 0;
+        tally.step2 += d.step2 || 0;
         tally.files_removed += d.files_removed || 0;
       }
       const d = tally;
       const stillHeld = mode === 'held' ? leftCount() : 0;
       status.textContent =
-        `saved — ${d.approved} released, ${d.rerun} queued to regenerate, ${d.unusable} retired`
+        `saved — ${d.approved} released, ${d.rerun} queued to ${step2On ? 'repaint' : 'regenerate'}, ${d.unusable} retired`
+        + (d.step2 ? ` · ${d.step2} sent back to step 2` : '')
         + (d.held ? ` · ${d.held} moved to the Photoshop queue` : '')
         // A picture taken off its title while this screen was open (USE MY
         // OWN PICTURE or RETIRE elsewhere): its painting is never decided.

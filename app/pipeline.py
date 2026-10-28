@@ -278,6 +278,19 @@ DEFAULT_FAA_SELECTORS = {
                              " || css:a.buttonSubmit"),
     # If the URL still matches this after submitting, the submit silently failed.
     "still_on_form_marker": "updateartwork",
+    # ── SWAPPING THE PICTURE ON A LIVE LISTING (v266) ────────────────────
+    # MEASURED 2026-10-28 from the owner's saved copies of the listing page
+    # and of updateartwork2026.html before and after pressing Change Image.
+    # Each has a fallback that finds the control by its WORDS, because the
+    # fields keep their names across FAA's redesigns while the boxes around
+    # the buttons churn (see the three-forms note in CLAUDE.md).
+    "swap_edit_link":       "css:a[href*='updateartwork'][href*='artworkid=']",
+    "swap_change_image":    ("xpath://a[contains(@class, 'imageDetailsButton')][contains(normalize-space(.), 'Change Image')]"
+                             " || xpath://a[contains(normalize-space(.), 'Change Image')]"),
+    "swap_file_input":      ("css:input.uploadImageInput[type='file']"
+                             " || css:input[type='file'][name='uploadimage']"),
+    "swap_upload_button":   ("xpath://div[@id='uploadImageDiv']//a[contains(normalize-space(.), 'Upload Image')]"
+                             " || xpath://a[contains(normalize-space(.), 'Upload Image')]"),
 }
 
 
@@ -823,6 +836,60 @@ DEFAULTS: dict[str, Any] = {
     # the number pad, and Ctrl+V meant reaching across the keyboard). A key
     # can only READ the clipboard on a secure page; see admin_pick.js.
     "review_key_paste":     "3",
+    # REDO STEP 2 on Approve Artwork: flatten the painting on screen again
+    # (or another painting version you picked) without repainting. 6, beside
+    # the 7-8-9 row the owner's hand already sits on (v266).
+    "review_key_step2":     "6",
+
+    # ── STEP 1 / STEP 2 AND BATCH (v266, owner 2026-10-28) ───────────────
+    #
+    # STEP 1 is the painting made from the worker's photo — everything the
+    # openai_* settings above describe. Switched OFF, nothing new is painted
+    # EXCEPT pictures the owner named by hand (RETRY, REPAINT — see
+    # SavedPoster.paint_requested_at), while step 2 keeps running on what is
+    # already painted. That is the "only the 689 for now" lever: step 2 runs
+    # on the backlog of paintings while 1,142 photos wait, and he opens the
+    # tap when he has seen the flow work. Same shape as the daily limit of 0,
+    # which stops uploads without stopping painting.
+    "step1_enabled": True,
+    # STEP 2 is the flatten: the owner's second prompt run over the painting,
+    # making flat vector-style art with the text and skyline cleaned up. It
+    # replaces reviewing the painting — a project with step 2 on sends every
+    # new painting straight on, and Approve Artwork shows the step-2 result.
+    # OFF globally: a project only gets it by saying so (travel does, in
+    # PROJECT_DEFS), so the next niche does not inherit a second paid call.
+    "step2_enabled": False,
+    # The owner's step-2 prompt. {LOCATION} is replaced by the title, like
+    # the painting prompt. Empty with step 2 on is REFUSED loudly rather than
+    # sent — an empty prompt would still be charged for.
+    "step2_prompt": "",
+    # His tested values (2026-10-28, measured in the laptop tester): this
+    # snapshot, medium quality, opaque, the see-through painting as input.
+    # The snapshot is pinned rather than the floating "gpt-image-2" name, so
+    # the look cannot drift with no deploy on our side.
+    "step2_model": "gpt-image-2-2026-04-21",
+    "step2_quality": "medium",
+    "step2_background": "opaque",
+    # 'same' picks the OpenAI size closest to the painting's own shape —
+    # what the tester's "same shape as the picture" did.
+    "step2_size": "same",
+    # Off in his tests: step 2 is sent the painting alone.
+    "step2_send_style": False,
+    # Tries before a painting's step 2 is parked on Needs Attention.
+    "step2_max_attempts": 3,
+
+    # BATCH: send paintings and flattens to OpenAI's Batch API — half the
+    # price, answered within 24 hours instead of seconds. Off means one at a
+    # time, at full price, as before. Both steps follow this one switch.
+    "openai_batch_enabled": False,
+    # How often a new batch may be sent, in minutes. Everything waiting goes
+    # out together when it does, so a big catch-up is one send, not many.
+    "batch_gather_min": 10,
+    # How often an open batch is asked how it is doing, in minutes.
+    "batch_poll_min": 3,
+    # The most pictures one send puts in flight (across however many files
+    # OpenAI's 200 MB file limit needs). A brake on a mistake, not a target.
+    "batch_max_items": 800,
 
     # Node poll interval hint (seconds). The node honours this.
     "poll_interval_s":    30,
@@ -1413,6 +1480,39 @@ PROJECT_DEFS: list[dict] = [
             # Still the owner's to state and not guessable: openai_prompt,
             # the wording that turns the photo into artwork. His real prompt
             # lives in the dashboard; the global default is only a skeleton.
+            #
+            # ── STEP 2 AND BATCH, stated by the owner 2026-10-28 ─────────
+            # His final flatten prompt, word for word as he tested it in the
+            # laptop tester (gpt-image-2-2026-04-21, medium, opaque — those
+            # are the global defaults above, so they need no override here).
+            "step2_enabled": True,
+            "step2_prompt": (
+                "Maintain somewhat the same composition and image elements. "
+                "Transform the existing scene into a minimalist mid-century "
+                "travel poster using flat vector graphics, stark silhouettes, "
+                "and a limited retro color palette with zero gradients:\n\n"
+                "Text: Render all letters with sharp, crisp vector edges while "
+                "strictly preserving any original architectural flourishes or "
+                "custom illustrative shapes embedded in the typography. Remove "
+                "only the grunge textures and gradients to match the stark, "
+                "flat aesthetic. Can revamp or change the text colors "
+                "intelligently to strong vivid solid colors to best compliment "
+                "the main image subject\n\n"
+                "Water: Water needs to be detailed. \n\n"
+                "Sky: Sky need strong vivid solid color (use original sky hues)\n\n"
+                "Structures: Merge small shapes into larger ones. Always retain "
+                "distant background landmasses as is, plus its occupying "
+                "elements in a detailed manner. Never add new buildings, "
+                "skylines, or landmarks.\n\n"
+                "Details: Replace tiny windows and street clutter with minimal "
+                "flat color blocks. Remove all clouds, country flags, and "
+                "flagpoles."),
+            "openai_batch_enabled": True,
+            # OFF on the first deploy, on purpose: step 2 runs over the
+            # paintings already made while the 1,142 photos wait, and he
+            # switches this on once he has seen the flow (2026-10-28). Only
+            # written when absent, so it never switches itself back off.
+            "step1_enabled": False,
         },
     },
 ]
@@ -2379,6 +2479,14 @@ def picture_can_change(db: Session, sp) -> bool:
     # The STATE decides, never times_listed: a RECALLED picture has its
     # state reset on purpose so the worker can redo it.
     status = sp.pipeline_status or ""
+    # A PICTURE THAT IS LIVE ON THE MARKETPLACE NEVER CHANGES FROM HERE
+    # (v266). Since step 2, a live poster can be repainted (REPAINT on one
+    # of the 417 being swapped), which puts it back to 'greenlit' for a
+    # while — and the state alone would then let the worker delete the
+    # picture behind a real listing. A RECALL deletes the upload rows, so a
+    # recalled picture is still free to change, as before.
+    if has_live_listing(db, sp.id):
+        return False
     if status in _CHANGEABLE_STATES:
         return True
     if status == "processed":
@@ -2420,12 +2528,149 @@ def take_out_of_pipeline(db: Session, sp) -> bool:
                  .filter(ProcessedImage.saved_poster_id == sp.id,
                          ProcessedImage.is_current == 1).all()):
         pi.is_current = 0
-        if (pi.review_status or "") in ("pending", "held"):
+        if (pi.review_status or "") in WAITING_REVIEW_STATES:
             pi.review_status = "superseded"
     title = db.query(MasterTitle).filter_by(id=sp.master_title_id).first()
     if title is not None:
         recompute_title_status(db, title)
     return True
+
+
+# The review words that mean "somebody is still waiting on this row": the
+# admin ('pending', 'held') or step 2 ('step2', and 'step2_failed' — parked on
+# Needs Attention for a RETRY). Every door that takes a
+# picture away sets these aside — ONE tuple, so the step-2 word added in
+# v266 cannot be forgotten by a door that only knew the first two.
+WAITING_REVIEW_STATES = ("pending", "held", "step2", "step2_failed")
+
+
+def has_live_listing(db: Session, poster_id: int) -> bool:
+    """Has this picture gone live on a marketplace (an 'uploaded' row)?"""
+    return db.query(UploadTracking.id).filter(
+        UploadTracking.saved_poster_id == poster_id,
+        UploadTracking.status == "uploaded").first() is not None
+
+
+# ═════════════════════════════════════════════════════════════════════════
+#  STEP 1 / STEP 2 (v266)
+# ═════════════════════════════════════════════════════════════════════════
+
+def step2_active(db: Session, project: Optional[Project]) -> bool:
+    """
+    Does a new painting in this project go on to step 2 instead of to the
+    owner? Needs the review gate too: step 2's result is what he approves,
+    and with no gate there is nobody to approve it.
+    """
+    if project is None or not project.has_review_gate:
+        return False
+    return bool(get_setting(db, "step2_enabled", project=project)) \
+        and review_gate_enabled(db, project)
+
+
+def step1_open(db: Session, project: Optional[Project]) -> bool:
+    """Is Step 1 painting switched on? Off = only pictures named by hand."""
+    return bool(get_setting(db, "step1_enabled", project=project))
+
+
+def batch_enabled(db: Session, project: Optional[Project]) -> bool:
+    return bool(get_setting(db, "openai_batch_enabled", project=project))
+
+
+def waiting_for_step2(db: Session, project: Project):
+    """
+    Query: the current PAINTINGS waiting for step 2 in this project — the
+    step-2 queue. In flight at OpenAI or not; ai_batches tells those apart.
+    One spelling, read by the sender, the counts and Diagnostics.
+    """
+    return (db.query(ProcessedImage)
+              .join(SavedPoster, ProcessedImage.saved_poster_id == SavedPoster.id)
+              .filter(ProcessedImage.project_id == project.id,
+                      ProcessedImage.is_current == 1,
+                      ProcessedImage.review_status == "step2",
+                      SavedPoster.deleted_at.is_(None),
+                      SavedPoster.pipeline_status.in_(("processed", "uploaded"))))
+
+
+def painted_before_step2(db: Session, project: Project):
+    """
+    Query: current PAINTINGS made before step 2 existed (or before it was
+    switched on) that have never been through it — the catch-up pile the
+    owner sends on with one button. Waiting for him ('pending'), left for
+    Photoshop ('held'), or already approved — waiting to upload, or LIVE
+    (the 417, which are swapped on the marketplace afterwards).
+    """
+    return (db.query(ProcessedImage)
+              .join(SavedPoster, ProcessedImage.saved_poster_id == SavedPoster.id)
+              .filter(ProcessedImage.project_id == project.id,
+                      ProcessedImage.is_current == 1,
+                      or_(ProcessedImage.stage.is_(None), ProcessedImage.stage == 1),
+                      ProcessedImage.review_status.in_(("pending", "held", "approved")),
+                      SavedPoster.deleted_at.is_(None),
+                      SavedPoster.pipeline_status.in_(("processed", "uploaded"))))
+
+
+def send_painted_to_step2(db: Session, project: Project, *, by: str) -> int:
+    """
+    The one-click catch-up: every painting in `painted_before_step2` is
+    marked 'step2', so the next pass sends it to the flatten. Commits nothing.
+
+    An APPROVED painting may already have an upload row waiting. That row is
+    DELETED: it never went anywhere, approving the step-2 result creates a
+    fresh one (ensure_upload_rows), and a row left behind would sit in every
+    "N to upload" count on the site as a queue that cannot move. (The
+    uploader also refuses any row whose picture is not the approved current
+    one — see claim_upload_batch — so even a missed row could not send the
+    painting.) A LIVE one keeps its 'uploaded' row untouched; approving its
+    step-2 result is what puts it on the swap list.
+    """
+    n = 0
+    for pi in painted_before_step2(db, project).all():
+        pi.review_status = "step2"
+        pi.step2_attempts = 0
+        pi.step2_error = None
+        (db.query(UploadTracking)
+           .filter(UploadTracking.saved_poster_id == pi.saved_poster_id,
+                   UploadTracking.status.in_(("pending", "failed")))
+           .delete(synchronize_session=False))
+        n += 1
+    return n
+
+
+def swap_waiting(db: Session, project: Project):
+    """
+    Query: (UploadTracking, ProcessedImage) for listings that are LIVE but
+    now have a newer approved picture — the 417's swap list. Derived, not
+    marked: a live row pointing at a picture that is no longer the current
+    approved one IS the definition, so nothing has to remember to set it.
+    Recording a swap (scripts/swap_record.py, or the node's swap job) points
+    the row at the new picture, which takes it off this list by itself.
+    """
+    return (db.query(UploadTracking, ProcessedImage)
+              .join(ProcessedImage,
+                    (ProcessedImage.saved_poster_id == UploadTracking.saved_poster_id)
+                    & (ProcessedImage.is_current == 1))
+              .join(SavedPoster, SavedPoster.id == UploadTracking.saved_poster_id)
+              .filter(UploadTracking.project_id == project.id,
+                      UploadTracking.status == "uploaded",
+                      ProcessedImage.review_status == "approved",
+                      ProcessedImage.storage_path != "",
+                      SavedPoster.deleted_at.is_(None),
+                      or_(UploadTracking.processed_image_id.is_(None),
+                          UploadTracking.processed_image_id != ProcessedImage.id)))
+
+
+def restore_live_status(db: Session, poster: SavedPoster) -> None:
+    """
+    A LIVE poster that went round again (a repaint of one of the 417) comes
+    back as 'processed' from the painter. Once its new picture is approved
+    it is still live on the marketplace, so its state says so again.
+    """
+    if (poster.pipeline_status or "") in ("processed", "greenlit") \
+            and has_live_listing(db, poster.id):
+        rows = db.query(UploadTracking.status).filter(
+            UploadTracking.saved_poster_id == poster.id).all()
+        if rows and all(s in ("uploaded", "skipped", "removed") for (s,) in rows):
+            poster.pipeline_status = "uploaded"
 
 
 def pull_back_pictures(db: Session, posters) -> int:
@@ -3671,7 +3916,18 @@ def claim_upload_batch(
                       UploadTracking.project_id == project.id,
                       UploadTracking.status.in_(("pending", "failed")),
                       UploadTracking.attempts < max_attempts,
-                      SavedPoster.deleted_at.is_(None))
+                      SavedPoster.deleted_at.is_(None),
+                      # ONLY THE PICTURE THE OWNER LET GO (v266). A row is
+                      # created when a picture is approved, and it used to be
+                      # trusted from then on — so when step 2 took an
+                      # approved painting back to be flattened, its queued
+                      # row would still have uploaded the painting. The
+                      # picture a row points at must be the CURRENT one and
+                      # must not be waiting on anybody: approved, or made
+                      # with no review gate at all (NULL).
+                      ProcessedImage.is_current == 1,
+                      or_(ProcessedImage.review_status.is_(None),
+                          ProcessedImage.review_status == "approved"))
               .order_by(SavedPoster.original_save_date.asc(),
                         MasterTitle.external_id.asc().nullslast(),
                         UploadTracking.letter_index.asc())

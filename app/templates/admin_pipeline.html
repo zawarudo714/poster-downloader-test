@@ -96,6 +96,25 @@
       </div>
     </section>
 
+    {# ── AI PAINTING (v266) ────────────────────────────────────────────
+       Step 1 (painting), step 2 (the flatten) and the batches at OpenAI,
+       in one panel, because "why is nothing being painted" is answered by
+       all three together: step 1 may be switched off, step 2 may be
+       waiting on a batch, and the batch says how far OpenAI has got. #}
+    {% if processor == 'gpt' %}
+    <section class="panel" data-ai-panel>
+      <div class="panel-head">
+        <span>AI PAINTING — STEP 1, STEP 2 AND BATCHES
+          {{ info("Step 1 paints the worker's photo. Step 2 runs your second prompt over that painting to flatten it, and Approve Artwork shows the step 2 result. Switch step 1 off to let step 2 work through what is already painted while new photos wait. Sent as batches, each step costs half and comes back within 24 hours. STOP on a batch cancels it at OpenAI: what already finished is kept and paid for, the rest goes back in the queue.") }}
+        </span>
+        <button type="button" class="btn btn-ghost btn-tiny" data-action="ai-refresh">REFRESH</button>
+      </div>
+      <div class="panel-body" data-ai-state>
+        <div class="muted">Loading…</div>
+      </div>
+    </section>
+    {% endif %}
+
     {# What a node is holding right now. The funnel tells you how many are at
        each stage; this tells you WHICH, on which node, and for how long —
        which is the difference between "working" and "hung". #}
@@ -478,6 +497,22 @@
           <button type="button" class="btn btn-accent" data-action="save-gpt-prompt">SAVE PROMPT</button>
           <button type="button" class="btn btn-ghost" data-action="reset-gpt-prompt">RESET TO DEFAULT</button>
           <span class="muted mono" data-gpt-prompt-status></span>
+        </div>
+      </div>
+    </section>
+
+    {# ── STEP 2 AND BATCH SETTINGS (v266) ─────────────────────────────── #}
+    <section class="panel">
+      <div class="panel-head">
+        <span>STEP 2 (THE FLATTEN) AND BATCHES
+          {{ info("Step 2 sends each finished painting to OpenAI a second time with the prompt below, and that result is what you review and what goes to the marketplace. The model, quality and background here are step 2's own — the ones above are the painting's. Batches send both steps at half price, answered within 24 hours.") }}
+        </span>
+      </div>
+      <div class="panel-body">
+        <div class="settings-grid" data-settings-group="step2"></div>
+        <div class="filter-row" style="margin-top:12px">
+          <button type="button" class="btn btn-accent" data-action="save-settings" data-group="step2">SAVE STEP 2 SETTINGS</button>
+          <span class="muted mono" data-settings-status="step2"></span>
         </div>
       </div>
     </section>

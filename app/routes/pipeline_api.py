@@ -584,7 +584,10 @@ def jobs_claim(
                     # page, public ones included, while this machine is not.
                     # The capability being asked for is really "can reach the
                     # marketplace at all".
-                    "listing_check"]
+                    "listing_check",
+                    # Swapping the picture on a live listing (v266): the
+                    # uploader's own browser, account and sign-in.
+                    "listing_swap"]
     if kinds:
         allowed = [k for k in allowed if k in kinds]
 
@@ -684,6 +687,45 @@ def _resolve_job_payload(
             # TeePublic's, and left with it on 2026-09-06.)
             "signin_on_read": earnings_service.signin_on_read(
                 (account.target_site or "").lower()),
+        })
+        return resolved
+
+    if job.kind == "listing_swap":
+        # The list is worked out NOW, when the machine picks the job up, not
+        # when the button was pressed — so a listing approved in between is
+        # included and one swapped meanwhile is not sent twice.
+        from .. import listing_check as LC
+        cap = max(1, int(payload.get("limit") or 500))
+        rows = P.swap_waiting(db, project).limit(cap).all()
+        if not rows:
+            return {**resolved, "error": "Nothing is waiting to be swapped."}
+        account_ids = {t.account_id for t, _pi in rows}
+        account = db.query(UploadAccount).filter_by(id=sorted(account_ids)[0]).first()
+        if account is None:
+            return {**resolved, "error": "The listings' account no longer exists."}
+        if not (account.artist_name or "").strip():
+            return {**resolved, "error": (
+                f"Type the artist name for '{account.name}' on the Listing "
+                f"check tab first — the listing addresses are built from it.")}
+        items = []
+        for tracking, pi in rows:
+            if tracking.account_id != account.id:
+                continue            # one account per job; the next job takes the rest
+            url = LC.listing_url(tracking, account.artist_name)
+            if not url:
+                continue
+            items.append({
+                "tracking_id": tracking.id,
+                "processed_id": pi.id,
+                "listing_url": url,
+                "expected_title": tracking.remote_title or "",
+                "storage_path": pi.storage_path,
+            })
+        resolved.update({
+            "items": items,
+            "account": P.account_payload(db, account, include_secret=True,
+                                         project=project),
+            "settings": P.upload_settings_payload(db, project=project),
         })
         return resolved
 
@@ -952,6 +994,49 @@ def _prune_artifacts(db: Session, folder) -> None:
     except Exception as e:          # noqa: BLE001 — see the note above
         logging.getLogger("uvicorn.error").warning(
             "Could not prune failure evidence in %s: %s", folder, e)
+
+
+@router.post("/swap/report")
+def swap_report(
+    payload: dict = Body(...),
+    node: WorkerNode = Depends(require_node),
+    db: Session = Depends(get_db),
+):
+    """
+    One live listing's picture swap, reported as it happens (v266). The reply
+    carries `stop` — the job's CANCEL on the Pipeline page — because the
+    machine cannot hear a button, only an answer to a question it asked.
+
+    A SUCCESS points the listing's upload row at the new picture. That is the
+    whole record: `swap_waiting` is DERIVED from rows that point at a picture
+    which is not the current approved one, so this one leaves the list by
+    itself. The FineArtAmerica artwork number is kept too, which is free and
+    is the one fact that finds a listing even if its title ever changes.
+    """
+    tracking = db.query(UploadTracking).filter_by(id=payload.get("tracking_id")).first()
+    job = db.query(PipelineJob).filter_by(id=payload.get("job_id")).first()
+    if tracking is None:
+        raise HTTPException(404, "No such upload row.")
+    if payload.get("ok"):
+        tracking.processed_image_id = int(payload.get("processed_id") or 0) or tracking.processed_image_id
+        if payload.get("artwork_id"):
+            tracking.remote_id = str(payload["artwork_id"])[:128]
+        tracking.last_error = None
+        log_activity(db, user=None, action="listing_swapped", target_type="upload",
+                     target_id=tracking.id,
+                     details={"node": node.name, "artwork_id": payload.get("artwork_id"),
+                              "processed_id": payload.get("processed_id")})
+        if job is not None:
+            P.append_job_log(db, job, f"swapped: {tracking.remote_title}", level="ok")
+    else:
+        err = (payload.get("error") or "unknown error")[:2000]
+        tracking.last_error = f"swap failed: {err}"
+        if job is not None:
+            P.append_job_log(db, job, f"NOT swapped: {tracking.remote_title} — {err}",
+                             level="error")
+    stop = bool(job is not None and job.status == "cancelled")
+    db.commit()
+    return JSONResponse({"ok": True, "stop": stop})
 
 
 @router.post("/listings/progress")

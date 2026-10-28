@@ -1677,6 +1677,8 @@ def api_retry_failures(
             poster.process_error = None
             poster.claimed_at = None
             poster.claimed_by = None
+            # Named by hand: painted even while Step 1 is off (v266).
+            poster.paint_requested_at = datetime.utcnow()
             title = db.query(MasterTitle).filter_by(id=poster.master_title_id).first()
             if title:
                 P.recompute_title_status(db, title)
@@ -2325,6 +2327,199 @@ def api_gpt_state(
     })
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+#  STEP 1 / STEP 2 / BATCHES — the AI PAINTING panel on the Pipeline page (v266)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _ai_counts(db: Session, project) -> dict:
+    """Every number the AI PAINTING panel and the status strip show, each
+    from the one query that defines it."""
+    from .. import ai_batches as AB
+    from ..gpt_worker import paint_queue
+    from ..models import ProcessedImage as _PI
+
+    scope = _title_scope(db, project)
+    greenlit_total = (db.query(func.count(SavedPoster.id))
+                        .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+                        .filter(SavedPoster.deleted_at.is_(None),
+                                SavedPoster.pipeline_status == "greenlit", scope)
+                        .scalar() or 0)
+    named = (db.query(func.count(SavedPoster.id))
+               .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+               .filter(SavedPoster.deleted_at.is_(None),
+                       SavedPoster.pipeline_status.in_(("greenlit", "failed_processing")),
+                       SavedPoster.paint_requested_at.isnot(None), scope)
+               .scalar() or 0)
+    in_batch_1 = (db.query(func.count(SavedPoster.id))
+                    .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+                    .filter(SavedPoster.pipeline_status == "processing",
+                            SavedPoster.claimed_by.like("batch:%"), scope)
+                    .scalar() or 0)
+    step2_all = P.waiting_for_step2(db, project).count()
+    away2 = len(AB.open_item_ids(db, project, stage=2))
+    failed2 = (db.query(func.count(_PI.id))
+                 .join(SavedPoster, _PI.saved_poster_id == SavedPoster.id)
+                 .filter(_PI.project_id == project.id, _PI.is_current == 1,
+                         _PI.review_status == "step2_failed",
+                         SavedPoster.deleted_at.is_(None))
+                 .scalar() or 0)
+    return {
+        "step1_enabled": P.step1_open(db, project),
+        "step2_active": P.step2_active(db, project),
+        "batch_enabled": P.batch_enabled(db, project),
+        "waiting_to_paint": greenlit_total,
+        # What will actually be painted next: everything, or only the ones
+        # named by hand while Step 1 is off.
+        "will_paint": paint_queue(db, project).count(),
+        "named_by_hand": named,
+        "painting_in_batch": in_batch_1,
+        "step2_waiting": max(0, step2_all - away2),
+        "step2_in_batch": away2,
+        "step2_failed": failed2,
+        "catchup": P.painted_before_step2(db, project).count(),
+        "swap_waiting": P.swap_waiting(db, project).count(),
+    }
+
+
+@router.get("/api/ai")
+def api_ai_state(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """The AI PAINTING panel: the two switches, what is waiting where, and
+    the newest batches with OpenAI's own progress counts."""
+    from .. import ai_batches as AB
+    project = _project(request, admin, db)
+    return JSONResponse({
+        "ok": True,
+        **_ai_counts(db, project),
+        "batches": AB.summary(db, project),
+        "last_error": AB.last_error(project),
+    })
+
+
+@router.post("/api/ai/catchup")
+def api_ai_catchup(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    SEND THE PAINTINGS ALREADY MADE TO STEP 2 — the one-click catch-up.
+
+    Every painting made before step 2 (waiting for review, left for
+    Photoshop, approved and waiting to upload, or LIVE) goes on to be
+    flattened. Nothing is deleted; each painting keeps its files.
+    """
+    project = _project(request, admin, db)
+    if not P.step2_active(db, project):
+        raise HTTPException(409, "Step 2 is switched off for this project.")
+    n = P.send_painted_to_step2(db, project, by=admin.username)
+    log_activity(db, user=admin, action="step2_catchup", target_type="pipeline",
+                 details={"project": project.slug, "paintings": n})
+    db.commit()
+    return JSONResponse({"ok": True, "sent": n})
+
+
+@router.post("/api/ai/step2/retry")
+def api_ai_step2_retry(
+    request: Request,
+    payload: dict = Body(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Try step 2 again for paintings it gave up on. `poster_ids` from the
+    ticked rows on Needs Attention, or `all: true` for every one — the
+    usual case after fixing a key or topping up.
+    """
+    from ..models import ProcessedImage as _PI
+    project = _project(request, admin, db)
+    q = (db.query(_PI)
+           .join(SavedPoster, _PI.saved_poster_id == SavedPoster.id)
+           .filter(_PI.project_id == project.id, _PI.is_current == 1,
+                   _PI.review_status == "step2_failed",
+                   SavedPoster.deleted_at.is_(None)))
+    if not payload.get("all"):
+        ids = [int(i) for i in (payload.get("poster_ids") or []) if str(i).isdigit()]
+        if not ids:
+            raise HTTPException(400, "Tick the rows to retry, or send all.")
+        q = q.filter(_PI.saved_poster_id.in_(ids))
+    n = 0
+    for pi in q.all():
+        pi.review_status = "step2"
+        pi.step2_attempts = 0
+        pi.step2_error = None
+        n += 1
+    log_activity(db, user=admin, action="step2_retry", target_type="pipeline",
+                 details={"project": project.slug, "count": n})
+    db.commit()
+    return JSONResponse({"ok": True, "requeued": n})
+
+
+@router.post("/api/ai/swap")
+def api_ai_swap(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    SWAP THE PICTURES ON LIVE LISTINGS — one click (v266).
+
+    Queues ONE job for the worker machine. Which listings it covers is
+    decided when the machine picks it up (see _resolve_job_payload), so the
+    list is never stale. One job at a time: pressing again while one is
+    queued or running does nothing, and STOP on the jobs list ends it after
+    the listing in hand.
+    """
+    project = _project(request, admin, db)
+    waiting = P.swap_waiting(db, project).count()
+    if not waiting:
+        raise HTTPException(409, "Nothing is waiting to be swapped.")
+    open_job = (db.query(PipelineJob)
+                  .filter(PipelineJob.kind == "listing_swap",
+                          PipelineJob.status.in_(("queued", "running")))
+                  .first())
+    if open_job is not None:
+        return JSONResponse({"ok": True, "job_id": open_job.id, "already": True,
+                             "waiting": waiting})
+    job = P.create_job(db, kind="listing_swap", project_id=project.id,
+                       payload={"limit": 500}, requested_by=admin.username)
+    log_activity(db, user=admin, action="listing_swap_queued", target_type="pipeline",
+                 details={"project": project.slug, "waiting": waiting, "job": job.id})
+    db.commit()
+    return JSONResponse({"ok": True, "job_id": job.id, "waiting": waiting})
+
+
+@router.post("/api/ai/batch/{batch_id}/cancel")
+def api_ai_batch_cancel(
+    batch_id: int,
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    STOP a batch at OpenAI. You pay only for what has already finished, and
+    that is still filed; everything else goes back to the queue when the
+    batch is collected, a few minutes later. The way to stop the spending
+    yourself when something looks wrong.
+    """
+    from .. import ai_batches as AB
+    from .. import gpt_images as G
+    project = _project(request, admin, db)
+    try:
+        out = AB.cancel(db, project, batch_id, by=admin.username)
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+    except (G.PermanentFailure, G.TransientFailure) as e:
+        raise HTTPException(502, f"OpenAI did not accept the stop: {e}")
+    log_activity(db, user=admin, action="batch_cancel", target_type="pipeline",
+                 details={"project": project.slug, "batch": batch_id, **out})
+    db.commit()
+    return JSONResponse(out)
+
+
 @router.post("/api/gpt/prompt")
 def api_save_gpt_prompt(
     request: Request,
@@ -2689,6 +2884,62 @@ def api_attention(
             severity="stop",
             items=[{"kind": "group", "error": e, "count": n} for e, n in by_error.items()],
             note=f"{len(config_rows)} images affected.",
+        ))
+
+    # ── Step 2 gave up on these paintings (v266) ─────────────────────────
+    # The painting exists and is paid for; it is the flatten that did not
+    # come back — refused by OpenAI, or failed step2_max_attempts times.
+    # RETRY sends it to step 2 again; nothing is repainted.
+    s2_failed = (
+        db.query(ProcessedImage, SavedPoster, MasterTitle)
+          .join(SavedPoster, ProcessedImage.saved_poster_id == SavedPoster.id)
+          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+          .filter(ProcessedImage.project_id == project.id,
+                  ProcessedImage.is_current == 1,
+                  ProcessedImage.review_status == "step2_failed",
+                  SavedPoster.deleted_at.is_(None))
+    )
+    s2_total = s2_failed.count()
+    if s2_total:
+        findings.append(_attention_finding(
+            "step2_failed",
+            "Step 2 could not finish these paintings",
+            "The painting is fine and already paid for — it is the flatten "
+            "that failed. If they all say the same thing (no credit, a wrong "
+            "key), fix that first.",
+            "RETRY STEP 2 sends them to step 2 again. Nothing is repainted.",
+            severity="warn",
+            items=[{"poster_id": sp.id, **title_of(t), "filename": pi.filename,
+                    "attempts": pi.step2_attempts,
+                    "error": (pi.step2_error or "")[:400]}
+                   for pi, sp, t in s2_failed.limit(limit).all()],
+            note=f"{s2_total} painting(s) waiting for a retry.",
+        ))
+
+    # ── OpenAI refused a whole batch (v266) ─────────────────────────────
+    # Shown as one STOP line: a refused send means every picture is waiting
+    # for the same fix (no credit, a wrong key, a model OpenAI will not
+    # batch). The pictures are already back in the queue; nothing was spent.
+    from ..models import AIBatch
+    refused = (db.query(AIBatch)
+                 .filter(AIBatch.project_id == project.id,
+                         AIBatch.status == "send_failed",
+                         AIBatch.error.like("[refused]%"),
+                         AIBatch.created_at >= now - timedelta(hours=2))
+                 .order_by(AIBatch.id.desc()).first())
+    if refused is not None:
+        findings.append(_attention_finding(
+            "batch_refused",
+            "OpenAI refused a batch",
+            "Nothing was sent and nothing was charged. Every picture in it "
+            "went back in the queue. The site tries again an hour after the "
+            "refusal.",
+            "Fix what OpenAI says below — or switch 'Send to OpenAI as "
+            "batches' off on the Settings page to paint them one at a time "
+            "at full price.",
+            severity="stop",
+            items=[{"kind": "group", "count": refused.total,
+                    "error": (refused.error or "")[:400]}],
         ))
 
     # ── 2 · The processor refused the image itself ──────────────────────
@@ -3144,6 +3395,10 @@ def api_attention_retry_group(
         poster.process_error = None
         poster.claimed_at = None
         poster.claimed_by = None
+        # Named by hand: painted even while Step 1 is off (v266) — this is
+        # how the owner sends the 95 parked for credit through both steps
+        # as the test of step 1 by batch.
+        poster.paint_requested_at = datetime.utcnow()
         title = db.query(MasterTitle).filter_by(id=poster.master_title_id).first()
         if title:
             P.recompute_title_status(db, title)
@@ -3274,6 +3529,8 @@ def api_return_to_pipeline(
         poster.pipeline_status = "greenlit"
         poster.process_attempts = 0
         poster.process_error = None
+        # Named by hand: painted even while Step 1 is off (v266).
+        poster.paint_requested_at = datetime.utcnow()
         # The reason is kept, not cleared: the history of "this was once
         # judged unusable" is worth more than a tidy row.
         title = db.query(MasterTitle).filter_by(id=poster.master_title_id).first()
@@ -3530,10 +3787,33 @@ def api_review_queue(
             return default_bg
         return painted
 
+    # How many step-2 pictures each painting has had, so a redo reads
+    # "v2 step 2 #2" rather than two buttons that look the same.
+    s2_rank: dict[int, int] = {}
+    for _pid, rows_ in siblings.items():
+        seen: dict[int, int] = {}
+        for r in rows_:
+            if (r.stage or 1) == 2 and not r.variant:
+                seen[r.step2_from or 0] = seen.get(r.step2_from or 0, 0) + 1
+                s2_rank[r.id] = seen[r.step2_from or 0]
+
+    def _label(p) -> str:
+        if (p.stage or 1) != 2:
+            return f"v{p.attempt or 1}{p.variant or ''}"
+        n = s2_rank.get(p.id) or s2_rank.get(p.healed_from or 0) or 1
+        return (f"v{p.attempt or 1} step 2" + (f" #{n}" if n > 1 else "")
+                + (p.variant or ""))
+
     def _version(p) -> dict:
+        is_step2 = (p.stage or 1) == 2
         return {
             "processed_id": p.id,
             "attempt": p.attempt or 1,
+            # STEP 2 (v266): which step made this picture, and the name the
+            # version bar shows — "v2" for a painting, "v2 step 2" for the
+            # flatten made from it.
+            "stage": 2 if is_step2 else 1,
+            "label": _label(p),
             # 'b', 'c', … for a healed (brush-edited) derivative; '' for an
             # ordinary generation. The screen shows it as v1b, sorted inside
             # its family.
@@ -3565,9 +3845,17 @@ def api_review_queue(
             # the screen and the builder can never disagree about it — two
             # copies of one rule is two chances to drift.
             "signature": _signature_for_screen(db, project, p),
-            "can_recolor": bool(p.master_path),
+            # A step-2 picture comes back SOLID — the model paints the sky
+            # itself — so there is nothing see-through to put a colour behind
+            # and the colour controls would be a dead knob (owner, 2026-10-28).
+            "can_recolor": bool(p.master_path) and not is_step2,
             "master_url": (f"/admin/pipeline/review/master/{p.id}"
-                           if p.master_path else ""),
+                           if p.master_path and not is_step2 else ""),
+            # The editor needs a full-size picture to work on; a step-2 row
+            # has no print file until it is approved, so it edits its master.
+            "edit_url": (f"/admin/pipeline/review/master/{p.id}?full=1"
+                         if p.master_path else
+                         f"/admin/pipeline/review/full/{p.id}"),
         }
 
     titles: dict = {}
@@ -3653,7 +3941,14 @@ def api_review_queue(
                              "keep": str(P.get_setting(
                                  db, "review_key_keep",
                                  project=project) or "9"),
-                         }})
+                             "step2": str(P.get_setting(
+                                 db, "review_key_step2",
+                                 project=project) or "6"),
+                         },
+                         # Whether this project has step 2, so the screen can
+                         # offer REDO STEP 2 and call RERUN what it now is —
+                         # a repaint of both steps (v266).
+                         "step2": P.step2_active(db, project)})
 
 
 @router.get("/review/image/{processed_id}")
@@ -3880,6 +4175,13 @@ def _build_print_file(db: Session, processed, color: str, project,
         return ""
 
     rel = (processed.storage_path or "").strip()
+    if not rel and processed.stage == 2:
+        # A STEP-2 picture (or a Photopea edit of one) has its own family of
+        # names, read off its master: X_step2.png prints as X_step2.jpg. The
+        # painting's name would collide with the painting's own print file —
+        # for one of the 417 that is the LIVE file, which the approval below
+        # then deletes as a loser (v266).
+        rel = processed.master_path.rsplit(".", 1)[0] + ".jpg"
     if not rel and title is not None and processed.saved_poster is not None:
         rel, _name = P.storage_path_for(db, title, processed.saved_poster,
                                         project=project,
@@ -4261,10 +4563,20 @@ def _store_variant_row(db, *, admin, project, title, poster, processed,
                                  "rerun it instead.")
 
     # ── Files: the family's deterministic paths, plus the letter ────────
-    base_rel, base_name = storage_path_for(db, title, poster, project=project,
-                                           attempt=processed.attempt)
-    stem, ext = base_rel.rsplit(".", 1)
-    name_stem, name_ext = base_name.rsplit(".", 1)
+    is_step2 = processed.stage == 2
+    if is_step2:
+        # A step-2 picture's family is named after its own master
+        # (X_step2.png), so its edit is X_step2b — never a name from the
+        # painting's family, whose print file may be the LIVE one (v266).
+        stem = processed.master_path.rsplit(".", 1)[0]
+        ext = "jpg"
+        name_stem = processed.filename.rsplit(".", 1)[0]
+        name_ext = "jpg"
+    else:
+        base_rel, base_name = storage_path_for(db, title, poster, project=project,
+                                               attempt=processed.attempt)
+        stem, ext = base_rel.rsplit(".", 1)
+        name_stem, name_ext = base_name.rsplit(".", 1)
     filename = f"{name_stem}{letter}.{name_ext}"
     parts = f"{stem}{letter}.{ext}".rsplit("/", 1)
     preview_rel = (parts[0] + "/previews/" + parts[1]) if len(parts) == 2 \
@@ -4293,7 +4605,8 @@ def _store_variant_row(db, *, admin, project, title, poster, processed,
         if as_master:
             # Same deferred shape as generation: the print file is built at
             # approval, from this master, with colour and signature.
-            master_rel = f"{stem}{letter}_master.png"
+            master_rel = (f"{stem}{letter}.png" if is_step2
+                          else f"{stem}{letter}_master.png")
             flatten_onto(edit_tmp, flat_tmp, colour)
             make_preview(flat_tmp, prev_tmp)
             write_bytes(db, master_rel, edit_tmp.read_bytes(), project=project)
@@ -4340,8 +4653,12 @@ def _store_variant_row(db, *, admin, project, title, poster, processed,
         review_status=(("held" if processed.review_status == "held" else "pending")
                        if processed.review_status else None),
         master_path=master_rel,
-        background_color=(colour if as_master else None),
+        background_color=(colour if as_master and not is_step2 else None),
         signature_json=processed.signature_json,
+        # An edit of a step-2 picture is still a step-2 picture: no colour
+        # controls, its own print-file name, and the same painting behind it.
+        stage=processed.stage,
+        step2_from=processed.step2_from,
     )
     db.add(row)
     db.flush()
@@ -4536,7 +4853,7 @@ def api_review_decide(
 
     now = datetime.utcnow()
     counts = {"approved": 0, "held": 0, "rerun": 0, "unusable": 0,
-              "withdrawn": 0, "files_removed": 0}
+              "step2": 0, "withdrawn": 0, "files_removed": 0}
     batch_doomed: list = []
 
     for item in decisions:
@@ -4651,14 +4968,24 @@ def api_review_decide(
                 # `delete_paths`, which swallows everything and reports a
                 # count. Anything it leaves behind shows up in Diagnostics
                 # as an orphan file, so the net is already there.
+                # NEVER A FILE THE KEPT PICTURE IS USING. Two rows of one
+                # poster can name the same path — an edit built at approval
+                # takes its family's print-file name, which is the parent's
+                # own — and deleting the loser's copy would delete the file
+                # just built (found building step 2, v266, where the parent
+                # of one of the 417 owns the LIVE print file).
+                kept_paths = {processed.storage_path, processed.preview_path,
+                              processed.master_path}
                 for other in losers:
                     # A row already emptied on an earlier approval is skipped,
                     # so pressing approve twice does not count the same files
                     # again and does not have to reach the Storage Box at all.
                     if (other.review_status or "") == "discarded":
                         continue
-                    batch_doomed += [other.storage_path, other.preview_path,
-                                     other.master_path]
+                    batch_doomed += [p for p in (other.storage_path,
+                                                 other.preview_path,
+                                                 other.master_path)
+                                     if p and p not in kept_paths]
                     # 'discarded' rather than 'superseded' ON PURPOSE. The two
                     # look alike and mean different things: superseded is "set
                     # aside, the picture is still there", discarded is "the
@@ -4688,6 +5015,12 @@ def api_review_decide(
                 P.ensure_upload_rows(db, poster=poster, title=title,
                                      processed=processed,
                                      project=P.project_for_title(db, title))
+                # A LIVE poster stays live. One of the 417 that went round
+                # again for a repaint came back 'processed'; approving its
+                # new picture puts it on the swap list, not in the upload
+                # queue (its 'uploaded' row is left alone by
+                # ensure_upload_rows), so its state says 'uploaded' again.
+                P.restore_live_status(db, poster)
             # The review cache exists to make revisiting fast; once an image
             # is approved and heading for upload nobody reviews it again, so
             # this is the right moment — and the ONLY moment — to let it go.
@@ -4743,7 +5076,43 @@ def api_review_decide(
                 poster.pipeline_status = "greenlit"
                 poster.process_attempts = 0
                 poster.process_error = None
+                # Named by hand, so it is painted even while Step 1 is
+                # switched off (v266 — SavedPoster.paint_requested_at).
+                poster.paint_requested_at = now
             counts["rerun"] += 1
+
+        elif action == "step2":
+            # ── REDO STEP 2, WITHOUT REPAINTING (v266) ───────────────────
+            #
+            # The picture on screen decides the painting: a PAINTING version
+            # (the owner picked v1 or v3 in the version bar) is flattened
+            # again as it is; a STEP-2 picture is redone from the painting it
+            # came from. That is what "redo on v2 instead of paying for a new
+            # painting" means (owner, 2026-10-28).
+            source = processed
+            if (processed.stage or 1) == 2:
+                source = (db.query(ProcessedImage)
+                            .filter_by(id=processed.step2_from).first()
+                          if processed.step2_from else None)
+            if source is None or not (source.master_path or source.storage_path) \
+                    or (source.review_status or "") == "discarded":
+                raise HTTPException(409, "That painting's files are gone — "
+                                         "REPAINT it instead.")
+            # Everything else steps aside; step-2 pictures are KEPT (with
+            # their files) as 'rerun', so the next review can still offer
+            # them if the redo comes out worse.
+            for other in (db.query(ProcessedImage)
+                            .filter(ProcessedImage.saved_poster_id == processed.saved_poster_id,
+                                    ProcessedImage.id != source.id).all()):
+                other.is_current = 0
+                if (other.review_status or "") in ("pending", "held"):
+                    other.review_status = "rerun" if (other.stage or 1) == 2 \
+                        else "superseded"
+            source.is_current = 1
+            source.review_status = "step2"
+            source.step2_attempts = 0
+            source.step2_error = None
+            counts["step2"] += 1
 
         elif action == "unusable":
             reason = (item.get("reason") or "").strip()

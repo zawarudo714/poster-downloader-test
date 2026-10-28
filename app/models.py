@@ -420,6 +420,17 @@ class SavedPoster(Base):
     # the only sign that a look had ever happened.
     review_voided_at     = Column(DateTime, nullable=True)
 
+    # THE OWNER ASKED FOR THIS PICTURE TO BE PAINTED, BY HAND (v266).
+    #
+    # Stamped by the doors where he names specific pictures — RETRY on Needs
+    # Attention, RETRY ALL AFFECTED, REPAINT on Approve Artwork — and read
+    # only while "Step 1 painting" is switched OFF: then only stamped
+    # pictures are painted, so he can test or repaint a few without opening
+    # the tap on the whole backlog (owner, 2026-10-28). Consumed when the
+    # painter takes the picture, so a stamp can never let something through
+    # twice. It changes nothing while Step 1 is on.
+    paint_requested_at   = Column(DateTime, nullable=True)
+
     # rerun_hold_at and prompt_round_id were PROMPT TEST MODE's two marks
     # (v249). The mode was REMOVED in v264 — prompts are tested on the
     # laptop instead (../site_prompt_tester). The columns stay in existing
@@ -1205,6 +1216,33 @@ class ProcessedImage(Base):
     # was done" are different facts, and the whole point is to compare them.
     background_chosen = Column(String(16), nullable=True)
 
+    # ── STEP 2: THE FLATTEN, MADE FROM A PAINTING (v266) ────────────────
+    #
+    # `stage` NULL (or 1) is a PAINTING — the step-1 picture made from the
+    # worker's photo. 2 is a STEP-2 picture: the owner's flatten prompt run
+    # over one painting (owner, 2026-10-28). A step-2 row is an ordinary
+    # generation in every other way — reviewed, edited in Photopea, approved
+    # into a signed print file — so it lives in this table rather than a new
+    # one, and every screen that already understands generations understands
+    # it. Its `master_path` is the picture exactly as OpenAI returned it
+    # (opaque), so `_build_print_file` builds it unchanged.
+    #
+    # `step2_from` is the painting it was made from. The owner can redo step
+    # 2 from ANY painting version of the poster (v1, v2, …) instead of paying
+    # for a new painting, so which one this came from is a fact worth keeping.
+    #
+    # review_status gains two words, and only PAINTINGS wear them:
+    #   'step2'   — waiting for step 2 (or in a batch at OpenAI right now —
+    #               an open AIBatchItem says which). Never on Approve Artwork.
+    #   'painted' — went through step 2; kept, with its files, as a source
+    #               for "redo step 2 from this version".
+    # `step2_attempts` / `step2_error` count and explain failed tries on the
+    # painting, the same way process_attempts / process_error do on a poster.
+    stage           = Column(Integer, nullable=True)
+    step2_from      = Column(Integer, nullable=True)
+    step2_attempts  = Column(Integer, nullable=False, default=0)
+    step2_error     = Column(Text, nullable=True)
+
     saved_poster = relationship("SavedPoster")
 
     __table_args__ = (
@@ -1640,3 +1678,67 @@ class ListingSweep(Base):
 
 # PROMPT TEST MODE's three tables (prompt_test_prompts, _rounds, _items)
 # were removed with the mode in v264. Existing databases keep them, unread.
+
+
+class AIBatch(Base):
+    """
+    One OpenAI Batch API job: a file of painting (step 1) or flatten (step 2)
+    requests handed to OpenAI at half price, answered within 24 hours (v266).
+
+    ════════════════════════════════════════════════════════════════════════
+    THE WORK IN FLIGHT IS THE ITEMS, NOT A COUNTER
+    ════════════════════════════════════════════════════════════════════════
+    No column here counts what is finished. OpenAI reports its own
+    `request_counts`, which are copied into `total` / `done` / `failed` purely
+    so the screen can show progress — and labelled as OpenAI's. Whether a
+    picture is waiting at OpenAI is asked of AIBatchItem (an item with no
+    `finished_at` on a batch not yet collected), never of a number somebody
+    has to keep in step.
+
+    `status` is OpenAI's own word (validating, in_progress, finalizing,
+    completed, failed, expired, cancelling, cancelled), plus two of ours:
+    'sending' while the file goes up, and 'send_failed' when it never got
+    there — in which case every item was put straight back in the queue.
+    `collected_at` is when its results were filed; a batch is OPEN until then.
+    """
+    __tablename__ = "ai_batches"
+
+    id              = Column(Integer, primary_key=True)
+    project_id      = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    stage           = Column(Integer, nullable=False)          # 1 painting, 2 flatten
+    model           = Column(String(64), nullable=True)
+    openai_batch_id = Column(String(96), nullable=True, index=True)
+    input_file_id   = Column(String(96), nullable=True)
+    output_file_id  = Column(String(96), nullable=True)
+    error_file_id   = Column(String(96), nullable=True)
+    status          = Column(String(24), nullable=False, default="sending", index=True)
+    # OpenAI's own counts, copied for the progress line. Display only.
+    total           = Column(Integer, nullable=False, default=0)
+    done            = Column(Integer, nullable=False, default=0)
+    failed          = Column(Integer, nullable=False, default=0)
+    error           = Column(Text, nullable=True)
+    created_at      = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    expires_at      = Column(DateTime, nullable=True)
+    last_checked_at = Column(DateTime, nullable=True)
+    collected_at    = Column(DateTime, nullable=True, index=True)
+    cancel_requested_by = Column(String(64), nullable=True)
+
+
+class AIBatchItem(Base):
+    """
+    One picture inside an AIBatch. `saved_poster_id` always; for step 2 also
+    `processed_id`, the PAINTING being flattened. `outcome` is set when the
+    batch is collected: 'filed', 'failed', 'retry' (sent back to the queue)
+    or 'dropped' (the picture changed while it was away, so the answer was
+    not filed — see ai_batches.collect for each case).
+    """
+    __tablename__ = "ai_batch_items"
+
+    id              = Column(Integer, primary_key=True)
+    batch_id        = Column(Integer, ForeignKey("ai_batches.id"), nullable=False, index=True)
+    saved_poster_id = Column(Integer, ForeignKey("saved_posters.id"), nullable=False, index=True)
+    processed_id    = Column(Integer, nullable=True, index=True)
+    custom_id       = Column(String(64), nullable=False)
+    outcome         = Column(String(16), nullable=True)
+    error           = Column(Text, nullable=True)
+    finished_at     = Column(DateTime, nullable=True)

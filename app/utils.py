@@ -450,11 +450,12 @@ def withdrawn_picture_paintings(db):
     """
     from sqlalchemy import or_
     from .models import ProcessedImage, SavedPoster
+    from .pipeline import WAITING_REVIEW_STATES
     return (db.query(ProcessedImage)
               .join(SavedPoster, ProcessedImage.saved_poster_id == SavedPoster.id)
               .filter(SavedPoster.deleted_at.isnot(None),
                       or_(ProcessedImage.is_current == 1,
-                          ProcessedImage.review_status.in_(("pending", "held")))))
+                          ProcessedImage.review_status.in_(WAITING_REVIEW_STATES))))
 
 
 def set_aside_withdrawn_paintings(db) -> int:
@@ -469,10 +470,11 @@ def set_aside_withdrawn_paintings(db) -> int:
     this repairs what the door had already written — fixing a door never
     repairs the rows it wrote. Idempotent: a clean database changes nothing.
     """
+    from .pipeline import WAITING_REVIEW_STATES
     changed = 0
     for pi in withdrawn_picture_paintings(db).all():
         pi.is_current = 0
-        if (pi.review_status or "") in ("pending", "held"):
+        if (pi.review_status or "") in WAITING_REVIEW_STATES:
             pi.review_status = "superseded"
         changed += 1
     return changed

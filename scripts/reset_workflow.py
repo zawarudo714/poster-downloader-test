@@ -55,7 +55,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.config import BACKUPS_DIR, DB_PATH, WORKSPACE_DIR          # noqa: E402
 from app.db import SessionLocal                                      # noqa: E402
 from app.models import (                                             # noqa: E402
-    ActivityLog, ChatMessage, ChatReadState, ImportJob, LedgerEntry,
+    AIBatch, AIBatchItem, ActivityLog, ChatMessage, ChatReadState, ImportJob, LedgerEntry,
     ListingSweep, MarketplaceSnapshot, MasterTitle, PaymentRun, PipelineJob,
     ProcessedImage, Revision, SavedPoster, SearchCache, TitleAlias,
     UploadTracking, User,
@@ -190,6 +190,9 @@ def reset(db, *, wipe_titles: bool, dry_run: bool) -> None:
     # but deleting children first keeps the log sensible if it's interrupted.
     tables = [
         ("upload tracking",  UploadTracking),
+        # Batches at OpenAI describe paintings this reset deletes (v266).
+        ("batch items",      AIBatchItem),
+        ("batches",          AIBatch),
         ("processed images", ProcessedImage),
         ("pipeline jobs",    PipelineJob),
         ("revisions",        Revision),

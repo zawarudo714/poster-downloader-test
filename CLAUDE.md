@@ -1038,7 +1038,11 @@ app/
   brave_search.py      Query building and the image search. `{title}` is the
                        placeholder; `{artist}` is a legacy alias.
   gpt_worker.py        Image generation, on THIS server. Started only if a
-                       project declares processor='gpt'.
+                       project declares processor='gpt'. Step 1 (painting)
+                       and step 2 (the flatten, v266), one at a time.
+  ai_batches.py        The same two steps sent as OpenAI BATCHES — half
+                       price, within 24 h. Send, poll, collect; every exit
+                       puts its pictures back (v266).
   listing_check.py     Is what we think is live on FineArtAmerica actually
                        there? 410 means removed, 404 means our ADDRESS is
                        wrong. Never collapse the two.
@@ -1053,6 +1057,8 @@ app/
   static/js/           One file per page, vanilla JS, no build step.
 
 worker_service/        Runs on the Windows VPS. agent.py is the loop.
+                       listing_swap.py swaps the picture on a LIVE listing
+                       (the 417, v266) — delete it once they are done.
                        Updated by COPYING THE FOLDER, which has no receipt —
                        so AGENT_VERSION is bumped whenever anything in here
                        changes, and read back on the Nodes tab.
@@ -1607,6 +1613,14 @@ because the fetch was still there. **Say which check you expect to go red
 before you break anything**, or you will confirm a check that was never
 looking.
 
+**A TEST OF A REFUSAL NEEDS A POSITIVE CONTROL FIRST.** v266's test that
+the uploader refuses a row whose picture went to step 2 stayed green with
+the guard DELETED: the quiet window had closed intake at 22:00 in the
+sandbox, so nothing at all was claimable and "nothing was claimed" proved
+nothing. Sabotage found it. Before asserting that X is refused, assert in
+the same test that an ordinary Y IS accepted — otherwise the test cannot
+tell a working guard from a closed door.
+
 **A TEST MUST NOT BE HANDED THE RULE IT IS CHECKING.** The archive tests
 lift two functions out of the shipped file and were passed `FOLDER_ID` — the
 pattern that decides which title a path belongs to — as a convenience. Break
@@ -2157,6 +2171,10 @@ cancelled, those 8 were handed out again, and the second attempt failed with
 in this repo; nobody compared them.
 
 So: **ask a job whether it is ALIVE, never how long it has been going.**
+A picture sent in an OpenAI BATCH (v266) may honestly take 24 hours, so its
+claim carries NO claim time at all — the reaper only frees claims with one
+— and its liveness is the batch row instead, watched by
+`check_batch_claims_have_an_open_batch` and repaired at start-up.
 Liveness is the last thing it SAID — `PipelineJob.last_report_at`, stamped
 by `append_job_log`. `started_at` is only the fallback for something that
 never reported at all. And whenever you add a timeout, find the longest
@@ -2537,6 +2555,16 @@ is.** A flag beside a path is two records of one fact, which is this very
 rule wearing its usual clothes — and the emptiness is also what the rebuild
 reads to decide whether it has work to do, so there is one thing to keep
 correct rather than two.
+
+And the mirror image, found while building step 2 (v266): approval DELETES
+the losing generations' files, and two rows of one poster can name the SAME
+path — an edit built at approval takes its family's print-file name, which
+is its parent's own. Delete the loser's copy after building the winner and
+the file just built is gone; for one of the 417 that path was the LIVE print
+file. Approval now never deletes a path the kept row uses, and step-2
+pictures get their own family of names (`X_step2.png` / `.jpg`). When a
+clean-up deletes "the other rows' files", ask whether any of those paths is
+also the survivor's.
 
 So: **keeping the record is not keeping the thing.** Whenever you write to
 a path built from a rule rather than from a unique key, ask what else in the

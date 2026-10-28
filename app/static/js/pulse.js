@@ -81,6 +81,9 @@
     var doing = [];
     if (n.processing) doing.push(n.processing + ' painting');
     if (n.uploading) doing.push(n.uploading + ' uploading');
+    // Pictures in a BATCH at OpenAI (v266): sent and paid for, answered
+    // within 24 hours — not the machine working this second, so said apart.
+    if (n.at_openai) doing.push(n.at_openai + ' at OpenAI (batch)');
     (n.jobs || []).forEach(function (word) { doing.push(word); });
     bits.push(chip(doing.length ? 'busy' : 'idle', 'doing now',
       doing.length ? doing.join(' · ') : 'nothing',
@@ -96,7 +99,13 @@
     // day. The chip is only drawn when there IS a queue, so a quiet system
     // stays quiet.
     var waiting = [];
-    if (n.to_process) waiting.push(n.to_process + ' to paint');
+    if (n.to_process) {
+      // Step 1 switched off (v266): the number is waiting on purpose, and
+      // says so, rather than reading as a jam.
+      waiting.push(n.to_process + ' to paint'
+        + ((n.step1_off && n.step1_off.length) ? ' (step 1 is OFF)' : ''));
+    }
+    if (n.to_step2) waiting.push(n.to_step2 + ' for step 2');
     if (n.to_upload) waiting.push(n.to_upload + ' to upload');
     if (waiting.length) {
       bits.push(chip('queue', 'waiting', waiting.join(' · '),

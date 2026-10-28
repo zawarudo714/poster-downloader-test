@@ -60,7 +60,8 @@ from ..models import (
     ImportJob, MasterTitle, PaymentRun, ProcessedImage, Project, Revision,
     SavedPoster, UploadAccount, UploadTracking, User, UserProject,
 )
-from ..pipeline import ensure_default_project, pull_back_pictures
+from ..pipeline import (WAITING_REVIEW_STATES, ensure_default_project,
+                        pull_back_pictures)
 from ..projects import (
     active_project, allowed_projects, project_by_slug, remember_project,
     scope_titles, set_project_cookie,
@@ -191,9 +192,37 @@ def api_pulse(request: Request, admin: User = Depends(require_admin),
     offline = [n.name for n in nodes
                if not (n.last_seen_at and n.last_seen_at > stale_after)]
 
+    # A painting sitting in a BATCH at OpenAI is 'processing' too, but it is
+    # not the machine working this second — it may be a day away. Counted
+    # apart, so "1,142 painting" never reads as a busy machine (v266).
     processing_now = (db.query(func.count(SavedPoster.id))
                         .filter(SavedPoster.pipeline_status == "processing",
+                                or_(SavedPoster.claimed_by.is_(None),
+                                    ~SavedPoster.claimed_by.like("batch:%")),
                                 SavedPoster.deleted_at.is_(None)).scalar() or 0)
+    from ..models import AIBatch, AIBatchItem, Project as _Project
+    at_openai = (db.query(func.count(SavedPoster.id))
+                   .filter(SavedPoster.pipeline_status == "processing",
+                           SavedPoster.claimed_by.like("batch:%"),
+                           SavedPoster.deleted_at.is_(None)).scalar() or 0) \
+        + (db.query(func.count(AIBatchItem.id))
+             .join(AIBatch, AIBatch.id == AIBatchItem.batch_id)
+             .filter(AIBatch.stage == 2, AIBatch.collected_at.is_(None),
+                     AIBatchItem.outcome.is_(None)).scalar() or 0)
+    step2_waiting = max(0, (db.query(func.count(ProcessedImage.id))
+                              .join(SavedPoster, ProcessedImage.saved_poster_id == SavedPoster.id)
+                              .filter(ProcessedImage.is_current == 1,
+                                      ProcessedImage.review_status == "step2",
+                                      SavedPoster.deleted_at.is_(None)).scalar() or 0)
+                        - (db.query(func.count(AIBatchItem.id))
+                             .join(AIBatch, AIBatch.id == AIBatchItem.batch_id)
+                             .filter(AIBatch.stage == 2, AIBatch.collected_at.is_(None),
+                                     AIBatchItem.outcome.is_(None)).scalar() or 0))
+    # Projects whose STEP 1 is switched off, so "N to paint" can say why it
+    # is not moving instead of looking like a jam.
+    step1_off = [p.name for p in db.query(_Project).filter(
+                     _Project.is_active == 1, _Project.processor == "gpt").all()
+                 if not P.step1_open(db, p)]
     uploading_now = (db.query(func.count(UploadTracking.id))
                        .filter(UploadTracking.status == "uploading")
                        .scalar() or 0)
@@ -247,6 +276,7 @@ def api_pulse(request: Request, admin: User = Depends(require_admin),
         # is the more useful number — "3 painting" beats "1 paint job".
         SAY = {
             "listing_check":   "checking listings",
+            "listing_swap":    "swapping listing pictures",
             "earnings_read":   "reading the money",
             "profile_cleanup": "tidying a browser profile",
             "test_download":   "running a download test",
@@ -492,6 +522,12 @@ def api_pulse(request: Request, admin: User = Depends(require_admin),
             "uploading": uploading_now,
             "to_process": process_waiting,
             "to_upload": upload_waiting,
+            # v266: pictures in a batch at OpenAI (both steps), paintings
+            # waiting to be sent to step 2, and which projects have step 1
+            # switched off — so a still "to paint" number explains itself.
+            "at_openai": at_openai,
+            "to_step2": step2_waiting,
+            "step1_off": step1_off,
             # EVERY OTHER JOB THE MACHINE DOES. The two counts above are
             # PICTURES in a state, so they can only ever describe painting
             # and uploading. The machine also runs the listing check, the
@@ -2556,7 +2592,7 @@ def _withdraw_pictures(db: Session, posters: list, *, note: str,
         for pi in (db.query(ProcessedImage)
                      .filter(ProcessedImage.saved_poster_id == sp.id).all()):
             pi.is_current = 0
-            if (pi.review_status or "") in ("pending", "held"):
+            if (pi.review_status or "") in WAITING_REVIEW_STATES:
                 pi.review_status = "superseded"
         # Clean the title folder if this emptied it — same as a worker delete.
         title_dir = fs_path.parent

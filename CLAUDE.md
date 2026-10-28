@@ -202,6 +202,18 @@ its code**, and rename the fields, classes and payload keys it left behind.
 Same rule as deleting a capability rather than disabling it (5b), applied to
 words.
 
+**And grep for the deleted FILE's name too, because an import inside a
+function is only resolved when it runs.** Deleting `routes/store_admin.py`
+with TeePublic (v147, 2026-09-06) left two jobs in the scheduler importing
+it. Each sat in a broad `except Exception`, so a missing file became a
+traceback in the server log every minute for seven weeks, instead of a
+failure anyone saw; it was found only by reading that log while checking
+v266. The untested assumption was "if a file were missing, startup would
+fail". Now mechanical: `check_imports_resolve` in `preflight.py` fails any
+import of our own code that names a missing file or a missing name inside
+one, wherever the import sits. Sabotage-tested with the old lines and with
+a misspelt name.
+
 **AND THE WORST PLACE IT HIDES IS A FALLBACK, WHERE NOTHING IS WRONG UNTIL
 THE DAY IT IS.** That grep was run on 2026-09-09 and called done. On
 2026-09-10 the owner opened a delete dialog reading *"Only 0 usable posters
@@ -2792,6 +2804,21 @@ launch left every item at 'uploading' with the reason written only to a
 console on an unattended VPS. The reaper released them, the next cycle
 claimed them, and it stranded them again — forever, looking alive the whole
 time.
+
+**A MARK THAT DECIDES WHETHER WORK IS PICKED UP IS SPENT WHEN THE WORK
+ENDS, NEVER WHEN IT IS TAKEN.** With step 1 off, `paint_requested_at` (the
+"named by hand" mark) is the only thing that lets a picture be painted.
+v266 cleared it at the claim — the live call and the batch claim both. So
+every exit that is not "painted" — a temporary error, a refused or stopped
+batch, a restart, RELEASE — put the picture back in the queue WITHOUT the
+mark, where it waited silently until step 1 was switched on, while the
+screen said it "went back in the queue". Found by the v267 site audit; the
+95 pictures of TO_TEST 113 would have hit it the first time OpenAI refused
+a batch. Fixed in v268: the mark is cleared only in `file_painting()` and
+at a FINAL `record_paint_failure()`; preflight's "hand-named mark ends with
+the painting" fails on any other place that clears it. The test to apply:
+**list the exits that lead back to the queue, and ask what each one leaves
+the item carrying.**
 
 **Catching an exception into a COUNTER is the same defect wearing a third
 hat.** The store scan wrapped each account in try/except, added 1 to

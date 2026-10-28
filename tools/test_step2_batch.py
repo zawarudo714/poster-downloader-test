@@ -198,8 +198,8 @@ ok(len(lines1) == 1 and f"-p{retried.id}-" in lines1[0]["custom_id"],
    "step 1 batch (step 1 OFF) carries only the picture named by hand")
 db.refresh(retried)
 ok(retried.pipeline_status == "processing" and retried.claimed_by == f"batch:{b1.id}"
-   and retried.claimed_at is None and retried.paint_requested_at is None,
-   "a batch painting is claimed with NO claim time (the reaper cannot free it), mark spent")
+   and retried.claimed_at is None and retried.paint_requested_at is not None,
+   "a batch painting is claimed with NO claim time (the reaper cannot free it), mark KEPT while away")
 P.reap_stale_claims(db); db.commit(); db.refresh(retried)
 ok(retried.pipeline_status == "processing", "the stale-claim reaper leaves a batch claim alone")
 ok(GW.step2_queue(db, proj).count() == 0, "paintings at OpenAI are not sent twice")
@@ -258,6 +258,7 @@ ok(pi_old.review_status == "step2_failed" and "safety" in (pi_old.step2_error or
    "a refused line parks the painting on Needs Attention with OpenAI's words")
 db.refresh(retried)
 new_painting = db.query(M.ProcessedImage).filter_by(saved_poster_id=retried.id, is_current=1).one()
+ok(retried.paint_requested_at is None, "the hand-named mark is spent when the painting is filed")
 ok(retried.pipeline_status == "processed" and new_painting.review_status == "step2",
    "a batch PAINTING is filed and goes straight on to step 2")
 
@@ -283,6 +284,8 @@ ok(AB.recover_unsent(db) == 1, "a send cut short by a restart is found at start-
 db.commit(); db.refresh(p_s); db.refresh(bx)
 ok(p_s.pipeline_status == "greenlit" and bx.status == "send_failed",
    "its picture is back in the queue and the batch says why")
+ok(p_s.paint_requested_at is not None and p_s.id in {sp.id for sp, _t in GW.paint_queue(db, proj).all()},
+   "step 1 OFF: a hand-named picture back from a cut-short send keeps its mark and is painted again")
 p_s.pipeline_status = "processing"; p_s.claimed_by = "batch:999"; db.commit()
 chk = D.check_batch_claims_have_an_open_batch(db, D.Scope(db, proj.id))
 ok(chk.count == 1 and chk.severity == "error", "Diagnostics: a picture held by a closed batch is an error")
@@ -309,6 +312,27 @@ last = db.query(M.AIBatch).order_by(M.AIBatch.id.desc()).first()
 ok(p_r.pipeline_status == "greenlit" and last.status == "send_failed"
    and last.error.startswith("[refused]"), "a refused send puts every picture back and records why")
 ok(AB._recently_refused(db, proj, 1), "and is not retried for an hour")
+ok(p_r.paint_requested_at is not None and p_r.id in {sp.id for sp, _t in GW.paint_queue(db, proj).all()},
+   "step 1 OFF: a hand-named picture from a REFUSED batch keeps its mark (TO_TEST 113's 95)")
+
+# ── THE LIVE CALL'S FAILURES: the mark lasts exactly as long as the tries ──
+t8, p_t = picture("greenlit"); p_t.paint_requested_at = datetime.utcnow(); db.commit()
+taken, _t = GW._claim_next(db, proj)
+ok(taken is not None and taken.pipeline_status == "processing" and taken.paint_requested_at is not None,
+   "the live call takes a hand-named picture and the mark stays")
+taken.pipeline_status = "greenlit"; taken.claimed_by = None; taken.claimed_at = None
+p_t.pipeline_status = "processing"; p_t.claimed_by = "server"; db.commit()
+GW.record_paint_failure(db, p_t, t8, proj, G.TransientFailure("timeout")); db.commit()
+ok(p_t.pipeline_status == "greenlit" and p_t.paint_requested_at is not None
+   and p_t.id in {sp.id for sp, _t in GW.paint_queue(db, proj).all()},
+   "a temporary error puts it back in the queue STILL MARKED")
+p_t.process_attempts = 99; p_t.pipeline_status = "processing"; db.commit()
+GW.record_paint_failure(db, p_t, t8, proj, G.TransientFailure("timeout")); db.commit()
+ok(p_t.pipeline_status == "failed_processing" and p_t.paint_requested_at is None,
+   "past the last try the mark ends, so the panel stops counting it as waiting")
+t9, p_p = picture("greenlit"); p_p.paint_requested_at = datetime.utcnow(); db.commit()
+GW.record_paint_failure(db, p_p, t9, proj, G.PermanentFailure("no", kind="moderation")); db.commit()
+ok(p_p.paint_requested_at is None, "a permanent refusal ends the mark too (RETRY sets it again)")
 
 # ── NAMING: a redo of step 2 never overwrites the first ────────────────────
 names = GW.step2_names(db, t1, p_pending, pi_pending, proj)

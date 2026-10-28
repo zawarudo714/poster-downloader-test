@@ -286,39 +286,12 @@ def _scheduler_loop():
             except Exception:
                 log.exception("Earnings read failed")
 
-            # ── Is a listing sweep waiting to try again? ─────────────────
-            # A wall or a maintenance page makes a sweep sleep rather than
-            # give up. Nothing else would ever wake it: the node cannot
-            # queue its own work, so the clock has to live here.
-            try:
-                from .db import SessionLocal
-                from .routes.store_admin import wake_due_retries
-                _db = SessionLocal()
-                try:
-                    wake_due_retries(_db)
-                finally:
-                    _db.close()
-            except Exception:
-                log.exception("Listing-sweep retry failed")
-
-            # ── Is a listing sweep stuck with nothing working on it? ─────
-            # The worker machine rebooting mid-account leaves a run in
-            # `deactivating` for ever, holding Photoshop and the uploads all
-            # night while the screen shows work in progress. Nothing else
-            # notices: the node cannot report a crash it did not survive.
-            # Separate try from the retry above so one failing cannot stop
-            # the other.
-            try:
-                from .db import SessionLocal
-                from .routes.store_admin import sweep_stalled_runs
-                _db = SessionLocal()
-                try:
-                    for note in sweep_stalled_runs(_db):
-                        log.warning("Stalled listing run repaired — %s", note)
-                finally:
-                    _db.close()
-            except Exception:
-                log.exception("Stalled listing-run sweep failed")
+            # (The TeePublic store-listing retry and stall sweeps lived here
+            # until v267. Their module, routes/store_admin.py, was deleted
+            # with TeePublic in v147, and both blocks then failed with a
+            # traceback every minute for seven weeks — the try/except around
+            # them turned a missing file into log noise. Preflight's
+            # "imports point at real files" now fails on that shape.)
 
             # ── Is a marketplace listing sweep stuck? ────────────────────
             # Same invariant, different feature: a sweep that says "running"

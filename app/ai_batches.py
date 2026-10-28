@@ -369,8 +369,7 @@ def _send_one_file(db: Session, project, *, stage: int, model: str,
                            SavedPoster.pipeline_status.in_(("greenlit", "failed_processing")))
                    .update({SavedPoster.pipeline_status: "processing",
                             SavedPoster.claimed_by: f"batch:{batch.id}",
-                            SavedPoster.claimed_at: None,
-                            SavedPoster.paint_requested_at: None},
+                            SavedPoster.claimed_at: None},
                            synchronize_session=False))
             if n != 1:
                 continue

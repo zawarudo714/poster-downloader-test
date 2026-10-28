@@ -405,6 +405,171 @@ def check_module_attributes() -> None:
                      f"{base}.{node.attr} does not exist in {module}.py")
 
 
+def _names_bound_at_module_level(tree) -> set[str] | None:
+    """
+    Every name a module binds outside its functions and classes, including
+    inside module-level `if` / `try` blocks. None when the module can bind
+    names this cannot see (`import *`, or a module-level `__getattr__`).
+    """
+    names: set[str] = set()
+
+    def visit(stmts) -> bool:
+        for n in stmts:
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef,
+                              ast.ClassDef)):
+                names.add(n.name)
+                if n.name == "__getattr__":
+                    return False
+            elif isinstance(n, (ast.Import, ast.ImportFrom)):
+                for a in n.names:
+                    if a.name == "*":
+                        return False
+                    names.add((a.asname or a.name).split(".")[0])
+            elif isinstance(n, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+                targets = n.targets if isinstance(n, ast.Assign) else [n.target]
+                for t in targets:
+                    for leaf in ast.walk(t):
+                        if isinstance(leaf, ast.Name):
+                            names.add(leaf.id)
+            elif isinstance(n, (ast.If, ast.Try, ast.With, ast.For)):
+                for field in ("body", "orelse", "finalbody"):
+                    if not visit(getattr(n, field, [])):
+                        return False
+                for h in getattr(n, "handlers", []):
+                    if not visit(h.body):
+                        return False
+        return True
+
+    return names if visit(tree.body) else None
+
+
+def check_imports_resolve() -> None:
+    """
+    An import of one of OUR modules that names a file, or a name in it, that
+    no longer exists.
+
+    Python only resolves an import when the line RUNS. Most of this app's
+    cross-module imports sit inside functions, to dodge import cycles, so a
+    deleted file is not noticed at startup — and when the import is wrapped
+    in a broad `except Exception`, it is never noticed at all. That is how
+    the TeePublic removal (v147, 2026-09-06) left two scheduler jobs
+    importing `routes.store_admin` and logging a traceback every minute for
+    seven weeks, found only by reading the server log during the v266 check.
+
+    Relative imports are resolved from the file's own folder; absolute ones
+    only when they start with `app.` (the scripts and tools import that way).
+    Third-party imports are not checked — that needs importing, which a
+    preflight should not do.
+    """
+    bound_cache: dict[Path, set[str] | None] = {}
+
+    def bound(path: Path):
+        if path not in bound_cache:
+            try:
+                bound_cache[path] = _names_bound_at_module_level(
+                    ast.parse(path.read_text(encoding="utf-8")))
+            except SyntaxError:
+                bound_cache[path] = None
+        return bound_cache[path]
+
+    def module_file(base: Path, dotted: str) -> Path | None:
+        target = base.joinpath(*dotted.split(".")) if dotted else base
+        if target.with_suffix(".py").is_file() and dotted:
+            return target.with_suffix(".py")
+        if (target / "__init__.py").is_file():
+            return target / "__init__.py"
+        return None
+
+    files = py_files() + sorted((ROOT / "tools").glob("*.py"))
+    for path in files:
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue
+        where = path.relative_to(ROOT)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            mod = node.module or ""
+            if node.level:
+                base = path.parent
+                for _ in range(node.level - 1):
+                    base = base.parent
+            elif mod == "app" or mod.startswith("app."):
+                base = ROOT
+            else:
+                continue
+            spelt = "." * node.level + mod
+            target = module_file(base, mod)
+            if target is None:
+                fail(f"{where}:{node.lineno}: imports from {spelt}, "
+                     f"which is not a file in this repo")
+                continue
+            names = bound(target)
+            pkg_dir = target.parent if target.name == "__init__.py" else None
+            for a in node.names:
+                if a.name == "*":
+                    continue
+                if pkg_dir is not None and module_file(pkg_dir, a.name):
+                    continue                     # a submodule of the package
+                if names is None or a.name in names:
+                    continue
+                fail(f"{where}:{node.lineno}: imports {a.name} from {spelt}, "
+                     f"and {target.relative_to(ROOT)} has no such name")
+
+
+# Where a picture's painting ENDS — filed, or past its last try. The only two
+# places allowed to spend the hand-named mark.
+PAINT_MARK_SPENT_IN = {
+    ("app/gpt_worker.py", "file_painting"),
+    ("app/gpt_worker.py", "record_paint_failure"),
+}
+
+
+def check_paint_mark_spent_where_painting_ends() -> None:
+    """
+    `SavedPoster.paint_requested_at` set back to None anywhere but where a
+    painting ends.
+
+    With step 1 off, that mark is the ONLY thing that lets a picture be
+    painted. v266 spent it when a picture was TAKEN — by the live call and by
+    the batch claim — so every way back to the queue (a temporary error, a
+    refused or stopped batch, a restart, RELEASE) returned the picture
+    unmarked, and it then waited, silently, until step 1 was switched on.
+    Found by the v267 site audit, not by anything that runs. A mark that
+    decides whether work is picked up is spent when the work ends.
+    """
+    def is_mark(n) -> bool:
+        return isinstance(n, ast.Attribute) and n.attr == "paint_requested_at"
+
+    def is_none(n) -> bool:
+        return isinstance(n, ast.Constant) and n.value is None
+
+    def walk(node, func, where):
+        for child in ast.iter_child_nodes(node):
+            inner = (child.name if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+                     else func)
+            spent = False
+            if isinstance(child, ast.Assign) and is_none(child.value):
+                spent = any(is_mark(t) for t in child.targets)
+            elif isinstance(child, ast.Dict):
+                spent = any(k is not None and is_mark(k) and is_none(v)
+                            for k, v in zip(child.keys, child.values))
+            if spent and (where, func) not in PAINT_MARK_SPENT_IN:
+                fail(f"{where}:{child.lineno}: clears the hand-named mark "
+                     f"(paint_requested_at) in {func or 'module code'}; it may "
+                     f"only end where the painting ends — file_painting() or "
+                     f"record_paint_failure()")
+            walk(child, inner, where)
+
+    for path in py_files():
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue
+        walk(tree, None, path.relative_to(ROOT).as_posix())
+
+
 def _module_level_defs(tree):
     """
     Module-level functions in one file, as {name: (min_pos, max_pos, names,
@@ -3673,6 +3838,8 @@ CHECKS = [
     ("settings reachable on the dashboard", check_settings_are_reachable),
     ("activity log calls valid",  check_activity_log_calls),
     ("cross-module calls exist",  check_module_attributes),
+    ("imports point at real files", check_imports_resolve),
+    ("hand-named mark ends with the painting", check_paint_mark_spent_where_painting_ends),
     ("calls pass the right arguments", check_call_arity),
     ("javascript parses",         check_js_parses),
     ("template tags balance",     check_template_tags_balance),

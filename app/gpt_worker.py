@@ -161,14 +161,18 @@ def record_paint_failure(db: Session, poster, title, project, err) -> None:
         poster.process_error = f"[{err.kind}] {err}"
         # Attempts pushed past the cap so no automatic retry can pick it up.
         poster.process_attempts = 999
+        # The hand-named mark ends with the painting's last try. RETRY on
+        # Needs Attention sets it again (v268).
+        poster.paint_requested_at = None
         log.warning("GPT permanently rejected poster %s: %s", poster.id, err)
     else:
-        poster.pipeline_status = "greenlit"     # back in the queue
+        poster.pipeline_status = "greenlit"     # back in the queue, mark kept
         poster.process_error = str(err)
         poster.process_attempts = (poster.process_attempts or 0) + 1
         max_attempts = int(get_setting(db, "process_max_attempts", project=project) or 3)
         if poster.process_attempts >= max_attempts:
             poster.pipeline_status = "failed_processing"
+            poster.paint_requested_at = None
         log.warning("GPT transient failure on poster %s: %s", poster.id, err)
     recompute_title_status(db, title)
 
@@ -385,6 +389,8 @@ def file_painting(db: Session, poster, title, project, gen) -> bool:
     poster.process_error = None
     poster.claimed_at = None
     poster.claimed_by = None
+    # Painted: the hand-named mark is spent here and nowhere earlier (v268).
+    poster.paint_requested_at = None
 
     if not gate:
         from .pipeline import ensure_upload_rows
@@ -653,8 +659,11 @@ def _claim_next(db: Session, project):
     poster.pipeline_status = "processing"
     poster.claimed_at = datetime.utcnow()
     poster.claimed_by = "server"
-    # A hand-named picture's mark is spent by being taken (v266).
-    poster.paint_requested_at = None
+    # A hand-named picture KEEPS its mark while it is out. It is spent in
+    # file_painting() or at a final record_paint_failure(), never here: every
+    # way back to the queue (a transient error, a refused or stopped batch,
+    # a restart, RELEASE) would otherwise return it unmarked, and with step 1
+    # off an unmarked picture is never painted (v268).
     db.commit()
     return poster, title
 

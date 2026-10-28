@@ -1444,6 +1444,41 @@ def check_open_revisions_on_deleted(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def check_closed_flags_stay_closed(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: a change request the admin closed stays closed.
+
+    Closing sets `resolved_at`; every admin path that re-opens a flag starts
+    from "awaiting approval", which never has one. Until v273 the worker's
+    "send with no change" flipped ANY flag, so a closed one could come back
+    as "awaiting approval" and hold its picture's pay and painting again.
+    The endpoint now takes only open flags; this watches every other path.
+    """
+    q = (
+        db.query(Revision, SavedPoster)
+          .join(SavedPoster, Revision.saved_poster_id == SavedPoster.id)
+          .filter(Revision.status != "resolved",
+                  Revision.resolved_at.isnot(None),
+                  scope.posters)
+    )
+    total = q.count()
+    rows = [
+        Finding(f"change request {rev.id} on picture record {sp.id}",
+                f"was closed, and is now '{rev.status}'", "/admin/revisions",
+                project=scope.label(_project_of(db, sp)))
+        for rev, sp in q.limit(MAX_ROWS).all()
+    ]
+    return _result(
+        "closed_flags_stay_closed",
+        f"{total} closed change request(s) came back open"
+        if total else "Every closed change request is still closed",
+        "You closed these, but they are open again. They hold the picture's "
+        "pay and painting until you close them again on the Changes "
+        "Requested page.",
+        "warn" if total else "ok", rows, total,
+    )
+
+
 def check_duplicate_hashes(db: Session, scope: Scope) -> CheckResult:
     """The identical file saved more than once."""
     dupes = (
@@ -2354,6 +2389,57 @@ def check_paid_ahead_pictures_settled(db: Session, scope: Scope) -> CheckResult:
         "offers to take the amount off (or let it go); either way it is "
         "settled once and does not come back.",
         "warn" if total else "ok", rows[:MAX_ROWS], total,
+    )
+
+
+def check_deductions_fit_their_payment(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: a payment never records more paid-ahead money as taken back
+    than the pictures it paid for were worth.
+
+    Until v272 the Payments box took the whole debt off, the amount stopped
+    at 0, and every owed picture was recorded as repaid — so a debt bigger
+    than the week's pay was partly forgiven with nothing on screen saying
+    so. MARK PAID now settles only what fits (admin.payments_mark_paid);
+    this reads the payment runs themselves, so a run written by any other
+    path is caught too. A waive is his decision and is not checked.
+    """
+    import json as _json
+    from decimal import Decimal, InvalidOperation
+    from .models import PaymentRun
+    rows, total = [], 0
+    for run in (db.query(PaymentRun)
+                  .filter(PaymentRun.advance_settled_json.isnot(None)).all()):
+        try:
+            settled = _json.loads(run.advance_settled_json)
+            if not settled.get("deducted"):
+                continue
+            taken = Decimal(str(settled.get("kes") or "0"))
+            by_project = _json.loads(run.by_project_json or "null")
+            gross = (sum(Decimal(str(p.get("subtotal") or "0"))
+                         for p in by_project.values())
+                     if by_project else
+                     Decimal(str(run.rate_kes or "0")) * (run.poster_count or 0))
+        except (TypeError, ValueError, AttributeError, InvalidOperation):
+            continue
+        if taken <= gross:
+            continue
+        total += 1
+        if len(rows) < MAX_ROWS:
+            rows.append(Finding(
+                f"Payment {run.id} to {run.worker_username}",
+                f"took back {taken} KES for paid-ahead pictures, but the "
+                f"pictures it paid for were worth only {gross} KES",
+                "/admin/payments"))
+    return _result(
+        "deductions_fit_their_payment",
+        f"{total} payment(s) took back more than they paid for"
+        if total else "No payment took back more than it paid for",
+        "Each of these payments recorded paid-ahead money as taken back, "
+        "but the payment was smaller than that money. The difference was "
+        "recorded as repaid when it was not. Check that worker's payments "
+        "and take the rest off a later payment by hand.",
+        "warn" if total else "ok", rows, total,
     )
 
 
@@ -3609,6 +3695,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_titles_hold_too_many_pictures,
     check_titles_are_paid_once,
     check_paid_ahead_pictures_settled,
+    check_deductions_fit_their_payment,
     check_admin_picks_reach_painting,
     check_kept_pictures_reach_painting,
     check_nothing_queued_without_a_look,
@@ -3636,6 +3723,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_orphan_files,
     check_complete_without_posters,
     check_open_revisions_on_deleted,
+    check_closed_flags_stay_closed,
     check_stale_claims,
     check_projects_match_registry,
     check_sheet_columns_all_or_nothing,

@@ -271,6 +271,8 @@
   let dialogRate = 0;
   let dialogNormal = { count: 0, total: 0 };   // the range as normally paid
   let dialogShort = { count: 0, kes: '0', items: [] };
+  let dialogShortText = '';  // the box's sentence before the "stays owed" part
+  let dialogTaking = [];     // the owed pictures this payment covers (settleNow)
 
   document.querySelectorAll('button[data-action="pay"]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -303,7 +305,7 @@
       if (dialogShort.count > 0) {
         shortWrap.hidden = false;
         shortTake.checked = true;
-        shortText.textContent =
+        shortText.textContent = dialogShortText =
           `Take ${dialogShort.kes} KES off this payment — ${dialogShort.count} ` +
           `paid-ahead ${dialogShort.count === 1 ? PD.noun : PD.nouns} ` +
           `${dialogShort.count === 1 ? 'was' : 'were'} later removed without pay. ` +
@@ -343,15 +345,40 @@
     });
   });
 
+  // The owed pictures a payment of `room` KES can cover, in the box's order,
+  // skipping any that no longer fit — the same list the server settles
+  // (admin.py mark_paid). Taking all of them stopped the amount at 0 and
+  // recorded the whole debt as repaid when it was bigger than the week's
+  // pay (site audit, 2026-10-29); the rest now stays owed for next time.
+  function settleNow(room) {
+    const out = [];
+    for (const i of dialogShort.items) {
+      const rate = parseFloat(i.rate) || 0;
+      if (rate <= room + 1e-9) { out.push(i); room -= rate; }
+    }
+    return out;
+  }
+
   function recomputeDialogTotal() {
     let extraCount = 0;
     backPayList.querySelectorAll('input[type="checkbox"]:checked').forEach((cb) => {
       extraCount += parseInt(cb.getAttribute('data-bp-count'), 10) || 0;
     });
     const totalCount = dialogBaseCount + extraCount;
-    const takeOff    = (dialogShort.count > 0 && shortTake.checked)
-      ? (parseFloat(dialogShort.kes) || 0) : 0;
-    const totalKes   = Math.max(dialogBaseTotal + (extraCount * dialogRate) - takeOff, 0);
+    const gross      = dialogBaseTotal + (extraCount * dialogRate);
+    dialogTaking     = (dialogShort.count > 0 && shortTake.checked)
+      ? settleNow(gross) : [];
+    const takeOff    = dialogTaking.reduce((s, i) => s + (parseFloat(i.rate) || 0), 0);
+    const totalKes   = Math.max(gross - takeOff, 0);
+    if (dialogShort.count > 0) {
+      const left = dialogShort.count - dialogTaking.length;
+      shortText.textContent = dialogShortText + ((shortTake.checked && left > 0)
+        ? ` This payment can only cover ${formatAmount(takeOff)} KES of it, so ` +
+          `${left} ${left === 1 ? PD.noun : PD.nouns} ` +
+          `(${formatAmount((parseFloat(dialogShort.kes) || 0) - takeOff)} KES) ` +
+          `${left === 1 ? 'stays' : 'stay'} owed and will be taken off next time.`
+        : '');
+    }
     backPaySummary.textContent =
       extraCount === 0
         ? 'No back-pay selected.'
@@ -431,8 +458,10 @@
     }
     if (aheadBox && aheadBox.checked) fd.append('pay_ahead', '1');
     // The paid-ahead pictures the box SHOWED — settled either way, once.
+    // A deduction settles only those this payment covers (settleNow).
     if (dialogShort.count > 0) {
-      fd.append('settle_ids', dialogShort.items.map((i) => i.poster_id).join(','));
+      const settling = shortTake.checked ? dialogTaking : dialogShort.items;
+      fd.append('settle_ids', settling.map((i) => i.poster_id).join(','));
       fd.append('settle_mode', shortTake.checked ? 'deducted' : 'waived');
     }
     dialogConfirm.disabled = true;

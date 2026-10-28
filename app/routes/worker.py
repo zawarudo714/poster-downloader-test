@@ -1904,8 +1904,9 @@ def _download_to(url: str, target_path: Path) -> int:
     counter until unused; replace writes to `.incoming`), so deleting it on
     failure can never destroy an existing good picture.
     """
+    from ..imagefetch import get_public   # checks every redirect hop (v271)
     try:
-        with requests.get(
+        with get_public(
             url,
             stream=True,
             timeout=DOWNLOAD_TIMEOUT_S,
@@ -2938,6 +2939,14 @@ def resolve_revision(
     sp = db.query(SavedPoster).filter_by(id=rev.saved_poster_id).first()
     if not sp or sp.user_id != user.id:
         raise HTTPException(403, "Not your revision.")
+    # Only an OPEN flag can be sent. This flipped any flag, so a closed one
+    # (an old page, a second click after the admin approved) went back on
+    # his list and held its picture's pay and painting again (site audit,
+    # 2026-10-29). Already sent is not an error: nothing changes.
+    if rev.status == "awaiting_approval":
+        return JSONResponse({"ok": True, "already": True})
+    if rev.status != "open":
+        raise HTTPException(409, "This flag is already closed. Reload the page.")
     rev.status = "awaiting_approval"
     rev.submitted_at = datetime.utcnow()
     rev.worker_note = worker_note.strip() or None

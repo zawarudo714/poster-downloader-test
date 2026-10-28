@@ -108,12 +108,57 @@ def sniff_format(head: bytes) -> str | None:
     return None
 
 
+MAX_REDIRECTS = 5
+
+
+class RedirectRefused(requests.RequestException):
+    """A website sent the download on to somewhere it may not go. A
+    RequestException, so every caller's existing "download failed" handling
+    shows it without a new branch."""
+
+
+def get_public(url: str, **kwargs) -> requests.Response:
+    """
+    `requests.get` that follows redirects ITSELF, checking every hop.
+
+    The callers check the address a person typed (`_validate_image_url`)
+    and then used to hand it to `requests.get`, which follows redirects on
+    its own — so a public page answering "302 → http://127.0.0.1/admin" or
+    "→ 169.254.169.254" made the server fetch its own network anyway, and
+    the internal-address check guarded only the first hop (audit,
+    2026-10-29). Each hop now goes through the same `_host_check`, and a
+    redirect to anything but http(s) is refused. Only the internal check is
+    repeated, not a project's host allow-list: a listed site sending its
+    picture on to its own CDN is normal.
+    """
+    from urllib.parse import urljoin, urlparse
+    from .routes.worker import _host_check
+
+    for _ in range(MAX_REDIRECTS + 1):
+        resp = requests.get(url, allow_redirects=False, **kwargs)
+        if not resp.is_redirect:
+            return resp
+        nxt = urljoin(url, resp.headers.get("Location", ""))
+        resp.close()
+        parsed = urlparse(nxt)
+        if parsed.scheme not in ("http", "https"):
+            raise RedirectRefused("the website sent the download on to an "
+                                  "address that is not a web address.")
+        verdict, message = _host_check(parsed.hostname or "")
+        if verdict != "public":
+            raise RedirectRefused(f"the website sent the download on to "
+                                  f"another address. {message}")
+        url = nxt
+    raise RedirectRefused(f"the website sent the download on more than "
+                          f"{MAX_REDIRECTS} times.")
+
+
 def download_bytes(url: str) -> bytes:
     """Stream a URL into memory with a hard size cap and a hard time cap."""
     import time
     deadline = time.monotonic() + TOTAL_S
     try:
-        with requests.get(
+        with get_public(
             url, stream=True, timeout=TIMEOUT_S,
             headers={"User-Agent": "Mozilla/5.0 PosterDownloader/1.0"},
         ) as resp:

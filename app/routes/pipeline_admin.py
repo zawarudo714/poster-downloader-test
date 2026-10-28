@@ -2375,6 +2375,15 @@ def _ai_counts(db: Session, project) -> dict:
                        SavedPoster.pipeline_status.in_(("greenlit", "failed_processing")),
                        SavedPoster.paint_requested_at.isnot(None), scope)
                .scalar() or 0)
+    # The photos Step 1 holds back while it is off: released, not named by
+    # hand. The panel once printed "N named · M other" with M counting the
+    # named ones a second time (site audit, 2026-10-29).
+    unnamed = (db.query(func.count(SavedPoster.id))
+                 .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+                 .filter(SavedPoster.deleted_at.is_(None),
+                         SavedPoster.pipeline_status == "greenlit",
+                         SavedPoster.paint_requested_at.is_(None), scope)
+                 .scalar() or 0)
     in_batch_1 = (db.query(func.count(SavedPoster.id))
                     .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
                     .filter(SavedPoster.pipeline_status == "processing",
@@ -2397,6 +2406,11 @@ def _ai_counts(db: Session, project) -> dict:
         # named by hand while Step 1 is off.
         "will_paint": paint_queue(db, project).count(),
         "named_by_hand": named,
+        "waiting_unnamed": unnamed,
+        # One send takes at most this many (ai_batches.send_due, step 2
+        # first), so "will paint" is NOT "in the next send" past it.
+        "send_cap": (max(1, int(P.get_setting(db, "batch_max_items", project=project) or 1))
+                     if P.batch_enabled(db, project) else None),
         "painting_in_batch": in_batch_1,
         "step2_waiting": max(0, step2_all - away2),
         "step2_in_batch": away2,
@@ -2461,6 +2475,13 @@ def api_ai_step2_retry(
     """
     from ..models import ProcessedImage as _PI
     project = _project(request, admin, db)
+    # Switched off, nothing sends a painting marked for step 2, and it is on
+    # no other screen — RETRY would hide it where Diagnostics' "step 2 work
+    # can move" is the only thing that sees it. Same refusal as the
+    # catch-up above (site audit, 2026-10-29).
+    if not P.step2_active(db, project):
+        raise HTTPException(409, "Step 2 is switched off for this project. "
+                                 "Switch it on first, then retry.")
     q = (db.query(_PI)
            .join(SavedPoster, _PI.saved_poster_id == SavedPoster.id)
            .filter(_PI.project_id == project.id, _PI.is_current == 1,

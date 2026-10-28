@@ -812,6 +812,77 @@ def check_setting_resets_name_their_scope() -> None:
                      f"server then clears the general one")
 
 
+# Pipeline-page buttons that spend money at OpenAI or change the marketplace
+# — `data-action` names in admin_pipeline.js. Each must ask before acting.
+SPENDS_OR_PUBLISHES = ("ai-step1-on", "ai-catchup", "ai-swap", "test-upload")
+
+
+def check_spending_buttons_ask_first() -> None:
+    """
+    A button that spends money or publishes, whose click handler has no
+    `confirm(`.
+
+    SWITCH STEP 1 ON started paying for every held-back photo in one click,
+    and RUN TEST UPLOAD published a real listing under a panel saying
+    "Nothing is marked uploaded" (site audit, 2026-10-29). Both now ask; a
+    new button of the kind goes into SPENDS_OR_PUBLISHES.
+    """
+    path = JS / "admin_pipeline.js"
+    if not path.is_file():
+        return
+    lines = path.read_text(encoding="utf-8").splitlines()
+    for name in SPENDS_OR_PUBLISHES:
+        start = next((n for n, l in enumerate(lines)
+                      if l.strip().startswith(f"case '{name}'")), None)
+        if start is None:
+            fail(f"admin_pipeline.js: no click handler `case '{name}'` — if the "
+                 f"button was renamed, rename it in SPENDS_OR_PUBLISHES too")
+            continue
+        end = next((n for n in range(start + 1, len(lines))
+                    if lines[n].strip().startswith("case '")), len(lines))
+        if not any("confirm(" in l for l in lines[start:end]):
+            fail(f"admin_pipeline.js:{start + 1}: the '{name}' button spends money "
+                 f"or publishes and does not ask first (confirm)")
+
+
+# The files where the server downloads an address a PERSON typed or picked.
+# Other outbound calls (OpenAI, Brave, Google Vision) go to fixed addresses.
+FETCHES_TYPED_ADDRESSES = ("imagefetch.py", "routes/worker.py")
+
+
+def check_typed_addresses_check_every_redirect() -> None:
+    """
+    A `requests.get` in a file that downloads typed addresses, without
+    `allow_redirects=False`.
+
+    Those addresses are checked against this server's own network before
+    the download. A plain `requests.get` then follows any redirect
+    unchecked, so a public page answering "302 → 127.0.0.1" got the server
+    to fetch its own network anyway — the check guarded only the first hop
+    until v271 (site audit, 2026-10-29). Download through
+    `imagefetch.get_public`, which follows redirects itself and checks
+    each one.
+    """
+    for rel in FETCHES_TYPED_ADDRESSES:
+        path = APP / rel
+        if not path.is_file():
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "requests"
+                    and node.func.attr in ("get", "request", "head", "post")):
+                continue
+            safe = any(k.arg == "allow_redirects"
+                       and isinstance(k.value, ast.Constant)
+                       and k.value.value is False for k in node.keywords)
+            if not safe:
+                fail(f"app/{rel}:{node.lineno}: requests.{node.func.attr}() "
+                     f"follows redirects without checking where they go — "
+                     f"download through imagefetch.get_public instead")
+
+
 def check_js_parses() -> None:
     if not JS.is_dir():
         return
@@ -3916,6 +3987,8 @@ CHECKS = [
     ("hand-named mark ends with the painting", check_paint_mark_spent_where_painting_ends),
     ("setting resets name their tier", check_setting_resets_name_their_scope),
     ("settings read without a project are site-wide", check_settings_read_without_a_project_are_site_wide),
+    ("typed addresses check every redirect", check_typed_addresses_check_every_redirect),
+    ("spending buttons ask first", check_spending_buttons_ask_first),
     ("calls pass the right arguments", check_call_arity),
     ("javascript parses",         check_js_parses),
     ("template tags balance",     check_template_tags_balance),

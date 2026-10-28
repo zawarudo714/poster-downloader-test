@@ -376,4 +376,32 @@ ok(float(P.get_setting(db, "upload_gap_hours")) == 7
    and float(P.all_settings(db, project=proj)["upload_gap_hours"]) == 7,
    "and the code that reads it with no project sees what was saved")
 
+# ── THE AI PANEL: counts and the RETRY STEP 2 guard (v273) ─────────────────
+t10, p_named = picture("greenlit"); p_named.paint_requested_at = datetime.utcnow()
+t11, p_plain = picture("greenlit"); db.commit()
+c = PA._ai_counts(db, proj)
+greenlit_named = (db.query(M.SavedPoster)
+                    .filter(M.SavedPoster.pipeline_status == "greenlit",
+                            M.SavedPoster.deleted_at.is_(None),
+                            M.SavedPoster.paint_requested_at.isnot(None)).count())
+ok(greenlit_named >= 1 and c["waiting_unnamed"] == c["waiting_to_paint"] - greenlit_named,
+   f"'N other photos wait' leaves out the hand-named ones ({c['waiting_unnamed']} of {c['waiting_to_paint']})")
+ok(c["send_cap"] == int(P.get_setting(db, "batch_max_items", project=proj)),
+   "the panel knows how many go in one send")
+from fastapi import HTTPException
+_real_project = PA._project
+PA._project = lambda request, admin, db, explicit=None: proj
+try:
+    P.set_setting(db, "step2_enabled", False, project=proj, by="t"); db.commit()
+    try:
+        PA.api_ai_step2_retry(None, {"all": True}, admin=a, db=db)
+        ok(False, "RETRY STEP 2 refuses while step 2 is switched off")
+    except HTTPException as e:
+        ok(e.status_code == 409, "RETRY STEP 2 refuses while step 2 is switched off")
+    P.set_setting(db, "step2_enabled", True, project=proj, by="t"); db.commit()
+    r = json.loads(PA.api_ai_step2_retry(None, {"all": True}, admin=a, db=db).body)
+    ok(r["ok"], "and works again once it is on")
+finally:
+    PA._project = _real_project
+
 print("\nALL STEP 2 / BATCH CHECKS PASSED")

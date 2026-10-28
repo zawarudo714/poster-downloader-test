@@ -1188,6 +1188,16 @@ tool needs, add it to `REQUIRED_MODULES` in `dev_setup.py` too.
   as a fallback, which is what makes the startup move in
   `app/workspace_migration.py` safe to automate. Delete the fallback once
   production scans clean in Diagnostics.
+- **An address a person typed is downloaded through `imagefetch.get_public`,
+  never a bare `requests.get`.** `_validate_image_url` refuses addresses on
+  this server's own network, but `requests` follows redirects by itself, so
+  until v271 a public page that redirected to `127.0.0.1` or
+  `169.254.169.254` got fetched anyway — the check guarded the first hop
+  only (site audit, 2026-10-29). `get_public` follows redirects itself and
+  runs `_host_check` on each. A check on an input is only as good as the
+  last place the input can change before use. Preflight's "typed addresses
+  check every redirect" fails a deploy on a `requests` call without
+  `allow_redirects=False` in `imagefetch.py` or `routes/worker.py`.
 - **Comments explain *why*, not *what*.** The existing code does this well —
   match it. Several modules carry a design-contract header; keep those current.
 
@@ -3016,6 +3026,15 @@ its run's list, so a redo two weeks later was "title already paid" and the
 worker was never paid for it (traced 2026-10-26 while designing the K
 rule); `payments.deducted_advance_ids` now leaves it out of every "is this
 title paid" count, and `check_titles_are_paid_once` reads the same.
+**And money taken back is recorded only as far as the payment covered
+it.** The box took the whole debt off, the amount stopped at 0 (a
+`Math.max`), and every owed picture was recorded as repaid — a debt
+bigger than the week's pay was partly forgiven, silently (site audit,
+2026-10-29). Since v272 MARK PAID settles owed pictures in the box's order
+only while they fit the run's own value; the rest stays owed. The page
+(`settleNow`) and the server compute the same list, and
+`check_deductions_fit_their_payment` reads the runs. The general shape: a
+clamp that hides a remainder must also keep the remainder somewhere.
 **Since v265 the gate is the fact itself: painting follows the owner's K
 mark, not the payment** — "not flagged" had been standing in for "looked
 at", which is the mechanism-for-the-fact shape this whole rule is about.
@@ -3410,6 +3429,28 @@ So, before shipping any figure or label:
   `datetime.combine` day boundary).
 * **A mechanism should announce what it is doing**, in its own words —
   "waiting to try again at 23:44", not "retry_at set".
+* **A label must not be true and misleading.** RUN TEST UPLOAD's panel said
+  "Nothing is marked uploaded" — true — while it published a real listing
+  the site never recorded, so the normal upload would list it a second
+  time. The AI panel said "N other photos wait" with N counting the named
+  ones again, and "M will go in the next send" past the per-send cap
+  (`batch_max_items`). All found by the site audit, 2026-10-29, fixed in
+  v273. Say what the button DOES to the outside world first, and count
+  each thing once.
+* **A button that spends money or publishes asks first, every time.**
+  SWITCH STEP 1 ON started paying for every held-back photo in one click
+  while the catch-up and the swap both asked. Preflight's "spending
+  buttons ask first" fails a deploy on a button listed in
+  `SPENDS_OR_PUBLISHES` whose handler has no `confirm(`; add new ones
+  there. And a button that hands work to a step that is switched off
+  refuses instead (RETRY STEP 2 now does, like the catch-up) — otherwise
+  the work waits where only Diagnostics sees it.
+* **A state change names the state it starts FROM.** The worker's "send
+  with no change" set any flag to "awaiting approval", so a closed one
+  came back on his list and held its picture's pay again (v273;
+  `check_closed_flags_stay_closed`). Every admin path already checked
+  first. And a save that runs in pieces refuses a second start while the
+  first runs (the review screen's `commit()` now checks `commitBusy`).
 * **A STATUS THAT IS TRUE AND ANSWERS NOTHING IS STILL A DEFECT.** The
   status strip read "machine on · idle". Both words were correct and the
   owner still could not tell a finished day from a jam, because idle with a

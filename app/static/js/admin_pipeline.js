@@ -412,8 +412,9 @@
       ? `<span class="status-pill status-reviewed">ON</span> new photos are painted as they are released.
          <button type="button" class="btn btn-ghost btn-tiny" data-action="ai-step1-off">SWITCH STEP 1 OFF</button>`
       : `<span class="status-pill status-error">OFF</span> only pictures you RETRY or REPAINT are painted —
-         ${d.named_by_hand} of those waiting. ${d.waiting_to_paint} other photo(s) wait for you to switch it on.
-         <button type="button" class="btn btn-accent btn-tiny" data-action="ai-step1-on">SWITCH STEP 1 ON</button>`;
+         ${d.named_by_hand} of those waiting. ${d.waiting_unnamed} other photo(s) wait for you to switch it on.
+         <button type="button" class="btn btn-accent btn-tiny" data-action="ai-step1-on"
+                 data-count="${d.waiting_unnamed}">SWITCH STEP 1 ON</button>`;
     const step2 = d.step2_active
       ? `${d.step2_waiting} waiting to be sent · ${d.step2_in_batch} at OpenAI now`
         + (d.step2_failed ? ` · <strong>${d.step2_failed} gave up</strong> — see NEEDS ATTENTION` : '')
@@ -437,7 +438,10 @@
       const progress = b.open
         ? `${b.openai_done} of ${b.openai_total || b.items} done${b.openai_failed ? ` · ${b.openai_failed} failed` : ''}`
         : `${b.filed} filed${b.failed ? ` · ${b.failed} failed` : ''}${b.back_in_queue ? ` · ${b.back_in_queue} back in the queue` : ''}${b.dropped ? ` · ${b.dropped} not filed (changed meanwhile)` : ''}`;
-      const cancel = (b.open && b.status !== 'sending' && b.status !== 'cancelling')
+      // Not on a batch OpenAI has already finished (ai_batches.TERMINAL) but
+      // the site has not collected yet: there is nothing left to stop.
+      const cancel = (b.open && !['sending', 'cancelling', 'completed', 'failed',
+                                  'expired', 'cancelled'].includes(b.status))
         ? `<button type="button" class="btn btn-error btn-tiny" data-action="ai-cancel" data-batch="${b.id}">STOP</button>` : '';
       return `<tr>
         <td class="mono">#${b.id}</td>
@@ -452,7 +456,9 @@
     }).join('');
     el.innerHTML = `
       <p><strong>STEP 1 — painting:</strong> ${step1}</p>
-      <p class="muted">${d.painting_in_batch} being painted at OpenAI now · ${d.will_paint} will go in the next send</p>
+      <p class="muted">${d.painting_in_batch} being painted at OpenAI now · ${d.will_paint} waiting to be painted${
+        (d.send_cap && d.will_paint > d.send_cap)
+          ? ` · at most ${d.send_cap} go in each send, step 2 first, the rest in the sends after` : ''}</p>
       <p style="margin-top:8px"><strong>STEP 2 — flatten:</strong> ${step2}</p>
       ${catchup}
       <p style="margin-top:8px"><strong>Sending:</strong> ${d.batch_enabled
@@ -2543,7 +2549,14 @@
     switch (action) {
       case 'refresh-overview': loadOverview(); break;
       case 'ai-refresh':  maybeLoadAI(true); break;
-      case 'ai-step1-on': await setStep1(true); break;
+      case 'ai-step1-on': {
+        // Switching on starts paying for every photo held back, so it asks
+        // first, like every other button that spends (site audit, 2026-10-29).
+        const n = parseInt(btn.dataset.count, 10) || 0;
+        if (!confirm(`Switch Step 1 on?\n\n${n} photo(s) waiting will start to be `
+            + 'painted. Each painting costs money at OpenAI.')) break;
+        await setStep1(true); break;
+      }
       case 'ai-step1-off': await setStep1(false); break;
       case 'ai-catchup': {
         const n = btn.dataset.count;
@@ -2724,6 +2737,14 @@
         const acc    = q('[data-test-upload-account]').value;
         const statusEl = q('[data-test-status="upload"]');
         if (!poster || !acc) return setStatus(statusEl, `Pick a ${PD.noun} id and an account.`, 'error');
+        // It runs the real upload to the end, submit included (uploader.py
+        // test_upload calls upload_one). The panel once said "Nothing is
+        // marked uploaded" and nothing more, which read as "nothing happens"
+        // (site audit, 2026-10-29).
+        if (!confirm('This publishes a REAL listing on the marketplace.\n\n'
+            + 'This site does not record it, so when this picture\'s normal '
+            + 'upload runs it will be listed a second time. Delete the test '
+            + 'listing on the marketplace afterwards.\n\nRun the test upload?')) return;
         runTest('upload', {
           poster_id: parseInt(poster, 10), account_id: parseInt(acc, 10),
         }, statusEl);

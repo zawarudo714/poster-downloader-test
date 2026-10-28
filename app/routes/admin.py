@@ -4330,25 +4330,6 @@ def payments_mark_paid(
     ids = sorted(set(ids))
     rate = get_rate_kes(db)
 
-    # Paid-ahead pictures that were removed without pay, as the BOX showed
-    # them. Only ids that are still owed now are settled — the box's list is
-    # what he decided about, and anything that appeared since is left for
-    # next time (an implicit decision ranges over what was seen).
-    settled_json = None
-    if settle_mode in ("deducted", "waived") and settle_ids.strip():
-        from ..payments import advance_shortfall
-        owed = {it["poster_id"]: it for it in
-                advance_shortfall(db, worker_id)["items"]}
-        seen = set()
-        for raw in settle_ids.split(","):
-            raw = raw.strip()
-            if raw.isdigit() and int(raw) in owed:
-                seen.add(int(raw))
-        if seen:
-            kes = sum(parse_decimal(owed[i]["rate"]) for i in seen)
-            settled_json = json.dumps({settle_mode: sorted(seen),
-                                       "kes": str(kes)})
-
     # Per-day breakdown for receipt transparency.
     by_day = per_day_breakdown(db, poster_ids=ids)
 
@@ -4360,6 +4341,43 @@ def payments_mark_paid(
     from ..payments import price_run
     pricing = price_run(db, ids)
     by_project = pricing["by_project"]
+
+    # Paid-ahead pictures that were removed without pay, as the BOX showed
+    # them. Only ids that are still owed now are settled — the box's list is
+    # what he decided about, and anything that appeared since is left for
+    # next time (an implicit decision ranges over what was seen).
+    #
+    # A DEDUCTION settles only what this payment can cover. The box once
+    # took everything off and the amount stopped at 0, while every picture
+    # was recorded as repaid — so when the debt was bigger than the week's
+    # pay, the rest of it was silently forgiven (site audit, 2026-10-29).
+    # Pictures are taken in the box's order, skipping any that no longer
+    # fit; the ones left over stay owed and come back next time. The page
+    # works out the same list (admin_payments.js, settleNow) to fill the
+    # amount. A WAIVE settles everything shown: that is his decision.
+    settled_json = None
+    if settle_mode in ("deducted", "waived") and settle_ids.strip():
+        from ..payments import advance_shortfall
+        owed_items = advance_shortfall(db, worker_id)["items"]
+        owed = {it["poster_id"]: it for it in owed_items}
+        seen = set()
+        for raw in settle_ids.split(","):
+            raw = raw.strip()
+            if raw.isdigit() and int(raw) in owed:
+                seen.add(int(raw))
+        if settle_mode == "deducted":
+            room = parse_decimal(str(pricing["total"]))
+            fits = set()
+            for it in owed_items:
+                cost = parse_decimal(it["rate"])
+                if it["poster_id"] in seen and cost <= room:
+                    fits.add(it["poster_id"])
+                    room -= cost
+            seen = fits
+        if seen:
+            kes = sum(parse_decimal(owed[i]["rate"]) for i in seen)
+            settled_json = json.dumps({settle_mode: sorted(seen),
+                                       "kes": str(kes)})
 
     # The admin types the amount they actually sent, which is authoritative —
     # they may round, or add a bonus. But when the field is left at the

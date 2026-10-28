@@ -1961,6 +1961,11 @@
 
   async function commit() {
     const status = $('[data-review-commit-status]');
+    // A second SAVE (a double click, or Enter while saving) would send every
+    // decision again from the top while the first is still going (site
+    // audit, 2026-10-29). One save at a time; commitBusy is the same flag
+    // that arms the leave-page prompt, and every exit below clears it.
+    if (commitBusy) return;
     if (!titles.length) { status.textContent = 'nothing loaded'; return; }
     status.textContent = 'saving…';
 

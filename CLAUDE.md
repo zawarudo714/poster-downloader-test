@@ -2628,6 +2628,15 @@ is sent on that painting. The buttons sit under the picture they redo
 the picture's ONE mark. Watched by `tools/test_review_split.py`, which
 lifts the helpers from the shipped file.
 
+**Number pad 4 and 6 are the owner's MOVE, and a key setting must never
+sit on them.** `PDKeys.matches` makes a digit setting match its number-pad
+key too (so 7/8/9 work with Num Lock off), which means REDO STEP 2 on 6
+(v266) took number pad 6 whenever Num Lock was on: "move right" marked a
+redo. Since v284 REDO STEP 2 is 3 and the page moves on `e.code` Numpad6 /
+Numpad4 BEFORE any decision key; the top-row 4 and 6 still pick versions.
+Watched by `tools/test_review_keys.py`, which runs the page's own keydown
+handler with Num Lock on and off.
+
 So: **keeping the record is not keeping the thing.** Whenever you write to
 a path built from a rule rather than from a unique key, ask what else in the
 database claims that same path. Fixed at the source — the generation number

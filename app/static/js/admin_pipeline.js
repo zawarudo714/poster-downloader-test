@@ -123,7 +123,7 @@
       ['review_key_paste', 'text', 'Key: PASTE PICTURE (Worker Images zoom)',
        'In the Worker Images zoom, this key pastes the picture you copied into USE MY OWN PICTURE, the same as Ctrl+V. 3 by default, so your hand can stay on the number pad. On a plain http site the browser only lets a key read the clipboard after a one-time Chrome setting; until then the box opens and asks for Ctrl+V.'],
       ['review_key_step2', 'text', 'Key: REDO STEP 2',
-       'On Approve Artwork, flattens the picture again WITHOUT a new painting — from the painting on screen (pick v1, v2… in the version bar) or from the painting behind a step 2 picture. Only shown where step 2 is switched on. 6 by default.'],
+       'On Approve Artwork, flattens the picture again WITHOUT a new painting — from the painting on screen (pick v1, v2… in the version bar) or from the painting behind a step 2 picture. Only shown where step 2 is switched on. 3 by default. Do not use 4 or 6: on the number pad those move left and right.'],
       ['review_batch_size',   'number', 'Review batch size',       'How many painted images REVIEW EVERYTHING WAITING loads at once, so you inspect and release a small set at a time instead of a hundred. For example 20. Set to 0 to load everything at once. Only affects the "everything waiting" button; reviewing a single date still loads that whole day.'],
     ],
     // ── STEP 2 AND BATCHES (v266) ─────────────────────────────────────

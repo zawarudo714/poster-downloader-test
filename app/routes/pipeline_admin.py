@@ -4015,7 +4015,7 @@ def api_review_queue(
                                  project=project) or "9"),
                              "step2": str(P.get_setting(
                                  db, "review_key_step2",
-                                 project=project) or "6"),
+                                 project=project) or "3"),
                          },
                          # Whether this project has step 2, so the screen can
                          # offer REDO STEP 2 and call RERUN what it now is —

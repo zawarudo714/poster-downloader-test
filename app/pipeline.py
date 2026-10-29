@@ -837,9 +837,11 @@ DEFAULTS: dict[str, Any] = {
     # can only READ the clipboard on a secure page; see admin_pick.js.
     "review_key_paste":     "3",
     # REDO STEP 2 on Approve Artwork: flatten the painting on screen again
-    # (or another painting version you picked) without repainting. 6, beside
-    # the 7-8-9 row the owner's hand already sits on (v266).
-    "review_key_step2":     "6",
+    # (or another painting version you picked) without repainting. 3 on the
+    # number pad (owner, 2026-10-29, v284): 6 was the first choice (v266),
+    # but number pad 6 is his MOVE RIGHT, so with Num Lock on it marked
+    # redo instead of moving. Worker Images uses 3 for paste — another page.
+    "review_key_step2":     "3",
 
     # ── STEP 1 / STEP 2 AND BATCH (v266, owner 2026-10-28) ───────────────
     #

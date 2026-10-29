@@ -153,7 +153,7 @@
       reviewKeys.rerun = d.review_keys.rerun || '7';
       reviewKeys.photoshop = d.review_keys.photoshop || '8';
       reviewKeys.keep = d.review_keys.keep || '9';
-      reviewKeys.step2 = d.review_keys.step2 || '6';
+      reviewKeys.step2 = d.review_keys.step2 || '3';
     }
     step2On = !!d.step2;
     refreshKeyLabels();
@@ -820,7 +820,7 @@
   // default at the owner's ask (2026-09-27): he steps with the number pad's
   // 4 and 6, so the row above sits under the same hand. PDKeys.matches (in
   // keys.js) also accepts the number-pad key with Num Lock off.
-  const reviewKeys = { rerun: '7', photoshop: '8', keep: '9', step2: '6' };
+  const reviewKeys = { rerun: '7', photoshop: '8', keep: '9', step2: '3' };
   const keyLabel = (name) => String(reviewKeys[name] || '').toUpperCase();
   // The words a mark is SHOWN with. 'approve' is stored for KEEP; the word
   // on screen is the one on the button.
@@ -2035,6 +2035,12 @@
     }
     if (e.key === 'ArrowRight') { move(1);  e.preventDefault(); return; }
     if (e.key === 'ArrowLeft')  { move(-1); e.preventDefault(); return; }
+    // Number pad 6 and 4 MOVE, with Num Lock on or off (owner, 2026-10-29).
+    // With Num Lock on they send "6" and "4", which a decision key or a
+    // version digit would otherwise take — REDO STEP 2 sat on 6 until
+    // v284. The top-row 4 and 6 still pick versions.
+    if (e.code === 'Numpad6') { move(1);  e.preventDefault(); return; }
+    if (e.code === 'Numpad4') { move(-1); e.preventDefault(); return; }
 
     // THE DECISION KEYS, from the dashboard. Checked BEFORE the version
     // digits below, because the defaults ARE digits (7 / 8 / 9): handled

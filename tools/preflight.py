@@ -1933,6 +1933,31 @@ def check_falsy_zero_defaults() -> None:
                      f"ZERO here is silently replaced: {stripped[:60]}")
 
 
+# Fields where the owner can choose ZERO and mean it.
+ZERO_IS_A_CHOICE = ("daily_limit",)
+
+
+def check_server_keeps_a_chosen_zero() -> None:
+    """
+    `int(x or 100)` on a field in ZERO_IS_A_CHOICE, in the server code.
+
+    The JS check above fixed the account form's `|| 100`, and the server
+    went on doing the same thing: the owner set the account's daily limit
+    to 0 to hold uploads back, and it saved as 100 (2026-10-29). Both
+    halves of a save have to keep the zero, so both are checked.
+    """
+    pat = re.compile(r"\b(" + "|".join(ZERO_IS_A_CHOICE) + r")\b.*\bor\s+([1-9][0-9]*)")
+    for path in sorted(APP.rglob("*.py")):
+        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if line.strip().startswith("#"):
+                continue
+            m = pat.search(line)
+            if m:
+                fail(f"{path.relative_to(ROOT)}:{i} — {m.group(1)} falls back to "
+                     f"{m.group(2)}, so a ZERO the owner chose is saved as "
+                     f"{m.group(2)}: {line.strip()[:70]}")
+
+
 # ── A GUARD IS ONLY A GUARD IF EVERY PATH CALLS IT ──────────────────────
 #
 # (file, what the risky thing looks like, what protects it, plain words).
@@ -4138,6 +4163,7 @@ CHECKS = [
     ("pages get what the layout needs", check_page_context),
     ("no queries inside loops",   check_queries_in_loops),
     ("zero is not treated as missing", check_falsy_zero_defaults),
+    ("the server keeps a chosen zero", check_server_keeps_a_chosen_zero),
     ("guards are called on every path", check_guards_are_called),
     ("state changes are logged", check_state_changes_are_logged),
     ("every document is linked", check_no_orphan_documents),

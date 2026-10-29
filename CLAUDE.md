@@ -2728,6 +2728,11 @@ Fixed, the zero check then found a defect NOBODY had reported: `daily_limit`
 account's daily limit to zero is the obvious way to say "do not upload here
 today", and it did the opposite, on a real marketplace, silently. That is
 the whole point of this rule — a check found it instead of the owner.
+**But the check only looked at the JS, and the fix only fixed the JS:** the
+server's save still did `int(x or 100)`, so the owner's 0 was stored as 100
+anyway (v281). A value that crosses a layer is fixed on EVERY layer it
+crosses, and the check covers every layer too (preflight "the server keeps
+a chosen zero", list `ZERO_IS_A_CHOICE`; `tools/test_daily_limit_zero.py`).
 
 ### 6. The third-project test
 

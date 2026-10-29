@@ -1100,6 +1100,20 @@ def api_detach_account(
     return JSONResponse({"ok": True, "detached": removed, "left_queued": queued})
 
 
+def _daily_limit(value) -> int:
+    """
+    The daily upload limit the owner typed. Only a BLANK means the default.
+
+    `int(value or 100)` turned a deliberate 0 into 100: the owner set 0 to
+    hold uploads back while building up a stock of pictures, and the account
+    saved as 100 (2026-10-29; fixed in v281). The page had been fixed for
+    the same mistake earlier, and the server still undid it.
+    """
+    if value is None or str(value).strip() == "":
+        return 100
+    return max(0, int(value))
+
+
 @router.post("/api/accounts")
 def api_create_account(
     request: Request,
@@ -1154,7 +1168,7 @@ def api_create_account(
         password_enc=P.encrypt_secret(password),
         profile_url=(payload.get("profile_url") or "").strip() or None,
         chrome_profile_dir=(payload.get("chrome_profile_dir") or "").strip() or None,
-        daily_limit=int(payload.get("daily_limit") or 100),
+        daily_limit=_daily_limit(payload.get("daily_limit")),
         rotation_order=int(payload.get("rotation_order") or 100),
         rotation_size=(int(payload["rotation_size"])
                        if payload.get("rotation_size") else None),
@@ -1203,7 +1217,7 @@ def api_update_account(
     if "target_site" in payload and payload["target_site"]:
         account.target_site = payload["target_site"].strip()
     if "daily_limit" in payload:
-        account.daily_limit = int(payload["daily_limit"] or 100)
+        account.daily_limit = _daily_limit(payload["daily_limit"])
     if "rotation_order" in payload:
         account.rotation_order = int(payload["rotation_order"] or 100)
     if "rotation_size" in payload:

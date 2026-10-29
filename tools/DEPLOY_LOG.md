@@ -15,6 +15,7 @@ cost far more to read, answer a different question, and on a mounted working
 copy `git status` cannot refresh its index — it reports stale answers with
 no warning.
 
+- **2026-10-29 12:10** · `[178.105.34.144]` · `5dd40a00` · v283 · review buttons sit under the picture they redo; KEEP only releases step 2
 - **2026-10-29 11:52** · `[178.105.34.144]` · `51c9edcf` · v282 · Approve Artwork shows photo, step 1 painting and step 2 side by side
 - **2026-10-29 11:39** · `[178.105.34.144]` · `c158734f` · v281 · a daily upload limit of 0 is saved as 0
 - **2026-10-29 02:01** · `[178.105.34.144]` · `e557dda2` · v280 · v274–v280: swap count, title keys, payment delete guard, closed titles, last-picture reset, style picture, claim race

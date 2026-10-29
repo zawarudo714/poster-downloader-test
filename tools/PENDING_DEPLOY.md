@@ -42,5 +42,11 @@
   - This applies to sends in batches and to one-at-a-time painting.
   - The worker folder does **not** need copying for this one.
 
+- **v280 — two workers can no longer be handed the same title.**
+  - If two workers pressed GET at the same moment, both could be told the same titles were theirs. Only the later one really kept them.
+  - The same could happen when picking titles from the list.
+  - Now each title is checked and claimed in one step. The worker who comes second gets fewer titles, or none, and can press GET again.
+  - The worker folder does **not** need copying for this one.
+
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.

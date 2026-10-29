@@ -220,6 +220,38 @@ def _scope_to_project(q, project):
     return scope_titles(q, project)
 
 
+def _claim_if_free(db: Session, ids: list[int], user: User, now) -> list[int]:
+    """
+    Claim each title that is STILL pending and unclaimed; return the ids won.
+
+    The check and the write are one UPDATE, so two workers pressing GET at
+    the same moment cannot both win a title. Checking the rows already
+    loaded was not enough: they were read before the other worker's claim
+    landed, so the later writer silently took titles the earlier one had
+    just been told were theirs (site audit, 2026-10-29; fixed in v280).
+    """
+    won: list[int] = []
+    for tid in ids:
+        hit = (
+            db.query(MasterTitle)
+              .filter(
+                  MasterTitle.id == tid,
+                  MasterTitle.status == "pending",
+                  MasterTitle.claimed_by_id.is_(None),
+              )
+              .update({
+                  MasterTitle.claimed_by_id:   user.id,
+                  MasterTitle.claimed_by_name: user.username,
+                  MasterTitle.claimed_at:      now,
+                  MasterTitle.status:          "in_progress",
+                  MasterTitle.updated_at:      now,
+              }, synchronize_session=False)
+        )
+        if hit:
+            won.append(tid)
+    return won
+
+
 def _my_queue(db: Session, user: User, project=None):
     """
     MasterTitle rows claimed by `user` in the project they are standing in.
@@ -1268,8 +1300,8 @@ def pull_next(
     late-added famous landmarks carry a higher priority so they are handed out
     next without their numbers having to change. See MasterTitle.queue_priority.
 
-    Atomic-ish: SQLite gives us per-statement atomicity; we re-check status
-    inside the transaction before flipping.
+    Each title is claimed by `_claim_if_free`, which re-checks it in the
+    same statement that writes the claim.
     """
     if n < 1:
         raise HTTPException(400, "Pull size must be at least 1.")
@@ -1289,16 +1321,7 @@ def pull_next(
     )
 
     now = datetime.utcnow()
-    claimed_ids: list[int] = []
-    for r in rows:
-        # Defensive double-check — could have been claimed by a parallel request.
-        if r.claimed_by_id is None and r.status == "pending":
-            r.claimed_by_id   = user.id
-            r.claimed_by_name = user.username
-            r.claimed_at      = now
-            r.status          = "in_progress"
-            r.updated_at      = now
-            claimed_ids.append(r.id)
+    claimed_ids = _claim_if_free(db, [r.id for r in rows], user, now)
 
     user.last_pull_size = n
     log_activity(
@@ -1342,14 +1365,7 @@ def select_titles(
     )
 
     now = datetime.utcnow()
-    claimed_ids: list[int] = []
-    for r in rows:
-        r.claimed_by_id   = user.id
-        r.claimed_by_name = user.username
-        r.claimed_at      = now
-        r.status          = "in_progress"
-        r.updated_at      = now
-        claimed_ids.append(r.id)
+    claimed_ids = _claim_if_free(db, [r.id for r in rows], user, now)
 
     log_activity(
         db, user=user, action="claimed", target_type="bulk",

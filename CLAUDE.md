@@ -3468,6 +3468,10 @@ So, before shipping any figure or label:
   `check_closed_flags_stay_closed`). Every admin path already checked
   first. And a save that runs in pieces refuses a second start while the
   first runs (the review screen's `commit()` now checks `commitBusy`).
+  The FROM check goes IN the write when two people can race for the same
+  row: checking rows already loaded let two workers pressing GET together
+  both be told they held the same titles (v280; `_claim_if_free`, preflight
+  "claims re-check the row", `tools/test_claim_race.py`).
   Every DOOR to the same action asks the same FROM question: the paste
   door refused a closed title, the search grid checked only the claim
   (which skip and complete keep) and saved onto it (v277; preflight

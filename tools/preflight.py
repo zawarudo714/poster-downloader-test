@@ -940,6 +940,38 @@ def check_closed_titles_refuse_new_pictures() -> None:
                  f"refusing a complete or skipped one")
 
 
+# The worker routes that hand out many titles at once.
+CLAIMS_MANY_TITLES = ("pull_next", "select_titles")
+
+
+def check_claims_recheck_the_row() -> None:
+    """
+    A route in CLAIMS_MANY_TITLES that writes the claim onto rows it loaded.
+
+    The rows were read before another worker's claim could land, so two
+    workers pressing GET together were both told they held the same titles,
+    and the later writer silently kept them (site audit, 2026-10-29). Since
+    v280 both routes claim through `_claim_if_free`, whose UPDATE re-checks
+    the row in the same statement.
+    """
+    path = APP / "routes" / "worker.py"
+    if not path.is_file():
+        return
+    text = path.read_text(encoding="utf-8")
+    tree = ast.parse(text)
+    funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+    for name in CLAIMS_MANY_TITLES:
+        fn = funcs.get(name)
+        if fn is None:
+            fail(f"worker.py: no function {name} — if it was renamed, rename it in "
+                 f"CLAIMS_MANY_TITLES too")
+            continue
+        src = ast.get_source_segment(text, fn) or ""
+        if "_claim_if_free(" not in src or re.search(r"\.claimed_by_id\s*=[^=]", src):
+            fail(f"worker.py:{fn.lineno}: {name} claims titles without _claim_if_free, "
+                 f"so two workers can be handed the same title")
+
+
 # The files where the server downloads an address a PERSON typed or picked.
 # Other outbound calls (OpenAI, Brave, Google Vision) go to fixed addresses.
 FETCHES_TYPED_ADDRESSES = ("imagefetch.py", "routes/worker.py")
@@ -4087,6 +4119,7 @@ CHECKS = [
     ("swap button counts one run", check_swap_button_counts_one_run),
     ("title key sets, never flips", check_title_key_sets_not_flips),
     ("closed titles refuse new pictures", check_closed_titles_refuse_new_pictures),
+    ("claims re-check the row", check_claims_recheck_the_row),
     ("calls pass the right arguments", check_call_arity),
     ("javascript parses",         check_js_parses),
     ("template tags balance",     check_template_tags_balance),

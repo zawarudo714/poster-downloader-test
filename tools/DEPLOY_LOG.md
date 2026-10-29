@@ -15,6 +15,7 @@ cost far more to read, answer a different question, and on a mounted working
 copy `git status` cannot refresh its index — it reports stale answers with
 no warning.
 
+- **2026-10-29 02:01** · `[178.105.34.144]` · `e557dda2` · v280 · v274–v280: swap count, title keys, payment delete guard, closed titles, last-picture reset, style picture, claim race
 - **2026-10-29 01:19** · `[178.105.34.144]` · `03d2e795` · v273 · v271-v273: redirects checked on picture downloads; deductions settle only what fits; honest Pipeline buttons
 - **2026-10-29 00:52** · `[178.105.34.144]` · `952bc44` · v270 · v269-v270: batch pictures safe from RELEASE/RETRY; prompt RESET names its tier; site-wide settings
 - **2026-10-29 00:35** · `[178.105.34.144]` · `8db47f68` · v268 · deploy v268 (with v267): dead TeePublic timer jobs removed; hand-named pictures keep their mark until painted
@@ -44,4 +45,3 @@ no warning.
 - **2026-09-27 18:32** · `[178.105.34.144]` · `ff795a1e` · v238 · deploy v238
 - **2026-09-27 18:00** · `[178.105.34.144]` · `1a247235` · v237 · deploy v237
 - **2026-09-27 13:19** · `[178.105.34.144]` · `3fb8cbe4` · v236 · deploy v236
-- **2026-09-27 12:43** · `[178.105.34.144]` · `19658dc2` · v234 · deploy v234

@@ -477,6 +477,38 @@ def batch_cancel(api_key: str, batch_id: str) -> dict:
     return _api("POST", f"/batches/{batch_id}/cancel", api_key, timeout=60).json()
 
 
+def batch_list(api_key: str, *, after: str = "", limit: int = 100) -> dict:
+    """One page of this key's batches, newest first ({data, has_more})."""
+    params = {"limit": limit}
+    if after:
+        params["after"] = after
+    return _api("GET", "/batches", api_key, timeout=60, params=params).json()
+
+
+def file_first_custom_id(api_key: str, file_id: str) -> str:
+    """
+    The custom_id on the FIRST line of a batch's input file, read from its
+    first few hundred bytes only — the file can be 180 MB. Our lines are
+    written with custom_id first (ai_batches._send), and OpenAI hands the
+    file back as it was sent (checked on batch #52, 2026-10-29).
+    """
+    try:
+        with requests.get(f"{API_ROOT}/files/{file_id}/content",
+                          headers={"Authorization": f"Bearer {api_key}"},
+                          stream=True, timeout=60) as resp:
+            if resp.status_code >= 400:
+                raise _classify(resp.status_code, resp.text)
+            head = b""
+            for chunk in resp.iter_content(512):
+                head += chunk
+                if len(head) >= 512:
+                    break
+    except requests.RequestException as e:
+        raise TransientFailure(f"network error: {e}")
+    m = re.match(rb'\{"custom_id":\s*"([^"]+)"', head)
+    return m.group(1).decode("ascii", "replace") if m else ""
+
+
 def file_download(api_key: str, file_id: str, dest: Path) -> None:
     """Stream a result file to disk — a few hundred pictures is gigabytes."""
     dest.parent.mkdir(parents=True, exist_ok=True)

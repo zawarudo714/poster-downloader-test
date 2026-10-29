@@ -35,7 +35,13 @@ EVERY EXIT REPORTS (rule 8)
 ════════════════════════════════════════════════════════════════════════════
   · the send fails          → batch 'send_failed', every picture back in the
                               queue, OpenAI's words on the batch row
-  · the server restarts mid-send → recover_unsent() at startup does the same
+  · a send cut short — by a restart, or by a failure after OpenAI already
+    had the batch (v286: batch #52's receipt could not be saved while the
+    database was busy) → the next poll ASKS OPENAI whether it has the batch,
+    by the custom_id on the first line of each recent input file. Found: it
+    is watched and collected like any other. Not found: every picture goes
+    back in the queue, as above. It is never simply sent again: that paid
+    twice and lost the first answers.
   · a line succeeds          → filed (or 'dropped' if the picture changed
                               while it was away — never filed over a newer one)
   · a line fails             → the same failure record a live call writes
@@ -162,23 +168,34 @@ def _release_stage1(db: Session, batch) -> int:
     return n
 
 
-def recover_unsent(db: Session) -> int:
-    """At startup: a batch still 'sending' was cut short by a restart."""
-    from .models import AIBatch, AIBatchItem
+def _close_unsent(db: Session, batch, error: str) -> None:
+    """A batch that never reached OpenAI: closed, every picture back in the queue."""
+    from .models import AIBatchItem
     now = datetime.utcnow()
+    batch.status = "send_failed"
+    batch.error = error[:4000]
+    batch.collected_at = now
+    (db.query(AIBatchItem)
+       .filter(AIBatchItem.batch_id == batch.id, AIBatchItem.outcome.is_(None))
+       .update({AIBatchItem.outcome: "retry", AIBatchItem.finished_at: now,
+                AIBatchItem.error: batch.error[:500]},
+               synchronize_session=False))
+    if batch.stage == 1:
+        _release_stage1(db, batch)
+
+
+def recover_unsent(db: Session) -> int:
+    """
+    At startup. Returns how many batches were caught 'sending'.
+
+    They are NOT put back in the queue here any more (v286). A send can be
+    cut short AFTER OpenAI took the batch, and requeueing those paid for the
+    pictures twice and threw the first answers away. The first poll() asks
+    OpenAI and settles each one (_settle_unsent).
+    """
+    from .models import AIBatch
     stuck = db.query(AIBatch).filter(AIBatch.status == "sending",
-                                     AIBatch.collected_at.is_(None)).all()
-    for b in stuck:
-        b.status = "send_failed"
-        b.error = "The server restarted while this batch was being sent. " \
-                  "Its pictures went back in the queue."
-        b.collected_at = now
-        (db.query(AIBatchItem)
-           .filter(AIBatchItem.batch_id == b.id, AIBatchItem.outcome.is_(None))
-           .update({AIBatchItem.outcome: "retry", AIBatchItem.finished_at: now},
-                   synchronize_session=False))
-        if b.stage == 1:
-            _release_stage1(db, b)
+                                     AIBatch.collected_at.is_(None)).count()
     # And the repair for rows any FUTURE exit forgets: a picture still held
     # by a batch that is already closed goes back in the queue. Watched by
     # diagnostics.check_batch_claims_have_an_open_batch.
@@ -192,7 +209,60 @@ def recover_unsent(db: Session) -> int:
             poster.pipeline_status = "greenlit"
             poster.claimed_by = None
             poster.claimed_at = None
-    return len(stuck)
+    return stuck
+
+
+def _find_at_openai(api_key: str, batch, cids: set) -> Optional[dict]:
+    """
+    OpenAI's batch object for a send that was cut short, or None if OpenAI
+    has no such batch. Raises TransientFailure / PermanentFailure when
+    OpenAI cannot be asked — then nobody knows, and nothing is resent.
+
+    Only batches made since our row was written can be it (two minutes'
+    grace for the clocks), and OpenAI lists newest first, so the walk stops
+    at the first older one. Each candidate's input file is opened just far
+    enough to read its first custom_id, which carries a random part, so a
+    match is exact.
+    """
+    from . import gpt_images as G
+    since = batch.created_at - timedelta(minutes=2)
+    after = ""
+    for _page in range(20):
+        page = G.batch_list(api_key, after=after)
+        rows = page.get("data") or []
+        for info in rows:
+            made = datetime.utcfromtimestamp(int(info.get("created_at") or 0))
+            if made < since:
+                return None
+            fid = info.get("input_file_id")
+            if fid and G.file_first_custom_id(api_key, fid) in cids:
+                return info
+        if not rows or not page.get("has_more"):
+            return None
+        after = rows[-1]["id"]
+    raise G.TransientFailure("too many batches since this one to look through")
+
+
+def _settle_unsent(db: Session, project, batch, *, api_key: str) -> None:
+    """A batch caught 'sending': watched if OpenAI has it, else requeued."""
+    from .models import AIBatchItem
+    cids = {c for (c,) in db.query(AIBatchItem.custom_id)
+                              .filter(AIBatchItem.batch_id == batch.id).all()}
+    info = _find_at_openai(api_key, batch, cids)
+    if info is None:
+        _close_unsent(db, batch, "This batch never reached OpenAI (checked). "
+                                 "Its pictures went back in the queue.")
+        db.commit()
+        log.warning("Batch %s for %s never reached OpenAI; its pictures are "
+                    "back in the queue", batch.id, project.slug)
+        return
+    batch.input_file_id = info.get("input_file_id") or batch.input_file_id
+    batch.error = None
+    _apply_info(batch, info)
+    db.commit()
+    log.warning("Batch %s for %s was cut short after OpenAI took it; found "
+                "it there as %s and will collect it", batch.id, project.slug,
+                batch.openai_batch_id)
 
 
 # ── Sending ────────────────────────────────────────────────────────────────
@@ -410,18 +480,8 @@ def _send_one_file(db: Session, project, *, stage: int, model: str,
         refused = isinstance(e, G.PermanentFailure)
         db.rollback()
         batch = db.query(AIBatch).filter_by(id=batch.id).first()
-        now = datetime.utcnow()
-        batch.status = "send_failed"
-        batch.error = (("[refused] " if refused else "[could not send] ")
-                       + str(e))[:4000]
-        batch.collected_at = now
-        (db.query(AIBatchItem)
-           .filter(AIBatchItem.batch_id == batch.id, AIBatchItem.outcome.is_(None))
-           .update({AIBatchItem.outcome: "retry", AIBatchItem.finished_at: now,
-                    AIBatchItem.error: batch.error[:500]},
-                   synchronize_session=False))
-        if stage == 1:
-            _release_stage1(db, batch)
+        _close_unsent(db, batch, ("[refused] " if refused else "[could not send] ")
+                                 + str(e))
         db.commit()
         note_error(project, batch.error)
         log.error("Batch %s for %s could not be sent: %s", batch.id, project.slug, e)
@@ -462,7 +522,7 @@ def poll(db: Session, project) -> bool:
     finished ones. Returns True if anything was filed."""
     from . import gpt_images as G
     from .pipeline import get_setting
-    batches = [b for b in open_batches(db, project).all() if b.status != "sending"]
+    batches = open_batches(db, project).all()
     if not batches:
         return False
     every = int(get_setting(db, "batch_poll_min", project=project) or 3)
@@ -478,6 +538,20 @@ def poll(db: Session, project) -> bool:
             continue
         if api_key is None:
             api_key = G.api_key_for(db, project)
+        if b.status == "sending":
+            # poll() and send_due() run one after the other in the painting
+            # thread, so a batch still 'sending' HERE is one whose send was
+            # cut short. OpenAI is asked before anything is sent again (v286).
+            try:
+                _settle_unsent(db, project, b, api_key=api_key)
+            except (G.PermanentFailure, G.TransientFailure) as e:
+                db.rollback()
+                b.last_checked_at = now
+                b.error = f"could not ask OpenAI whether it has this batch: {e}"[:4000]
+                db.commit()
+                continue
+            if b.collected_at:
+                continue
         if b.status not in TERMINAL:
             try:
                 info = G.batch_get(api_key, b.openai_batch_id)

@@ -1054,7 +1054,8 @@ app/
                        and step 2 (the flatten, v266), one at a time.
   ai_batches.py        The same two steps sent as OpenAI BATCHES — half
                        price, within 24 h. Send, poll, collect; every exit
-                       puts its pictures back (v266).
+                       puts its pictures back (v266) — except a send cut
+                       short, which is looked up at OpenAI first (v286).
   listing_check.py     Is what we think is live on FineArtAmerica actually
                        there? 410 means removed, 404 means our ADDRESS is
                        wrong. Never collapse the two.
@@ -2222,6 +2223,22 @@ Liveness is the last thing it SAID — `PipelineJob.last_report_at`, stamped
 by `append_job_log`. `started_at` is only the fallback for something that
 never reported at all. And whenever you add a timeout, find the longest
 thing it applies to and check the two numbers against each other.
+
+**A send that may have arrived is ASKED about, never sent again — and no
+request holds SQLite's write lock across slow work.** On 2026-10-29 OpenAI
+took batch #52 (4 step-2 pictures), then the site could not save the
+receipt: SAVE on Approve Artwork had written its first decision and then
+held the one write lock through every print-file build in its chunk of 5
+(10–17 s), and the painting thread gives up after `busy_timeout` (5 s). The
+row stayed 'sending' with no OpenAI id, and the start-up repair would have
+put its pictures back in the queue — paid twice, first answers lost. Since
+v286 SAVE commits after EACH decision, and a batch still 'sending' is
+settled by `poll()` (`_settle_unsent`), which walks OpenAI's batch list back
+to our row's time and matches the custom_id on the first line of each
+input file: found, it is watched like any other; not found, its pictures go
+back; OpenAI unreachable, it waits. `recover_unsent` only counts them now.
+`tools/test_step2_batch.py` drives all three cases and checks that a second
+connection can write during every build.
 
 **A guessed DURATION is the same defect, and it is easier to miss because it
 usually lives in a comment rather than in code.** `dispatch_stage` said

@@ -4929,6 +4929,7 @@ def api_review_decide(
     batch_doomed: list = []
 
     for item in decisions:
+        doomed_here: list = []
         processed = db.query(ProcessedImage).filter_by(id=item.get("processed_id")).first()
         if processed is None:
             continue
@@ -5054,7 +5055,7 @@ def api_review_decide(
                     # again and does not have to reach the Storage Box at all.
                     if (other.review_status or "") == "discarded":
                         continue
-                    batch_doomed += [p for p in (other.storage_path,
+                    doomed_here += [p for p in (other.storage_path,
                                                  other.preview_path,
                                                  other.master_path)
                                      if p and p not in kept_paths]
@@ -5204,6 +5205,21 @@ def api_review_decide(
         processed.reviewed_by = admin.username
         if title:
             P.recompute_title_status(db, title)
+        # ── EACH DECISION IS SAVED ON ITS OWN (v286) ─────────────────────
+        #
+        # One commit at the end held SQLite's write lock from the first
+        # decision's write to the last, across every print file built in
+        # between — 10 to 17 seconds a SAVE chunk. Everything else that
+        # writes waits 5 seconds and then fails: the painting thread could
+        # not record batch #52 after OpenAI took it, and the worker's hello
+        # got a 500 (owner's screenshot, 2026-10-29). Committing here means
+        # the next build runs with the database free. A later failure in
+        # the same chunk now keeps the decisions before it, and pressing
+        # SAVE again repeats them harmlessly (a rebuild is skipped when
+        # nothing changed). The files are only queued for deletion once
+        # their decision is saved.
+        db.commit()
+        batch_doomed += doomed_here
 
     # ── THE TIDY-UP, ONCE, AT THE END ────────────────────────────────────
     #

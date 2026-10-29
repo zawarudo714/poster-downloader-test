@@ -808,15 +808,16 @@ def _run() -> None:
         try:
             freed = release_claims_for_node(_db, "server")
             _db.commit()
-            # A batch caught half-way through SENDING by a restart never
-            # reached OpenAI; its pictures go straight back in the queue
-            # (v266, rule 8 — claimed work must end in a reported state).
+            # A batch caught half-way through SENDING may or may not have
+            # reached OpenAI. The first poll asks OpenAI and either watches
+            # it or puts its pictures back (v286 — requeueing blind paid
+            # twice; rule 8, claimed work must end in a reported state).
             from .ai_batches import recover_unsent
             unsent = recover_unsent(_db)
             _db.commit()
             if unsent:
-                log.warning("GPT: %s batch send(s) were cut short by a restart — "
-                            "their pictures are back in the queue", unsent)
+                log.warning("GPT: %s batch send(s) were cut short — the first "
+                            "batch check asks OpenAI whether it has them", unsent)
             if freed["posters"] or freed["uploads"]:
                 log.warning("GPT: released %s claim(s) left over from a "
                             "previous run", freed["posters"] + freed["uploads"])

@@ -1,7 +1,8 @@
 """
 Behaviour test: step 2 (the flatten), the Step 1 switch, OpenAI batches and
-the live-listing swap list (v266). Builds a throw-away SQLite database and a
-throw-away storage folder, and replaces the four OpenAI calls with fakes that
+the live-listing swap list (v266); a send cut short, and SAVE leaving the
+database free while it builds (v286). Builds a throw-away SQLite database
+and a throw-away storage folder, and replaces the four OpenAI calls with fakes that
 record what was sent — so it never touches poster.db and never spends money.
 
     python tools/test_step2_batch.py
@@ -293,22 +294,116 @@ ok(db.query(M.UploadTracking).filter_by(saved_poster_id=p_live.id).count() == 1,
 live_row.processed_image_id = live2.id; db.commit()
 ok(P.swap_waiting(db, proj).count() == 0, "recording the swap takes it off the list by itself")
 
-# ── RECOVERY ───────────────────────────────────────────────────────────────
+# ── RECOVERY: a send cut short is asked about at OpenAI, never resent blind (v286)
+# Batch #52 (2026-10-29): OpenAI took it, then the site could not save the
+# receipt because SAVE held the database. Requeueing it blind would have paid
+# for its 4 pictures twice and lost the first answers.
+import calendar
+utc_ts = lambda dt: calendar.timegm(dt.timetuple())
+opened = []
+def fake_first(key, fid):
+    opened.append(fid)
+    return first_line[fid]
+G.file_first_custom_id = fake_first
+
 t6, p_s = picture("greenlit"); p_s.paint_requested_at = datetime.utcnow(); db.commit()
 bx = M.AIBatch(project_id=proj.id, stage=1, status="sending"); db.add(bx); db.flush()
 p_s.pipeline_status = "processing"; p_s.claimed_by = f"batch:{bx.id}"
-db.add(M.AIBatchItem(batch_id=bx.id, saved_poster_id=p_s.id, custom_id="x")); db.commit()
+db.add(M.AIBatchItem(batch_id=bx.id, saved_poster_id=p_s.id, custom_id="s1-px-0a1b")); db.commit()
 ok(AB.recover_unsent(db) == 1, "a send cut short by a restart is found at start-up")
 db.commit(); db.refresh(p_s); db.refresh(bx)
-ok(p_s.pipeline_status == "greenlit" and bx.status == "send_failed",
-   "its picture is back in the queue and the batch says why")
+ok(bx.status == "sending" and p_s.pipeline_status == "processing",
+   "start-up does NOT put its pictures back blind (OpenAI may already have the batch)")
+
+def fake_list_down(key, after="", limit=100):
+    raise G.TransientFailure("network error: down")
+G.batch_list = fake_list_down
+AB.poll(db, proj); db.refresh(p_s); db.refresh(bx)
+ok(bx.status == "sending" and bx.collected_at is None and p_s.pipeline_status == "processing"
+   and "could not ask OpenAI" in (bx.error or ""),
+   "OpenAI cannot be asked: the batch stays put and says why; nothing is resent")
+
+# OpenAI has only an OLDER batch — whose file even starts with our label, a
+# trap: the walk must stop at the first batch older than ours, unopened.
+first_line = {"file-old": "s1-px-0a1b"}
+G.batch_list = lambda key, after="", limit=100: {"has_more": False, "data": [
+    {"id": "batch_old", "created_at": utc_ts(bx.created_at) - 3600, "input_file_id": "file-old"}]}
+bx.last_checked_at = None; db.commit(); opened.clear()
+AB.poll(db, proj)
+db.commit(); db.refresh(p_s); db.refresh(bx)
+ok(opened == [], "batches older than ours are never opened")
+ok(p_s.pipeline_status == "greenlit" and bx.status == "send_failed"
+   and "never reached OpenAI" in (bx.error or ""),
+   "OpenAI has no such batch: its picture is back in the queue and the batch says why")
 ok(p_s.paint_requested_at is not None and p_s.id in {sp.id for sp, _t in GW.paint_queue(db, proj).all()},
    "step 1 OFF: a hand-named picture back from a cut-short send keeps its mark and is painted again")
+
+# OpenAI HAS it (the batch #52 case): found by the label on its first line,
+# watched from then on, its picture left alone.
+t12, p_f = picture("processed"); pi_f = painting(t12, p_f, "step2"); db.commit()
+bf = M.AIBatch(project_id=proj.id, stage=2, status="sending", total=1); db.add(bf); db.flush()
+cid_f = f"s2-p{p_f.id}-5207c54a829b"
+db.add(M.AIBatchItem(batch_id=bf.id, saved_poster_id=p_f.id, processed_id=pi_f.id,
+                     custom_id=cid_f)); db.commit()
+made = utc_ts(bf.created_at)
+first_line = {"file-newer": "s2-p999-ffffffffffff", "file-ours": cid_f, "file-old": cid_f}
+G.batch_list = lambda key, after="", limit=100: {"has_more": False, "data": [
+    {"id": "batch_newer", "created_at": made + 60, "input_file_id": "file-newer", "status": "completed"},
+    {"id": "batch_ours", "created_at": made + 5, "input_file_id": "file-ours", "status": "in_progress",
+     "request_counts": {"total": 1, "completed": 0, "failed": 0}},
+    {"id": "batch_old", "created_at": made - 3600, "input_file_id": "file-old", "status": "completed"}]}
+G.batch_get = lambda key, bid: {"id": bid, "status": "in_progress",
+                                "request_counts": {"total": 1, "completed": 0, "failed": 0}}
+opened.clear()
+AB.recover_unsent(db); db.commit()
+AB.poll(db, proj); db.refresh(bf)
+item_f = db.query(M.AIBatchItem).filter_by(batch_id=bf.id).one()
+ok(bf.openai_batch_id == "batch_ours" and bf.input_file_id == "file-ours"
+   and bf.status == "in_progress" and bf.collected_at is None and not bf.error,
+   f"OpenAI has it: the batch gets its OpenAI id and is watched ({bf.openai_batch_id}, {bf.status})")
+ok(opened == ["file-newer", "file-ours"], f"only newer batches' first lines were read ({opened})")
+ok(item_f.outcome is None and pi_f.id not in {pi.id for pi, _sp, _t in GW.step2_queue(db, proj).all()},
+   "its picture stays at OpenAI and is NOT sent a second time")
+bf.status = "completed"; bf.collected_at = datetime.utcnow(); db.commit()
+
 p_s.pipeline_status = "processing"; p_s.claimed_by = "batch:999"; db.commit()
 chk = D.check_batch_claims_have_an_open_batch(db, D.Scope(db, proj.id))
 ok(chk.count == 1 and chk.severity == "error", "Diagnostics: a picture held by a closed batch is an error")
 AB.recover_unsent(db); db.commit(); db.refresh(p_s)
 ok(p_s.pipeline_status == "greenlit", "start-up repair frees a picture held by a closed batch")
+
+# ── SAVE ON APPROVE ARTWORK DOES NOT HOLD THE DATABASE WHILE IT BUILDS (v286)
+# A second connection with no patience tries to write during each print-file
+# build. Before v286 the first decision's write held the lock through the
+# second build, and the painting thread's 5-second wait ran out.
+import sqlite3
+dbfile = os.environ["DATABASE_URL"][len("sqlite:///"):]
+ta, pa_ = picture("processed"); ia = painting(ta, pa_, "pending")
+tb, pb_ = picture("processed"); ib = painting(tb, pb_, "pending"); db.commit()
+free_during_build = []
+def probe_build(db_, processed, color, project, title=None):
+    other = sqlite3.connect(dbfile, timeout=0)
+    try:
+        other.execute("BEGIN IMMEDIATE"); other.execute("ROLLBACK")
+        free_during_build.append(True)
+    except sqlite3.OperationalError:
+        free_during_build.append(False)
+    finally:
+        other.close()
+    return ""
+_real_build = PA._build_print_file
+PA._build_print_file = probe_build
+try:
+    r = json.loads(PA.api_review_decide(None, {"decisions": [
+        {"processed_id": ia.id, "action": "approve"},
+        {"processed_id": ib.id, "action": "approve"}]}, admin=a, db=db).body)
+finally:
+    PA._build_print_file = _real_build
+db.refresh(ia); db.refresh(ib)
+ok(r["approved"] == 2 and ia.review_status == "approved" and ib.review_status == "approved",
+   "SAVE still approves both pictures")
+ok(free_during_build == [True, True],
+   f"the database is free for other writers during EVERY build ({free_during_build})")
 
 # ── STEP 2 SWITCHED OFF WITH WORK WAITING ─────────────────────────────────
 P.set_setting(db, "step2_enabled", False, project=proj, by="t"); db.commit()

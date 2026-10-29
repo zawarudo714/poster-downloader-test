@@ -160,6 +160,9 @@ kbd {
 .btn-accent { background: var(--accent); color: var(--bg); }
 .btn-info { background: rgba(100, 180, 255, 0.20); color: #b3d9ff; border-color: rgba(100, 180, 255, 0.45); }
 .btn-info:hover { background: rgba(100, 180, 255, 0.35); }
+/* REDO STEP 2: magenta, the one colour no other mark uses (v285). */
+.btn-step2 { background: rgba(222, 92, 214, 0.22); color: #f2b8ee; border-color: rgba(222, 92, 214, 0.6); }
+.btn-step2:hover { background: rgba(222, 92, 214, 0.38); }
 .btn-accent:hover { background: var(--accent2); }
 .btn-ghost { background: var(--border); color: var(--text); }
 .btn-ghost:hover { background: var(--accent); color: var(--bg); }
@@ -5307,6 +5310,9 @@ label.inline-check {
 /* LEAVE FOR PHOTOSHOP — not released on save, waits to be edited. Blue so it
    reads apart from keep (green), rerun (amber) and unusable (red). */
 .review-img.is-photoshop { border-color: rgba(100, 180, 255, 0.9); }
+/* REDO STEP 2 — magenta, its own colour (owner, 2026-10-29, v285). It had
+   none, so a redo looked like a picture with no mark at all. */
+.review-img.is-step2 { border-color: rgba(222, 92, 214, 0.95); }
 
 /* ══════════════════════════════════════════════════════════════════════
    NO BACKGROUND ON THE POSTER ITSELF. THIS ONE LINE WAS THE WHOLE BUG.
@@ -5345,7 +5351,14 @@ label.inline-check {
   display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
   margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border);
 }
-.review-tally { margin-left: auto; font-size: 11px; color: var(--subtext); }
+.review-tally {
+  font-size: 16px; font-weight: 600; color: var(--text);
+  margin-bottom: 12px; padding: 8px 12px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 4px;
+}
+.review-tally:empty { display: none; }
+.review-tally-bare { color: var(--error); }
+.review-tally-done { color: var(--success); }
 .review-commit {
   display: flex; align-items: center; gap: 12px;
   margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);
@@ -5354,7 +5367,6 @@ label.inline-check {
 @media (max-width: 700px) {
   .review-pair { grid-template-columns: 1fr; }
   .review-img img { max-height: 40vh; }
-  .review-tally { margin-left: 0; width: 100%; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -5472,7 +5484,7 @@ label.inline-check {
 
 /* The bar that commits review decisions stays reachable while you scroll a
    long day of images. Sticky is inert where the bar is short-page anyway. */
-.review-actionbar, .review-tally {
+.review-actionbar {
   position: sticky; bottom: 0; z-index: 30;
   background: var(--card);
 }

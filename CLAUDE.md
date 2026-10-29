@@ -2637,6 +2637,15 @@ Numpad4 BEFORE any decision key; the top-row 4 and 6 still pick versions.
 Watched by `tools/test_review_keys.py`, which runs the page's own keydown
 handler with Num Lock on and off.
 
+**Every mark has its own outline colour, and the tally is at the top.**
+REDO STEP 2 (v266) was added to `MARK_WORD` with no `.review-img.is-step2`
+rule, so a redo looked exactly like an unmarked picture. Since v285 it is
+magenta (border and `.btn-step2`), and the tally ("N will be released …
+N NOT MARKED YET", the unmarked count in red) is the first line of the
+review panel in 16px instead of 11px print by UNMARK THIS TITLE (owner,
+2026-10-29). `tools/test_review_tally.py` fails if any mark in `MARK_WORD`
+lacks a colour or two marks share one.
+
 So: **keeping the record is not keeping the thing.** Whenever you write to
 a path built from a rule rather than from a unique key, ask what else in the
 database claims that same path. Fixed at the source — the generation number

@@ -85,6 +85,11 @@
     </div>
 
     <div class="panel-body">
+      {# The tally sits at the TOP, in big letters, so a missed picture is
+         seen before SAVE rather than found by it (owner, 2026-10-29, v285).
+         It used to be small print beside UNMARK THIS TITLE. #}
+      <div class="review-tally mono" data-review-tally></div>
+
       <div class="review-head">
         <div>
           <span class="review-title" data-review-title>—</span>
@@ -116,7 +121,6 @@
       <div class="review-actions">
         <span class="muted">Give every picture a mark: KEEP, RERUN, UNUSABLE, or LEAVE FOR PHOTOSHOP (blue outline, waits for a touch-up). A picture with no mark is never released, and SAVE &amp; RELEASE will not save until every picture has one.</span>
         <button class="btn btn-ghost btn-tiny" data-action="review-clear-marks">UNMARK&nbsp;THIS&nbsp;TITLE&nbsp;<span class="mono">(C)</span></button>
-        <span class="review-tally mono" data-review-tally></span>
       </div>
 
       {# ── THE KEYS, WRITTEN DOWN WHERE THEY ARE USED ──────────────────
@@ -126,7 +130,7 @@
          to use than one where none of them do. #}
       <p class="review-keys muted">
         <span class="mono" data-key-label="rerun">7</span> rerun (repaint) ·
-        <span class="mono" data-key-label="step2">6</span> redo step 2, where the project has it ·
+        <span class="mono" data-key-label="step2">3</span> redo step 2, where the project has it ·
         <span class="mono" data-key-label="photoshop">8</span> leave for Photoshop ·
         <span class="mono" data-key-label="keep">9</span> keep ·
         <span class="mono">U</span> unusable ·

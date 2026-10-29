@@ -1125,7 +1125,7 @@
           ${sigBarHtml(v, 'card')}
           ${editBarHtml()}
           <div class="review-img-actions">${split ? '' : repaintBtn}
-            ${step2On ? `<button class="btn btn-skip btn-tiny" data-img-action="step2" data-poster="${img.poster_id}"
+            ${step2On ? `<button class="btn btn-step2 btn-tiny" data-img-action="step2" data-poster="${img.poster_id}"
                     title="${split
                       ? 'Make step 2 again WITHOUT a new painting — from the painting in the middle (pick v1, v2… under it)'
                       : 'Flatten again WITHOUT a new painting — from the painting on screen (pick v1, v2… in the version bar)'}">REDO STEP 2 <span class="mono">(${esc(keyLabel('step2'))})</span></button>` : ''}
@@ -1322,7 +1322,10 @@
     // second number is the one that stops SAVE & RELEASE (v244).
     const approving = releasedCount();
     const bare = unmarkedCount();
-    $('[data-review-tally]').textContent =
+    // Numbers and fixed words only, so innerHTML is safe here. The unmarked
+    // count is RED and on the top line (v285) — the owner reads it to see
+    // whether one was missed; zero says so in green.
+    $('[data-review-tally]').innerHTML =
       `${approving} will be released · ${marked.rerun} ${step2On ? 'repaint' : 'rerun'}`
       + (marked.step2 ? ` · ${marked.step2} redo step 2` : '')
       + ` · ${marked.unusable} retired`
@@ -1331,7 +1334,9 @@
               ? ` · ${leftCount()} still left for Photoshop`
               : ` · ${leftCount()} go to the Photoshop queue`)
           : '')
-      + (bare ? ` · ${bare} NOT MARKED YET` : '');
+      + (bare
+          ? ` · <span class="review-tally-bare">${bare} NOT MARKED YET</span>`
+          : ' · <span class="review-tally-done">every picture marked</span>');
   }
 
   function decide(posterId, action, reason) {

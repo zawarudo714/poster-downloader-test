@@ -3883,6 +3883,9 @@ def api_review_queue(
             # flatten made from it.
             "stage": 2 if is_step2 else 1,
             "label": _label(p),
+            # The painting a step-2 picture was made from, so the screen can
+            # show photo, painting and step 2 side by side (owner, 2026-10-29).
+            "step2_from": (p.step2_from or 0) if is_step2 else 0,
             # 'b', 'c', … for a healed (brush-edited) derivative; '' for an
             # ordinary generation. The screen shows it as v1b, sorted inside
             # its family.

@@ -240,6 +240,15 @@
     return (img.versions && img.versions.length) ? img.versions : [img];
   }
 
+  // The painting behind the step-2 picture on screen, or null. Shown in the
+  // middle so photo → painting → step 2 read left to right (owner,
+  // 2026-10-29). Null for a painting, or when its file is gone.
+  function paintingBehind(img) {
+    const v = shownVersion(img);
+    if (v.stage !== 2 || !v.step2_from) return null;
+    return versionsOf(img).find((p) => p.processed_id === v.step2_from) || null;
+  }
+
   // The human word for where the worker found the photograph. Empty in,
   // empty out — an old save with no record must show nothing, not a guess.
   function sourceWord(src) {
@@ -967,6 +976,11 @@
     // on this one rather than at the start.
     rememberSeen(t);
 
+    // Three across when a step-2 picture is on screen: photo, painting,
+    // step 2. Every image gets the middle slot then, so the rows line up.
+    const three = t.images.some((img) => paintingBehind(img));
+    $('[data-review-pair]').classList.toggle('is-three', three);
+
     $('[data-review-pair]').innerHTML = t.images.map((img) => {
       const state = markOf(img);
       const v = shownVersion(img);
@@ -1001,8 +1015,27 @@
       // updates the instant you change the colour, with no round trip.
       const shown = v.can_recolor ? v.master_url : v.preview_url;
 
+      // THE PAINTING STEP 2 WAS MADE FROM — for looking, not deciding. The
+      // decision buttons stay on the step-2 picture, which is what gets
+      // released; REDO STEP 2 there already works from this painting.
+      const parent = three ? paintingBehind(img) : null;
+      const painting = !three ? '' : parent ? `
+        <figure class="review-img review-img-painting">
+          <a href="${parent.preview_url}?full=1" target="_blank" rel="noopener"
+             title="Open the painting full size in a new tab">
+            <img loading="lazy" src="${parent.preview_url}" alt=""></a>
+          <figcaption>
+            <span class="mono">${esc(parent.filename)}</span>
+            <span class="muted mono">${esc(versionLabel(parent))} · step 1 painting · click to open</span>
+          </figcaption>
+        </figure>` : `
+        <figure class="review-img review-img-painting">
+          <figcaption><span class="muted">No painting to show for this picture.</span></figcaption>
+        </figure>`;
+
       return `
         ${source}
+        ${painting}
         <figure class="review-img ${state ? 'is-' + state : ''}" data-pid="${v.processed_id}">
             <span class="review-canvas" data-canvas data-pid="${v.processed_id}"
                   data-zoom-open="${img.poster_id}"

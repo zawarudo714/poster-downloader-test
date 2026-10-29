@@ -2609,6 +2609,14 @@ pictures get their own family of names (`X_step2.png` / `.jpg`). When a
 clean-up deletes "the other rows' files", ask whether any of those paths is
 also the survivor's.
 
+Since v282 a step-2 title shows THREE pictures: photo, the step 1 painting
+it came from (`step2_from`), and step 2 (owner, 2026-10-29). The middle one
+is a plain `<img>` on purpose — no `data-poster-img`, no `data-zoom-open`,
+no signature layer — because the colour plate, the signature preview and
+the zoom all find "the picture being decided" by those hooks, and a second
+picture carrying them would be recoloured, signed and zoomed as if it were
+the one going live.
+
 So: **keeping the record is not keeping the thing.** Whenever you write to
 a path built from a rule rather than from a unique key, ask what else in the
 database claims that same path. Fixed at the source — the generation number

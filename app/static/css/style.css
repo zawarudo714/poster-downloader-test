@@ -5860,6 +5860,15 @@ html.theme-light .stat-value, html.theme-light .stat-pill-num {
    either — `.review-img img` matched that too, which is the kind of stray
    hit that only shows up once somebody sets the same property inline. */
 .review-img-source img { width: 100%; max-height: 68vh; object-fit: contain; }
+/* Step 2 on screen: photo | step 1 painting | step 2, left to right (owner,
+   2026-10-29). The painting is for looking only, so it is just a picture. */
+.review-pair.is-three { grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 900px) { .review-pair.is-three { grid-template-columns: 1fr; } }
+.review-img-painting img { width: 100%; max-height: 68vh; object-fit: contain; }
+/* Three pictures need the room, so while a title is open for review the page
+   uses the whole width instead of stopping at its usual cap. Must out-rank
+   `body.has-rail .page` in the rail block. */
+body .page:has([data-review-stage]:not([hidden])) { max-width: none; }
 /* The ZOOM CURSOR follows the zoom CLICK. Both used to be on the whole card,
    so the controls underneath the poster looked clickable-to-enlarge and were.
    Now only the pictures carry either. */

@@ -86,7 +86,9 @@ class ListingCheckStage:
         """
         sweep_id = payload["sweep_id"]
         items = payload.get("items") or []
-        gap = max(0.0, float(payload.get("gap_ms") or 300) / 1000.0)
+        # 0 means "no pause" — the form allows it (v287).
+        gap_ms = payload.get("gap_ms")
+        gap = max(0.0, float(300 if gap_ms in (None, "") else gap_ms) / 1000.0)
         every = max(1, int(payload.get("report_every") or 25))
 
         self.client.job_log(job_id, [

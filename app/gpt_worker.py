@@ -105,6 +105,145 @@ def health() -> dict:
     }
 
 
+# ── Paid pictures are kept until they are filed (v287) ─────────────────────
+#
+# A picture OpenAI has sent back is PAID FOR. Filing it takes two more
+# things that can fail on their own: the Storage Box, and a database write
+# that another writer can hold up ("database is locked"). Either failure
+# used to throw the picture away and put the photo back in the queue, so the
+# same picture was painted, and paid for, again.
+#
+# So the picture is written here FIRST, and deleted only after its row is
+# committed. Anything that would otherwise pay for it again — the painter,
+# the step-2 painter, the batch sender — looks here before going to OpenAI,
+# and file_kept() files what is here at the start of every pass.
+#
+#   s1_<poster id>.png     a painting, waiting to be filed
+#   s2_<painting id>.png   a step-2 picture, waiting to be filed
+
+KEPT_RETRY_S = 120          # how long a kept picture waits between tries
+_kept_tried: dict = {}
+
+
+def _kept_dir() -> Path:
+    from .config import WORKSPACE_DIR
+    return WORKSPACE_DIR / "_gpt_tmp" / "paid"
+
+
+def kept_path(stage: int, key: int) -> Path:
+    return _kept_dir() / f"s{stage}_{int(key)}.png"
+
+
+def keep_paid(stage: int, key: int, image_bytes: bytes) -> None:
+    path = kept_path(stage, key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    part = path.with_suffix(".part")
+    part.write_bytes(image_bytes)
+    part.replace(path)          # whole or not at all
+
+
+def kept_generation(stage: int, key: int):
+    """The picture already paid for, as a Generation, or None."""
+    from .gpt_images import Generation
+    path = kept_path(stage, key)
+    try:
+        return Generation(image_bytes=path.read_bytes())
+    except OSError:
+        return None
+
+
+def forget_paid(stage: int, key: int) -> None:
+    kept_path(stage, key).unlink(missing_ok=True)
+    _kept_tried.pop((stage, int(key)), None)
+
+
+def has_kept(stage: int, key: int) -> bool:
+    return kept_path(stage, key).is_file()
+
+
+def file_kept(db: Session, project) -> bool:
+    """
+    File the pictures that were paid for but not filed. Returns True if any
+    was filed. One that is no longer wanted (the photo was deleted, painted
+    since, or the painting stopped waiting for step 2) is let go.
+    """
+    import time as _time
+    from .models import MasterTitle, ProcessedImage, SavedPoster
+    from .pipeline import project_for_title
+    folder = _kept_dir()
+    if not folder.is_dir():
+        return False
+    did = False
+    for path in sorted(folder.glob("s[12]_*.png")):
+        try:
+            stage, key = int(path.stem[1]), int(path.stem.split("_", 1)[1])
+        except ValueError:
+            continue
+        if _time.monotonic() - _kept_tried.get((stage, key), -1e9) < KEPT_RETRY_S:
+            continue
+        if stage == 1:
+            poster = db.query(SavedPoster).filter_by(id=key).first()
+            if poster is None:
+                forget_paid(1, key)
+                continue
+            title = db.query(MasterTitle).filter_by(id=poster.master_title_id).first()
+            if title is None or project_for_title(db, title).id != project.id:
+                continue        # another project's pass files it
+            if poster.deleted_at is not None or poster.pipeline_status in (
+                    "processed", "uploaded", "unusable"):
+                forget_paid(1, key)
+                continue
+            if poster.pipeline_status not in ("greenlit", "failed_processing"):
+                continue        # out with the painter or a batch; filed there
+            gen = kept_generation(1, key)
+            if gen is None:
+                continue
+            _kept_tried[(1, key)] = _time.monotonic()
+            poster.pipeline_status = "processing"
+            poster.claimed_by = "server"
+            poster.claimed_at = datetime.utcnow()
+            db.commit()
+            log.info("Filing painting for poster %s that was already paid for", key)
+            try:
+                if file_painting(db, poster, title, project, gen):
+                    did = True
+            except Exception as e:                       # noqa: BLE001
+                db.rollback()
+                again = db.query(SavedPoster).filter_by(id=key).first()
+                if again is not None and again.pipeline_status == "processing":
+                    again.pipeline_status = "greenlit"
+                    again.claimed_by = None
+                    again.claimed_at = None
+                    again.process_error = f"filing the paid picture: {type(e).__name__}: {e}"
+                    db.commit()
+                log.error("Could not file the paid painting for poster %s: %s", key, e)
+        else:
+            painting = db.query(ProcessedImage).filter_by(id=key).first()
+            if painting is None:
+                forget_paid(2, key)
+                continue
+            if painting.project_id != project.id:
+                continue
+            poster = db.query(SavedPoster).filter_by(id=painting.saved_poster_id).first()
+            title = (db.query(MasterTitle).filter_by(id=poster.master_title_id).first()
+                     if poster is not None else None)
+            if title is None or not step2_still_wanted(db, painting, poster):
+                forget_paid(2, key)
+                continue
+            gen = kept_generation(2, key)
+            if gen is None:
+                continue
+            _kept_tried[(2, key)] = _time.monotonic()
+            log.info("Filing step 2 for painting %s that was already paid for", key)
+            try:
+                if file_step2(db, painting, poster, title, project, gen):
+                    did = True
+            except Exception as e:                       # noqa: BLE001
+                db.rollback()
+                log.error("Could not file the paid step 2 for painting %s: %s", key, e)
+    return did
+
+
 # ── One image ───────────────────────────────────────────────────────────────
 
 def process_one(db: Session, poster, title, project) -> bool:
@@ -122,6 +261,11 @@ def process_one(db: Session, poster, title, project) -> bool:
     source = saved_poster_path(poster)
     style_rel = str(get_setting(db, "openai_style_image", project=project) or "")
     style = WORKSPACE_DIR / style_rel if style_rel else Path("")
+
+    kept = kept_generation(1, poster.id)
+    if kept is not None:
+        log.info("Poster %s: filing the painting already paid for", poster.id)
+        return file_painting(db, poster, title, project, kept)
 
     try:
         # The title travels to the generator so the poster carries the FULL
@@ -227,6 +371,8 @@ def file_painting(db: Session, poster, title, project, gen) -> bool:
     raw = WORKSPACE_DIR / "_gpt_tmp" / f"{poster.id}_raw.png"
     raw.parent.mkdir(parents=True, exist_ok=True)
     raw.write_bytes(gen.image_bytes)
+    # Paid for: kept until its row is committed (see keep_paid).
+    keep_paid(1, poster.id, gen.image_bytes)
 
     tmp = WORKSPACE_DIR / "_gpt_tmp" / f"{poster.id}.jpg"
     # One colour or top-into-bottom, from the dashboard (default_background).
@@ -320,9 +466,10 @@ def file_painting(db: Session, poster, title, project, gen) -> bool:
         _clear_review_cache([full_rel, preview_rel, master_rel])
     except StorageError as e:
         # The image exists and was paid for, but we could not file it. Treat
-        # as transient — storage comes back, and re-running would spend again.
+        # as transient — storage comes back. The picture itself is KEPT
+        # (keep_paid), so the next try files it rather than paying again.
         poster.pipeline_status = "greenlit"
-        poster.process_error = f"storage: {e}"
+        poster.process_error = f"storage: {e} (the picture is kept, not paid for again)"
         poster.process_attempts = (poster.process_attempts or 0) + 1
         poster.claimed_at = None
         poster.claimed_by = None
@@ -399,6 +546,7 @@ def file_painting(db: Session, poster, title, project, gen) -> bool:
 
     recompute_title_status(db, title)
     db.commit()
+    forget_paid(1, poster.id)
     return True
 
 
@@ -494,7 +642,10 @@ def file_step2(db: Session, painting, poster, title, project, gen,
     if not step2_still_wanted(db, painting, poster):
         log.info("Step 2 for painting %s came back after it stopped waiting — "
                  "not filed", painting.id)
+        forget_paid(2, painting.id)
         return False
+    # Paid for: kept until its row is committed (see keep_paid).
+    keep_paid(2, painting.id, gen.image_bytes)
 
     names = step2_names(db, title, poster, painting, project)
     with Image.open(io.BytesIO(gen.image_bytes)) as probe:
@@ -559,6 +710,7 @@ def file_step2(db: Session, painting, poster, title, project, gen,
     db.flush()
     recompute_title_status(db, title)
     db.commit()
+    forget_paid(2, painting.id)
     return True
 
 
@@ -568,6 +720,11 @@ def process_step2_one(db: Session, painting, poster, title, project) -> bool:
     from .pipeline import get_setting
     from .storage_remote import StorageError, read_bytes
     from .config import WORKSPACE_DIR
+
+    kept = kept_generation(2, painting.id)
+    if kept is not None:
+        log.info("Painting %s: filing the step 2 already paid for", painting.id)
+        return file_step2(db, painting, poster, title, project, kept)
 
     style_rel = str(get_setting(db, "openai_style_image", project=project) or "")
     style = WORKSPACE_DIR / style_rel if style_rel else Path("")
@@ -698,6 +855,15 @@ def _cycle() -> bool:
                 db.rollback()
                 AB.note_error(project, f"checking batches: {type(e).__name__}: {e}")
                 log.error("Batch check failed for %s: %s", project.slug, e)
+
+            # PICTURES ALREADY PAID FOR are filed before anything new is
+            # sent or painted, paused or not — like collecting (v287).
+            try:
+                if file_kept(db, project):
+                    did_work = True
+            except Exception as e:                       # noqa: BLE001
+                db.rollback()
+                log.error("Filing kept pictures failed for %s: %s", project.slug, e)
 
             # Paused or draining. The loop keeps ticking (so the heartbeat
             # stays fresh and the watchdog does not "revive" a worker that is

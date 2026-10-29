@@ -32,11 +32,54 @@ if not shutil.which("node"):
     print("SKIP node is not installed")
     sys.exit(0)
 
+HELPERS = ("versionsOf", "step2Versions", "paintingVersions", "hasStep2",
+           "deciderVersions", "shownVersion", "shownPainting", "keepRefused")
+
+
+def keep_on_a_bare_painting(page: str) -> dict:
+    """KEEP pressed on a picture with only paintings, with the step 2 switch
+    ON and then OFF — the switch is set here, not assumed from the fixture.
+    Until v287 this test only had a picture with no step 2 VERSION, which
+    says nothing about whether step 2 is switched on."""
+    script = "\n".join([
+        "const chosen = new Map(); const chosenPainting = new Map();",
+        "const status = { textContent: '' }; const $ = () => status;",
+        *[re.search(r"^  function " + n + r"\(.*?^  }\n", page, re.S | re.M).group(0)
+          for n in HELPERS],
+        "const p3 = { processed_id: 3, stage: 1 }, p4 = { processed_id: 4, stage: 1 };",
+        "const s4 = { processed_id: 5, stage: 2, step2_from: 4 };",
+        "const titles = [{ images: [{ poster_id: 1, processed_id: 5, versions: [p3, p4, s4] },",
+        "                           { poster_id: 2, processed_id: 4, versions: [p3, p4] }] }];",
+        "let step2On = true; const out = {};",
+        "out.bareOn = keepRefused(2, 'approve');",
+        "out.withStep2On = keepRefused(1, 'approve');",
+        "out.rerunOn = keepRefused(2, 'rerun');",
+        "out.said = status.textContent;",
+        "step2On = false;",
+        "out.bareOff = keepRefused(2, 'approve');",
+        "console.log(JSON.stringify(out));",
+    ])
+    res = subprocess.run(["node", "-e", script], capture_output=True, text=True, encoding="utf-8")
+    if res.returncode:
+        print("FAIL node:", res.stderr)
+        sys.exit(1)
+    return json.loads(res.stdout)
+
+
+def keep_checks(k: dict) -> list[str]:
+    broke = []
+    if k["bareOff"] is not False:
+        broke.append("with step 2 OFF, KEEP on a painting is allowed")
+    if k["bareOn"] is not True or "REDO STEP 2" not in k["said"]:
+        broke.append("with step 2 ON, KEEP on a painting is refused, saying why")
+    if k["withStep2On"] is not False or k["rerunOn"] is not False:
+        broke.append("with step 2 ON, KEEP on a step 2 picture and REPAINT still work")
+    return broke
+
+
 script = "\n".join([
     "const chosen = new Map(); const chosenPainting = new Map();",
-    *[lift(n) for n in ("versionsOf", "step2Versions", "paintingVersions",
-                        "hasStep2", "deciderVersions", "shownVersion",
-                        "shownPainting")],
+    *[lift(n) for n in HELPERS if n != "keepRefused"],
     # v3 and v4 paintings, and the step 2 made from v4 (the queue's pick).
     "const p3 = { processed_id: 3, stage: 1 }, p4 = { processed_id: 4, stage: 1 };",
     "const s4 = { processed_id: 5, stage: 2, step2_from: 4 };",
@@ -60,7 +103,7 @@ script = "\n".join([
     "out.goneMiddle = shownPainting(gone);",
     "console.log(JSON.stringify(out));",
 ])
-res = subprocess.run(["node", "-e", script], capture_output=True, text=True)
+res = subprocess.run(["node", "-e", script], capture_output=True, text=True, encoding="utf-8")
 if res.returncode:
     print("FAIL node:", res.stderr)
     sys.exit(1)
@@ -68,9 +111,11 @@ out = json.loads(res.stdout)
 
 ok = lambda cond, msg: print(("PASS " if cond else "FAIL ") + msg) or (cond or sys.exit(1))
 # The positive control first: without step 2, a painting IS the decided picture.
+# (Which picture is SHOWN only. Whether KEEP may release it depends on the
+# step 2 switch, and is checked against keepRefused at the end.)
 ok(out["twoRight"] == 4 and out["twoBar"] == [3, 4],
-   f"without step 2 the paintings are decided as before (got {out['twoRight']}, {out['twoBar']})")
-ok(out["twoMiddle"] is None, "without step 2 there is no middle picture")
+   f"with no step 2 version the paintings are shown as before (got {out['twoRight']}, {out['twoBar']})")
+ok(out["twoMiddle"] is None, "with no step 2 version there is no middle picture")
 ok(out["right"] == 5, "the right-hand picture is the step-2 one")
 ok(out["middle"] == 4, "the middle shows the painting behind it")
 ok(out["rightAfterOldPick"] == 5,
@@ -79,4 +124,21 @@ ok(out["middlePicked"] == 3, "a painting picked under the middle is shown there"
 ok(out["rightAfterPaintingPick"] == 5, "picking a painting leaves KEEP on step 2")
 ok(out["rightBar"] == [5], f"the right-hand bar lists only step-2 versions (got {out['rightBar']})")
 ok(out["goneMiddle"] is None, "a discarded painting leaves the middle empty")
-print("ALL REVIEW SPLIT CHECKS PASSED")
+
+# ── KEEP ON A PICTURE THAT HAS ONLY PAINTINGS ─────────────────────────────
+k = keep_on_a_bare_painting(src)
+shipped = keep_checks(k)
+for rule in ("with step 2 OFF, KEEP on a painting is allowed",
+             "with step 2 ON, KEEP on a painting is refused, saying why",
+             "with step 2 ON, KEEP on a step 2 picture and REPAINT still work"):
+    ok(rule not in shipped, f"{rule} (got {k})")
+
+# ── SABOTAGE ──────────────────────────────────────────────────────────────
+# keepRefused without its step 2 test: the SAME checks must go red.
+print("\n  sabotage — KEEP on a painting no longer refused while step 2 is on")
+line = "if (!img || hasStep2(img)) return false;"
+ok(src.count(line) == 1, "the line is where the sabotage expects it")
+ok("with step 2 ON, KEEP on a painting is refused, saying why"
+   in keep_checks(keep_on_a_bare_painting(src.replace(line, "return false;"))),
+   "the check catches it")
+print("\nALL REVIEW SPLIT CHECKS PASSED")

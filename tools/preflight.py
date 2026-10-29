@@ -1934,7 +1934,8 @@ def check_falsy_zero_defaults() -> None:
 
 
 # Fields where the owner can choose ZERO and mean it.
-ZERO_IS_A_CHOICE = ("daily_limit",)
+ZERO_IS_A_CHOICE = ("daily_limit", "min_image_px", "daily_start_hour",
+                    "rotation_order", "gap_ms")
 
 
 def check_server_keeps_a_chosen_zero() -> None:
@@ -1944,10 +1945,14 @@ def check_server_keeps_a_chosen_zero() -> None:
     The JS check above fixed the account form's `|| 100`, and the server
     went on doing the same thing: the owner set the account's daily limit
     to 0 to hold uploads back, and it saved as 100 (2026-10-29). Both
-    halves of a save have to keep the zero, so both are checked.
+    halves of a save have to keep the zero, so both are checked. v287 added
+    the other settings whose help says 0 is a choice: the size floor ("0
+    switches the check off"), the daily start hour (midnight), an account's
+    turn (first) and the listing check's pause (none).
     """
     pat = re.compile(r"\b(" + "|".join(ZERO_IS_A_CHOICE) + r")\b.*\bor\s+([1-9][0-9]*)")
-    for path in sorted(APP.rglob("*.py")):
+    # The upload machine's folder too: it reads the same settings (v287).
+    for path in sorted([*APP.rglob("*.py"), *(ROOT / "worker_service").rglob("*.py")]):
         for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
             if line.strip().startswith("#"):
                 continue
@@ -1965,7 +1970,19 @@ def check_server_keeps_a_chosen_zero() -> None:
 # Add a row whenever a protective call has to accompany a risky one. The
 # point is not the individual rule — it is that "somebody remembered" stops
 # being the mechanism.
-GUARDED: list[tuple[str, str, tuple[str, ...], str]] = [
+#
+# The risky part is one marker, or a tuple of every way of writing the same
+# thing. A row whose marker matches NO function is watching nothing — the
+# usual cause is a rename — and fails, unless the marker is in
+# MAY_MATCH_NOTHING: a row that exists to forbid code nobody has written.
+
+# Every way SQLAlchemy code here writes "the title with sheet number N".
+# Until v287 only the first was listed, and it matched nothing at all, so
+# a lookup written as filter_by(external_id=...) or .in_() passed unseen.
+EXTERNAL_ID_LOOKUP = (".external_id ==", "filter_by(external_id=", "external_id.in_(")
+MAY_MATCH_NOTHING = {EXTERNAL_ID_LOOKUP}
+
+GUARDED: list[tuple[str, "str | tuple[str, ...]", tuple[str, ...], str]] = [
     # ── EVERY WORKER SAVE ASKS "IS THIS PICTURE ALREADY ANOTHER TITLE'S?" ──
     #
     # A guard only some doors call is no guard: the old address-only check
@@ -2093,12 +2110,12 @@ GUARDED: list[tuple[str, str, tuple[str, ...], str]] = [
     # matched 0 of 4,865 images, while reporting a page of plausible
     # findings about the wrong project's titles. Nothing looked broken —
     # the numbers were confident and completely wrong.
-    ("app/**/*.py", ".external_id ==",
+    ("app/**/*.py", EXTERNAL_ID_LOOKUP,
      ("project_scope(", "scope_titles(", "_title_scope("),
      "looks a title up by its sheet number without scoping to a project, "
      "and that number repeats in every project"),
-    ("scripts/**/*.py", ".external_id ==",
-     ("project_scope(", "scope_titles(", "_titles_by_ext_query("),
+    ("scripts/**/*.py", EXTERNAL_ID_LOOKUP,
+     ("project_scope(", "scope_titles("),
      "looks a title up by its sheet number without scoping to a project, "
      "and that number repeats in every project"),
     # ── HANDING OUT A TITLE IS A PERMISSION QUESTION ────────────────────
@@ -2426,6 +2443,8 @@ def check_guards_are_called() -> None:
         return parsed[path]
 
     for pattern, risky, guards, what in GUARDED:
+        markers = risky if isinstance(risky, tuple) else (risky,)
+        watched = 0
         # A rule usually belongs to a KIND of code rather than to one file —
         # the project-scoping one applies to anything that touches titles.
         # A glob keeps it from being a list of files somebody has to
@@ -2442,8 +2461,9 @@ def check_guards_are_called() -> None:
             if funcs is None:
                 continue
             for node, body in funcs:
-                if risky not in body:
+                if not any(m in body for m in markers):
                     continue
+                watched += 1
                 # PROSE MUST NOT SATISFY A GUARD.
                 #
                 # This used to substring-match the raw source, so a comment
@@ -2464,6 +2484,12 @@ def check_guards_are_called() -> None:
                 if not any(g.rstrip("(") in called for g in guards):
                     fail(f"{rel}:{node.lineno} — {node.name}() {what} "
                          f"(expected one of: {', '.join(guards)})")
+        # A RULE THAT MATCHES NOTHING READS AS COVERAGE. Until v287 only an
+        # empty glob failed here, so renaming the risky line emptied a row
+        # with nothing said (audit, 2026-10-29).
+        if not watched and risky not in MAY_MATCH_NOTHING:
+            fail(f"{pattern}: no function contains {markers[0]!r} any more — "
+                 f"this guard row is watching nothing (was the line renamed?)")
 
 
 def check_endpoints_have_buttons() -> None:

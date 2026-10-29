@@ -294,7 +294,7 @@ def send_due(db: Session, project) -> bool:
     """
     from .models import AIBatch
     from .pipeline import get_setting, step2_active
-    from .gpt_worker import paint_queue, step2_queue
+    from .gpt_worker import has_kept, paint_queue, step2_queue
     gather = int(get_setting(db, "batch_gather_min", project=project) or 0)
     cap = max(1, int(get_setting(db, "batch_max_items", project=project) or 1))
     last = (db.query(AIBatch.created_at)
@@ -306,7 +306,10 @@ def send_due(db: Session, project) -> bool:
     from . import gpt_images as G
     sent = 0
     if step2_active(db, project) and not _recently_refused(db, project, 2):
-        work = step2_queue(db, project).limit(cap).all()
+        # A picture already paid for and kept is filed by file_kept(),
+        # never sent again (v287).
+        work = [w for w in step2_queue(db, project).limit(cap).all()
+                if not has_kept(2, w[0].id)]
         # A SETTING that fails every picture alike stops this step's send
         # before anything is claimed, instead of failing each picture (v279).
         problem = G.settings_problem(db, project, stage=2) if work else None
@@ -316,7 +319,8 @@ def send_due(db: Session, project) -> bool:
             sent += _send(db, project, stage=2, work=work)
     room = cap - sent
     if room > 0 and not _recently_refused(db, project, 1):
-        work = paint_queue(db, project).limit(room).all()
+        work = [w for w in paint_queue(db, project).limit(room).all()
+                if not has_kept(1, w[0].id)]
         problem = G.settings_problem(db, project, stage=1) if work else None
         if problem:
             note_error(project, problem)
@@ -477,6 +481,23 @@ def _send_one_file(db: Session, project, *, stage: int, model: str,
         batch.input_file_id = file_id
         info = G.batch_create(api_key, file_id)
     except (G.PermanentFailure, G.TransientFailure, OSError) as e:
+        if isinstance(e, G.TransientFailure) and batch.input_file_id:
+            # NO ANSWER IS NOT A NO (v287). The file is up and the request to
+            # start the batch went out, but the answer did not come back (a
+            # timeout, a dropped line). OpenAI may well have started it — and
+            # closing it here put every picture back in the queue to be painted
+            # and paid for a second time. Left on 'sending', the next poll asks
+            # OpenAI and either watches the batch or requeues it
+            # (_settle_unsent), the same way a send cut short by a restart is
+            # settled.
+            batch.error = f"no answer when starting it — checking with OpenAI: {e}"[:4000]
+            batch.last_checked_at = datetime.utcnow()
+            db.commit()
+            note_error(project, batch.error)
+            log.warning("Batch %s for %s: no answer from OpenAI when starting it; "
+                        "the next poll checks whether OpenAI has it: %s",
+                        batch.id, project.slug, e)
+            return 0
         refused = isinstance(e, G.PermanentFailure)
         db.rollback()
         batch = db.query(AIBatch).filter_by(id=batch.id).first()

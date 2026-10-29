@@ -59,3 +59,6 @@ worker_service/config.json
 # rather than shipping it inside the image.
 /travel_titled.csv
 /CHECK_catalogue.csv
+
+# The upload machine keeps receipts it could not send here (v287).
+worker_service/unsent_receipts.json

@@ -1149,6 +1149,61 @@ def set_setting(
         row.updated_at = datetime.utcnow()
 
 
+# The keys that share one screen, and that screen's FIXED keys (v287).
+# A dashboard key equal to another key on its screen takes that key's press
+# — the decision keys are read first — so the other action can no longer be
+# reached from the keyboard, and nothing says so. 4 and 6 are the number
+# pad's MOVE keys on Approve Artwork, read before everything else.
+KEY_SCREENS = (
+    ("Approve Artwork",
+     ("review_key_rerun", "review_key_photoshop", "review_key_keep",
+      "review_key_step2", "signature_key_left", "signature_key_right"),
+     {"u": "UNUSABLE", "c": "clear the marks", "v": "next generation",
+      "z": "zoom", "b": "signature colour", "e": "eyedropper",
+      "4": "move left (number pad)", "6": "move right (number pad)"}),
+    ("the Worker Images zoom", ("review_key_keep", "review_key_paste"), {}),
+)
+# What the Settings page calls each key, so the refusal names the box.
+KEY_NAMES = {
+    "review_key_rerun": "RERUN", "review_key_photoshop": "LEAVE FOR PHOTOSHOP",
+    "review_key_keep": "KEEP", "review_key_step2": "REDO STEP 2",
+    "review_key_paste": "PASTE PICTURE", "signature_key_left": "signature to the left",
+    "signature_key_right": "signature to the right",
+}
+
+
+def key_clash(db: Session, changed: Iterable[str], *,
+              project: Optional[Project] = None) -> Optional[str]:
+    """
+    The first clash among the keys a save just CHANGED, as a sentence for
+    the owner — or None.
+
+    Asked AFTER the save's rows are written (and flushed), never key by key
+    while saving: the Settings page sends a whole group at once, so a check
+    on each key against the others' OLD values would refuse a swap of two
+    keys, and would refuse every save of a group that already clashes —
+    including the save that fixes it.
+    """
+    changed = set(changed)
+    for screen, keys, fixed in KEY_SCREENS:
+        if not changed & set(keys):
+            continue
+        seen: dict[str, str] = {}
+        for key in keys:
+            value = str(get_setting(db, key, project=project) or "").strip().lower()
+            if not value:
+                continue
+            if value in fixed:
+                return (f"{value!r} is already the {fixed[value]} key on {screen}. "
+                        f"Pick another key for {KEY_NAMES[key]}.")
+            if value in seen:
+                return (f"The {KEY_NAMES[seen[value]]} key and the {KEY_NAMES[key]} "
+                        f"key are both {value!r} on {screen}. One of them could "
+                        f"never be pressed, so pick another key for one of them.")
+            seen[value] = key
+    return None
+
+
 def _reject_a_value_the_key_cannot_hold(key: str, value) -> None:
     """
     Refuse a non-number being saved into a number setting.
@@ -2775,6 +2830,9 @@ def ungreenlight_titles(db: Session, title_ids: Iterable[int]) -> int:
 _STAGE_ORDER = [
     "failed_processing", "failed_upload", "greenlit", "processing",
     "processed", "uploading", "uploaded",
+    # Last: a title only reads "unusable" when nothing else is left on it.
+    # Missing, a title whose picture was retired read "partial" (v287).
+    "unusable",
 ]
 
 
@@ -3968,6 +4026,13 @@ def claim_upload_batch(
                       UploadTracking.status.in_(("pending", "failed")),
                       UploadTracking.attempts < max_attempts,
                       SavedPoster.deleted_at.is_(None),
+                      # UNUSABLE MEANS NOT LISTED (v287). Marking a poster
+                      # unusable changes the poster, not its approved
+                      # picture, so a row already queued still uploaded —
+                      # and the claim then overwrote "unusable" with
+                      # "uploading".
+                      or_(SavedPoster.pipeline_status.is_(None),
+                          SavedPoster.pipeline_status != "unusable"),
                       # ONLY THE PICTURE THE OWNER LET GO (v266). A row is
                       # created when a picture is approved, and it used to be
                       # trusted from then on — so when step 2 took an
@@ -4165,6 +4230,13 @@ def report_upload_failure(
     tracking = db.query(UploadTracking).filter_by(id=tracking_id).first()
     if tracking is None:
         return
+    # A LISTING THAT IS LIVE IS NEVER MARKED FAILED. Until v287 the node's
+    # catch-all sent a failure when only its "done" message had failed (a
+    # 500, a locked database), and this line turned an uploaded row back
+    # into a retry — the next run listed the same picture a second time.
+    # The node no longer does that; this refuses it whoever asks.
+    if tracking.status == "uploaded":
+        return
 
     tracking.status = "failed"
     tracking.attempts = (tracking.attempts or 0) + 1
@@ -4234,7 +4306,13 @@ def retry_uploads(db: Session, tracking_ids: Iterable[int]) -> int:
     if not ids:
         return 0
 
-    rows = db.query(UploadTracking).filter(UploadTracking.id.in_(ids)).all()
+    # Only a row that is NOT live and NOT on the machine right now. RETRY on
+    # an uploaded row listed the picture twice; on an uploading one it was
+    # handed out again while the first upload was still in the browser.
+    rows = (db.query(UploadTracking)
+              .filter(UploadTracking.id.in_(ids),
+                      UploadTracking.status.notin_(("uploaded", "uploading")))
+              .all())
     for row in rows:
         row.status = "pending"
         row.attempts = 0
@@ -4710,6 +4788,9 @@ def funnel_counts(db: Session, *, project_id: Optional[int] = None) -> dict[str,
         "awaiting_greenlight": 0, "greenlit": 0, "processing": 0,
         "processed": 0, "uploading": 0, "uploaded": 0,
         "failed_processing": 0, "failed_upload": 0, "skipped": 0,
+        # Retired by the owner. Without its own key these pictures were in
+        # no box at all, so the boxes did not add up (v287).
+        "unusable": 0,
     }
     for status, count in query.group_by(SavedPoster.pipeline_status).all():
         if status is None:
@@ -4731,6 +4812,78 @@ def funnel_counts(db: Session, *, project_id: Optional[int] = None) -> dict[str,
     counts["awaiting_greenlight"] = backlog_q.scalar() or 0
 
     return counts
+
+
+def attention_count(db: Session, project: Project) -> int:
+    """
+    The NEEDS ATTENTION number, for the Pipeline tab and the home page.
+
+    ONE question asked by both badges (v287). Before, the Pipeline tab
+    counted failures and stalled claims, the home page counted failures
+    only, and NEITHER counted step 2 giving up or OpenAI refusing a batch —
+    so both read 0 while the Needs Attention page listed work that only the
+    owner can unstick. Each line below matches a list on that page.
+    """
+    from .models import AIBatch
+
+    scope = project_scope(project.id, default_project_id=_default_project_id(db))
+    now = datetime.utcnow()
+    stale_cutoff = now - timedelta(
+        minutes=int(get_setting(db, "claim_timeout_min", project=project) or 30))
+
+    def posters(*conds):
+        return (db.query(func.count(SavedPoster.id))
+                  .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+                  .filter(SavedPoster.deleted_at.is_(None), scope, *conds)
+                  .scalar() or 0)
+
+    failed_painting = posters(SavedPoster.pipeline_status == "failed_processing")
+    # A claim that stopped reporting: nothing is marked failed and nothing
+    # moves, which is the stoppage a failure count misses.
+    stalled_painting = posters(SavedPoster.pipeline_status == "processing",
+                               SavedPoster.claimed_at.isnot(None),
+                               SavedPoster.claimed_at < stale_cutoff)
+    failed_upload = (db.query(func.count(UploadTracking.id))
+                       .filter(UploadTracking.status == "failed",
+                               UploadTracking.project_id == project.id)
+                       .scalar() or 0)
+    stalled_upload = (db.query(func.count(UploadTracking.id))
+                        .filter(UploadTracking.status == "uploading",
+                                UploadTracking.claimed_at.isnot(None),
+                                UploadTracking.claimed_at < stale_cutoff,
+                                UploadTracking.project_id == project.id)
+                        .scalar() or 0)
+    step2_gave_up = (db.query(func.count(ProcessedImage.id))
+                       .join(SavedPoster, ProcessedImage.saved_poster_id == SavedPoster.id)
+                       .filter(ProcessedImage.project_id == project.id,
+                               ProcessedImage.is_current == 1,
+                               ProcessedImage.review_status == "step2_failed",
+                               SavedPoster.deleted_at.is_(None))
+                       .scalar() or 0)
+    # One line on that page however many pictures it held, so one here.
+    batch_refused = 1 if (db.query(AIBatch.id)
+                            .filter(AIBatch.project_id == project.id,
+                                    AIBatch.status == "send_failed",
+                                    AIBatch.error.like("[refused]%"),
+                                    AIBatch.created_at >= now - timedelta(hours=2))
+                            .first()) else 0
+    return (failed_painting + stalled_painting + failed_upload + stalled_upload
+            + step2_gave_up + batch_refused)
+
+
+def waiting_to_upload_count(db: Session, project: Project) -> int:
+    """
+    Pictures with an upload queued or under way — the home page's "waiting
+    to upload". It used to add the funnel's processed and uploading boxes,
+    and "processed" also holds every picture still waiting for review or
+    for step 2, which are not waiting to upload at all (v287).
+    """
+    return (db.query(func.count(func.distinct(UploadTracking.saved_poster_id)))
+              .join(SavedPoster, UploadTracking.saved_poster_id == SavedPoster.id)
+              .filter(UploadTracking.project_id == project.id,
+                      UploadTracking.status.in_(("pending", "uploading")),
+                      SavedPoster.deleted_at.is_(None))
+              .scalar() or 0)
 
 
 def upload_history(db: Session, *, days: int = 30, account_id: Optional[int] = None) -> list[dict]:

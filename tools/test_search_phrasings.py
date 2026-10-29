@@ -65,11 +65,15 @@ def rejects(key: str, value: str) -> bool:
     Called with db=None deliberately. The guard runs before anything touches
     the database, so a value that gets as far as needing a session is a value
     that was accepted — which makes the missing session the proof.
+
+    The refusal is recognised by its OWN words. Any KeyError used to count,
+    so a key that is no longer a setting at all ("Unknown pipeline setting")
+    read as "the guard refused it" and the check could not fail (v287).
     """
     try:
         P.set_setting(None, key, value)
-    except KeyError:
-        return True
+    except KeyError as e:
+        return "does not say which place" in str(e)
     except Exception:
         return False        # got past the guard and died on the database
     return False
@@ -92,8 +96,10 @@ ok("one bad line among good ones is REFUSED",
            "{title} skyline\nbeautiful scenery\naerial view of {title}"))
 ok("the SEARCH button phrasing is guarded too",
    rejects("brave_query_normal", "landscape photo"))
-ok("the DEEP SEARCH phrasing is guarded too",
-   rejects("brave_query_deep", "landscape photo"))
+ok("the GOOGLE button phrasing is guarded too",
+   rejects("google_query", "landscape photo"))
+ok("a key that is not a setting is not mistaken for a refusal",
+   not rejects("brave_query_deep", "landscape photo"))
 ok("a setting that is not a phrasing is left alone",
    not rejects("openai_model", "gpt-image-2"))
 
@@ -130,27 +136,40 @@ ok("the guard is called from inside set_setting itself",
 # ════════════════════════════════════════════════════════════════════════════
 print("\nEditing a phrasing must not serve the old results")
 
-k = P.phrasing_cache_key
-ok("the same wording always gives the same name",
-   k("places to visit in {title}") == k("places to visit in {title}"))
-ok("different wording gives a different name",
-   k("places to visit in {title}") != k("{title} skyline"))
-ok("even a one-word edit gives a different name",
-   k("aerial view of {title}") != k("aerial photo of {title}"))
-ok("the name fits the 16-character column",
-   all(len(k(p)) <= 16 for p in ("{title}", "x" * 500 + " {title}")))
-ok("the name cannot be confused with the everyday buttons",
-   k("{title}") not in ("normal", "deep") and k("{title}").startswith("p:"))
+def cache_checks(k) -> list[str]:
+    """The cache-name rules, run against whichever function is passed —
+    the shipped one, or the sabotage below. Returns what broke."""
+    broke = []
+    if k("places to visit in {title}") != k("places to visit in {title}"):
+        broke.append("the same wording always gives the same name")
+    if k("places to visit in {title}") == k("{title} skyline"):
+        broke.append("different wording gives a different name")
+    if k("aerial view of {title}") == k("aerial photo of {title}"):
+        broke.append("even a one-word edit gives a different name")
+    if not all(len(k(p)) <= 16 for p in ("{title}", "x" * 500 + " {title}")):
+        broke.append("the name fits the 16-character column")
+    if k("{title}") in ("normal", "deep") or not k("{title}").startswith("p:"):
+        broke.append("the name cannot be confused with the everyday buttons")
+    return broke
+
+
+shipped = cache_checks(P.phrasing_cache_key)
+for rule in ("the same wording always gives the same name",
+             "different wording gives a different name",
+             "even a one-word edit gives a different name",
+             "the name fits the 16-character column",
+             "the name cannot be confused with the everyday buttons"):
+    ok(rule, rule not in shipped)
 
 # ── SABOTAGE ────────────────────────────────────────────────────────────────
-# The original mistake: key the cache on the BUTTON NUMBER. Two different
-# phrasings then share a name, and editing one silently serves the other's
-# results. Expect: "different wording gives a different name".
+# The original mistake: key the cache on the BUTTON NUMBER. The SAME rules
+# above are run against it, so this proves those rules can fail — until
+# v287 the sabotage compared a lambda with itself and could not.
 print("\n  sabotage — key on the button number instead of the words")
-by_position = lambda phrasing, position=2: f"p{position}"      # noqa: E731
-ok("keying on position makes two phrasings collide (so the hash is doing work)",
-   by_position("places to visit in {title}") == by_position("{title} skyline"),
-   "the sabotage did not apply — this test proves nothing")
+by_position = lambda phrasing, position=2: f"p:{position}"      # noqa: E731
+ok("keying on position breaks 'different wording gives a different name'",
+   "different wording gives a different name" in cache_checks(by_position),
+   "the rules above would pass a cache keyed on the button number")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -276,29 +295,59 @@ ok("step1_images() reads the switch itself, rather than trusting its caller",
 ok("the missing-reference error only fires when the reference is wanted",
    "use_style and not style.is_file()" in images_src)
 
-# The one line that picks the pictures, read out of the shipped file. Both
-# answers must be on it: both pictures when switched on, the photo alone
-# when off.
-picks = [l.strip() for l in images_src.splitlines()
-         if l.strip().startswith("return ") and "_part(source)" in l]
-ok("there is exactly one line that picks the pictures", len(picks) == 1, str(picks))
-pick = picks[0] if picks else ""
-both, _, alone = pick.partition(" if use_style else ")
-ok("switched on, both pictures are sent", "_part(style)" in both and "_part(source)" in both)
-ok("switched off, the photo goes alone", alone.strip() == "[_part(source)]", alone)
+# What step1_images() actually RETURNS, with the switch on and off. Until
+# v287 these checks read the return line as text, and the sabotage below
+# checked a string the test wrote itself, so neither could fail.
+import tempfile                                          # noqa: E402
+from app import gpt_images as GI                         # noqa: E402
 
-# The ORDER is the part that quietly ruins pictures rather than failing.
-ok("the reference is written FIRST when both are sent",
-   "_part(style)" in both and both.index("_part(style)") < both.index("_part(source)"),
+_pics = Path(tempfile.mkdtemp(prefix="pd_style_"))
+(_pics / "style.png").write_bytes(b"S")
+(_pics / "photo.jpg").write_bytes(b"P")
+
+
+def sent(fn, switch_on: bool) -> list[str]:
+    real = P.get_setting
+    P.get_setting = (lambda db, key, project=None:
+                     switch_on if key == "openai_use_style_image"
+                     else real(db, key, project=project))
+    try:
+        return [name for name, _b, _m in
+                fn(None, None, source=_pics / "photo.jpg", style=_pics / "style.png")]
+    finally:
+        P.get_setting = real
+
+
+def style_checks(fn) -> list[str]:
+    broke = []
+    if sent(fn, True) != ["style.png", "photo.jpg"]:
+        broke.append("switched on, both are sent, the reference FIRST")
+    if sent(fn, False) != ["photo.jpg"]:
+        broke.append("switched off, the photo goes alone")
+    return broke
+
+
+shipped = style_checks(GI.step1_images)
+ok("switched on, both pictures are sent, the reference FIRST",
+   "switched on, both are sent, the reference FIRST" not in shipped,
    "every prompt saying 'the first image' would then mean the photo")
+ok("switched off, the photo goes alone", "switched off, the photo goes alone" not in shipped)
 
 # ── SABOTAGE ────────────────────────────────────────────────────────────────
-# The original mistake: always send both. Expect the "goes alone" check to
-# go red on this line.
-print("\n  sabotage — always send both images")
-pretend = "return [_part(style), _part(source)]"
-ok("an always-both line has no photo-alone branch (so the check is looking)",
-   pretend.partition(" if use_style else ")[2].strip() != "[_part(source)]")
+# The shipped function, run with its return line changed: always both, then
+# the wrong order. The SAME checks must go red on each.
+_line = "return [_part(style), _part(source)] if use_style else [_part(source)]"
+_src = inspect.getsource(GI.step1_images)
+ok("the return line is where the sabotage expects it", _line in _src)
+for label, bad, rule in (
+        ("always send both images", "return [_part(style), _part(source)]",
+         "switched off, the photo goes alone"),
+        ("send the photo first", "return [_part(source), _part(style)] if use_style else [_part(source)]",
+         "switched on, both are sent, the reference FIRST")):
+    print(f"\n  sabotage — {label}")
+    _ns = dict(GI.__dict__)
+    exec(_src.replace(_line, bad), _ns)
+    ok(f"the check catches it ({rule})", rule in style_checks(_ns["step1_images"]))
 
 
 # ════════════════════════════════════════════════════════════════════════════

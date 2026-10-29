@@ -1011,8 +1011,9 @@ def check_upload_accounts(db: Session, scope: Scope) -> CheckResult:
             problems.append("no stored password")
         if not acct.profile_url:
             problems.append("no profile URL")
-        if not acct.daily_limit:
-            problems.append("daily limit is 0")
+        # A daily limit of 0 is NOT a problem: it is how the owner holds an
+        # account back for the day (account_quota keeps it). Reporting it
+        # here made a deliberate choice read as a fault (v287).
         if problems:
             rows.append(Finding(f"{acct.name} ({acct.email})",
                                 ", ".join(problems), "/admin/pipeline",

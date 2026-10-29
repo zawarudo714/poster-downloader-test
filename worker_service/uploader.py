@@ -30,6 +30,7 @@ Selector strings are prefixed: `css:`, `xpath:` or `name:`.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import time
@@ -1083,6 +1084,56 @@ class UploadStage:
         self.config = config
         self.log = log
         self.temp_dir = Path(config.get("temp_dir") or "C:/faa/temp")
+        self.receipts_file = Path(__file__).resolve().parent / "unsent_receipts.json"
+
+    # ── RECEIPTS FOR PICTURES THAT ARE ALREADY LIVE (v287) ────────────────
+    #
+    # Once FineArtAmerica has the picture, the only thing left is telling the
+    # server. If that message cannot get through, the picture must NOT be
+    # reported as failed (that lists it twice) and the receipt must not be
+    # forgotten either (a restart would hand it out again). So it is tried a
+    # few times, then written to a file beside this module and sent before
+    # the next run claims anything.
+    def _unsent(self) -> list:
+        try:
+            return [int(i) for i in json.loads(self.receipts_file.read_text())]
+        except (OSError, ValueError, TypeError):
+            return []
+
+    def _keep_unsent(self, ids: list) -> None:
+        if ids:
+            self.receipts_file.write_text(json.dumps(sorted(set(ids))))
+        elif self.receipts_file.exists():
+            self.receipts_file.unlink()
+
+    def _send_receipt(self, tracking_id: int, waits=(5, 20, 60)) -> bool:
+        for wait in (*waits, None):
+            try:
+                self.client.report_uploaded(tracking_id=tracking_id)
+                return True
+            except Exception as e:          # noqa: BLE001
+                self.log(f"Upload receipt {tracking_id} not taken: {e}", level="error")
+                if wait is None:
+                    break
+                time.sleep(wait)
+        self._keep_unsent(self._unsent() + [tracking_id])
+        return False
+
+    def flush_unsent_receipts(self) -> bool:
+        """Send receipts kept from an earlier run. False while any remain,
+        and then nothing new is claimed: the server would hand the same
+        picture out again."""
+        left = []
+        for tracking_id in self._unsent():
+            try:
+                self.client.report_uploaded(tracking_id=tracking_id)
+                self.log(f"Sent a kept upload receipt ({tracking_id})")
+            except Exception as e:          # noqa: BLE001
+                self.log(f"Kept upload receipt {tracking_id} still not taken: {e}",
+                         level="error")
+                left.append(tracking_id)
+        self._keep_unsent(left)
+        return not left
 
     def _resolve_image(self, item: dict, storage_root: Path) -> Path:
         """
@@ -1126,6 +1177,9 @@ class UploadStage:
     def run_batch(self, *, job_id: Optional[int] = None,
                   account_id: Optional[int] = None,
                   project_id: Optional[int] = None) -> dict:
+        if not self.flush_unsent_receipts():
+            self.log("Not uploading: receipts for live pictures are still unsent")
+            return {"claimed": 0, "uploaded": 0, "failed": 0}
         claim = self.client.claim_upload_batch(
             account_id=account_id, project_id=project_id)
 
@@ -1214,9 +1268,6 @@ class UploadStage:
                 try:
                     image_path = self._resolve_image(item, storage_root)
                     uploader.upload_one(item, image_path)
-                    # Report immediately — never batch the bookkeeping.
-                    self.client.report_uploaded(tracking_id=item["tracking_id"])
-                    uploaded += 1
 
                 except UploadError as e:
                     failed += 1
@@ -1243,6 +1294,20 @@ class UploadStage:
                         tracking_id=item["tracking_id"],
                         error=f"{type(e).__name__}: {e}", screenshot=shot,
                     )
+
+                else:
+                    # THE PICTURE IS LIVE. Report it immediately — never batch
+                    # the bookkeeping — and OUTSIDE the try above: until v287 a
+                    # failed "done" message (a 500, a locked database) fell
+                    # into the catch-all, which reported the live picture as
+                    # FAILED, and the next run listed it a second time.
+                    uploaded += 1
+                    if not self._send_receipt(item["tracking_id"]):
+                        uploader.emit(
+                            "The server is not taking upload receipts. Stopping "
+                            "this run; the receipt is kept and sent next time.",
+                            level="error")
+                        break
 
                 # A human-ish gap between images. Cheap insurance against rate
                 # heuristics, and irrelevant to an unattended box.

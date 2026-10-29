@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from datetime import date as date_type, datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -491,9 +492,12 @@ def _active_revisions_for_user(db: Session, user: User, project=None):
 
 
 def _safe_min_px(db: Session, project) -> int:
-    """The too-small threshold, or its default if the stored value is bad."""
+    """The too-small threshold, or its default if the stored value is bad.
+    ZERO IS KEPT: the help text says "Set to 0 to switch the check off", and
+    `or 350` turned that 0 back into 350 (v287)."""
     try:
-        return int(get_setting(db, "min_image_px", project=project) or 350)
+        value = get_setting(db, "min_image_px", project=project)
+        return 350 if value is None or str(value).strip() == "" else max(0, int(value))
     except Exception:
         return 350
 
@@ -1136,38 +1140,23 @@ def api_search_save(
     live = count_live_posters_for_master(db, t.id)
     replaced_ids: list[int] = []
     stood_down_paths: list = []
-    if live >= soft_limit:
-        # ── CHANGING YOUR MIND IS NORMAL, SO LET IT REPLACE ──────────────
-        # Picking a better image from the same grid used to be refused with
-        # "you already have 1 of 1", which left DELETE-then-search as the
-        # only route (owner's ask, 2026-09-06). With replace=1 the images
-        # this title already holds are stood down and the new pick takes
-        # their place — one action instead of three. See _stand_down_for_swap.
-        if replace:
-            swap = _stand_down_for_swap(
-                db, user, t, via="search_save",
-                note="Replaced by a different image from the search")
-            if swap is None:
-                return JSONResponse(
-                    {"ok": False, "reason": "in_pipeline",
-                     "message": _SWAP_IN_PIPELINE_MESSAGE,
-                     "current_count": live, "soft_limit": soft_limit},
-                    status_code=409,
-                )
-            replaced_ids, stood_down_paths = swap
-            live = count_live_posters_for_master(db, t.id)
-        else:
-            return JSONResponse(
-                {"ok": False, "reason": "soft_limit",
-                 "message": f"You already have {live} of {soft_limit} images for this title.",
-                 "current_count": live, "soft_limit": soft_limit,
-                 "can_replace": True},
-                status_code=409,
-            )
+    if live >= soft_limit and not replace:
+        return JSONResponse(
+            {"ok": False, "reason": "soft_limit",
+             "message": f"You already have {live} of {soft_limit} images for this title.",
+             "current_count": live, "soft_limit": soft_limit,
+             "can_replace": True},
+            status_code=409,
+        )
 
+    # NOTHING IS WRITTEN UNTIL THE PICTURE HAS ARRIVED (v287). The first-save
+    # fields are set on the title here but not flushed, and the swap below
+    # runs after the download: SQLite has ONE write lock, and holding it
+    # through a download of up to a minute made the painting thread, the
+    # upload machine and every other save fail with "database is locked" —
+    # batch #52's cause, in a different door.
     today = local_today()
     _ensure_first_save_metadata(t, today)
-    db.flush()
 
     from ..workspace_migration import project_folder_for
     project_folder = project_folder_for(project)
@@ -1187,6 +1176,26 @@ def api_search_save(
     except FetchError as e:
         target_path.unlink(missing_ok=True)
         return JSONResponse({"ok": False, "message": str(e)}, status_code=422)
+
+    if live >= soft_limit:
+        # ── CHANGING YOUR MIND IS NORMAL, SO LET IT REPLACE ──────────────
+        # Picking a better image from the same grid used to be refused with
+        # "you already have 1 of 1", which left DELETE-then-search as the
+        # only route (owner's ask, 2026-09-06). With replace=1 the images
+        # this title already holds are stood down and the new pick takes
+        # their place — one action instead of three. See _stand_down_for_swap.
+        swap = _stand_down_for_swap(
+            db, user, t, via="search_save",
+            note="Replaced by a different image from the search")
+        if swap is None:
+            target_path.unlink(missing_ok=True)
+            return JSONResponse(
+                {"ok": False, "reason": "in_pipeline",
+                 "message": _SWAP_IN_PIPELINE_MESSAGE,
+                 "current_count": live, "soft_limit": soft_limit},
+                status_code=409,
+            )
+        replaced_ids, stood_down_paths = swap
 
     # ── TOO SMALL? THE SAME HARD FLOOR THE PASTE FLOW USES ───────────────
     # Every door refuses a picture under `min_image_px` on ANY side (2026-
@@ -1930,7 +1939,11 @@ def _download_to(url: str, target_path: Path) -> int:
     counter until unused; replace writes to `.incoming`), so deleting it on
     failure can never destroy an existing good picture.
     """
-    from ..imagefetch import get_public   # checks every redirect hop (v271)
+    from ..imagefetch import TOTAL_S, get_public   # checks every redirect hop (v271)
+    # A per-read timeout is not a time limit: a site that trickles a little
+    # every few seconds held this door open for minutes (v287 gives it the
+    # same total deadline, and the same small pieces, as imagefetch).
+    deadline = time.monotonic() + TOTAL_S
     try:
         with get_public(
             url,
@@ -1945,7 +1958,11 @@ def _download_to(url: str, target_path: Path) -> int:
 
             written = 0
             with open(target_path, "wb") as f:
-                for chunk in resp.iter_content(chunk_size=64 * 1024):
+                for chunk in resp.iter_content(chunk_size=8 * 1024):
+                    if time.monotonic() > deadline:
+                        raise HTTPException(
+                            504, f"The picture had not finished arriving after "
+                                 f"{TOTAL_S} seconds. Try a different address.")
                     if not chunk:
                         continue
                     written += len(chunk)
@@ -2089,32 +2106,23 @@ def save_image(
     live = count_live_posters_for_master(db, t.id)
     replaced_ids: list[int] = []
     stood_down_paths: list = []
-    if live >= soft_limit:
-        if not replace:
-            noun = getattr(project, "item_noun", None) or "image"
-            return JSONResponse(
-                {"ok": False, "reason": "soft_limit", "can_replace": True,
-                 "message": (f"This title already has {live} of {soft_limit} "
-                             f"{noun}{'' if soft_limit == 1 else 's'}. "
-                             f"Replace {'it' if live == 1 else 'them'} "
-                             f"with this one?"),
-                 "current_count": live, "soft_limit": soft_limit},
-                status_code=409,
-            )
-        swap = _stand_down_for_swap(db, user, t, via="paste_save",
-                                    note="Replaced by a pasted image")
-        if swap is None:
-            return JSONResponse(
-                {"ok": False, "reason": "in_pipeline",
-                 "message": _SWAP_IN_PIPELINE_MESSAGE,
-                 "current_count": live, "soft_limit": soft_limit},
-                status_code=409,
-            )
-        replaced_ids, stood_down_paths = swap
+    if live >= soft_limit and not replace:
+        noun = getattr(project, "item_noun", None) or "image"
+        return JSONResponse(
+            {"ok": False, "reason": "soft_limit", "can_replace": True,
+             "message": (f"This title already has {live} of {soft_limit} "
+                         f"{noun}{'' if soft_limit == 1 else 's'}. "
+                         f"Replace {'it' if live == 1 else 'them'} "
+                         f"with this one?"),
+             "current_count": live, "soft_limit": soft_limit},
+            status_code=409,
+        )
 
+    # NOTHING IS WRITTEN UNTIL THE PICTURE HAS ARRIVED (v287) — see the same
+    # note in api_search_save. The fields are set on the title but not
+    # flushed; the swap runs after the download.
     today = local_today()
     _ensure_first_save_metadata(t, today)
-    db.flush()  # so t.title_folder_path / t.original_save_date are visible to helpers
 
     # The project's folder segment, resolved once and stamped onto the poster
     # row below so saved_poster_path() never needs a join to rebuild it.
@@ -2135,6 +2143,19 @@ def save_image(
         target_path = folder / target_name
 
     written = _download_to(src_url, target_path)
+
+    if live >= soft_limit:
+        swap = _stand_down_for_swap(db, user, t, via="paste_save",
+                                    note="Replaced by a pasted image")
+        if swap is None:
+            target_path.unlink(missing_ok=True)
+            return JSONResponse(
+                {"ok": False, "reason": "in_pipeline",
+                 "message": _SWAP_IN_PIPELINE_MESSAGE,
+                 "current_count": live, "soft_limit": soft_limit},
+                status_code=409,
+            )
+        replaced_ids, stood_down_paths = swap
 
     # Read pixel dimensions from the file we just wrote (zero-dep header parse).
     from ..imghdr_lite import read_file_dimensions

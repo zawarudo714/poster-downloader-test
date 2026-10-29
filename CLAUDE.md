@@ -1140,7 +1140,12 @@ tool needs, add it to `REQUIRED_MODULES` in `dev_setup.py` too.
   Any lookup BY external_id must be scoped, through `pipeline.project_scope`
   or one of the `scope_titles` helpers. Now enforced by the GUARDED table in
   `preflight.py`, so a new one fails before deploy. Sorting by it is fine —
-  it is equality lookups that pick a row.
+  it is equality lookups that pick a row. Until v287 the row knew only
+  `.external_id ==`, which matched no code at all, so `filter_by(
+  external_id=…)` and `.in_()` would have passed unseen; the row now lists
+  all three (`EXTERNAL_ID_LOOKUP`), and a GUARDED row whose risky line
+  matches nothing FAILS — a rename used to empty a row silently — unless it
+  is in `MAY_MATCH_NOTHING`, a row that forbids code nobody has written.
 
   **AND IT IS AN IDENTITY, NOT A WORK ORDER — `queue_priority` is the work
   order.** Added 2026-09-17, when 146 famous landmarks (Eiffel Tower,
@@ -1254,7 +1259,11 @@ exists or a marketplace catalogue that has been taken down.
   predicted: six doors each computed the marker with their own copy of the
   question, two copies forgot to skip DELETED pictures, and titles with 0
   saved wore a red FLAG for ever — the worker avoided them. The fix was
-  ONE question (`utils.live_flag_title_ids`) asked by every door, the
+  ONE question (`utils.live_flag_title_ids`) asked by every door — the
+  same fix as the two NEEDS ATTENTION badges, which each added their own
+  sum and both left out step 2 giving up (v287: `pipeline.attention_count`,
+  also behind the home page's "waiting to upload"
+  `waiting_to_upload_count`; `tools/test_attention_count.py`), the
   worker's tag DERIVED from it at read time (which repaired the stuck
   rows with no script), and `check_flag_marker_uses_one_definition` in
   preflight, which found the sixth door on its first run. A seventh door
@@ -2238,7 +2247,17 @@ to our row's time and matches the custom_id on the first line of each
 input file: found, it is watched like any other; not found, its pictures go
 back; OpenAI unreachable, it waits. `recover_unsent` only counts them now.
 `tools/test_step2_batch.py` drives all three cases and checks that a second
-connection can write during every build.
+connection can write during every build. **The same rule holds for a
+picture already PAID for and for a listing already LIVE** (v287): a painting
+whose filing fails (Storage Box down, database locked) is kept in
+`_gpt_tmp/paid/` and filed again by `gpt_worker.file_kept` instead of being
+painted twice (`tools/test_paid_kept.py`); a batch start with no answer is
+settled the same way as a send cut short; and the node sends its "done"
+receipt OUTSIDE the upload's try, keeping it in `unsent_receipts.json`
+until the site takes it, while the server ignores a failure for a row it
+has as uploaded and RETRY skips them (`tools/test_upload_receipts.py`). A
+worker's save likewise downloads BEFORE its first database write
+(`tools/test_save_lock.py`).
 
 **A guessed DURATION is the same defect, and it is easier to miss because it
 usually lives in a comment rather than in code.** `dispatch_stage` said
@@ -2651,8 +2670,14 @@ key too (so 7/8/9 work with Num Lock off), which means REDO STEP 2 on 6
 (v266) took number pad 6 whenever Num Lock was on: "move right" marked a
 redo. Since v284 REDO STEP 2 is 3 and the page moves on `e.code` Numpad6 /
 Numpad4 BEFORE any decision key; the top-row 4 and 6 still pick versions.
-Watched by `tools/test_review_keys.py`, which runs the page's own keydown
-handler with Num Lock on and off.
+v284 made the top-row 3 REDO STEP 2 too, so version 3 could not be picked;
+since v287 a digit REDO STEP 2 key answers on the number pad only. And a
+key setting equal to another key on its screen silently takes that key's
+press, so `pipeline.key_clash` refuses it — checked over the WHOLE save
+after it is written (a swap must go through, and so must the save that
+fixes a clash already stored), never key by key. Watched by
+`tools/test_review_keys.py`, which runs the page's own keydown handler with
+Num Lock on and off, and `tools/test_key_clash.py`.
 
 **Every mark has its own outline colour, and the tally is at the top.**
 REDO STEP 2 (v266) was added to `MARK_WORD` with no `.review-img.is-step2`
@@ -2661,7 +2686,9 @@ magenta (border and `.btn-step2`), and the tally ("N will be released …
 N NOT MARKED YET", the unmarked count in red) is the first line of the
 review panel in 16px instead of 11px print by UNMARK THIS TITLE (owner,
 2026-10-29). `tools/test_review_tally.py` fails if any mark in `MARK_WORD`
-lacks a colour or two marks share one.
+lacks a colour or two marks share one, and runs the shipped counting
+functions — until v287 it stubbed them with fixed numbers, so it tested
+the wording and never the counts.
 
 So: **keeping the record is not keeping the thing.** Whenever you write to
 a path built from a rule rather than from a unique key, ask what else in the
@@ -2787,6 +2814,11 @@ server's save still did `int(x or 100)`, so the owner's 0 was stored as 100
 anyway (v281). A value that crosses a layer is fixed on EVERY layer it
 crosses, and the check covers every layer too (preflight "the server keeps
 a chosen zero", list `ZERO_IS_A_CHOICE`; `tools/test_daily_limit_zero.py`).
+The 2026-10-29 audit found four more (`min_image_px` 0 became 350, the
+node's `daily_start_hour` 0 became 6, `rotation_order` 0 became 100, the
+listing check's `gap_ms` 0 became 300) and Diagnostics calling a daily
+limit of 0 a fault; v287 fixed them and the list now covers
+`worker_service/` too.
 
 ### 6. The third-project test
 

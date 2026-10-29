@@ -1339,7 +1339,22 @@
           : ' · <span class="review-tally-done">every picture marked</span>');
   }
 
+  // A PAINTING NEVER GOES LIVE WHILE STEP 2 IS ON (owner's rule). A picture
+  // with no step-2 version yet has only paintings to show, so KEEP on it would
+  // release one. Refused here so the mark is never shown; the server refuses
+  // it too (v287), because a page loaded before the catch-up still has these.
+  function keepRefused(posterId, action) {
+    if (action !== 'approve' || !step2On) return false;
+    const img = titles.flatMap((t) => t.images).find((i) => i.poster_id === posterId);
+    if (!img || hasStep2(img)) return false;
+    const status = $('[data-review-commit-status]');
+    if (status) status.textContent =
+      'KEEP needs a step 2 picture — this one has only its painting. Press REDO STEP 2.';
+    return true;
+  }
+
   function decide(posterId, action, reason) {
+    if (keepRefused(posterId, action)) return;
     decisions.set(posterId, { action, reason: reason || '' });
     render();
   }
@@ -1396,7 +1411,8 @@
       if (!reason || !reason.trim()) return;
       missing.forEach((img) => decisions.set(img.poster_id, { action, reason: reason.trim() }));
     } else {
-      missing.forEach((img) => decisions.set(img.poster_id, { action, reason: '' }));
+      missing.filter((img) => !keepRefused(img.poster_id, action))
+             .forEach((img) => decisions.set(img.poster_id, { action, reason: '' }));
     }
     render();
   }
@@ -2055,7 +2071,14 @@
     if (K(e, reviewKeys.rerun))     { decideThisTitle('rerun');     e.preventDefault(); return; }
     if (K(e, reviewKeys.photoshop)) { decideThisTitle('photoshop'); e.preventDefault(); return; }
     if (K(e, reviewKeys.keep))      { decideThisTitle('approve');   e.preventDefault(); return; }
-    if (step2On && K(e, reviewKeys.step2)) { decideThisTitle('step2'); e.preventDefault(); return; }
+    // REDO STEP 2 sits on 3 (v284), where version 3 lives. A digit key for
+    // it answers on the NUMBER PAD only, so the top-row digit still picks
+    // that version — the same split as 4 and 6 above (v287).
+    const topRowDigit = /^[0-9]$/.test(String(reviewKeys.step2).trim())
+      && /^Digit/.test(e.code || '');
+    if (step2On && !topRowDigit && K(e, reviewKeys.step2)) {
+      decideThisTitle('step2'); e.preventDefault(); return;
+    }
 
     if (e.key >= '1' && e.key <= '9') {
       pickVersionByNumber(Number(e.key));
@@ -2175,7 +2198,8 @@
     const CHUNK = 5;
     const all = payload.decisions;
     const tally = { approved: 0, held: 0, rerun: 0, unusable: 0, withdrawn: 0,
-                    files_removed: 0, step2: 0 };
+                    files_removed: 0, step2: 0, painting_kept_back: 0,
+                    step2_off: 0, other_project: 0 };
     // From here until the save ends, leaving the page costs unsent work —
     // so the browser's own "leave site?" prompt is armed (commitBusy), and
     // a running tally is written down so a cut-short save can explain
@@ -2212,6 +2236,9 @@
         tally.rerun += d.rerun || 0;
         tally.unusable += d.unusable || 0;
         tally.step2 += d.step2 || 0;
+        tally.painting_kept_back += d.painting_kept_back || 0;
+        tally.step2_off += d.step2_off || 0;
+        tally.other_project += d.other_project || 0;
         tally.files_removed += d.files_removed || 0;
       }
       const d = tally;
@@ -2223,6 +2250,11 @@
         // A picture taken off its title while this screen was open (USE MY
         // OWN PICTURE or RETIRE elsewhere): its painting is never decided.
         + (d.withdrawn ? ` · ${d.withdrawn} skipped because the picture was replaced or retired meanwhile` : '')
+        // Refused by the server (v287): a painting is never released while
+        // step 2 is on, and REDO STEP 2 means nothing while it is off.
+        + (d.painting_kept_back ? ` · ${d.painting_kept_back} NOT released: only a painting, and step 2 is on` : '')
+        + (d.step2_off ? ` · ${d.step2_off} not sent to step 2: step 2 is off` : '')
+        + (d.other_project ? ` · ${d.other_project} skipped: they belong to another project` : '')
         + (stillHeld ? ` · ${stillHeld} still in the Photoshop queue` : '')
         + (d.files_removed
             ? ` · ${d.files_removed} old file(s) deleted from the archive` : '');

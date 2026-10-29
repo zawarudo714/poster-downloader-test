@@ -75,6 +75,8 @@ ok(out["pad4On"] == "move -1", f"number pad 4, Num Lock ON, moves left (got {out
 ok(out["pad4Off"] == "move -1", f"number pad 4, Num Lock off, moves left (got {out['pad4Off']!r})")
 ok(out["pad3On"] == "decide step2", f"number pad 3, Num Lock ON, is REDO STEP 2 (got {out['pad3On']!r})")
 ok(out["pad3Off"] == "decide step2", f"number pad 3, Num Lock off, is REDO STEP 2 (got {out['pad3Off']!r})")
-ok(out["top3"] == "decide step2", f"the top-row 3 is REDO STEP 2 too (got {out['top3']!r})")
+# Since v287 the top-row 3 picks version 3 again: REDO STEP 2 answers on
+# the number pad only, like 4 and 6.
+ok(out["top3"] == "version 3", f"the top-row 3 picks version 3 (got {out['top3']!r})")
 ok(out["top6"] == "version 6", f"the top-row 6 still picks version 6 (got {out['top6']!r})")
 print("ALL REVIEW KEY CHECKS PASSED")

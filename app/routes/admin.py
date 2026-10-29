@@ -453,8 +453,8 @@ def api_pulse(request: Request, admin: User = Depends(require_admin),
             "skipped": skipped,
             "review": review_art,
             "greenlight": funnel.get("awaiting_greenlight", 0),
-            "attention": (funnel.get("failed_processing", 0)
-                          + funnel.get("failed_upload", 0)),
+            # The same question as the Pipeline tab's badge (v287).
+            "attention": P.attention_count(db, proj),
         }
 
         # The journey, left to right, each step a link. A step is only shown
@@ -472,8 +472,7 @@ def api_pulse(request: Request, admin: User = Depends(require_admin),
              "href": "/admin/pipeline"},
             {"label": "artwork awaiting approval", "n": review_art,
              "href": "/admin/pipeline/review"},
-            {"label": "waiting to upload", "n": funnel.get("processed", 0)
-                                                 + funnel.get("uploading", 0),
+            {"label": "waiting to upload", "n": P.waiting_to_upload_count(db, proj),
              "href": "/admin/pipeline"},
             {"label": "live on the marketplace", "n": funnel.get("uploaded", 0),
              "href": "/admin/pipeline"},

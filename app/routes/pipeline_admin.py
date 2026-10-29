@@ -371,33 +371,13 @@ def api_overview(
           .scalar() or 0
     )
 
-    # The tab badge. Stale claims are included because they are exactly the
-    # kind of stoppage a failure count misses — nothing is marked failed, and
-    # nothing is moving either.
-    stale_cutoff = now - timedelta(
-        minutes=int(P.get_setting(db, "claim_timeout_min", project=project) or 30))
-    stalled_count = (
-        db.query(func.count(SavedPoster.id))
-          .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
-          .filter(SavedPoster.pipeline_status == "processing",
-                  SavedPoster.claimed_at.isnot(None),
-                  SavedPoster.claimed_at < stale_cutoff,
-                  SavedPoster.deleted_at.is_(None),
-                  _title_scope(db, project))
-          .scalar() or 0
-    ) + (
-        db.query(func.count(UploadTracking.id))
-          .filter(UploadTracking.status == "uploading",
-                  UploadTracking.claimed_at.isnot(None),
-                  UploadTracking.claimed_at < stale_cutoff,
-                  UploadTracking.project_id == project.id)
-          .scalar() or 0
-    )
+    # The tab badge is P.attention_count — the same question the home page
+    # asks, so the two numbers cannot disagree (v287).
 
     return JSONResponse({
         "ok": True,
         "project": {"id": project.id, "slug": project.slug, "name": project.name},
-        "attention": process_failures + upload_failures + stalled_count,
+        "attention": P.attention_count(db, project),
         "projects": [
             {"id": p.id, "slug": p.slug, "name": p.name, "is_active": bool(p.is_active)}
             for p in db.query(Project).order_by(Project.id.asc()).all()
@@ -867,6 +847,14 @@ def api_set_settings(
             raise HTTPException(400, str(e))
         applied.append(key)
 
+    # Two keys on one screen must differ — checked over the whole save, so a
+    # swap goes through and a clash already stored can be fixed (v287).
+    db.flush()
+    clash = P.key_clash(db, updates.keys(), project=project)
+    if clash:
+        db.rollback()
+        raise HTTPException(400, clash)
+
     log_activity(db, user=admin, action="pipeline_settings", target_type="pipeline",
                  details={"keys": applied, "scope": scope, "project": project.slug})
     db.commit()
@@ -898,6 +886,12 @@ def api_reset_setting(
                          else f"{P.SETTINGS_ROOT}.{key}")
     previous = row.value if row is not None else None
     P.clear_setting(db, key, project=target)
+    # A reset brings back the default, which can clash with a key set since.
+    db.flush()
+    clash = P.key_clash(db, [key], project=project)
+    if clash:
+        db.rollback()
+        raise HTTPException(400, clash)
     # A settings change is exactly what you want to find when behaviour
     # changes and nobody remembers touching anything.
     log_activity(db, user=admin, action="setting_reset", target_type="setting",
@@ -1114,6 +1108,15 @@ def _daily_limit(value) -> int:
     return max(0, int(value))
 
 
+def _rotation_order(value) -> int:
+    """The account's turn in the rotation. Only a BLANK means the default:
+    0 is a real place in the order (first), which `or 100` moved to the
+    back (v287). The page already keeps it (`??`, numOr)."""
+    if value is None or str(value).strip() == "":
+        return 100
+    return int(value)
+
+
 @router.post("/api/accounts")
 def api_create_account(
     request: Request,
@@ -1169,7 +1172,7 @@ def api_create_account(
         profile_url=(payload.get("profile_url") or "").strip() or None,
         chrome_profile_dir=(payload.get("chrome_profile_dir") or "").strip() or None,
         daily_limit=_daily_limit(payload.get("daily_limit")),
-        rotation_order=int(payload.get("rotation_order") or 100),
+        rotation_order=_rotation_order(payload.get("rotation_order")),
         rotation_size=(int(payload["rotation_size"])
                        if payload.get("rotation_size") else None),
         is_enabled=1 if payload.get("is_enabled", True) else 0,
@@ -1219,7 +1222,7 @@ def api_update_account(
     if "daily_limit" in payload:
         account.daily_limit = _daily_limit(payload["daily_limit"])
     if "rotation_order" in payload:
-        account.rotation_order = int(payload["rotation_order"] or 100)
+        account.rotation_order = _rotation_order(payload["rotation_order"])
     if "rotation_size" in payload:
         account.rotation_size = (int(payload["rotation_size"])
                                  if payload["rotation_size"] else None)
@@ -4925,8 +4928,16 @@ def api_review_decide(
 
     now = datetime.utcnow()
     counts = {"approved": 0, "held": 0, "rerun": 0, "unusable": 0,
-              "step2": 0, "withdrawn": 0, "files_removed": 0}
+              "step2": 0, "withdrawn": 0, "files_removed": 0,
+              "painting_kept_back": 0, "step2_off": 0, "other_project": 0}
     batch_doomed: list = []
+    # THE RULES ARE THE SERVER'S, NOT THE PAGE'S (v287). Until then only the
+    # page stopped KEEP on a painting while step 2 was on, and only the page
+    # stopped REDO STEP 2 while it was off — so a page loaded before the
+    # catch-up released a painting all the way to the uploader. The project
+    # is checked too, as every sibling endpoint already did.
+    here = _project(request, admin, db)
+    step2_on = P.step2_active(db, here)
 
     for item in decisions:
         doomed_here: list = []
@@ -4943,7 +4954,17 @@ def api_review_decide(
             counts["withdrawn"] += 1
             continue
         title = db.query(MasterTitle).filter_by(id=poster.master_title_id).first() if poster else None
+        owner = P.project_for_title(db, title) if title else None
+        if owner is None or owner.id != here.id:
+            counts["other_project"] += 1
+            continue
         action = item.get("action")
+        if action == "approve" and step2_on and (processed.stage or 1) != 2:
+            counts["painting_kept_back"] += 1
+            continue
+        if action == "step2" and not step2_on:
+            counts["step2_off"] += 1
+            continue
 
         if action == "approve":
             # THE COLOUR IS SETTLED HERE, ON APPROVAL, AND NOWHERE ELSE.
@@ -5231,7 +5252,7 @@ def api_review_decide(
         from ..storage_remote import delete_paths
         from ..review_cache import clear as _clear_cache
         counts["files_removed"] = delete_paths(
-            db, batch_doomed, project=_project(request, admin, db))
+            db, batch_doomed, project=here)
         _clear_cache(batch_doomed)
 
     log_activity(db, user=admin, action="pipeline_review", target_type="pipeline",

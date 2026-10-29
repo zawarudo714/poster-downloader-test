@@ -1,7 +1,9 @@
 """
 Behaviour test: the title-level KEEP key on the review screen sets every
 picture of the title, and never flips a KEEP already made back off (v275).
-Lifts decide / toggleDecision / decideThisTitle out of
+With step 2 on, a picture that has only its painting is never marked KEEP
+(v287) — the server refuses it too. Lifts keepRefused / decide /
+toggleDecision / decideThisTitle out of
 admin_review_images.js and runs them in node with a stub screen.
 Run from the repo root:
 
@@ -35,8 +37,14 @@ script = "\n".join([
     "const prompt = () => answer;",
     "const render = () => {};",
     "const t = { images: [{ poster_id: 1 }, { poster_id: 2 }] };",
-    "const current = () => t;",
-    lift("decide"), lift("toggleDecision"), lift("decideThisTitle"),
+    "const t2 = { images: [{ poster_id: 3, s2: true }, { poster_id: 4 }] };",
+    "const titles = [t, t2];",
+    "let on = t;",
+    "const current = () => on;",
+    "let step2On = false;",
+    "const hasStep2 = (img) => !!img.s2;",
+    "const $ = () => null;",
+    lift("keepRefused"), lift("decide"), lift("toggleDecision"), lift("decideThisTitle"),
     "const out = [];",
     "const snap = () => JSON.stringify([...decisions].map(([k, v]) => [k, v.action]));",
     "decisions.set(1, { action: 'approve', reason: '' });",
@@ -44,6 +52,10 @@ script = "\n".join([
     "decideThisTitle('approve'); out.push(snap());",
     "decideThisTitle('unusable'); out.push(snap());",
     "out.push(String(decisions.get(2) && decisions.get(2).reason));",
+    "step2On = true; on = t2;",
+    "decideThisTitle('approve'); out.push(snap());",
+    "decide(4, 'approve'); out.push(snap());",
+    "decide(4, 'step2'); out.push(snap());",
     "console.log(JSON.stringify(out));",
 ])
 res = subprocess.run(["node", "-e", script], capture_output=True, text=True)
@@ -59,4 +71,10 @@ ok(out[0] == '[[1,"approve"],[2,"approve"]]',
 ok(out[1] == "[]", f"KEEP again when both are KEEP clears both (got {out[1]})")
 ok(out[2] == '[[1,"unusable"],[2,"unusable"]]', f"UNUSABLE marks both after one question (got {out[2]})")
 ok(out[3] == "blurry", "both carry the reason")
+base = '[1,"unusable"],[2,"unusable"]'
+ok(out[4] == f'[{base},[3,"approve"]]',
+   f"step 2 on: title KEEP marks only the picture that has a step 2 (got {out[4]})")
+ok(out[5] == out[4], f"step 2 on: KEEP on a bare painting is refused (got {out[5]})")
+ok(out[6] == f'[{base},[3,"approve"],[4,"step2"]]',
+   f"REDO STEP 2 on that painting still goes through (got {out[6]})")
 print("ALL TITLE KEEP CHECKS PASSED")

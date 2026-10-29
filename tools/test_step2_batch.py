@@ -378,8 +378,12 @@ ok(p_s.pipeline_status == "greenlit", "start-up repair frees a picture held by a
 # second build, and the painting thread's 5-second wait ran out.
 import sqlite3
 dbfile = os.environ["DATABASE_URL"][len("sqlite:///"):]
-ta, pa_ = picture("processed"); ia = painting(ta, pa_, "pending")
-tb, pb_ = picture("processed"); ib = painting(tb, pb_, "pending"); db.commit()
+# Step-2 pictures: with step 2 on, a bare painting is never KEPT (v287).
+ta, pa_ = picture("processed"); ia = painting(ta, pa_, "pending"); ia.stage = 2
+tb, pb_ = picture("processed"); ib = painting(tb, pb_, "pending"); ib.stage = 2
+db.commit()
+_real_project = PA._project
+PA._project = lambda request, admin, db, explicit=None: proj
 free_during_build = []
 def probe_build(db_, processed, color, project, title=None):
     other = sqlite3.connect(dbfile, timeout=0)
@@ -399,11 +403,70 @@ try:
         {"processed_id": ib.id, "action": "approve"}]}, admin=a, db=db).body)
 finally:
     PA._build_print_file = _real_build
+    PA._project = _real_project
 db.refresh(ia); db.refresh(ib)
 ok(r["approved"] == 2 and ia.review_status == "approved" and ib.review_status == "approved",
    "SAVE still approves both pictures")
 ok(free_during_build == [True, True],
    f"the database is free for other writers during EVERY build ({free_during_build})")
+
+# ── THE RULES ARE THE SERVER'S, NOT THE PAGE'S (v287) ─────────────────────
+# Before v287 only the page kept a bare painting from being KEPT while step 2
+# is on; a second tab, an old page or a stray key press went straight
+# through. The server now refuses it, and two more things the page alone
+# guarded: REDO STEP 2 with step 2 off, and a picture of another project.
+def decide(pid, action):
+    PA._project = lambda request, admin, db, explicit=None: proj
+    try:
+        return json.loads(PA.api_review_decide(None, {"decisions": [
+            {"processed_id": pid, "action": action}]}, admin=a, db=db).body)
+    finally:
+        PA._project = _real_project
+
+tc, pc_ = picture("processed"); bare = painting(tc, pc_, "pending"); db.commit()
+r = decide(bare.id, "approve"); db.refresh(bare)
+ok(r["approved"] == 0 and r["painting_kept_back"] == 1 and bare.review_status == "pending",
+   f"KEEP on a bare painting is refused while step 2 is on ({r['painting_kept_back']}, {bare.review_status})")
+
+P.set_setting(db, "step2_enabled", False, project=proj, by="t"); db.commit()
+r = decide(bare.id, "step2"); db.refresh(bare)
+ok(r["step2_off"] == 1 and bare.review_status == "pending",
+   f"REDO STEP 2 is refused while step 2 is off ({bare.review_status})")
+r = decide(bare.id, "approve"); db.refresh(bare)
+ok(r["approved"] == 1 and bare.review_status == "approved",
+   "with step 2 off the painting itself can be KEPT")
+P.set_setting(db, "step2_enabled", True, project=proj, by="t"); db.commit()
+
+elsewhere = M.Project(slug="elsewhere", name="Elsewhere"); db.add(elsewhere); db.flush()
+te = M.MasterTitle(title="Other place", external_id=99001, status="complete",
+                   project_id=elsewhere.id); db.add(te); db.flush()
+pe = M.SavedPoster(master_title_id=te.id, user_id=w.id, username=w.username,
+                   project_folder="elsewhere", original_save_date=date(2026, 10, 20),
+                   title_folder_path="99001. Other place", filename="o.jpg",
+                   source_url="u", pipeline_status="processed")
+db.add(pe); db.flush()
+foreign = M.ProcessedImage(saved_poster_id=pe.id, project_id=elsewhere.id, storage_path="",
+                           filename="o.jpg", is_current=1, review_status="pending",
+                           attempt=1, master_path="m.png", preview_path="p.jpg", stage=2)
+db.add(foreign); db.commit()
+r = decide(foreign.id, "unusable"); db.refresh(foreign)
+ok(r["other_project"] == 1 and foreign.review_status == "pending",
+   f"a picture of another project is left alone ({foreign.review_status})")
+
+# Sabotage: the same KEEP with the server's stage rule taken out must go
+# through — proof the first check above is looking at the rule.
+import inspect
+src = inspect.getsource(PA.api_review_decide)
+ok('action == "approve" and step2_on and (processed.stage or 1) != 2' in src,
+   "the stage rule is in the shipped endpoint")
+bare2_t, bare2_p = picture("processed"); bare2 = painting(bare2_t, bare2_p, "pending"); db.commit()
+_real_active = P.step2_active
+P.step2_active = lambda db_, project_: False      # what a missing rule looks like
+try:
+    r = decide(bare2.id, "approve")
+finally:
+    P.step2_active = _real_active
+ok(r["approved"] == 1, "sabotage: without the rule the bare painting IS kept (so the check can fail)")
 
 # ── STEP 2 SWITCHED OFF WITH WORK WAITING ─────────────────────────────────
 P.set_setting(db, "step2_enabled", False, project=proj, by="t"); db.commit()

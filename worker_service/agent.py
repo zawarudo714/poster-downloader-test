@@ -60,7 +60,7 @@ from .uploader import UploadStage
 # either way. `check_worker_agent_current` in diagnostics.py now compares
 # what the machine reports against what this file says, so a stale copy is
 # reported instead of assumed.
-AGENT_VERSION = "1.32.0"
+AGENT_VERSION = "1.33.0"
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_CONFIG = HERE / "config.json"
@@ -201,7 +201,9 @@ class Agent:
         self.capabilities = set(node.get("capabilities") or [])
         self.poll_interval = int(data.get("poll_interval_s") or 30)
         self.schedule_mode = data.get("schedule_mode") or "continuous"
-        self.daily_start_hour = int(data.get("daily_start_hour") or 6)
+        # 0 is midnight, a real hour — not "unset" (v287).
+        start = data.get("daily_start_hour")
+        self.daily_start_hour = 6 if start in (None, "") else int(start)
         self.poll_interval_idle = int(data.get("poll_interval_idle_s")
                                       or self.poll_interval)
         self.poll_idle_after_min = int(data.get("poll_idle_after_min") or 10)

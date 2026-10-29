@@ -2617,6 +2617,17 @@ the zoom all find "the picture being decided" by those hooks, and a second
 picture carrying them would be recoloured, signed and zoomed as if it were
 the one going live.
 
+**A painting never goes live while step 2 is on** (owner, 2026-10-29). So
+since v283 a picture with a step-2 version has its versions SPLIT:
+`deciderVersions` (step 2 only) feeds the right-hand picture, KEEP, 1-9 and
+V, and `shownVersion` can no longer land on a painting — before that,
+clicking V4 and pressing KEEP released the painting. The paintings have
+their own bar under the middle picture (`chosenPainting`), and REDO STEP 2
+is sent on that painting. The buttons sit under the picture they redo
+(UNUSABLE left, REPAINT middle, the rest right) but every one still sets
+the picture's ONE mark. Watched by `tools/test_review_split.py`, which
+lifts the helpers from the shipped file.
+
 So: **keeping the record is not keeping the thing.** Whenever you write to
 a path built from a rule rather than from a unique key, ask what else in the
 database claims that same path. Fixed at the source — the generation number

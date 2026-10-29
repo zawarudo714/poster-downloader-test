@@ -54,11 +54,16 @@
   let index    = 0;
   let decisions = new Map(); // poster_id -> {action, reason}
   let chosen    = new Map(); // poster_id -> processed_id being looked at
+  // poster_id -> the painting shown in the MIDDLE once step 2 exists, which
+  // is also the painting REDO STEP 2 starts from. Unset = the painting
+  // behind the step-2 picture on the right.
+  let chosenPainting = new Map();
   let mode     = 'pending';
   let batchSize = 0;        // 0 = review all at once; N = load N at a time
   // Whether this project has STEP 2 (v266). On: RERUN repaints both steps
   // and is labelled REPAINT, and REDO STEP 2 flattens again without a new
-  // painting — from the painting on screen, or the one behind a step-2 picture.
+  // painting — from the painting in the middle (see shownPainting), or the
+  // painting on screen for a title that has no step-2 picture yet.
   let step2On = false;
 
   const esc = (v) => String(v == null ? '' : v)
@@ -166,6 +171,7 @@
     });
     saveDecisions();
     chosen = new Map();
+    chosenPainting = new Map();
     restoreChosen();
     if (!titles.length) {
       // The quiet path is the auto-resume at page load: an empty door
@@ -230,7 +236,7 @@
   // fallback for an image payload without one.
   function shownVersion(img) {
     const pid = chosen.get(img.poster_id);
-    const list = versionsOf(img);
+    const list = deciderVersions(img);
     return list.find((v) => v.processed_id === pid)
         || list.find((v) => v.processed_id === img.processed_id)
         || list[list.length - 1];
@@ -240,13 +246,35 @@
     return (img.versions && img.versions.length) ? img.versions : [img];
   }
 
-  // The painting behind the step-2 picture on screen, or null. Shown in the
-  // middle so photo → painting → step 2 read left to right (owner,
-  // 2026-10-29). Null for a painting, or when its file is gone.
-  function paintingBehind(img) {
-    const v = shownVersion(img);
-    if (v.stage !== 2 || !v.step2_from) return null;
-    return versionsOf(img).find((p) => p.processed_id === v.step2_from) || null;
+  // STEP 2 SPLITS THE VERSIONS IN TWO (owner, 2026-10-29). Once a picture
+  // has a step-2 version, the right-hand picture — the one KEEP releases —
+  // is always a step-2 one, and the paintings get their own bar under the
+  // middle picture. A painting never goes live while step 2 is on, so the
+  // decided picture cannot be one.
+  function step2Versions(img) {
+    return versionsOf(img).filter((v) => v.stage === 2);
+  }
+  function paintingVersions(img) {
+    return versionsOf(img).filter((v) => v.stage !== 2);
+  }
+  function hasStep2(img) {
+    return step2Versions(img).length > 0;
+  }
+  // The versions the right-hand picture, the 1-9 keys and V choose from.
+  function deciderVersions(img) {
+    return hasStep2(img) ? step2Versions(img) : versionsOf(img);
+  }
+
+  // The painting in the MIDDLE: the one picked in its bar, else the one
+  // behind the step-2 picture on the right. Shown so photo → painting →
+  // step 2 read left to right. Null without step 2, or when its file is gone.
+  function shownPainting(img) {
+    if (!hasStep2(img)) return null;
+    const list = paintingVersions(img);
+    const pid = chosenPainting.get(img.poster_id);
+    return list.find((p) => p.processed_id === pid)
+        || list.find((p) => p.processed_id === shownVersion(img).step2_from)
+        || null;
   }
 
   // The human word for where the worker found the photograph. Empty in,
@@ -410,7 +438,10 @@
       const flat = [];
       titles.forEach((t) => t.images.forEach((img) => {
         const pid = chosen.get(img.poster_id);
-        if (pid) flat.push([img.poster_id, { pid, top: topAttempt(img) }]);
+        const painting = chosenPainting.get(img.poster_id);
+        if (pid || painting) {
+          flat.push([img.poster_id, { pid, painting, top: topAttempt(img) }]);
+        }
       }));
       localStorage.setItem(CHOSEN_KEY, JSON.stringify(flat));
     } catch (e) { /* a blocked store must never break the screen */ }
@@ -429,6 +460,9 @@
       if (topAttempt(img) > (c.top || 0)) return;
       if (versionsOf(img).some((v) => v.processed_id === c.pid)) {
         chosen.set(img.poster_id, c.pid);
+      }
+      if (paintingVersions(img).some((v) => v.processed_id === c.painting)) {
+        chosenPainting.set(img.poster_id, c.painting);
       }
     }));
   }
@@ -937,12 +971,12 @@
   }
 
   function versionBarHtml(img) {
-    const list = versionsOf(img);
+    const list = deciderVersions(img);
     if (list.length < 2) return '';
     const showing = shownVersion(img);
     return `
       <div class="review-versions" data-versions="${img.poster_id}">
-        <span class="muted mono">generations</span>
+        <span class="muted mono">${hasStep2(img) ? 'step 2 versions' : 'generations'}</span>
         ${list.map((v, i) => `
           <button class="btn btn-tiny ${v.processed_id === showing.processed_id
                     ? 'btn-accent' : 'btn-ghost'}${v.variant ? ' btn-lettered' : ''}"
@@ -957,6 +991,26 @@
                   data-pid="${showing.processed_id}"
                   title="Delete this edited version and its files — paid generations are never deletable">
             🗑 DELETE ${esc(versionLabel(showing))}</button>` : ''}
+      </div>`;
+  }
+
+  // The paintings, under the middle picture. Picking one changes which
+  // painting REDO STEP 2 starts from; it never changes what KEEP releases.
+  // Clicks only — 1-9 and V stay on the step-2 bar.
+  function paintingBarHtml(img) {
+    const list = paintingVersions(img);
+    if (list.length < 2) return '';
+    const showing = shownPainting(img);
+    return `
+      <div class="review-versions">
+        <span class="muted mono">paintings</span>
+        ${list.map((p) => `
+          <button class="btn btn-tiny ${showing && p.processed_id === showing.processed_id
+                    ? 'btn-accent' : 'btn-ghost'}${p.variant ? ' btn-lettered' : ''}"
+                  data-pick-painting="${p.processed_id}"
+                  data-poster="${img.poster_id}"
+                  title="${esc(p.filename)} · REDO STEP 2 starts from the painting shown here">
+            ${esc(versionLabel(p))}</button>`).join('')}
       </div>`;
   }
 
@@ -978,7 +1032,7 @@
 
     // Three across when a step-2 picture is on screen: photo, painting,
     // step 2. Every image gets the middle slot then, so the rows line up.
-    const three = t.images.some((img) => paintingBehind(img));
+    const three = t.images.some(hasStep2);
     $('[data-review-pair]').classList.toggle('is-three', three);
 
     $('[data-review-pair]').innerHTML = t.images.map((img) => {
@@ -996,6 +1050,18 @@
       // 'pasted link'. Empty for saves made before this was recorded, and
       // then the caption reads exactly as it always did.
       const foundVia = sourceWord(img.image_source);
+
+      // THE BUTTONS SIT UNDER THE PICTURE THEY REDO (owner, 2026-10-29):
+      // UNUSABLE under the photo, REPAINT under the painting, the rest
+      // under step 2. Every one still sets the ONE mark this picture has,
+      // so the keys and the outline on the step-2 picture are unchanged.
+      // Without a step-2 version all of them stay under the poster.
+      const split = hasStep2(img);
+      const repaintBtn = `
+            <button class="btn btn-skip btn-tiny"    data-img-action="rerun"     data-poster="${img.poster_id}"
+                    title="${step2On ? 'Paint it again from the worker’s photo — both steps, so a new painting is paid for' : 'Paint it again'}">${step2On ? 'REPAINT' : 'RERUN'} <span class="mono">(${esc(keyLabel('rerun'))})</span></button>`;
+      const unusableBtn = `
+            <button class="btn btn-error btn-tiny"   data-img-action="unusable"  data-poster="${img.poster_id}">UNUSABLE <span class="mono">(U)</span></button>`;
       const source = `
         <figure class="review-img review-img-source">
           <img loading="lazy" src="${img.source_url}" alt=""
@@ -1004,6 +1070,7 @@
           <figcaption>${img.admin_pick
               ? `<span class="status-pill status-admin-pick" title="Your own picture, used in place of the worker’s${img.admin_pick_note ? ' — ' + esc(img.admin_pick_note) : ''}">ADMIN PICK</span> `
               : ''}<span class="muted mono">${img.admin_pick ? 'your own picture' : 'what the worker found'}${foundVia ? ' · ' : ''}${foundVia ? `<span class="img-source-word">${foundVia}</span>` : ''} · click to enlarge</span></figcaption>
+          ${split ? `<div class="review-img-actions">${unusableBtn}</div>` : ''}
         </figure>`;
 
       // THE POSTER, SITTING ON ITS COLOUR.
@@ -1015,22 +1082,24 @@
       // updates the instant you change the colour, with no round trip.
       const shown = v.can_recolor ? v.master_url : v.preview_url;
 
-      // THE PAINTING STEP 2 WAS MADE FROM — for looking, not deciding. The
-      // decision buttons stay on the step-2 picture, which is what gets
-      // released; REDO STEP 2 there already works from this painting.
-      const parent = three ? paintingBehind(img) : null;
-      const painting = !three ? '' : parent ? `
-        <figure class="review-img review-img-painting">
+      // THE PAINTING STEP 2 WAS MADE FROM — never released itself. Its own
+      // bar picks which painting REDO STEP 2 starts from, and REPAINT sits
+      // here because a new painting is what it makes.
+      const parent = three ? shownPainting(img) : null;
+      const behind = parent && parent.processed_id === v.step2_from;
+      const painting = !three ? '' : `
+        <figure class="review-img review-img-painting">${parent ? `
           <a href="${parent.preview_url}?full=1" target="_blank" rel="noopener"
              title="Open the painting full size in a new tab">
             <img loading="lazy" src="${parent.preview_url}" alt=""></a>
           <figcaption>
             <span class="mono">${esc(parent.filename)}</span>
-            <span class="muted mono">${esc(versionLabel(parent))} · step 1 painting · click to open</span>
-          </figcaption>
-        </figure>` : `
-        <figure class="review-img review-img-painting">
-          <figcaption><span class="muted">No painting to show for this picture.</span></figcaption>
+            <span class="muted mono">${esc(versionLabel(parent))} · ${behind
+              ? 'step 1 painting' : 'REDO STEP 2 starts from this one'} · click to open</span>
+          </figcaption>` : `
+          <figcaption><span class="muted">No painting to show for this picture.</span></figcaption>`}
+          ${split ? paintingBarHtml(img) : ''}
+          ${split ? `<div class="review-img-actions">${repaintBtn}</div>` : ''}
         </figure>`;
 
       return `
@@ -1055,15 +1124,14 @@
           ${colorBarHtml(v, 'card')}
           ${sigBarHtml(v, 'card')}
           ${editBarHtml()}
-          <div class="review-img-actions">
-            <button class="btn btn-skip btn-tiny"    data-img-action="rerun"     data-poster="${img.poster_id}"
-                    title="${step2On ? 'Paint it again from the worker’s photo — both steps, so a new painting is paid for' : 'Paint it again'}">${step2On ? 'REPAINT' : 'RERUN'} <span class="mono">(${esc(keyLabel('rerun'))})</span></button>
+          <div class="review-img-actions">${split ? '' : repaintBtn}
             ${step2On ? `<button class="btn btn-skip btn-tiny" data-img-action="step2" data-poster="${img.poster_id}"
-                    title="Flatten again WITHOUT a new painting — from the painting on screen (pick v1, v2… in the version bar), or from the painting behind this step-2 picture">REDO STEP 2 <span class="mono">(${esc(keyLabel('step2'))})</span></button>` : ''}
+                    title="${split
+                      ? 'Make step 2 again WITHOUT a new painting — from the painting in the middle (pick v1, v2… under it)'
+                      : 'Flatten again WITHOUT a new painting — from the painting on screen (pick v1, v2… in the version bar)'}">REDO STEP 2 <span class="mono">(${esc(keyLabel('step2'))})</span></button>` : ''}
             <button class="btn btn-info btn-tiny"    data-img-action="photoshop" data-poster="${img.poster_id}"
                     title="Leave this one for editing: when you save it moves to its own Photoshop queue (JUST THE PHOTOSHOP ONES) and is not released">LEAVE FOR PHOTOSHOP <span class="mono">(${esc(keyLabel('photoshop'))})</span></button>
-            <button class="btn btn-success btn-tiny" data-img-action="approve"   data-poster="${img.poster_id}">KEEP <span class="mono">(${esc(keyLabel('keep'))})</span></button>
-            <button class="btn btn-error btn-tiny"   data-img-action="unusable"  data-poster="${img.poster_id}">UNUSABLE <span class="mono">(U)</span></button>
+            <button class="btn btn-success btn-tiny" data-img-action="approve"   data-poster="${img.poster_id}">KEEP <span class="mono">(${esc(keyLabel('keep'))})</span></button>${split ? '' : unusableBtn}
           </div>
           ${state ? `<span class="review-img-state">${esc(markWord(state))}</span>` : ''}
         </figure>`;
@@ -1338,7 +1406,15 @@
   // ── Choosing a generation ──────────────────────────────────────────────
   function pickVersion(posterId, processedId) {
     chosen.set(posterId, processedId);
+    // A different step-2 picture brings its own painting into the middle.
+    chosenPainting.delete(posterId);
     saveChosen();     // survives leaving, like the decisions do
+    render();
+  }
+
+  function pickPainting(posterId, processedId) {
+    chosenPainting.set(posterId, processedId);
+    saveChosen();
     render();
   }
 
@@ -1346,7 +1422,7 @@
     const t = current();
     if (!t || !t.images.length) return;
     const img = t.images[0];
-    const list = versionsOf(img);
+    const list = deciderVersions(img);
     if (n < 1 || n > list.length) return;
     pickVersion(img.poster_id, list[n - 1].processed_id);
   }
@@ -1355,7 +1431,7 @@
     const t = current();
     if (!t || !t.images.length) return;
     const img = t.images[0];
-    const list = versionsOf(img);
+    const list = deciderVersions(img);
     if (list.length < 2) return;
     const at = list.findIndex(
       (v) => v.processed_id === shownVersion(img).processed_id);
@@ -1779,6 +1855,12 @@
                   parseInt(pick.dataset.pickVersion, 10));
       return;
     }
+    const pickP = e.target.closest('[data-pick-painting]');
+    if (pickP) {
+      pickPainting(parseInt(pickP.dataset.poster, 10),
+                   parseInt(pickP.dataset.pickPainting, 10));
+      return;
+    }
 
     const el = e.target.closest('[data-action], [data-img-action]');
     if (!el) {
@@ -2047,9 +2129,13 @@
       if (fate === 'left' && mode === 'held') return;
       const d = decisions.get(img.poster_id);
       const v = shownVersion(img);
+      // REDO STEP 2 is sent on the painting in the middle, which the server
+      // flattens as it is — so picking v2 under it redoes step 2 from v2.
+      const base = (fate !== 'left' && d && d.action === 'step2')
+        ? shownPainting(img) : null;
       sentPosters.add(img.poster_id);
       payload.decisions.push({
-        processed_id: v.processed_id,
+        processed_id: (base || v).processed_id,
         action: fate === 'left' ? 'hold' : d.action,
         reason: d ? d.reason : '',
         // Sent with every decision. A poster whose colour you never touched
@@ -2139,6 +2225,8 @@
       // A version picked on a picture that was NOT sent (still waiting in
       // the Photoshop door) is remembered, as it always was.
       chosen = new Map([...chosen].filter(([pid]) => !sentPosters.has(pid)));
+      chosenPainting = new Map(
+        [...chosenPainting].filter(([pid]) => !sentPosters.has(pid)));
       saveChosen();
       clearCut();           // finished cleanly: nothing to explain later
       // A finished save ends the sitting, so there is no "where I was" to

@@ -134,6 +134,8 @@
        'Off, nothing new is painted EXCEPT pictures you RETRY or REPAINT by hand, while step 2 carries on with what is already painted. The same switch is on the Pipeline page.'],
       ['step2_prompt', 'textarea', 'Step 2 prompt',
        'Sent with every painting in step 2. {LOCATION} is replaced by the title. Changing it does not touch pictures already made.'],
+      ['step2_prompt_sky', 'textarea', 'Step 2 prompt, sky gradient version',
+       'Sent instead of the prompt above only when you tick SKY GRADIENT on Approve Artwork and press REDO STEP 2. Use it for a picture whose sky keeps coming back as two hard bands. Only that picture, only that redo. {LOCATION} is replaced by the title.'],
       ['step2_model', 'text', 'Step 2 model',
        'gpt-image-2-2026-04-21 is the pinned version you tested. A pinned name cannot change under you; plain gpt-image-2 can.'],
       ['step2_quality', 'select', 'Step 2 quality',

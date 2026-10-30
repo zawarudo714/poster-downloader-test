@@ -217,7 +217,7 @@ def generate(db: Session, *, source: Path, style: Path, project=None,
             log_fn(msg, level=level)
 
     api_key = api_key_for(db, project)
-    data = request_fields(db, project, stage=1, location=location)
+    data = request_fields(db, project, stage=1, location=location, sky=False)
     parts = step1_images(db, project, source=source, style=style)
     emit("sending the style reference and the photo" if len(parts) == 2
          else "sending the photo only — the style reference is switched off")
@@ -293,11 +293,15 @@ def same_shape_size(width: int, height: int) -> str:
 
 
 def request_fields(db: Session, project, *, stage: int, location: str,
-                   input_size: Optional[tuple] = None) -> dict:
+                   input_size: Optional[tuple] = None, sky: bool) -> dict:
     """
     Everything a request says apart from its pictures: model, prompt, size,
     quality, background. Stage 1 reads the openai_* settings, stage 2 the
     step2_* ones. Shared by the live call and the batch file.
+
+    `sky` (stage 2 only): the painting was sent back with SKY GRADIENT
+    ticked, so it gets `step2_prompt_sky` instead (v288). Everything else —
+    model, size, quality — is the same as any step 2.
 
     {LOCATION} is filled in HERE, before the prompt is sent. It was the one
     placeholder the generation prompt never resolved — the upload title,
@@ -305,8 +309,19 @@ def request_fields(db: Session, project, *, stage: int, location: str,
     out raw, so the model invented the poster text from the picture.
     """
     from .pipeline import get_setting
+    if stage == 2 and sky:
+        prompt = str(get_setting(db, "step2_prompt_sky", project=project) or "").strip()
+        # Never quietly the normal prompt: he asked for a gradient sky on
+        # this one. Worded without "prompt is empty", which the batch sender
+        # reads as "stop every send" — this stops only this picture.
+        if not prompt:
+            raise PermanentFailure(
+                "SKY GRADIENT was ticked, but the sky gradient version of the "
+                "step 2 prompt is blank. Write it on the Settings page (Step 2), "
+                "then press REDO STEP 2 again.", kind="bad_request")
     if stage == 2:
-        prompt = str(get_setting(db, "step2_prompt", project=project) or "").strip()
+        if not sky:
+            prompt = str(get_setting(db, "step2_prompt", project=project) or "").strip()
         if not prompt:
             raise PermanentFailure(
                 "Step 2 is switched on but its prompt is empty. Write it on "
@@ -381,7 +396,7 @@ def step2_images(db: Session, project, *, painting_png: bytes,
 
 
 def generate_step2(db: Session, *, painting_png: bytes, input_size: tuple,
-                   style: Path, project, location: str = "",
+                   style: Path, project, sky: bool, location: str = "",
                    log_fn=None) -> Generation:
     """STEP 2, one at a time at full price (batch switched off)."""
     def emit(msg, level="info"):
@@ -389,7 +404,7 @@ def generate_step2(db: Session, *, painting_png: bytes, input_size: tuple,
             log_fn(msg, level=level)
     api_key = api_key_for(db, project)
     data = request_fields(db, project, stage=2, location=location,
-                          input_size=input_size)
+                          input_size=input_size, sky=sky)
     files = [("image[]", p) for p in step2_images(
         db, project, painting_png=painting_png, style=style)]
     headers = {"Authorization": f"Bearer {api_key}"}

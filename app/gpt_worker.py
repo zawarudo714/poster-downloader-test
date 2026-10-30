@@ -705,6 +705,7 @@ def file_step2(db: Session, painting, poster, title, project, gen,
         signature_json=painting.signature_json,
         stage=2,
         step2_from=painting.id,
+        step2_sky=1 if painting.step2_sky else 0,
     )
     db.add(row)
     db.flush()
@@ -734,6 +735,7 @@ def process_step2_one(db: Session, painting, poster, title, project) -> bool:
         png, size = G.step2_input(master)
         gen = G.generate_step2(db, painting_png=png, input_size=size,
                                style=style, project=project,
+                               sky=bool(painting.step2_sky),
                                location=(title.title or ""))
     except StorageError as e:
         record_step2_failure(db, painting, project, G.TransientFailure(

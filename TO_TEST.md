@@ -1315,6 +1315,25 @@ Deploy with the pipeline still PAUSED. Then:
 
 ---
 
+## 114. SKY GRADIENT ON REDO STEP 2 — v288
+
+**Where:** Approve Artwork, on a picture whose sky came out as flat bands
+(for example Dubai or Moscow). Step 2 must be on.
+
+**What to click:**
+
+1. Press SKY GRADIENT beside REDO STEP 2. It should turn magenta and read
+   ☑ SKY GRADIENT.
+2. Press REDO STEP 2. The picture's status line should end "· sky gradient".
+3. Press SAVE.
+4. When the new step 2 picture comes back, its version button should end
+   "· sky".
+5. Open Settings, Step 2. The box "Step 2 prompt, sky gradient version"
+   should hold your prompt with "gradient" in the sky line.
+
+**What it means if it does not:** if step 4's label has no "· sky", the
+picture was sent the normal prompt. Tell me which picture it was.
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** No longer needed at all — corrected

@@ -3,7 +3,7 @@ Behaviour test: the title-level KEEP key on the review screen sets every
 picture of the title, and never flips a KEEP already made back off (v275).
 With step 2 on, a picture that has only its painting is never marked KEEP
 (v287) — the server refuses it too. Lifts keepRefused / decide /
-toggleDecision / decideThisTitle out of
+toggleDecision / decideThisTitle (and markFor, v288) out of
 admin_review_images.js and runs them in node with a stub screen.
 Run from the repo root:
 
@@ -44,7 +44,8 @@ script = "\n".join([
     "let step2On = false;",
     "const hasStep2 = (img) => !!img.s2;",
     "const $ = () => null;",
-    lift("keepRefused"), lift("decide"), lift("toggleDecision"), lift("decideThisTitle"),
+    "let skyWanted = new Set();",
+    lift("markFor"), lift("keepRefused"), lift("decide"), lift("toggleDecision"), lift("decideThisTitle"),
     "const out = [];",
     "const snap = () => JSON.stringify([...decisions].map(([k, v]) => [k, v.action]));",
     "decisions.set(1, { action: 'approve', reason: '' });",

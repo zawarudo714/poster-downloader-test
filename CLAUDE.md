@@ -2690,6 +2690,20 @@ lacks a colour or two marks share one, and runs the shipped counting
 functions — until v287 it stubbed them with fixed numbers, so it tested
 the wording and never the counts.
 
+**SKY GRADIENT (v288) is a choice for ONE redo, so every redo writes it.**
+The tick sends a painting's next step 2 with `step2_prompt_sky` instead of
+`step2_prompt`. It travels as `sky` on the REDO STEP 2 decision and is
+stored on the PAINTING as `ProcessedImage.step2_sky`. SAVE sets that column
+on every REDO STEP 2, to 0 when unticked, because a flag that is only ever
+SET follows the painting into every later redo. The batch line and the live
+call both read it through `request_fields(..., sky=)`, where `sky` is
+required with no default. The step 2 row copies it, which is the "· sky"
+label. A blank sky prompt is refused at SAVE before any decision is saved,
+and per picture after that, never swapped for the normal prompt. Its message
+avoids the words "prompt is empty", which `_send` reads as "stop every
+send". Watched by `tools/test_step2_sky.py`, which was broken five ways on
+purpose and went red each time.
+
 So: **keeping the record is not keeping the thing.** Whenever you write to
 a path built from a rule rather than from a unique key, ask what else in the
 database claims that same path. Fixed at the source — the generation number

@@ -865,6 +865,12 @@ DEFAULTS: dict[str, Any] = {
     # the painting prompt. Empty with step 2 on is REFUSED loudly rather than
     # sent — an empty prompt would still be charged for.
     "step2_prompt": "",
+    # The same prompt with a gradient sky allowed (owner, 2026-10-30). Some
+    # pictures come back from the solid-sky prompt with the sky in two hard
+    # bands however often step 2 is redone; ticking SKY GRADIENT on Approve
+    # Artwork before REDO STEP 2 sends that one picture this prompt instead.
+    # Empty is refused at SAVE, never swapped for the normal prompt.
+    "step2_prompt_sky": "",
     # His tested values (2026-10-28, measured in the laptop tester): this
     # snapshot, medium quality, opaque, the see-through painting as input.
     # The snapshot is pinned rather than the floating "gpt-image-2" name, so
@@ -1591,6 +1597,33 @@ PROJECT_DEFS: list[dict] = [
                 "distant background landmasses as is, plus its occupying "
                 "elements in a detailed manner. Never add new buildings, "
                 "skylines, or landmarks.\n\n"
+                "Details: Replace tiny windows and street clutter with minimal "
+                "flat color blocks. Remove all clouds, country flags, and "
+                "flagpoles."),
+            # His sky-gradient prompt, word for word (owner, 2026-10-30): his
+            # current step 2 prompt with only the sky line changed from solid
+            # to gradient. Seeded once; the Settings page owns it after that.
+            "step2_prompt_sky": (
+                "Keep the same composition, layout and image elements. "
+                "Transform the existing scene into a minimalist mid-century "
+                "travel poster using flat vector graphics, stark silhouettes, "
+                "and a limited retro color palette with zero gradients.\n\n"
+                "Text: Keep the exact same words, spelling and position of all "
+                "text. Render all letters with sharp, crisp vector edges while "
+                "strictly preserving any original architectural flourishes or "
+                "custom illustrative shapes embedded in the typography. Remove "
+                "only the grunge textures and gradients to match the stark, "
+                "flat aesthetic. You may change the text colors to a strong, "
+                "vivid, solid color palette taken from the image, to best "
+                "complement the main subject.\n\n"
+                "Water: Keep the water detailed, drawn as flat shapes in two or "
+                "three solid colors.\n\n"
+                "Sky: The sky needs a strong, vivid, gradient color, using the "
+                "original sky hues.\n\n"
+                "Structures: In the foreground and middle ground, merge small "
+                "shapes into larger ones. Always keep distant background "
+                "landmasses as they are, with the things on them drawn in "
+                "detail. Never add new buildings, skylines, or landmarks.\n\n"
                 "Details: Replace tiny windows and street clutter with minimal "
                 "flat color blocks. Remove all clouds, country flags, and "
                 "flagpoles."),

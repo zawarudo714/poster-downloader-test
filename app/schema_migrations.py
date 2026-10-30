@@ -209,6 +209,9 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("processed_images", "step2_attempts", "INTEGER NOT NULL DEFAULT 0"),
     ("processed_images", "step2_error",    "TEXT"),
     ("saved_posters",    "paint_requested_at", "DATETIME"),
+    # SKY GRADIENT on REDO STEP 2 (v288). 0 on every existing row is the
+    # truth: nothing was ever sent the sky prompt before.
+    ("processed_images", "step2_sky",      "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 # ════════════════════════════════════════════════════════════════════════════

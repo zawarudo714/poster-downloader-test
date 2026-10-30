@@ -3874,7 +3874,7 @@ def api_review_queue(
             return f"v{p.attempt or 1}{p.variant or ''}"
         n = s2_rank.get(p.id) or s2_rank.get(p.healed_from or 0) or 1
         return (f"v{p.attempt or 1} step 2" + (f" #{n}" if n > 1 else "")
-                + (p.variant or ""))
+                + (p.variant or "") + (" · sky" if p.step2_sky else ""))
 
     def _version(p) -> dict:
         is_step2 = (p.stage or 1) == 2
@@ -3889,6 +3889,8 @@ def api_review_queue(
             # The painting a step-2 picture was made from, so the screen can
             # show photo, painting and step 2 side by side (owner, 2026-10-29).
             "step2_from": (p.step2_from or 0) if is_step2 else 0,
+            # Made with the sky gradient prompt (v288).
+            "sky": bool(p.step2_sky) if is_step2 else False,
             # 'b', 'c', … for a healed (brush-edited) derivative; '' for an
             # ordinary generation. The screen shows it as v1b, sorted inside
             # its family.
@@ -4734,6 +4736,7 @@ def _store_variant_row(db, *, admin, project, title, poster, processed,
         # controls, its own print-file name, and the same painting behind it.
         stage=processed.stage,
         step2_from=processed.step2_from,
+        step2_sky=processed.step2_sky or 0,
     )
     db.add(row)
     db.flush()
@@ -4938,6 +4941,14 @@ def api_review_decide(
     # is checked too, as every sibling endpoint already did.
     here = _project(request, admin, db)
     step2_on = P.step2_active(db, here)
+    # SKY GRADIENT with no sky prompt is refused BEFORE anything is saved:
+    # decisions commit one at a time, so a refusal half way through would
+    # leave the earlier ones done and the rest not (v288).
+    sky_asked = any(d.get("action") == "step2" and d.get("sky") for d in decisions)
+    if sky_asked and not str(P.get_setting(db, "step2_prompt_sky", project=here) or "").strip():
+        raise HTTPException(409, "SKY GRADIENT is ticked, but the sky gradient "
+                                 "version of the step 2 prompt is blank. Write it "
+                                 "on the Settings page (Step 2), or untick it.")
 
     for item in decisions:
         doomed_here: list = []
@@ -5206,6 +5217,9 @@ def api_review_decide(
             source.review_status = "step2"
             source.step2_attempts = 0
             source.step2_error = None
+            # Which prompt this redo is sent: set on EVERY redo, so a tick
+            # used once does not follow the painting into the next one.
+            source.step2_sky = 1 if item.get("sky") else 0
             counts["step2"] += 1
 
         elif action == "unusable":

@@ -366,13 +366,15 @@ def _send(db: Session, project, *, stage: int, work: list) -> int:
                     png, dims = G.step2_input(master)
                     fields = G.request_fields(db, project, stage=2,
                                               location=(title.title or ""),
-                                              input_size=dims)
+                                              input_size=dims,
+                                              sky=bool(painting.step2_sky))
                     parts = G.step2_images(db, project, painting_png=png, style=style)
                 else:
                     poster, title = entry
                     painting = None
                     fields = G.request_fields(db, project, stage=1,
-                                              location=(title.title or ""))
+                                              location=(title.title or ""),
+                                              sky=False)
                     parts = G.step1_images(db, project,
                                            source=saved_poster_path(poster),
                                            style=style)

@@ -65,6 +65,11 @@
   // painting — from the painting in the middle (see shownPainting), or the
   // painting on screen for a title that has no step-2 picture yet.
   let step2On = false;
+  // SKY GRADIENT (v288): pictures whose next REDO STEP 2 is sent the sky
+  // gradient prompt. Ticked before or after pressing REDO STEP 2; once the
+  // mark exists the choice rides on it ({action: 'step2', sky: true}), so it
+  // is saved with the other marks and survives a reload. Off by default.
+  let skyWanted = new Set();
 
   const esc = (v) => String(v == null ? '' : v)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -1125,6 +1130,9 @@
           ${sigBarHtml(v, 'card')}
           ${editBarHtml()}
           <div class="review-img-actions">${split ? '' : repaintBtn}
+            ${step2On ? `<button class="btn btn-tiny ${skyTicked(img.poster_id) ? 'btn-step2' : 'btn-ghost'}" data-img-action="sky"
+                    data-poster="${img.poster_id}" aria-pressed="${skyTicked(img.poster_id)}"
+                    title="Ticked, REDO STEP 2 sends this picture the sky gradient version of the step 2 prompt (Settings, Step 2). Only this picture, only this redo.">${skyTicked(img.poster_id) ? '☑' : '☐'} SKY GRADIENT</button>` : ''}
             ${step2On ? `<button class="btn btn-step2 btn-tiny" data-img-action="step2" data-poster="${img.poster_id}"
                     title="${split
                       ? 'Make step 2 again WITHOUT a new painting — from the painting in the middle (pick v1, v2… under it)'
@@ -1133,7 +1141,8 @@
                     title="Leave this one for editing: when you save it moves to its own Photoshop queue (JUST THE PHOTOSHOP ONES) and is not released">LEAVE FOR PHOTOSHOP <span class="mono">(${esc(keyLabel('photoshop'))})</span></button>
             <button class="btn btn-success btn-tiny" data-img-action="approve"   data-poster="${img.poster_id}">KEEP <span class="mono">(${esc(keyLabel('keep'))})</span></button>${split ? '' : unusableBtn}
           </div>
-          ${state ? `<span class="review-img-state">${esc(markWord(state))}</span>` : ''}
+          ${state ? `<span class="review-img-state">${esc(markWord(state))}${
+            state === 'step2' && skyTicked(img.poster_id) ? ' · sky gradient' : ''}</span>` : ''}
         </figure>`;
     }).join('');
 
@@ -1353,9 +1362,33 @@
     return true;
   }
 
+  function markFor(posterId, action, reason) {
+    const d = { action, reason: reason || '' };
+    if (action === 'step2' && skyWanted.has(posterId)) d.sky = true;
+    return d;
+  }
+
   function decide(posterId, action, reason) {
     if (keepRefused(posterId, action)) return;
-    decisions.set(posterId, { action, reason: reason || '' });
+    decisions.set(posterId, markFor(posterId, action, reason));
+    render();
+  }
+
+  // Is SKY GRADIENT ticked for this picture? The mark wins once it exists,
+  // because the set is empty again after a reload and the mark is not.
+  function skyTicked(posterId) {
+    const d = decisions.get(posterId);
+    if (d && d.action === 'step2') return !!d.sky;
+    return skyWanted.has(posterId);
+  }
+
+  function toggleSky(posterId) {
+    const on = !skyTicked(posterId);
+    if (on) skyWanted.add(posterId); else skyWanted.delete(posterId);
+    const d = decisions.get(posterId);
+    if (d && d.action === 'step2') {
+      if (on) d.sky = true; else delete d.sky;
+    }
     render();
   }
 
@@ -1409,10 +1442,10 @@
         'e.g. "AI merges her with the background every time"\n\n' +
         'This is kept permanently — the files and the worker\'s pay are not affected.');
       if (!reason || !reason.trim()) return;
-      missing.forEach((img) => decisions.set(img.poster_id, { action, reason: reason.trim() }));
+      missing.forEach((img) => decisions.set(img.poster_id, markFor(img.poster_id, action, reason.trim())));
     } else {
       missing.filter((img) => !keepRefused(img.poster_id, action))
-             .forEach((img) => decisions.set(img.poster_id, { action, reason: '' }));
+             .forEach((img) => decisions.set(img.poster_id, markFor(img.poster_id, action)));
     }
     render();
   }
@@ -1924,6 +1957,10 @@
         resetSignature(parseInt(el.dataset.pid, 10));
         return;
       }
+      if (imgAction === 'sky') {
+        toggleSky(parseInt(el.dataset.poster, 10));
+        return;
+      }
       toggleDecision(parseInt(el.dataset.poster, 10), imgAction);
       return;
     }
@@ -2172,6 +2209,8 @@
         processed_id: (base || v).processed_id,
         action: fate === 'left' ? 'hold' : d.action,
         reason: d ? d.reason : '',
+        // SKY GRADIENT (v288): which prompt this REDO STEP 2 is sent.
+        sky: !!(d && d.action === 'step2' && fate !== 'left' && d.sky),
         // Sent with every decision. A poster whose colour you never touched
         // still needs one recorded, and "the one showing on screen" is what
         // you approved by pressing KEEP without changing it.
@@ -2265,6 +2304,9 @@
       // copy here would be a second record of the same fact.
       decisions = new Map();
       saveDecisions();
+      // A tick is for ONE redo. The picture comes back with its new step 2
+      // version and the box empty, as every other picture starts.
+      skyWanted = new Set();
       // A version picked on a picture that was NOT sent (still waiting in
       // the Photoshop door) is remembered, as it always was.
       chosen = new Map([...chosen].filter(([pid]) => !sentPosters.has(pid)));

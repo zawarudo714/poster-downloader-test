@@ -1242,6 +1242,11 @@ class ProcessedImage(Base):
     step2_from      = Column(Integer, nullable=True)
     step2_attempts  = Column(Integer, nullable=False, default=0)
     step2_error     = Column(Text, nullable=True)
+    # SKY GRADIENT (v288). On a PAINTING waiting for step 2: send it the
+    # `step2_prompt_sky` prompt instead of `step2_prompt` — set only by REDO
+    # STEP 2 with the tick on, cleared by a redo without it. On a STEP-2
+    # picture: it was made with that prompt, so its version reads "· sky".
+    step2_sky       = Column(Integer, nullable=False, default=0)
 
     saved_poster = relationship("SavedPoster")
 

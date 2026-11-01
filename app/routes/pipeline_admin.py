@@ -1443,7 +1443,7 @@ def api_delete_account(
         db.query(UploadTracking)
           .filter(UploadTracking.account_id == account_id,
                   UploadTracking.status.in_(
-                      ("pending", "uploading", "failed")))
+                      ("pending", "uploading", "failed", P.RELIST_WAITING)))
           .all()
     )
     released = 0
@@ -2414,7 +2414,6 @@ def _ai_counts(db: Session, project) -> dict:
                          _PI.review_status == "step2_failed",
                          SavedPoster.deleted_at.is_(None))
                  .scalar() or 0)
-    swap_all = P.swap_waiting(db, project).count()
     return {
         "step1_enabled": P.step1_open(db, project),
         "step2_active": P.step2_active(db, project),
@@ -2434,9 +2433,6 @@ def _ai_counts(db: Session, project) -> dict:
         "step2_in_batch": away2,
         "step2_failed": failed2,
         "catchup": P.painted_before_step2(db, project).count(),
-        "swap_waiting": swap_all,
-        # What ONE press swaps: one account, at most P.SWAP_JOB_CAP (v274).
-        "swap_this_run": len(P.swap_next_run(db, project)) if swap_all else 0,
     }
 
 
@@ -2522,46 +2518,6 @@ def api_ai_step2_retry(
                  details={"project": project.slug, "count": n})
     db.commit()
     return JSONResponse({"ok": True, "requeued": n})
-
-
-@router.post("/api/ai/swap")
-def api_ai_swap(
-    request: Request,
-    admin: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    """
-    SWAP THE PICTURES ON LIVE LISTINGS — one click (v266).
-
-    Queues ONE job for the worker machine. Which listings it covers is
-    decided when the machine picks it up (see _resolve_job_payload), so the
-    list is never stale. One job at a time: pressing again while one is
-    queued or running does nothing, and STOP on the jobs list ends it after
-    the listing in hand.
-    """
-    project = _project(request, admin, db)
-    waiting = P.swap_waiting(db, project).count()
-    if not waiting:
-        raise HTTPException(409, "Nothing is waiting to be swapped.")
-    # This project's open job only: another project's swap is not this one (v274).
-    open_job = (db.query(PipelineJob)
-                  .filter(PipelineJob.kind == "listing_swap",
-                          PipelineJob.project_id == project.id,
-                          PipelineJob.status.in_(("queued", "running")))
-                  .first())
-    if open_job is not None:
-        return JSONResponse({"ok": True, "job_id": open_job.id, "already": True,
-                             "waiting": waiting})
-    # One job takes one account and at most P.SWAP_JOB_CAP — say so, not "waiting".
-    this_run = len(P.swap_next_run(db, project))
-    job = P.create_job(db, kind="listing_swap", project_id=project.id,
-                       payload={"limit": P.SWAP_JOB_CAP}, requested_by=admin.username)
-    log_activity(db, user=admin, action="listing_swap_queued", target_type="pipeline",
-                 details={"project": project.slug, "waiting": waiting,
-                          "this_run": this_run, "job": job.id})
-    db.commit()
-    return JSONResponse({"ok": True, "job_id": job.id, "waiting": waiting,
-                         "this_run": this_run})
 
 
 @router.post("/api/ai/batch/{batch_id}/cancel")
@@ -5122,9 +5078,9 @@ def api_review_decide(
                                      project=P.project_for_title(db, title))
                 # A LIVE poster stays live. One of the 417 that went round
                 # again for a repaint came back 'processed'; approving its
-                # new picture puts it on the swap list, not in the upload
-                # queue (its 'uploaded' row is left alone by
-                # ensure_upload_rows), so its state says 'uploaded' again.
+                # new picture does not send it again (its 'uploaded' row is
+                # left alone by ensure_upload_rows — RE-UPLOAD on the Listing
+                # check tab is the way, v289), so it says 'uploaded' again.
                 P.restore_live_status(db, poster)
             # The review cache exists to make revisiting fast; once an image
             # is approved and heading for upload nobody reviews it again, so

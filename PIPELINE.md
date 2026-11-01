@@ -86,12 +86,21 @@ For a GPT project the Process row above is two steps, both on the Linux VPS:
   print file `X_v2_step2.jpg`, built when it is approved. A redo is
   `_step2-2`. Paintings keep their files until an approval settles the poster.
 - **Live listings (the 417).** Approving a step-2 picture of a poster that
-  is already live does not queue a new listing; it puts the listing on the
-  swap list (`pipeline.swap_waiting`, derived). SWAP N LIVE LISTINGS NOW
-  queues one `listing_swap` job for the Windows node, which presses Edit →
-  Change Image → Upload Image → Submit on each listing
-  (`worker_service/listing_swap.py`) and points the upload row at the new
-  picture.
+  is already live does not queue a new listing, and nothing changes the
+  live listing. The v266 swap was REMOVED in v289 (owner, 2026-11-01). The
+  owner deletes the listings on FineArtAmerica himself
+  (`tools/faa_delete_all.js`), runs the Listing check (all should read 410),
+  renames the shop, and presses RE-UPLOAD on the Listing check tab.
+- **RE-UPLOAD (v289, `pipeline.relist_listing`).** Takes only rows the
+  Listing check read as 410. Each goes back up on its SAME upload row, with
+  `relisted_at` stamped (claimed first by `claim_upload_batch`) and
+  `times_listed` back to 0 (plain title — see the title rules in
+  CLAUDE.md). An approved current picture joins the queue now ('pending');
+  one still on Approve Artwork waits as 'relist' and `ensure_upload_rows`
+  releases it on approval. The old address and live time go to the
+  activity log (`listing_relisted`). USE MY OWN PICTURE on such a title
+  moves the row onto the new picture; retire stands it down; the step-2
+  catch-up keeps it as 'relist'. Tested by `tools/test_relist.py`.
 
 ---
 

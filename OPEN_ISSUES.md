@@ -2,6 +2,113 @@
 
 ---
 
+## THE 417 LIVE LISTINGS: DELETE AND RE-UPLOAD UNDER A RENAMED SHOP — `DECIDED 2026-11-01`, BUILT v289
+
+**Built in v289 (not deployed when written).** RE-UPLOAD on the Listing
+check tab, the delete script `tools/faa_delete_all.js` (the owner runs it
+in his own browser; the site never deletes listings), USE MY OWN PICTURE on
+Approve Artwork, and the swap REMOVED. See PIPELINE.md, "RE-UPLOAD". The
+owner's order: approve with uploads paused (daily limit 0) → run the
+script, PREVIEW then DELETE → Listing check, all 410 → rename the shop and
+type the new artist name → RE-UPLOAD → daily limit back to 100.
+
+**Found while building, NOT acted on — a money decision for the owner.**
+`MEASURED 2026-11-01` (read-only, live database): 444 of his own picks
+(USE MY OWN PICTURE) sit greenlit with no `paint_requested_at`. Until v289
+that door did not name the pick, and Step 1 is off, so they were never
+painted and nothing said why. About $18.65 to paint at the measured
+~$0.030 a painting plus ~$0.012 for step 2. v289 names NEW picks only.
+`check_own_picks_painted_while_step1_off` lists them; ask him before
+naming or painting any of them.
+
+The original brief follows, as history.
+
+Written by the Cowork chat for the Claude Code chat, which has none of this
+context. The owner's decision, in his words: he has "settled for the 417
+being deleted and I reupload."
+
+**What the 417 are.** These are the travel posters that went live on
+FineArtAmerica before step 2 existed. Step 2 (v266) gives each one a new,
+flatter picture, and he wants the live listings to carry the new pictures.
+
+**Why not the swap.** v266 built a swap: approve the new step-2 picture,
+press SWAP N LIVE LISTINGS NOW, and the worker machine changes the picture
+on the existing listing (`worker_service/listing_swap.py`, a `listing_swap`
+job, `pipeline.swap_waiting`). He has chosen delete and re-upload instead,
+so the swap will not be used. Rule 2 says remove an obsolete mechanism
+rather than leave it, but confirm with him before deleting it.
+
+**The trap he is avoiding, `MEASURED` by him (see the title rules in
+CLAUDE.md):**
+
+- FineArtAmerica never gives a title back. A deleted listing becomes
+  "Kyoto #1", and uploading "Kyoto" again lists it as "Kyoto #2".
+- Our site avoids the "#2" by adding a letter itself. Every re-sent title
+  goes up as "Kyoto B" (`SavedPoster.times_listed`, `render_remote_title`).
+  He does not want a "B" on the 417 either.
+
+**His plan to avoid both: rename the shop slightly.** The artist name is
+"Illusination Travel Posterz". In FineArtAmerica's settings the first name
+is "Illusination" and the last name is "Travel Posterz". The ideas offered
+to him were Illusination Travel Posters, Illusination Travel Prints,
+Illusination Travel Art, Illusination Vintage Travel and Illusination
+Posters. As far as this chat knows he has not picked one yet, so ask him.
+
+**A new shop name DOES avoid "#2" — `MEASURED` by the owner, shown
+2026-11-01.** The shop was once "Illusination Travel Posters" (with an s).
+"Taj Mahal, Agra" was deleted under that name, the shop was renamed to
+"...Posterz", and the same title uploaded again listed as plain
+"Taj Mahal, Agra" with no "#2". Screenshots: the old address
+`taj-mahal-agra-illusination-travel-posters.html` answers "Page Removed"
+(410), and `taj-mahal-agra-illusination-travel-posterz.html` is live under
+the bare title. So FineArtAmerica's renumbering follows the ADDRESS, which
+includes the artist slug, and the hand test on the real account is NOT
+needed (it would also have spent the title it tested). The new name is
+"Illusination Travel Prints", chosen 2026-11-01.
+
+**Upload order: the 417 first, `DECIDED 2026-11-01`.** Today's uploader
+does NOT do that by itself. It orders by `SavedPoster.original_save_date`,
+then sheet number. Measured the same day: the 417 were saved 12–26 Sep, the
+10 waiting rows 16–18 Sep and the 364 not-yet-queued pictures from 13 Sep,
+so all three would interleave. The re-upload build must put the 417 first.
+
+**The order matters** (see "the artist name is the dangerous part of the
+rebrand" below):
+
+1. Rename the shop on FineArtAmerica.
+2. Type the new name, exactly as FineArtAmerica shows it, into the
+   account's artist name on the Listing check tab.
+3. Then upload.
+
+Do not run a listing check while old and new listings are mixed. It would
+report the deleted ones as removed, and any it still looks up under the old
+name as "our address is wrong".
+
+**What the site needs before he can do this (not built — plan it with him
+first):**
+
+- **The 417 must be re-uploadable.** Today each of them has an upload row
+  with status 'uploaded'. `ensure_upload_rows` never creates a second row
+  for an account that already has one, so approving the new picture queues
+  nothing. That is exactly why the swap list exists. The 417's rows need to
+  go back to 'pending', pointing at the approved step-2 picture.
+- **No "B" on those 417 only.** Their `times_listed` must go back to 0. This
+  deliberately breaks the rule that recall never resets that number. It is
+  only safe because the new shop name gives the titles fresh addresses
+  (measured above). Write down why in the same edit.
+- **Do NOT use SEND BACK TO THE START.** It deletes the paintings and the
+  step-2 pictures, so all 417 would be painted again and paid for twice.
+- **The daily limit is 100 uploads.** Re-uploading the 417 uses about four
+  days of slots, shared with new posters. Ask him which go first.
+- **Check the earnings side.** The Earnings page matches sales to designs by
+  title. The titles stay the same, but read `app/earnings/matching.py` and
+  confirm the shop rename does not upset it before saying it is fine.
+- **Find out where the 417 are now** before building anything. Count the
+  posters that are 'uploaded', and how many of those already have an
+  approved step-2 picture (`pipeline.swap_waiting` lists them).
+
+---
+
 ## STEP 2, BATCHES AND THE SWAP (v266) — what is NOT proven yet, 2026-10-28
 
 Built and tested against fakes (`tools/test_step2_batch.py`, 43 checks);
@@ -17,10 +124,9 @@ never run against the real OpenAI or the real FineArtAmerica. Each is a
 - **The JSON form of an image edit** (`images: [{image_url: data URL}]`) is
   read from the API reference, not sent by us before. The live path still
   sends multipart, as it always has.
-- **The swap job's clicks** come from the owner's three saved pages of the
-  2026 edit form. FineArtAmerica serves older forms at random; the job
-  stops on that listing, says which, and goes on. The title check means it
-  can never swap onto the wrong listing.
+- **The swap job's clicks** were never run, and the swap was REMOVED in
+  v289: the owner chose to delete and re-upload the 417 instead (see the
+  entry above).
 - **Measured:** a step 2 at medium costs 4.8–5.4 cents (four tester runs,
   real token counts). Batch halves it.
 

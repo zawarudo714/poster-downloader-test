@@ -25,6 +25,21 @@
     </div>
   </section>
 
+  {# ── Re-upload what you deleted (v289) ─────────────────────────────────
+     The way back up for listings you deleted on FineArtAmerica on purpose:
+     only the ones the check above read as Page Removed (410). #}
+  <section class="panel">
+    <div class="panel-head">
+      <span>PUT YOUR DELETED LISTINGS BACK UP
+        {{ info("For listings you deleted on FineArtAmerica yourself. Only the ones the check above read as PAGE REMOVED (410) are taken — that is proof the listing existed and is gone. Each one goes up again as a NEW listing, with its current picture and its plain title (no B). The plain title is only safe because the shop was renamed: FineArtAmerica adds #2 to a title it has seen at the SAME address, and the address carries the shop name. Order: delete on the marketplace, run the check, rename the shop there, type the new artist name below, then press this. Approved pictures join the upload queue at the front; the rest join it when you approve them on Approve Artwork. Nothing uploads until the daily limit lets it.") }}
+      </span>
+      <span class="muted mono" data-relist-summary></span>
+    </div>
+    <div class="panel-body" data-relist-panel>
+      <div class="muted">Loading…</div>
+    </div>
+  </section>
+
   {# ── What the worker machine is saying ────────────────────────────────
      Only on screen while a sweep exists, because with no sweep there is
      nothing for it to report and an empty console panel reads like a fault.

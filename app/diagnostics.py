@@ -3804,6 +3804,160 @@ def check_queued_uploads_point_at_released_pictures(db: Session, scope: Scope) -
     )
 
 
+# Upload-row states that hold, or are on their way to, a listing on the
+# marketplace. A 'relist' row (v289) is a deleted listing waiting to go back
+# up, so it counts: it will become a listing.
+_LISTING_STATES = ("uploaded", "uploading", "pending", "failed", "relist")
+
+
+def check_one_listing_per_title_slot(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: one title slot — (account, title, letter) — holds at most
+    ONE listing, live or on its way.
+
+    RE-UPLOAD (v289) sends a deleted listing back up on the SAME row, and
+    USE MY OWN PICTURE moves that row onto the new picture. If either ever
+    made a second row instead — or a replaced picture's row stayed live
+    beside its successor's — one title would go up twice on one account,
+    and FineArtAmerica would list the second as "#2". This asks about the
+    rows themselves, soft-deleted pictures included, so it holds whatever
+    door wrote them.
+    """
+    slot = (db.query(UploadTracking.account_id, SavedPoster.master_title_id,
+                     func.coalesce(UploadTracking.letter_index, 0).label("li"),
+                     func.count(UploadTracking.id).label("n"),
+                     func.group_concat(UploadTracking.id).label("ids"))
+              .join(SavedPoster, UploadTracking.saved_poster_id == SavedPoster.id)
+              .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+              .filter(UploadTracking.status.in_(_LISTING_STATES), scope.titles)
+              .group_by(UploadTracking.account_id, SavedPoster.master_title_id,
+                        func.coalesce(UploadTracking.letter_index, 0))
+              .having(func.count(UploadTracking.id) > 1))
+    found = slot.all()
+    total = len(found)
+    names = _account_names(db)
+    titles = {t.id: t for t in db.query(MasterTitle).filter(
+        MasterTitle.id.in_([mid for _, mid, _, _, _ in found[:MAX_ROWS]] or [0]))}
+    rows = []
+    for acct, mid, li, n, ids in found[:MAX_ROWS]:
+        t = titles.get(mid)
+        rows.append(Finding(
+            f"{scope.title_of(t) if t else f'title record {mid}'} · "
+            f"{names.get(acct, f'account record {acct}')}",
+            f"{n} upload rows (records {ids}) hold this one title slot",
+            "/admin/listings", project=scope.label(t.project_id if t else None)))
+    return _result(
+        "one_listing_per_title_slot",
+        f"{total} title(s) would go up more than once on one account"
+        if total else "Every title goes up at most once per account",
+        "One title has two upload rows on the same account, live or waiting. "
+        "Both would reach the marketplace, and FineArtAmerica would rename the "
+        "second one \"#2\". Pause uploads (daily limit 0) and tell me which "
+        "title it is before anything else goes up.",
+        "error" if total else "ok", rows, total,
+    )
+
+
+def check_relisted_rows_are_sound(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: a deleted listing sent back up (v289) is never counted as
+    live until it has really gone up AGAIN.
+
+    pipeline.relist_listing clears uploaded_at and stamps relisted_at, and
+    only report_uploaded may set uploaded_at afterwards. So:
+      * a 'relist' row always has relisted_at (it was sent back on purpose);
+      * a relisted row that reads 'uploaded' went up AFTER it was sent back;
+      * a 'relist' row sits on a picture that still exists — a withdrawn
+        picture's row is either stood down or moved to its successor.
+    """
+    q = (db.query(UploadTracking, SavedPoster, MasterTitle)
+           .join(SavedPoster, UploadTracking.saved_poster_id == SavedPoster.id)
+           .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+           .filter(scope.titles,
+                   or_((UploadTracking.status == "relist")
+                       & UploadTracking.relisted_at.is_(None),
+                       (UploadTracking.status == "relist")
+                       & SavedPoster.deleted_at.isnot(None),
+                       (UploadTracking.status == "uploaded")
+                       & UploadTracking.relisted_at.isnot(None)
+                       & (UploadTracking.uploaded_at.is_(None)
+                          | (UploadTracking.uploaded_at < UploadTracking.relisted_at)))))
+    total = q.count()
+    rows = []
+    for t, sp, mt in q.limit(MAX_ROWS).all():
+        if t.status == "relist" and t.relisted_at is None:
+            why = "waits to go back up but was never sent back"
+        elif t.status == "relist":
+            why = "waits to go back up on a picture that was taken down"
+        else:
+            why = "reads live, but has not gone up since it was sent back"
+        rows.append(Finding(scope.title_of(mt), f"upload row {t.id} {why}",
+                            "/admin/listings", project=scope.label(mt.project_id)))
+    return _result(
+        "relisted_rows_are_sound",
+        f"{total} re-uploaded listing(s) are in a state that cannot happen"
+        if total else "Every re-uploaded listing is where it should be",
+        "These are listings you deleted and sent back up with RE-UPLOAD. "
+        "Either one counts as live without having gone up again, or one "
+        "waits on a picture that is gone, so it would never go up. Tell me "
+        "which ones; do not press anything on them first.",
+        "error" if total else "ok", rows, total,
+    )
+
+
+def check_own_picks_painted_while_step1_off(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: with Step 1 switched off, your own picture waiting to be
+    painted carries the hand-named mark (paint_requested_at).
+
+    Step 1 OFF paints ONLY pictures named by hand (gpt_worker.paint_queue).
+    USE MY OWN PICTURE sends the pick to painting without payment, and until
+    v289 it did not name it — so every pick made while Step 1 was off waited
+    for ever with nothing on any screen saying why (found 2026-11-01: 444).
+    Asked per project, because the switch is per project.
+    """
+    from .pipeline import step1_open
+    projects = (db.query(Project).filter(Project.processor == "gpt").all())
+    if scope.project_id:
+        projects = [p for p in projects if p.id == scope.project.id]
+    projects = [p for p in projects if not step1_open(db, p)]
+    if not projects:
+        return _skipped("own_picks_painted_while_step1_off",
+                        "Own pictures waiting while Step 1 is off",
+                        "Step 1 is switched on (or nothing here paints with "
+                        "GPT), so every greenlit picture is painted.")
+    from .pipeline import project_scope, _default_project_id
+    total = 0
+    rows: list = []
+    for proj in projects:
+        q = (db.query(SavedPoster, MasterTitle)
+               .join(MasterTitle, SavedPoster.master_title_id == MasterTitle.id)
+               .filter(SavedPoster.added_by.isnot(None),
+                       SavedPoster.deleted_at.is_(None),
+                       SavedPoster.pipeline_status.in_(("greenlit", "failed_processing")),
+                       SavedPoster.paint_requested_at.is_(None),
+                       project_scope(proj.id, default_project_id=_default_project_id(db)),
+                       scope.titles))
+        n = q.count()
+        total += n
+        rows += [Finding(scope.title_of(mt),
+                         f"picture record {sp.id} is your own pick and waits to "
+                         f"be painted, but Step 1 is off and it was not named",
+                         "/admin/pipeline", project=scope.label(mt.project_id))
+                 for sp, mt in q.limit(max(0, MAX_ROWS - len(rows))).all()]
+    return _result(
+        "own_picks_painted_while_step1_off",
+        f"{total} of your own pictures wait for a painting that will not come"
+        if total else "Every picture of your own waiting to be painted will be",
+        "Step 1 is switched off, so only pictures named by hand are painted. "
+        "These are your own pictures, sent to painting by USE MY OWN PICTURE "
+        "before it named them. They wait until Step 1 is switched on or each "
+        "one is named. Painting costs money, so nothing is done about them "
+        "automatically — ask me first.",
+        "warn" if total else "ok", rows, total,
+    )
+
+
 CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_batch_claims_have_an_open_batch,
     check_batch_pictures_stay_in_their_batch,
@@ -3821,12 +3975,15 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_deductions_fit_their_payment,
     check_settled_pictures_were_paid,
     check_admin_picks_reach_painting,
+    check_own_picks_painted_while_step1_off,
     check_kept_pictures_reach_painting,
     check_nothing_queued_without_a_look,
     check_withdrawn_pictures_hold_no_waiting_painting,
     check_pictures_have_a_measured_size,
     check_generations_share_a_file,
     check_live_titles_are_unique_per_account,
+    check_one_listing_per_title_slot,
+    check_relisted_rows_are_sound,
     check_needs_revision_matches_open_flags,
     check_finished_titles_hold_no_unseen_replacement,
     check_retired_titles_hold_nothing,

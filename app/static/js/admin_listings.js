@@ -395,6 +395,39 @@
       : '<p class="muted">No FineArtAmerica accounts.</p>';
   }
 
+  // ── Put deleted listings back up (v289) ──────────────────────────────
+  function renderRelist(list) {
+    var any = list.some(function (a) {
+      return a.relistable || a.relist_waiting || a.relist_queued || a.relist_live;
+    });
+    q('[data-relist-summary]').textContent = any ? '' : 'nothing deleted';
+    q('[data-relist-panel]').innerHTML = !any
+      ? '<p class="muted">No listing reads Page Removed. After you delete '
+        + 'listings on FineArtAmerica, run the check above (before typing '
+        + 'a new artist name) and they appear here.</p>'
+      : list.filter(function (a) {
+          return a.relistable || a.relist_waiting || a.relist_queued || a.relist_live;
+        }).map(function (a) {
+          return '<p><strong>' + esc(a.name) + '</strong> · artist name now: '
+            + '<span class="mono">' + esc(a.artist_name || '(not set)') + '</span></p>'
+            + (a.relistable
+                ? '<p>' + a.relistable + ' listing(s) read <strong>Page '
+                  + 'Removed</strong> and can go back up. '
+                  + '<button class="btn btn-accent" type="button" '
+                  + 'data-action="relist" data-account="' + a.id + '" '
+                  + 'data-count="' + a.relistable + '" data-artist-now="'
+                  + esc(a.artist_name || '') + '">RE-UPLOAD '
+                  + a.relistable + '</button></p>'
+                : '')
+            + ((a.relist_queued || a.relist_waiting || a.relist_live)
+                ? '<p class="muted">Already sent back: ' + (a.relist_queued || 0)
+                  + ' in the upload queue (they go first) · '
+                  + (a.relist_waiting || 0) + ' waiting for you to approve '
+                  + 'their picture · ' + (a.relist_live || 0) + ' live again.</p>'
+                : '');
+        }).join('');
+  }
+
   // ── Loading ──────────────────────────────────────────────────────────
   async function load() {
     var data;
@@ -414,6 +447,7 @@
     if (logPanel) logPanel.hidden = false;
     renderJob(data.machine);
     renderAccounts(data.accounts || []);
+    renderRelist(data.accounts || []);
     Object.keys(data.settings || {}).forEach(function (k) {
       var el = q('[data-set="' + k + '"]');
       if (el && document.activeElement !== el) el.value = data.settings[k];
@@ -476,8 +510,11 @@
       var prompts = {
         taken_down: 'Mark this as taken down?\n\nIt stays in the records '
                     + 'with the reason you give, and stops counting as live.',
-        requeue:    'Send this back to be uploaded again?\n\nIt goes to the '
-                    + 'back of the upload queue and the pipeline will do it '
+        requeue:    'Send this back to be uploaded again?\n\nA listing that '
+                    + 'reads Page Removed goes up as a new listing with its '
+                    + 'current picture and plain title, at the front of the '
+                    + 'queue — the same as RE-UPLOAD above. Anything else goes '
+                    + 'to the back of the queue and the pipeline does it '
                     + 'properly this time.',
         ignore:     'Stop reporting this one?\n\nWrite down what you found '
                     + 'when you looked. It moves to "already dealt with" and '
@@ -506,6 +543,22 @@
           + 'between.',
           function (r) {
             if (!r.queued) alert('Nothing to check.');
+          });
+    } else if (a === 'relist') {
+      var n = t.dataset.count;
+      act(API + '/relist', { account_id: parseInt(t.dataset.account, 10) },
+          'Put ' + n + ' deleted listing(s) back up?\n\n'
+          + 'They go up as NEW listings with their current picture and their '
+          + 'plain title (no B). That is only safe because the shop has a new '
+          + 'name on FineArtAmerica — have you renamed it there, and typed '
+          + 'the new artist name below?\n\n'
+          + 'Artist name now: ' + (t.dataset.artistNow || '(not set)') + '\n\n'
+          + 'Approved pictures join the upload queue at the front. The rest '
+          + 'join it when you approve them. Nothing uploads until the daily '
+          + 'limit lets it.',
+          function (r) {
+            alert(r.count + ' sent back: ' + r.queued + ' in the upload queue now, '
+                  + r.waiting + ' waiting for you to approve their picture.');
           });
     } else if (a === 'stop') {
       act(API + '/stop', {},

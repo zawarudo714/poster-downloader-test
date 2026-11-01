@@ -1,6 +1,7 @@
 """
 Behaviour test: step 2 (the flatten), the Step 1 switch, OpenAI batches and
-the live-listing swap list (v266); a send cut short, and SAVE leaving the
+a live listing left alone by step 2 (the swap was removed in v289); a send
+cut short, and SAVE leaving the
 database free while it builds (v286). Builds a throw-away SQLite database
 and a throw-away storage folder, and replaces the four OpenAI calls with fakes that
 record what was sent — so it never touches poster.db and never spends money.
@@ -281,18 +282,17 @@ ok(retried.paint_requested_at is None, "the hand-named mark is spent when the pa
 ok(retried.pipeline_status == "processed" and new_painting.review_status == "step2",
    "a batch PAINTING is filed and goes straight on to step 2")
 
-# ── THE LIVE LISTING: approve its step 2 picture -> on the swap list ───────
+# ── THE LIVE LISTING: approving its step 2 picture leaves the listing alone
+# (v289: the swap is gone; the owner deletes it and presses RE-UPLOAD)
 live2 = s2[p_live.id]
 live2.review_status = "approved"; live2.storage_path = live2.master_path[:-4] + ".jpg"
 db.commit()
-sw = P.swap_waiting(db, proj).all()
-ok(len(sw) == 1 and sw[0][0].id == live_row.id and sw[0][1].id == live2.id,
-   "the live listing now waits to have its picture swapped")
 P.ensure_upload_rows(db, poster=p_live, title=t4, processed=live2, project=proj); db.commit()
 ok(db.query(M.UploadTracking).filter_by(saved_poster_id=p_live.id).count() == 1,
    "approving it does NOT queue a second listing")
-live_row.processed_image_id = live2.id; db.commit()
-ok(P.swap_waiting(db, proj).count() == 0, "recording the swap takes it off the list by itself")
+db.refresh(live_row)
+ok(live_row.status == "uploaded" and live_row.processed_image_id != live2.id,
+   "the live listing's row is untouched — nothing re-sends it on its own")
 
 # ── RECOVERY: a send cut short is asked about at OpenAI, never resent blind (v286)
 # Batch #52 (2026-10-29): OpenAI took it, then the site could not save the

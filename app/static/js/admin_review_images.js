@@ -1067,6 +1067,13 @@
                     title="${step2On ? 'Paint it again from the worker’s photo — both steps, so a new painting is paid for' : 'Paint it again'}">${step2On ? 'REPAINT' : 'RERUN'} <span class="mono">(${esc(keyLabel('rerun'))})</span></button>`;
       const unusableBtn = `
             <button class="btn btn-error btn-tiny"   data-img-action="unusable"  data-poster="${img.poster_id}">UNUSABLE <span class="mono">(U)</span></button>`;
+      // USE MY OWN PICTURE (owner, 2026-11-01): a photo the painter cannot
+      // do well is swapped for his own rather than retired. The shared
+      // dialog (admin_pick.js) does the asking; the server takes the
+      // worker's picture down (still paid) and paints the new one.
+      const pickBtn = `
+            <button class="btn btn-info btn-tiny" data-review-pick="${t.title_id}"
+                    title="Put your own photo on this title instead — it is painted again from yours">USE MY OWN PICTURE</button>`;
       const source = `
         <figure class="review-img review-img-source">
           <img loading="lazy" src="${img.source_url}" alt=""
@@ -1075,7 +1082,7 @@
           <figcaption>${img.admin_pick
               ? `<span class="status-pill status-admin-pick" title="Your own picture, used in place of the worker’s${img.admin_pick_note ? ' — ' + esc(img.admin_pick_note) : ''}">ADMIN PICK</span> `
               : ''}<span class="muted mono">${img.admin_pick ? 'your own picture' : 'what the worker found'}${foundVia ? ' · ' : ''}${foundVia ? `<span class="img-source-word">${foundVia}</span>` : ''} · click to enlarge</span></figcaption>
-          ${split ? `<div class="review-img-actions">${unusableBtn}</div>` : ''}
+          <div class="review-img-actions">${split ? unusableBtn : ''}${pickBtn}</div>
         </figure>`;
 
       // THE POSTER, SITTING ON ITS COLOUR.
@@ -1366,6 +1373,33 @@
     const d = { action, reason: reason || '' };
     if (action === 'step2' && skyWanted.has(posterId)) d.sky = true;
     return d;
+  }
+
+  // USE MY OWN PICTURE from this screen. Once the server has taken the
+  // worker's picture down, its painting is no longer one to judge: the
+  // title leaves this sitting (and any mark on it is forgotten), and comes
+  // back here as a new painting of YOUR picture.
+  function openOwnPicture(titleId) {
+    const t = titles.find((x) => Number(x.title_id) === titleId);
+    if (!t || !window.AdminPick) return;
+    window.AdminPick.open({
+      masterId: titleId,
+      title: t.title,
+      onDone: (d, msg) => {
+        t.images.forEach((img) => decisions.delete(img.poster_id));
+        saveDecisions();
+        const at = titles.indexOf(t);
+        if (at >= 0) titles.splice(at, 1);
+        if (index >= titles.length) index = Math.max(0, titles.length - 1);
+        toast(msg);
+        if (titles.length) {
+          render();
+        } else {
+          showPicker(true);
+          loadDates();
+        }
+      },
+    });
   }
 
   function decide(posterId, action, reason) {
@@ -1916,6 +1950,12 @@
       return;
     }
 
+    const pickOwn = e.target.closest('[data-review-pick]');
+    if (pickOwn) {
+      openOwnPicture(Number(pickOwn.dataset.reviewPick));
+      return;
+    }
+
     const el = e.target.closest('[data-action], [data-img-action]');
     if (!el) {
       // A click on a PICTURE opens the compare overlay. `data-zoom-open` now
@@ -2077,6 +2117,9 @@
   // left the screen half keyboard-driven, which is worse than neither.
   document.addEventListener('keydown', (e) => {
     if (stage.hidden) return;
+    // The USE MY OWN PICTURE dialog has the keyboard: a U or a 9 typed
+    // while it is open must not mark the picture behind it.
+    if (window.AdminPick && window.AdminPick.isOpen()) return;
     if (e.target.matches('input, textarea, select')) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
 

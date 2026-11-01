@@ -1334,6 +1334,40 @@ Deploy with the pipeline still PAUSED. Then:
 **What it means if it does not:** if step 4's label has no "· sky", the
 picture was sent the normal prompt. Tell me which picture it was.
 
+## 115. DELETE THE 417, RENAME, RE-UPLOAD — v289
+
+**Where:** Approve Artwork, then FineArtAmerica in your own browser, then
+the Listing check tab. Do these in this order.
+
+**What to click:**
+
+1. Set the account's daily limit to 0 on the Upload tab, so nothing goes
+   up while you work. Finish approving on Approve Artwork.
+2. On Approve Artwork, try USE MY OWN PICTURE on one picture. The new
+   picture should replace the old one on that title, and it should appear
+   to be painted even though Step 1 is off.
+3. Open your FineArtAmerica shop page, signed in. Press F12, open Console,
+   and paste all of `tools/faa_delete_all.js`. It deletes nothing yet. The
+   table should list your listings and the total should be about 417.
+4. Change `MODE = 'PREVIEW'` to `MODE = 'DELETE'` and paste it again. Say
+   OK to the question. It deletes one listing every 1.2 seconds and stops
+   by itself.
+5. On the Listing check tab, run the check. Every listing should read Page
+   Removed (410). Do this BEFORE the rename.
+6. Rename the shop on FineArtAmerica to "Illusination Travel Prints". Type
+   the new name, exactly as FineArtAmerica shows it, as the account's artist
+   name on the Listing check tab.
+7. Press RE-UPLOAD in the "PUT YOUR DELETED LISTINGS BACK UP" panel. It
+   should say how many joined the queue and how many wait for approval.
+8. Set the daily limit back to 100. The first uploads should be the old
+   listings, with plain titles (no "B", no "#2").
+
+**What it means if it does not:** if step 3 shows 0, the script cannot read
+the delete numbers on the page — stop and tell me. If step 5 shows some 404
+instead of 410, those addresses are wrong and RE-UPLOAD will leave them
+alone — tell me which. If a title goes up with "#2" in step 8, pause
+uploads at once and tell me which title.
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** No longer needed at all — corrected

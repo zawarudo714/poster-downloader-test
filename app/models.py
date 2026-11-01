@@ -1277,6 +1277,10 @@ class UploadTracking(Base):
                    configured cap, then surfaced for admin review
       removed    — was live, then taken down (copyright/DMCA)
       skipped    — admin decided never to upload this one
+      relist     — was live, the owner deleted it on the marketplace, and it
+                   goes up again once its new picture is approved (v289).
+                   Never live; ensure_upload_rows turns it into 'pending'
+                   at approval. See pipeline.relist_listing.
     """
     __tablename__ = "upload_tracking"
 
@@ -1306,6 +1310,11 @@ class UploadTracking(Base):
     uploaded_at        = Column(DateTime, nullable=True, index=True)
     removed_at         = Column(DateTime, nullable=True)
     removed_reason     = Column(Text, nullable=True)
+    # SET WHEN A DELETED LISTING IS SENT BACK UP (v289, pipeline.relist_listing).
+    # Two jobs: the upload queue takes these rows FIRST (claim_upload_batch),
+    # and a door that would cancel a queued upload sends a relisted row back
+    # to 'relist' instead of losing it. Never cleared: it is history too.
+    relisted_at        = Column(DateTime, nullable=True)
     created_at         = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     # ── What the marketplace ITSELF says about this listing ─────────────

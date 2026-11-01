@@ -429,14 +429,6 @@
            <span class="muted">paintings made before step 2 — waiting for review, left for Photoshop,
            approved, or already live. Each keeps its painting; nothing is repainted.</span>
          </div>` : '';
-    const swap = d.swap_waiting
-      ? `<div class="filter-row" style="margin-top:8px">
-           <button type="button" class="btn btn-accent btn-tiny" data-action="ai-swap" data-count="${d.swap_this_run}">SWAP ${d.swap_this_run} LIVE LISTING${d.swap_this_run === 1 ? '' : 'S'} NOW</button>
-           ${d.swap_this_run < d.swap_waiting ? `<span class="muted"><strong>${d.swap_waiting} are waiting;</strong> one run takes ${d.swap_this_run} (one account at a time, at most 500). Press again after it finishes for the rest.</span>` : ''}
-           <span class="muted">these are live on the marketplace and have a new approved picture.
-           The worker machine opens each one, presses Change Image, uploads the new file and Submit.
-           Title, address and keywords stay. The log is under RECENT JOBS; STOP there ends it.</span>
-         </div>` : '';
     const rows = (d.batches || []).map((b) => {
       const word = BATCH_WORD[b.status] || b.status;
       const progress = b.open
@@ -468,7 +460,6 @@
       <p style="margin-top:8px"><strong>Sending:</strong> ${d.batch_enabled
         ? 'as BATCHES — half price, answered within 24 hours. OpenAI often answers sooner, and the counts below sometimes sit at 0 and then jump; that is normal.'
         : 'one at a time, at full price (batches are switched off on the Settings page).'}</p>
-      ${swap}
       ${d.last_error ? `<p class="mono pipe-error-cell">Last problem (${esc(fmtWhen(d.last_error.at))}): ${esc(d.last_error.text)}</p>` : ''}
       ${rows ? `<table class="data-table" style="margin-top:8px">
         <thead><tr><th>BATCH</th><th>STEP</th><th>STATE</th><th>PROGRESS</th><th>SENT</th><th>DUE</th><th></th></tr></thead>
@@ -2566,26 +2557,14 @@
         const n = btn.dataset.count;
         if (!confirm(`Send ${n} painted picture(s) to step 2?\n\n`
                    + `Each one is flattened with your step 2 prompt and comes back to `
-                   + `Approve Artwork. Already-live ones are swapped on the marketplace `
-                   + `after you approve them. Nothing is repainted and no painting is deleted.`)) break;
+                   + `Approve Artwork. Already-live listings keep their old picture until `
+                   + `you delete them on the marketplace and press RE-UPLOAD on the Listing `
+                   + `check tab. Nothing is repainted and no painting is deleted.`)) break;
         try {
           const d = await postJSON(API + '/ai/catchup', {});
           toast(`Sent ${d.sent} to step 2 — they go out with the next send.`);
         } catch (e) { toast(e.message, 'error'); }
         maybeLoadAI(true);
-        break;
-      }
-      case 'ai-swap': {
-        if (!confirm(`Swap the picture on ${btn.dataset.count} live listing(s) that have a new approved one?\n\n`
-                   + 'The worker machine does them one after another — roughly 30 to 60 '
-                   + 'seconds each. It changes only the picture.')) break;
-        try {
-          const d = await postJSON(API + '/ai/swap', {});
-          toast(d.already ? `A swap job (#${d.job_id}) is already queued or running.`
-                          : `Queued job #${d.job_id} for ${d.this_run} listing(s)`
-                            + (d.this_run < d.waiting ? ` — ${d.waiting - d.this_run} more wait for the next run.` : '.'));
-        } catch (e) { toast(e.message, 'error'); }
-        loadOverview();
         break;
       }
       case 'ai-cancel': {

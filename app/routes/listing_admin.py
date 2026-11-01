@@ -24,7 +24,8 @@ from .. import pipeline as P
 from ..audit import log as log_activity
 from ..auth import require_admin
 from ..db import get_db
-from ..models import ListingSweep, PipelineJob, UploadAccount, UploadTracking
+from ..models import (ActivityLog, ListingSweep, PipelineJob, UploadAccount,
+                      UploadTracking)
 from ..templating import templates
 
 router = APIRouter(prefix="/admin", tags=["listing-admin"])
@@ -72,6 +73,19 @@ def api_overview(admin=Depends(require_admin), db: Session = Depends(get_db)):
             "claimed": db.query(UploadTracking).filter_by(
                 account_id=a.id, status="uploaded",
                 target_site=LC.MARKETPLACE).count(),
+            # RE-UPLOAD (v289): what the button would take now, and where
+            # the ones already sent back stand.
+            "relistable": P.relistable(db, a.id).count(),
+            "relist_waiting": db.query(UploadTracking).filter_by(
+                account_id=a.id, status=P.RELIST_WAITING).count(),
+            "relist_queued": db.query(UploadTracking).filter(
+                UploadTracking.account_id == a.id,
+                UploadTracking.relisted_at.isnot(None),
+                UploadTracking.status.in_(("pending", "failed", "uploading"))).count(),
+            "relist_live": db.query(UploadTracking).filter(
+                UploadTracking.account_id == a.id,
+                UploadTracking.relisted_at.isnot(None),
+                UploadTracking.status == "uploaded").count(),
         } for a in LC.accounts(db)],
         "counts": LC.counts(db, sweep),
         "sweep": _sweep_payload(db, sweep) if sweep else None,
@@ -407,6 +421,15 @@ def api_explain(payload: dict = Body(...), admin=Depends(require_admin),
         row.status = "removed"
         row.removed_at = datetime.utcnow()
         row.removed_reason = reason or "Not on the marketplace when checked."
+    elif answer == "requeue" and row.status == "uploaded" \
+            and row.listing_status == "gone":
+        # A listing that really WAS there and is now removed (410) goes back
+        # up the way RE-UPLOAD sends them (v289): its new picture, a plain
+        # title, the front of the queue. The old plain requeue below kept
+        # the old picture pointer and the re-send letter.
+        account = db.query(UploadAccount).filter_by(id=row.account_id).first()
+        before = P.relist_listing(db, row, now=datetime.utcnow())
+        _log_relist(db, admin, row, before, account, reason=reason)
     elif answer == "requeue":
         # Back to the start of the upload path. `attempts` is reset because
         # the previous attempts were recorded as successes, not failures —
@@ -452,6 +475,107 @@ def api_explain(payload: dict = Body(...), admin=Depends(require_admin),
                           "title": row.remote_title})
     db.commit()
     return JSONResponse({"ok": True, "status": row.status})
+
+
+def _log_relist(db: Session, admin, row: UploadTracking, before: dict,
+                account: Optional[UploadAccount], *, reason: str = "") -> None:
+    """One activity-log line per re-uploaded listing: when it first went
+    live and at what address. The row itself is reused (one row per picture
+    per account), so this is the only place the old listing is remembered."""
+    old_addr = ""
+    artist = _artist_name_when_checked(db, account, before.get("listing_checked_at"))
+    if artist and before.get("remote_title"):
+        probe = UploadTracking(remote_title=before["remote_title"])
+        old_addr = LC.listing_url(probe, artist) or ""
+    log_activity(db, user=admin, action="listing_relisted",
+                 target_type="upload_tracking", target_id=row.id,
+                 details={**before, "old_address": old_addr,
+                          "artist_name_then": artist,
+                          "artist_name_now": (account.artist_name if account else None),
+                          "reason": reason or None})
+
+
+def _artist_name_when_checked(db: Session, account: Optional[UploadAccount],
+                              checked_at: Optional[str]) -> str:
+    """The artist name the Listing check used when it read this row 410.
+
+    The owner types the NEW shop name before pressing RE-UPLOAD, so the
+    name on the account now builds the NEW address, not the one that was
+    removed. The name in force at the check is the last one saved before
+    it (each save is in the activity log); none saved since means the
+    current one is it."""
+    if account is None:
+        return ""
+    when = None
+    try:
+        when = datetime.fromisoformat(checked_at) if checked_at else None
+    except ValueError:
+        when = None
+    if when is not None:
+        changed_since = (db.query(ActivityLog)
+                           .filter(ActivityLog.action == "listing_artist_name_set",
+                                   ActivityLog.target_id == account.id,
+                                   ActivityLog.created_at > when)
+                           .first())
+        if changed_since is not None:
+            then = (db.query(ActivityLog)
+                      .filter(ActivityLog.action == "listing_artist_name_set",
+                              ActivityLog.target_id == account.id,
+                              ActivityLog.created_at <= when)
+                      .order_by(ActivityLog.created_at.desc()).first())
+            if then is None:
+                return ""
+            try:
+                import json as _json
+                return (_json.loads(then.details or "{}").get("artist_name") or "")
+            except ValueError:
+                return ""
+    return account.artist_name or ""
+
+
+@router.post("/api/listings/relist")
+def api_relist(payload: dict = Body(...), admin=Depends(require_admin),
+               db: Session = Depends(get_db)):
+    """
+    RE-UPLOAD THE LISTINGS YOU DELETED (v289) — one account at a time.
+
+    Takes ONLY the rows the Listing check last read as 410 Page Removed
+    (P.relistable): proof the listing existed and is gone. Each goes back up
+    as a NEW listing with its current picture and a plain title — see
+    pipeline.relist_listing for why the plain title is only safe after the
+    shop has been renamed. Approved pictures join the upload queue now, at
+    the front; the rest join it when approved on Approve Artwork.
+
+    Nothing reaches the marketplace from here: uploads only leave when the
+    account's daily limit lets them.
+    """
+    account = db.query(UploadAccount).filter_by(id=payload.get("account_id")).first()
+    if account is None:
+        raise HTTPException(404, "No such account.")
+    rows = P.relistable(db, account.id).order_by(UploadTracking.id).all()
+    if not rows:
+        raise HTTPException(409, (
+            "Nothing to re-upload: no listing on this account reads "
+            "'Page Removed'. Run the Listing check BEFORE typing the new "
+            "artist name — after it, the old addresses are no longer the "
+            "ones being checked."))
+    now = datetime.utcnow()
+    queued = waiting = 0
+    for row in rows:
+        before = P.relist_listing(db, row, now=now)
+        _log_relist(db, admin, row, before, account)
+        if row.status == "pending":
+            queued += 1
+        else:
+            waiting += 1
+    log_activity(db, user=admin, action="listings_relisted",
+                 target_type="upload_account", target_id=account.id,
+                 details={"account": account.name, "count": len(rows),
+                          "queued": queued, "waiting_for_approval": waiting,
+                          "artist_name": account.artist_name})
+    db.commit()
+    return JSONResponse({"ok": True, "count": len(rows), "queued": queued,
+                         "waiting": waiting})
 
 
 @router.post("/api/listings/settings")

@@ -60,8 +60,8 @@ from ..models import (
     ImportJob, MasterTitle, PaymentRun, ProcessedImage, Project, Revision,
     SavedPoster, UploadAccount, UploadTracking, User, UserProject,
 )
-from ..pipeline import (WAITING_REVIEW_STATES, ensure_default_project,
-                        pull_back_pictures)
+from ..pipeline import (RELIST_WAITING, WAITING_REVIEW_STATES,
+                        ensure_default_project, pull_back_pictures)
 from ..projects import (
     active_project, allowed_projects, project_by_slug, remember_project,
     scope_titles, set_project_cookie,
@@ -276,7 +276,7 @@ def api_pulse(request: Request, admin: User = Depends(require_admin),
         # is the more useful number — "3 painting" beats "1 paint job".
         SAY = {
             "listing_check":   "checking listings",
-            "listing_swap":    "swapping listing pictures",
+            "listing_swap":    "swapping listing pictures (removed v289)",
             "earnings_read":   "reading the money",
             "profile_cleanup": "tidying a browser profile",
             "test_download":   "running a download test",
@@ -2544,13 +2544,16 @@ def _picture_cannot_leave(sp: SavedPoster) -> Optional[str]:
        or (sp.times_listed or 0) > 0:
         return (f"'{sp.filename}' is in the pipeline or already on the "
                 f"marketplace ({sp.pipeline_status or 'listed'}). Recall or "
-                f"finish it first, then try again.")
+                f"finish it first, then try again. (One of the listings you "
+                f"deleted on FineArtAmerica? Press RE-UPLOAD on the Listing "
+                f"check tab first.)")
     return None
 
 
 def _withdraw_pictures(db: Session, posters: list, *, note: str,
                        verdict: str, admin: User, now: datetime,
-                       pay: bool = True) -> None:
+                       pay: bool = True,
+                       spare_relisted: bool = False) -> list:
     """Take these live pictures off their title, for good.
 
     Per picture: its open flags close with `verdict`; its file is removed;
@@ -2559,7 +2562,12 @@ def _withdraw_pictures(db: Session, posters: list, *, note: str,
     retire, and his answer for USE MY OWN PICTURE on 2026-09-27; the plain
     admin DELETE passes pay=False); queued uploads stand down; and its
     paintings leave Approve Artwork. The admin's own earlier pick is never
-    payable whatever `pay` says (payable_criteria)."""
+    payable whatever `pay` says (payable_criteria).
+
+    `spare_relisted` (USE MY OWN PICTURE, v289): a deleted listing waiting
+    to go back up is NOT stood down — it is returned, for the caller to move
+    onto the new picture with its place at the front of the queue."""
+    spared: list = []
     for sp in posters:
         for rv in (db.query(Revision)
                      .filter(Revision.saved_poster_id == sp.id,
@@ -2582,8 +2590,12 @@ def _withdraw_pictures(db: Session, posters: list, *, note: str,
         # the SKIP UPLOAD button writes.
         for tr in (db.query(UploadTracking)
                      .filter(UploadTracking.saved_poster_id == sp.id,
-                             UploadTracking.status.in_(("pending", "failed")))
+                             UploadTracking.status.in_(("pending", "failed",
+                                                        RELIST_WAITING)))
                      .all()):
+            if spare_relisted and tr.relisted_at is not None:
+                spared.append(tr)
+                continue
             tr.status = "skipped"
         # Its paintings leave Approve Artwork: no longer current, and any
         # still waiting for a verdict is set aside. The painting FILES stay,
@@ -2597,6 +2609,7 @@ def _withdraw_pictures(db: Session, posters: list, *, note: str,
         title_dir = fs_path.parent
         if title_dir.is_dir() and not list(title_dir.iterdir()):
             shutil.rmtree(title_dir, ignore_errors=True)
+    return spared
 
 
 # ── USE MY OWN PICTURE ───────────────────────────────────────────────────────
@@ -2808,10 +2821,11 @@ def admin_pick_title(
     # 3 · Everything live on the title is withdrawn.
     now = datetime.utcnow()
     said = f": {reason}" if reason else ""
-    _withdraw_pictures(
+    relisted = _withdraw_pictures(
         db, live, now=now, admin=admin,
         note=f"[replaced by admin, paid]{said}",
-        verdict=f"replaced by admin{said}")
+        verdict=f"replaced by admin{said}",
+        spare_relisted=True)
 
     # A worker's DELETION of a flagged picture on this title waits on
     # Changes Requested for an ACKNOWLEDGE. Using his own picture answers
@@ -2867,6 +2881,35 @@ def admin_pick_title(
     # owner's own picture is never paid — so without this it would wait
     # for ever (the + ADD box's quiet failure).
     gl = greenlight_titles(db, [t.id], by=admin.username, reason="admin_pick")
+    # NAMED BY HAND, so it is painted even while Step 1 is switched off —
+    # the same mark REPAINT sets (v266, SavedPoster.paint_requested_at).
+    # Without it the paint queue skips the pick for as long as Step 1 is
+    # off, and the picture he chose waits for ever (found 2026-11-01).
+    if (sp.pipeline_status or "") == "greenlit":
+        sp.paint_requested_at = now
+
+    # A DELETED LISTING WAITING TO GO BACK UP (v289) moves onto the new
+    # picture with its place at the front of the queue. Its old picture is
+    # gone, so it waits for the new one to be approved ('relist'), exactly
+    # as it would have waited for the old one. One row per picture per
+    # account (unique), and the new picture has none yet, so this is a move.
+    moved = []
+    # Its letter is the NEW picture's place among the title's live pictures,
+    # worked out the way ensure_upload_rows does (the old one is gone now).
+    siblings = [pid for (pid,) in
+                db.query(SavedPoster.id)
+                  .filter(SavedPoster.master_title_id == t.id,
+                          SavedPoster.deleted_at.is_(None))
+                  .order_by(SavedPoster.created_at.asc(), SavedPoster.id.asc())
+                  .all()]
+    for tr in relisted:
+        tr.saved_poster_id = sp.id
+        tr.letter_index = siblings.index(sp.id) if sp.id in siblings else 0
+        tr.status = RELIST_WAITING
+        tr.processed_image_id = None
+        tr.attempts = 0
+        tr.last_error = None
+        moved.append(tr.id)
 
     log_activity(
         db, user=admin, action="admin_pick", target_type="saved_poster",
@@ -2878,6 +2921,8 @@ def admin_pick_title(
                  "unretired": was == "unusable",
                  "retired_reason": was_reason if was == "unusable" else None,
                  "sent_to_painting": gl.get("posters", 0),
+                 "named_for_painting": bool(sp.paint_requested_at),
+                 "relist_rows_moved": moved,
                  "seconds": {"download": round(_t_dl - _t0, 1),
                              "total": round(_time.monotonic() - _t0, 1)}},
     )

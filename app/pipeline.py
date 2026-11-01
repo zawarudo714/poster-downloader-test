@@ -55,7 +55,7 @@ import unicodedata
 from datetime import date, datetime, timedelta
 from typing import Any, Iterable, Optional
 
-from sqlalchemy import func, or_, true as sa_true
+from sqlalchemy import case, func, or_, true as sa_true
 from sqlalchemy.orm import Session
 
 from .models import (
@@ -278,19 +278,6 @@ DEFAULT_FAA_SELECTORS = {
                              " || css:a.buttonSubmit"),
     # If the URL still matches this after submitting, the submit silently failed.
     "still_on_form_marker": "updateartwork",
-    # ── SWAPPING THE PICTURE ON A LIVE LISTING (v266) ────────────────────
-    # MEASURED 2026-10-28 from the owner's saved copies of the listing page
-    # and of updateartwork2026.html before and after pressing Change Image.
-    # Each has a fallback that finds the control by its WORDS, because the
-    # fields keep their names across FAA's redesigns while the boxes around
-    # the buttons churn (see the three-forms note in CLAUDE.md).
-    "swap_edit_link":       "css:a[href*='updateartwork'][href*='artworkid=']",
-    "swap_change_image":    ("xpath://a[contains(@class, 'imageDetailsButton')][contains(normalize-space(.), 'Change Image')]"
-                             " || xpath://a[contains(normalize-space(.), 'Change Image')]"),
-    "swap_file_input":      ("css:input.uploadImageInput[type='file']"
-                             " || css:input[type='file'][name='uploadimage']"),
-    "swap_upload_button":   ("xpath://div[@id='uploadImageDiv']//a[contains(normalize-space(.), 'Upload Image')]"
-                             " || xpath://a[contains(normalize-space(.), 'Upload Image')]"),
 }
 
 
@@ -2717,7 +2704,7 @@ def painted_before_step2(db: Session, project: Project):
     switched on) that have never been through it — the catch-up pile the
     owner sends on with one button. Waiting for him ('pending'), left for
     Photoshop ('held'), or already approved — waiting to upload, or LIVE
-    (the 417, which are swapped on the marketplace afterwards).
+    (the 417, which the owner deletes and re-uploads — see relist_listing).
     """
     return (db.query(ProcessedImage)
               .join(SavedPoster, ProcessedImage.saved_poster_id == SavedPoster.id)
@@ -2740,69 +2727,38 @@ def send_painted_to_step2(db: Session, project: Project, *, by: str) -> int:
     "N to upload" count on the site as a queue that cannot move. (The
     uploader also refuses any row whose picture is not the approved current
     one — see claim_upload_batch — so even a missed row could not send the
-    painting.) A LIVE one keeps its 'uploaded' row untouched; approving its
-    step-2 result is what puts it on the swap list.
+    painting.) A LIVE one keeps its 'uploaded' row untouched; the live
+    listing keeps its old picture until the owner deletes it on the
+    marketplace and presses RE-UPLOAD (relist_listing, v289).
     """
     n = 0
     for pi in painted_before_step2(db, project).all():
         pi.review_status = "step2"
         pi.step2_attempts = 0
         pi.step2_error = None
+        # A RE-UPLOAD of a deleted listing (v289) is not deleted: it waits
+        # for the step-2 picture as 'relist', keeping its place at the front.
         (db.query(UploadTracking)
            .filter(UploadTracking.saved_poster_id == pi.saved_poster_id,
-                   UploadTracking.status.in_(("pending", "failed")))
+                   UploadTracking.status.in_(("pending", "failed")),
+                   UploadTracking.relisted_at.isnot(None))
+           .update({UploadTracking.status: RELIST_WAITING},
+                   synchronize_session=False))
+        (db.query(UploadTracking)
+           .filter(UploadTracking.saved_poster_id == pi.saved_poster_id,
+                   UploadTracking.status.in_(("pending", "failed")),
+                   UploadTracking.relisted_at.is_(None))
            .delete(synchronize_session=False))
         n += 1
     return n
-
-
-def swap_waiting(db: Session, project: Project):
-    """
-    Query: (UploadTracking, ProcessedImage) for listings that are LIVE but
-    now have a newer approved picture — the 417's swap list. Derived, not
-    marked: a live row pointing at a picture that is no longer the current
-    approved one IS the definition, so nothing has to remember to set it.
-    Recording a swap (scripts/swap_record.py, or the node's swap job) points
-    the row at the new picture, which takes it off this list by itself.
-    """
-    return (db.query(UploadTracking, ProcessedImage)
-              .join(ProcessedImage,
-                    (ProcessedImage.saved_poster_id == UploadTracking.saved_poster_id)
-                    & (ProcessedImage.is_current == 1))
-              .join(SavedPoster, SavedPoster.id == UploadTracking.saved_poster_id)
-              .filter(UploadTracking.project_id == project.id,
-                      UploadTracking.status == "uploaded",
-                      ProcessedImage.review_status == "approved",
-                      ProcessedImage.storage_path != "",
-                      SavedPoster.deleted_at.is_(None),
-                      or_(UploadTracking.processed_image_id.is_(None),
-                          UploadTracking.processed_image_id != ProcessedImage.id)))
-
-
-# One swap job covers one account and at most this many listings (v274).
-SWAP_JOB_CAP = 500
-
-
-def swap_next_run(db: Session, project: Project) -> list:
-    """
-    The (UploadTracking, ProcessedImage) rows the NEXT swap job will take:
-    the lowest account id that has any waiting, at most SWAP_JOB_CAP of
-    them. The button's count, the toast and the job payload all read this,
-    so the owner is never told "620" while the machine does 500.
-    """
-    q = swap_waiting(db, project)
-    first = (q.with_entities(func.min(UploadTracking.account_id)).scalar())
-    if first is None:
-        return []
-    return (q.filter(UploadTracking.account_id == first)
-             .order_by(UploadTracking.id).limit(SWAP_JOB_CAP).all())
 
 
 def restore_live_status(db: Session, poster: SavedPoster) -> None:
     """
     A LIVE poster that went round again (a repaint of one of the 417) comes
     back as 'processed' from the painter. Once its new picture is approved
-    it is still live on the marketplace, so its state says so again.
+    it is still live on the marketplace (with its OLD picture — the swap was
+    given up in v289), so its state says so again.
     """
     if (poster.pipeline_status or "") in ("processed", "greenlit") \
             and has_live_listing(db, poster.id):
@@ -3363,6 +3319,14 @@ def ensure_upload_rows(
             # resurrect a row that already succeeded or was deliberately skipped.
             if processed is not None and existing.status in ("pending", "failed"):
                 existing.processed_image_id = processed.id
+            # A deleted listing waiting for its new picture (v289,
+            # relist_listing): this release IS that picture, so it joins the
+            # upload queue now — at the front, by its relisted_at.
+            if existing.status == RELIST_WAITING:
+                existing.status = "pending"
+                existing.attempts = 0
+                if processed is not None:
+                    existing.processed_image_id = processed.id
             continue
 
         row = UploadTracking(
@@ -3825,7 +3789,8 @@ def ban_account(
     dropped = (
         db.query(UploadTracking)
           .filter(UploadTracking.account_id == account.id,
-                  UploadTracking.status.in_(("pending", "failed", "uploading")))
+                  UploadTracking.status.in_(("pending", "failed", "uploading",
+                                             RELIST_WAITING)))
           .delete(synchronize_session=False)
     )
 
@@ -4077,7 +4042,13 @@ def claim_upload_batch(
                       ProcessedImage.is_current == 1,
                       or_(ProcessedImage.review_status.is_(None),
                           ProcessedImage.review_status == "approved"))
-              .order_by(SavedPoster.original_save_date.asc(),
+              # THE DELETED LISTINGS GO BACK UP FIRST (owner, 2026-11-01):
+              # a relisted row (relist_listing) before everything else, then
+              # the usual oldest-saved order within each group. Without it
+              # the 417 (saved 12–26 Sep) would interleave with pictures
+              # saved on 13 Sep.
+              .order_by(case((UploadTracking.relisted_at.isnot(None), 0), else_=1),
+                        SavedPoster.original_save_date.asc(),
                         MasterTitle.external_id.asc().nullslast(),
                         UploadTracking.letter_index.asc())
               .limit(take)
@@ -4204,7 +4175,8 @@ def report_uploaded(
     outstanding = (
         db.query(func.count(UploadTracking.id))
           .filter(UploadTracking.saved_poster_id == poster.id,
-                  UploadTracking.status.in_(("pending", "uploading", "failed")))
+                  UploadTracking.status.in_(("pending", "uploading", "failed",
+                                             RELIST_WAITING)))
           .scalar() or 0
     )
     fully_live = outstanding == 0
@@ -4377,6 +4349,107 @@ def mark_removed(
         row.removed_at = datetime.utcnow()
         row.removed_reason = (reason or "")[:1000]
     return len(rows)
+
+
+# ── RE-UPLOAD A LISTING THE OWNER DELETED (v289) ─────────────────────────────
+#
+# The 417 went live with pictures he later replaced. Swapping the picture on
+# a live listing (v266) was given up and REMOVED in v289 (owner, 2026-11-01,
+# worker_service/listing_swap.py and the listing_swap job): he deletes them on
+# FineArtAmerica, renames the shop, and they go up again as new listings.
+#
+# THE TITLE GOES OUT PLAIN, NOT "B". times_listed is set back to 0, which
+# render_remote_title reads as "never sent". That is ONLY safe because the
+# shop was renamed: FAA's "#2" renumbering follows the listing ADDRESS, and
+# the address carries the artist name. MEASURED by the owner on 2026-11-01:
+# "…-illusination-travel-posters.html" (the old name) reads Page Removed
+# while "…-illusination-travel-posterz.html" is live under the plain name.
+# Under an unchanged shop name the same title would come back as "#2".
+#
+# THE ROW IS REUSED, not replaced: (saved_poster_id, account_id) is unique,
+# so a second row cannot exist. What it said before is written to the
+# activity log by the caller (the old address and when it went live).
+
+RELIST_WAITING = "relist"
+
+
+def relist_listing(db: Session, row: UploadTracking, *, now: datetime) -> dict:
+    """
+    Send one deleted listing back up. Returns what the row said before, for
+    the activity log. Commits nothing.
+
+    Its picture decides where it goes: an APPROVED current picture joins the
+    upload queue now ('pending'); one still waiting on Approve Artwork waits
+    as 'relist' and joins the queue the moment it is approved
+    (ensure_upload_rows). Either way `relisted_at` puts it at the FRONT of
+    the queue (claim_upload_batch).
+    """
+    before = {
+        "status": row.status,
+        "uploaded_at": row.uploaded_at.isoformat() if row.uploaded_at else None,
+        "remote_title": row.remote_title,
+        "remote_id": row.remote_id,
+        "processed_image_id": row.processed_image_id,
+        "listing_status": row.listing_status,
+        "listing_http": row.listing_http,
+        "listing_checked_at": (row.listing_checked_at.isoformat()
+                               if row.listing_checked_at else None),
+    }
+    poster = db.query(SavedPoster).filter_by(id=row.saved_poster_id).first()
+    current = (db.query(ProcessedImage)
+                 .filter(ProcessedImage.saved_poster_id == row.saved_poster_id,
+                         ProcessedImage.is_current == 1)
+                 .order_by(ProcessedImage.id.desc()).first())
+    released = (current is not None and bool(current.storage_path)
+                and (current.review_status or "approved") == "approved")
+
+    row.status = "pending" if released else RELIST_WAITING
+    if current is not None:
+        row.processed_image_id = current.id
+    row.relisted_at = now
+    row.attempts = 0
+    row.last_error = None
+    row.last_screenshot = None
+    row.claimed_at = None
+    row.claimed_by = None
+    row.uploaded_at = None
+    row.remote_id = None
+    row.removed_at = None
+    row.removed_reason = None
+    # The marketplace's last word was about the OLD listing. Left here, the
+    # new listing would read "taken down" on the Listing check until the
+    # next sweep reached it.
+    row.listing_status = None
+    row.listing_http = None
+    row.listing_checked_at = None
+    row.listing_note = None
+    row.listing_ack_status = None
+    row.listing_ack_at = None
+    row.listing_ack_by = None
+
+    if poster is not None:
+        poster.times_listed = 0
+        # Not live any more: it waits to upload like any approved picture.
+        if (poster.pipeline_status or "") == "uploaded":
+            poster.pipeline_status = "processed"
+        title = db.query(MasterTitle).filter_by(id=poster.master_title_id).first()
+        if title is not None:
+            recompute_title_status(db, title)
+    before["now"] = row.status
+    return before
+
+
+def relistable(db: Session, account_id: int):
+    """
+    Query: the rows RE-UPLOAD may take on this account — believed live, and
+    the Listing check's last word on them was 410 Page Removed. A 404 (no
+    page at that address) is NOT enough: that is usually our address being
+    wrong, and the listing may still be up.
+    """
+    return (db.query(UploadTracking)
+              .filter(UploadTracking.account_id == account_id,
+                      UploadTracking.status == "uploaded",
+                      UploadTracking.listing_status == "gone"))
 
 
 def requeue_for_account(

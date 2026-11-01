@@ -951,6 +951,21 @@ non-ASCII characters from the celebrity database and reading back what saved:
   if the letter ever fails to advance, two live listings would share a name
   and it goes red.
 
+  **RE-UPLOAD (v289) is the ONE door that resets it to 0, on purpose.**
+  `MEASURED 2026-11-01` by the owner: FAA's renumbering follows the
+  ADDRESS, and the address carries the artist slug. "Taj Mahal, Agra" was
+  deleted under "Illusination Travel Posters", the shop was renamed, and
+  the same title went back up plain, with no "#2". So after a shop RENAME a
+  deleted listing's title is free again at its new address, and
+  `pipeline.relist_listing` sets `times_listed = 0` so it goes up without a
+  "B". That is only safe AFTER the rename, which is why RE-UPLOAD takes
+  only rows the Listing check read as 410 under the OLD name (and why the
+  screen says to rename before pressing it). Without a rename, a reset
+  would send "Kyoto" again and FAA would list "Kyoto #2". The row is the
+  SAME row (one per picture per account), so nothing can list a title
+  twice; `check_one_listing_per_title_slot` and
+  `check_relisted_rows_are_sound` watch it.
+
   This matters because the owner is REUSING an account that carried the
   movie catalogue, rebranded for travel (see `OPEN_ISSUES.md`). Every film
   title ever listed on it is permanently taken, deletions included.
@@ -1070,8 +1085,9 @@ app/
   static/js/           One file per page, vanilla JS, no build step.
 
 worker_service/        Runs on the Windows VPS. agent.py is the loop.
-                       listing_swap.py swaps the picture on a LIVE listing
-                       (the 417, v266) — delete it once they are done.
+                       (listing_swap.py, the live-listing picture swap of
+                       v266, was REMOVED in v289 — the owner deletes and
+                       RE-UPLOADs instead. Preflight keeps it removed.)
                        Updated by COPYING THE FOLDER, which has no receipt —
                        so AGENT_VERSION is bumped whenever anything in here
                        changes, and read back on the Nodes tab.
@@ -3553,9 +3569,9 @@ So, before shipping any figure or label:
   ones again, and "M will go in the next send" past the per-send cap
   (`batch_max_items`). All found by the site audit, 2026-10-29, fixed in
   v273. SWAP N LIVE LISTINGS NOW counted every waiting listing while one
-  job takes one account and at most 500; since v274 the button, the toast
-  and the job's list all read `P.swap_next_run` (preflight's "swap button
-  counts one run"), and its "already queued" check is per project. Say
+  job takes one account and at most 500; v274 made the button, the toast
+  and the job's list read one helper (the swap itself was removed in v289).
+  Say
   what the button DOES to the outside world first, count each thing once,
   and **a button's number is what ONE press does** — a number the press
   only partly covers reads it from the same helper the work uses.

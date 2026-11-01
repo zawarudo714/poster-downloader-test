@@ -114,6 +114,14 @@ For a GPT project the Process row above is two steps, both on the Linux VPS:
   Refused (`_pick_cannot_replace` in `routes/admin.py`) only while a
   picture is being painted or uploaded, or when the title has two listings
   on one account. Retire and delete still refuse a live picture.
+- **A review batch keeps its designs until it is saved (v291).** The
+  "everything waiting" door shows the first `review_batch_size` titles.
+  A repaint is an older design, so on any reload it sorted to the front
+  and pushed a design out of the batch the owner was working through.
+  The screen now sends the open batch's title ids back as `batch`, and
+  `api_review_queue` returns those titles that are still waiting. A repaint
+  joins the next batch, after a save from that door. Tested by
+  `tools/test_review_batch.py`.
 
 ---
 

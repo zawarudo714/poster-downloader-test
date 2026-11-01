@@ -3699,11 +3699,15 @@ def api_review_queue(
     end: str = Query(""),
     status: str = Query("pending"),
     sort: str = Query("saved"),
+    batch: str = Query(""),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """
     Every title awaiting review in a date range, with its images.
+
+    `batch` is the title ids of the batch the screen already has open,
+    comma-separated (v291). See "BATCH IT" below.
 
     Returns the WHOLE range in one call rather than paging. A review session
     is arrow-keyed at a couple of seconds per title, and a network round trip
@@ -3939,14 +3943,31 @@ def api_review_queue(
     # ONE spelling of the batch-size read (_safe_batch_size), shared with
     # /review/dates — two inline copies of "read it, tolerate garbage" is
     # exactly the drift this repo keeps paying for.
-    batch = (_safe_batch_size(db, project)
-             if status == "pending" and not start and not end else 0)
-    shown = all_titles[:batch] if batch > 0 else all_titles
+    size = (_safe_batch_size(db, project)
+            if status == "pending" and not start and not end else 0)
+    # A BATCH KEEPS ITS DESIGNS UNTIL IT IS SAVED (owner, 2026-11-01).
+    # "The first N" is asked again on every reload — coming back to the
+    # page, saving a Photopea edit, deleting a variant — and a repaint that
+    # came back meanwhile is an OLDER design, so it sorted to the front,
+    # pushed a design off the end, and was the first thing NEXT NOT MARKED
+    # jumped to. So the screen sends the titles of the batch it has open
+    # and gets exactly those back, still in the chosen order; what has
+    # left review elsewhere drops out. Only when none are left (or the
+    # screen sends none, after a save) is a new first N picked.
+    keep = {int(x) for x in batch.split(",") if x.strip().isdigit()}
+    shown = ([t for t in all_titles if t["title_id"] in keep]
+             if size > 0 and keep else [])
+    if not shown:
+        shown = all_titles[:size] if size > 0 else all_titles
 
     return JSONResponse({"titles": shown,
                          "count": len(shown),
                          "total_waiting": total_waiting,
-                         "batch_size": batch,
+                         "batch_size": size,
+                         # What the screen sends back as `batch` until it
+                         # saves; empty when this door does not batch.
+                         "batch_title_ids": ([t["title_id"] for t in shown]
+                                             if size > 0 else []),
                          "status": status,
                          # One colour, or "top/bottom" blended — see
                          # imagefetch.normalise_background.

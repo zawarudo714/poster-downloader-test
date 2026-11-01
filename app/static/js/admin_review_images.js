@@ -98,7 +98,13 @@
       // it stays "REVIEW EVERYTHING WAITING (137)".
       const allBtn = $('[data-action="review-all"]');
       if (allBtn) {
-        if (batchSize > 0 && totalImgs > batchSize) {
+        // A batch opened and not yet saved reopens as it was (v291), so
+        // the button says so rather than promising a fresh "next N".
+        const open = batchSize > 0 ? readBatch().length : 0;
+        if (open) {
+          allBtn.innerHTML = `CONTINUE&nbsp;THIS&nbsp;BATCH&nbsp;(${open})` +
+            ` <span class="mono">· ${totalImgs} waiting</span>`;
+        } else if (batchSize > 0 && totalImgs > batchSize) {
           allBtn.innerHTML = `REVIEW&nbsp;NEXT&nbsp;${Math.min(batchSize, totalImgs)}` +
             ` <span class="mono">· ${totalImgs} waiting</span>`;
         } else {
@@ -141,10 +147,13 @@
     if (end)   qs.set('end', end);
     // The remembered queue order rides on every door.
     qs.set('sort', currentSort());
+    const batchDoor = mode === 'pending' && !start && !end;
+    if (batchDoor && readBatch().length) qs.set('batch', readBatch().join(','));
 
     const r = await fetch(`${API}/review/queue?${qs}`);
     const d = await r.json();
     titles = d.titles || [];
+    if (batchDoor) writeBatch(d.batch_title_ids || []);
     // The dashboard's colour, so RESET goes back to what the
     // project is set to rather than to a number hardcoded here.
     defaultBackground = d.default_background || '#000000';
@@ -486,6 +495,27 @@
 
   function clearCut() {
     try { localStorage.removeItem(CUT_KEY); } catch (e) { /* as above */ }
+  }
+
+  // The titles of the batch open in the "everything waiting" door (v291).
+  // Sent with every reload of that door, so a repaint that comes back
+  // mid-batch waits for the NEXT batch instead of taking a place in this
+  // one (owner, 2026-11-01). Forgotten only by a save from that door —
+  // CLOSE keeps it, because the batch is still not saved.
+  const BATCH_KEY = 'pd_review_batch_v1';
+
+  function readBatch() {
+    try {
+      const v = JSON.parse(localStorage.getItem(BATCH_KEY) || '[]');
+      return Array.isArray(v) ? v.filter((x) => Number(x) > 0) : [];
+    } catch (e) { return []; }
+  }
+
+  function writeBatch(ids) {
+    try {
+      if (ids && ids.length) localStorage.setItem(BATCH_KEY, JSON.stringify(ids));
+      else localStorage.removeItem(BATCH_KEY);
+    } catch (e) { /* a blocked store must never break the screen */ }
   }
 
   function showCutNoteIfAny() {
@@ -2387,6 +2417,12 @@
         [...chosenPainting].filter(([pid]) => !sentPosters.has(pid)));
       saveChosen();
       clearCut();           // finished cleanly: nothing to explain later
+      // A save from the batched door ends that batch, so the next one is
+      // picked afresh — that is where waiting repaints join. A save from
+      // the Photoshop or reruns door leaves it alone.
+      if (mode === 'pending' && lastDoor && !lastDoor.start && !lastDoor.end) {
+        writeBatch([]);
+      }
       // A finished save ends the sitting, so there is no "where I was" to
       // walk back into — the next visit opens on the picker.
       lastDoor = null;

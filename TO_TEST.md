@@ -1395,6 +1395,26 @@ uploads at once and tell me which title.
 message. If step 3 sends the worker's old picture, or the title has a "B"
 or "#2", pause uploads and tell me which title.
 
+## 117. A BATCH KEEPS ITS DESIGNS UNTIL YOU SAVE IT — v291
+
+**Where:** Approve Artwork, the "everything waiting" button.
+
+**What to click:**
+
+1. Open a batch and mark a few designs, but do not save.
+2. Wait until a repaint comes back, or press RERUN on a design in another
+   batch earlier and let it finish. Then reload the page (F5).
+3. The same designs should come back, in the same order. The repaint
+   should not be among them. The button on the start screen should read
+   CONTINUE THIS BATCH, with the number of designs in it.
+4. Press * (NEXT NOT MARKED). It should only stop on designs of this batch.
+5. Save the batch. The next batch should now include the repaint.
+
+**What it means if it does not:** if the repaint shows up in the open
+batch, tell me which design and whether you reloaded or used another
+device. The batch is remembered by this browser only, so a phone or a
+second browser picks its own batch.
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** No longer needed at all — corrected

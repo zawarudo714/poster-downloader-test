@@ -15,6 +15,7 @@ cost far more to read, answer a different question, and on a mounted working
 copy `git status` cannot refresh its index — it reports stale answers with
 no warning.
 
+- **2026-11-01 10:10** · `[178.105.34.144]` · `98d788d3` · v289 · RE-UPLOAD for the deleted 417, USE MY OWN PICTURE on Approve Artwork, swap removed (node 1.34.0 to copy)
 - **2026-10-30 09:16** · `[178.105.34.144]` · `6a155322` · v288 · SKY GRADIENT tick on REDO STEP 2: one picture, one redo, sent the sky gradient prompt (new Settings box)
 - **2026-10-29 19:30** · `[178.105.34.144]` · `818e286b` · v287 · fixes from the 29 October audit: upload receipts, step 2 rules checked by the site, paid pictures kept, zero means zero, counters agree, keys, tests that can fail
 - **2026-10-29 16:59** · `[178.105.34.144]` · `fbf2fe16` · v286 · a batch cut short is looked up at OpenAI, never resent (batch #52's 4 collected); SAVE commits per decision
@@ -44,11 +45,3 @@ no warning.
 - **2026-09-29 12:46** · `[178.105.34.144]` · `45626c87` · v249 · deploy v249
 - **2026-09-29 11:51** · `[178.105.34.144]` · `a4281c68` · v248 · deploy v248
 - **2026-09-29 11:40** · `[178.105.34.144]` · `1672c414` · v247 · deploy v247
-- **2026-09-28 19:51** · `[178.105.34.144]` · `21d05a1c` · v245 · deploy v245
-- **2026-09-28 15:25** · `[178.105.34.144]` · `f3cb418f` · v244 · deploy v244
-- **2026-09-28 14:44** · `[178.105.34.144]` · `8571dee9` · v242 · deploy v242
-- **2026-09-28 08:41** · `[178.105.34.144]` · `fd1b73d4` · v241 · deploy v241
-- **2026-09-27 21:52** · `[178.105.34.144]` · `6412e2c0` · v240 · deploy v240
-- **2026-09-27 21:47** · `[178.105.34.144]` · `a19ebbdb` · v239 · deploy v239
-- **2026-09-27 18:32** · `[178.105.34.144]` · `ff795a1e` · v238 · deploy v238
-- **2026-09-27 18:00** · `[178.105.34.144]` · `1a247235` · v237 · deploy v237

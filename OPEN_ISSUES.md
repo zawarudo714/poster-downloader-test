@@ -12,14 +12,17 @@ owner's order: approve with uploads paused (daily limit 0) → run the
 script, PREVIEW then DELETE → Listing check, all 410 → rename the shop and
 type the new artist name → RE-UPLOAD → daily limit back to 100.
 
-**Found while building, NOT acted on — a money decision for the owner.**
-`MEASURED 2026-11-01` (read-only, live database): 444 of his own picks
-(USE MY OWN PICTURE) sit greenlit with no `paint_requested_at`. Until v289
-that door did not name the pick, and Step 1 is off, so they were never
-painted and nothing said why. About $18.65 to paint at the measured
-~$0.030 a painting plus ~$0.012 for step 2. v289 names NEW picks only.
-`check_own_picks_painted_while_step1_off` lists them; ask him before
-naming or painting any of them.
+**The 444 own picks waiting to be painted are NOT a fault — corrected
+2026-11-01 after the owner asked.** `MEASURED` (read-only, live database):
+all 444 were made 9–26 Oct, while painting was paused (PAUSE NEW WORK from
+3 Oct, "need tune prompt", until 29 Oct). Painting resumed on 29 Oct with
+Step 1 switched off the same day, so only pictures named by hand are
+painted. 698 worker pictures (27 Sep – 24 Oct) wait the same way. None of
+the 1,142 has ever been painted, and all of them will be when Step 1 is
+switched on. My first report called the 444 a defect of USE MY OWN PICTURE;
+that was wrong — they wait exactly like everything else saved during the
+pause. v289 names NEW own picks, so those are painted even while Step 1 is
+off; worker pictures still wait for Step 1.
 
 The original brief follows, as history.
 

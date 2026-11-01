@@ -15,6 +15,7 @@ cost far more to read, answer a different question, and on a mounted working
 copy `git status` cannot refresh its index — it reports stale answers with
 no warning.
 
+- **2026-11-01 12:20** · `[178.105.34.144]` · `3e8e7c6e` · v290 · USE MY OWN PICTURE on a title still live (row moves, new picture goes up on RE-UPLOAD); NEXT NOT MARKED (*) on Approve Artwork
 - **2026-11-01 10:10** · `[178.105.34.144]` · `98d788d3` · v289 · RE-UPLOAD for the deleted 417, USE MY OWN PICTURE on Approve Artwork, swap removed (node 1.34.0 to copy)
 - **2026-10-30 09:16** · `[178.105.34.144]` · `6a155322` · v288 · SKY GRADIENT tick on REDO STEP 2: one picture, one redo, sent the sky gradient prompt (new Settings box)
 - **2026-10-29 19:30** · `[178.105.34.144]` · `818e286b` · v287 · fixes from the 29 October audit: upload receipts, step 2 rules checked by the site, paid pictures kept, zero means zero, counters agree, keys, tests that can fail
@@ -44,4 +45,3 @@ no warning.
 - **2026-10-09 08:14** · `[178.105.34.144]` · `28b196e0` · v250 · deploy v250
 - **2026-09-29 12:46** · `[178.105.34.144]` · `45626c87` · v249 · deploy v249
 - **2026-09-29 11:51** · `[178.105.34.144]` · `a4281c68` · v248 · deploy v248
-- **2026-09-29 11:40** · `[178.105.34.144]` · `1672c414` · v247 · deploy v247

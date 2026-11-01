@@ -966,6 +966,14 @@ non-ASCII characters from the celebrity database and reading back what saved:
   twice; `check_one_listing_per_title_slot` and
   `check_relisted_rows_are_sound` watch it.
 
+  **A NEW PICTURE ON THE SAME TITLE INHERITS THE COUNT.** `times_listed`
+  lives on the PICTURE, but the name it counts belongs to the TITLE on the
+  account. So USE MY OWN PICTURE (v290) copies the highest `times_listed`
+  of the pictures it replaces onto the new one, and moves their upload
+  rows with it — a live listing's row too, unchanged. Without that, a
+  replaced Kyoto would go up again as plain "Kyoto" and FAA would list
+  "Kyoto #2". `tools/test_relist.py` breaks the copy on purpose and goes red.
+
   This matters because the owner is REUSING an account that carried the
   movie catalogue, rebranded for travel (see `OPEN_ISSUES.md`). Every film
   title ever listed on it is permanently taken, deletions included.

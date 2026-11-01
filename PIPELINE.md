@@ -101,6 +101,19 @@ For a GPT project the Process row above is two steps, both on the Linux VPS:
   activity log (`listing_relisted`). USE MY OWN PICTURE on such a title
   moves the row onto the new picture; retire stands it down; the step-2
   catch-up keeps it as 'relist'. Tested by `tools/test_relist.py`.
+- **USE MY OWN PICTURE on a title still LIVE (v290).** So the owner can
+  replace a poor worker photo BEFORE deleting the 417. The live listing's
+  'uploaded' row moves onto the new picture unchanged: same address, same
+  live time, and still the old `processed_image_id`, because that is the
+  painting the listing really shows (and the Listing check needs one).
+  Nothing changes on FineArtAmerica. The new picture inherits
+  `times_listed`. Approving it sends nothing while the listing is live
+  (`ensure_upload_rows` leaves an 'uploaded' row alone, and
+  `restore_live_status` reads the poster back as 'uploaded'). Once the
+  listing is deleted and reads 410, RE-UPLOAD sends the NEW picture.
+  Refused (`_pick_cannot_replace` in `routes/admin.py`) only while a
+  picture is being painted or uploaded, or when the title has two listings
+  on one account. Retire and delete still refuse a live picture.
 
 ---
 

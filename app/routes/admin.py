@@ -2550,6 +2550,42 @@ def _picture_cannot_leave(sp: SavedPoster) -> Optional[str]:
     return None
 
 
+def _pick_cannot_replace(db: Session, live: list) -> Optional[str]:
+    """Why USE MY OWN PICTURE cannot replace these pictures now, or None.
+
+    Unlike _picture_cannot_leave, a picture that is LIVE on the marketplace
+    may be replaced (owner, 2026-11-01: the 417 are deleted and re-uploaded,
+    and a bad worker photo cannot be rescued by step 2). Its listing record
+    moves onto the new picture (admin_pick_title), so RE-UPLOAD later sends
+    the new one. Only a picture the machine is holding right now waits, and
+    two listings on one account cannot both move onto one picture (one row
+    per picture per account)."""
+    for sp in live:
+        if sp.pipeline_status in ("processing", "uploading"):
+            return (f"'{sp.filename}' is being painted or uploaded right now. "
+                    f"Wait until that is finished, then try again.")
+    ids = [sp.id for sp in live]
+    if not ids:
+        return None
+    rows = (db.query(UploadTracking)
+              .filter(UploadTracking.saved_poster_id.in_(ids)).all())
+    if any(r.status == "uploading" for r in rows):
+        return ("This title is being uploaded right now. Wait until that is "
+                "finished, then try again.")
+    movers = [r for r in rows
+              if r.status == "uploaded"
+              or (r.status in ("pending", "failed", RELIST_WAITING)
+                  and r.relisted_at is not None)]
+    per_account: dict = {}
+    for r in movers:
+        per_account[r.account_id] = per_account.get(r.account_id, 0) + 1
+    if any(n > 1 for n in per_account.values()):
+        return ("This title has more than one listing on the same account, "
+                "so one picture cannot take over both. Recall one of them "
+                "first, then try again.")
+    return None
+
+
 def _withdraw_pictures(db: Session, posters: list, *, note: str,
                        verdict: str, admin: User, now: datetime,
                        pay: bool = True,
@@ -2679,10 +2715,9 @@ def admin_pick_title(
               .filter(SavedPoster.master_title_id == t.id,
                       SavedPoster.deleted_at.is_(None))
               .order_by(SavedPoster.id.asc()).all())
-    for sp in live:
-        why = _picture_cannot_leave(sp)
-        if why:
-            raise HTTPException(409, why)
+    why = _pick_cannot_replace(db, live)
+    if why:
+        raise HTTPException(409, why)
 
     # ── A TITLE YOU ALREADY SENT BACK TO THE WORKER ─────────────────────
     #
@@ -2911,6 +2946,28 @@ def admin_pick_title(
         tr.last_error = None
         moved.append(tr.id)
 
+    # A LISTING STILL LIVE ON THE MARKETPLACE (v290, owner 2026-11-01) moves
+    # onto the new picture too, and stays exactly as it is: 'uploaded', same
+    # address, same live time, and still pointing at the painting the
+    # listing really shows. Nothing changes on FineArtAmerica. Approving the
+    # new picture does not send it (ensure_upload_rows leaves an 'uploaded'
+    # row alone); once the listing is deleted and reads 410, RE-UPLOAD sends
+    # the NEW picture (relist_listing takes the poster's current picture).
+    live_moved = []
+    if live:
+        for tr in (db.query(UploadTracking)
+                     .filter(UploadTracking.saved_poster_id.in_(
+                                 [p.id for p in live]),
+                             UploadTracking.status == "uploaded")
+                     .all()):
+            tr.saved_poster_id = sp.id
+            tr.letter_index = siblings.index(sp.id) if sp.id in siblings else 0
+            live_moved.append(tr.id)
+    # The title's names spent on the marketplace go with it, so a later
+    # send carries the right letter ("Kyoto B", never a second "Kyoto");
+    # RE-UPLOAD sets it back to 0 on purpose, after the shop rename.
+    sp.times_listed = max([p.times_listed or 0 for p in live] + [0])
+
     log_activity(
         db, user=admin, action="admin_pick", target_type="saved_poster",
         target_id=sp.id,
@@ -2923,6 +2980,7 @@ def admin_pick_title(
                  "sent_to_painting": gl.get("posters", 0),
                  "named_for_painting": bool(sp.paint_requested_at),
                  "relist_rows_moved": moved,
+                 "live_rows_moved": live_moved,
                  "seconds": {"download": round(_t_dl - _t0, 1),
                              "total": round(_time.monotonic() - _t0, 1)}},
     )
@@ -2934,7 +2992,8 @@ def admin_pick_title(
     return JSONResponse({"ok": True, "poster_id": sp.id,
                          "replaced": len(live),
                          "unretired": was == "unusable",
-                         "sent_to_painting": bool(gl.get("posters", 0))})
+                         "sent_to_painting": bool(gl.get("posters", 0)),
+                         "live_listing_kept": bool(live_moved)})
 
 
 # ── Revisions ────────────────────────────────────────────────────────────────

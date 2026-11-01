@@ -1,6 +1,6 @@
 """
 Behaviour test: RE-UPLOAD of listings deleted on FineArtAmerica, and USE MY
-OWN PICTURE on a title waiting to go back up (v289).
+OWN PICTURE on a title waiting to go back up (v289) or still live (v290).
 
 The owner deletes the 417 live listings by hand, renames the shop, and
 presses RE-UPLOAD. Each deleted listing goes back up on its SAME upload row
@@ -15,6 +15,10 @@ queue. Checked here:
   * USE MY OWN PICTURE moves the waiting row onto the new picture and names
     the pick for painting, so Step 1 OFF still paints it;
   * retire stands a waiting row down; the step-2 catch-up keeps it;
+  * (v290) USE MY OWN PICTURE on a title still LIVE: the live row moves
+    onto the new picture unchanged, the spent name goes with it, approval
+    sends nothing while it is live, and RE-UPLOAD later sends the NEW
+    picture; refused while painting, or with two listings on one account;
   * RE-UPLOAD refuses (409) when nothing reads 410;
   * the three new Diagnostics invariants, each with a positive control.
 
@@ -247,6 +251,100 @@ P.ensure_upload_rows(db, poster=new, title=t_o, processed=pi_n, project=proj)
 db.commit(); db.refresh(tr_o)
 ok(tr_o.status == "pending" and tr_o.processed_image_id == pi_n.id and len(rows_of(new)) == 1,
    "approving the new painting puts the moved row in the queue — still one row")
+
+# ── USE MY OWN PICTURE ON A TITLE STILL LIVE (v290) ───────────────────────
+# The owner replaces a bad worker photo on one of the 417 BEFORE deleting
+# them. The live listing's row moves onto the new picture and stays live;
+# RE-UPLOAD later sends the new picture.
+def pick(title, colour):
+    b = io.BytesIO(); Image.new("RGB", (1200, 1600), colour).save(b, "JPEG"); b.seek(0)
+    r = A.admin_pick_title(title.id, request=None, url="", file=UploadFile(b, filename="mine.jpg"),
+                           reason="worker photo too poor", confirm_same_picture=1,
+                           confirm_flagged=0, admin=boss, db=db)
+    return _json.loads(r.body)
+
+t_l, sp_l, pi_l, tr_l = listing("pending", listing_status="live")
+db.commit()
+live_at, live_name = tr_l.uploaded_at, tr_l.remote_title
+ok(A._picture_cannot_leave(sp_l) is not None,
+   "control: retire and delete still refuse a picture behind a live listing")
+body = pick(t_l, (200, 60, 30))
+ok(body.get("ok") is True and body.get("live_listing_kept") is True,
+   f"USE MY OWN PICTURE succeeds on a live title and says the listing was kept ({body})")
+new_l = db.query(M.SavedPoster).filter_by(id=body["poster_id"]).one()
+db.refresh(tr_l); db.refresh(sp_l)
+ok(sp_l.deleted_at is not None, "the worker's picture is withdrawn")
+ok(tr_l.saved_poster_id == new_l.id and tr_l.status == "uploaded"
+   and tr_l.listing_status == "live" and tr_l.uploaded_at == live_at
+   and tr_l.remote_title == live_name,
+   "the live listing's row MOVED onto the new picture and is unchanged: still live, same name and time")
+ok(tr_l.processed_image_id == pi_l.id,
+   "it still points at the painting the listing really shows (the Listing check needs one)")
+ok(new_l.times_listed == 1, "the name already spent goes with it (times_listed 1)")
+ok(P.has_live_listing(db, new_l.id) and not P.picture_can_change(db, new_l),
+   "the new picture counts as live, so no worker door can change it")
+ok(new_l.paint_requested_at is not None, "and it is named for painting")
+
+# Painted and approved: still live, nothing queued, still one row.
+new_l.pipeline_status = "processed"
+pi_l2 = M.ProcessedImage(saved_poster_id=new_l.id, project_id=proj.id, storage_path="s/l2.jpg",
+                         filename="l2.jpg", is_current=1, review_status="approved", stage=2)
+db.add(pi_l2); db.flush()
+P.ensure_upload_rows(db, poster=new_l, title=t_l, processed=pi_l2, project=proj)
+P.restore_live_status(db, new_l)
+db.commit(); db.refresh(tr_l)
+ok(tr_l.status == "uploaded" and len(rows_of(new_l)) == 1 and new_l.pipeline_status == "uploaded",
+   "approving the new picture sends nothing while the listing is live — one row, poster reads uploaded")
+
+# Changing his mind again while it is still live: the row moves again.
+body2 = pick(t_l, (20, 160, 90))
+ok(body2.get("ok") is True and body2.get("live_listing_kept") is True,
+   f"a second own picture on the same live title also works ({body2})")
+new_l2 = db.query(M.SavedPoster).filter_by(id=body2["poster_id"]).one()
+db.refresh(tr_l)
+ok(tr_l.saved_poster_id == new_l2.id and new_l2.times_listed == 1,
+   "the row moved again, with the spent name")
+pi_l3 = M.ProcessedImage(saved_poster_id=new_l2.id, project_id=proj.id, storage_path="s/l3.jpg",
+                         filename="l3.jpg", is_current=1, review_status="approved", stage=2)
+db.add(pi_l3); new_l2.pipeline_status = "processed"; db.commit()
+
+# Deleted on FineArtAmerica, read 410, RE-UPLOAD: the NEW picture goes up.
+tr_l.listing_status = "gone"; tr_l.listing_http = 410; db.commit()
+LA.api_relist(payload={"account_id": acct.id}, admin=boss, db=db)
+db.refresh(tr_l); db.refresh(new_l2)
+ok(tr_l.status == "pending" and tr_l.processed_image_id == pi_l3.id
+   and tr_l.relisted_at is not None and new_l2.times_listed == 0,
+   "RE-UPLOAD queues YOUR picture, at the front, with a plain title")
+
+# Refusals, asked before anything is downloaded or withdrawn.
+t_p, sp_p, pi_p, tr_p = listing("pending", listing_status="live")
+sp_p.pipeline_status = "processing"; db.commit()
+try:
+    pick(t_p, (1, 2, 3)); refused = None
+except HTTPException as e:
+    refused = e
+db.refresh(sp_p)
+ok(refused is not None and refused.status_code == 409 and sp_p.deleted_at is None,
+   "a picture being painted right now is refused, and left as it was")
+t_2, sp_a, pi_a, tr_a = listing("approved", listing_status="live")
+sp_b = M.SavedPoster(master_title_id=t_2.id, user_id=w.id, username=w.username,
+                     project_folder="travel", original_save_date=date(2026, 9, 20),
+                     title_folder_path=t_2.title_folder_path, filename="b.jpg",
+                     source_url="ub", pipeline_status="uploaded", times_listed=1)
+db.add(sp_b); db.flush()
+db.add(M.UploadTracking(saved_poster_id=sp_b.id, account_id=acct.id, project_id=proj.id,
+                        target_site="fineartamerica", remote_title=t_2.title + " B",
+                        status="uploaded", letter_index=1, uploaded_at=datetime(2026, 10, 1),
+                        listing_status="live"))
+db.commit()
+try:
+    pick(t_2, (4, 5, 6)); refused = None
+except HTTPException as e:
+    refused = e
+db.refresh(sp_a); db.refresh(sp_b)
+ok(refused is not None and refused.status_code == 409
+   and sp_a.deleted_at is None and sp_b.deleted_at is None,
+   "two live listings on one account cannot both move onto one picture — refused, nothing withdrawn")
 
 # ── DIAGNOSTICS ───────────────────────────────────────────────────────────
 scope = D.Scope(db, proj.id)

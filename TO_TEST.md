@@ -1368,6 +1368,33 @@ instead of 410, those addresses are wrong and RE-UPLOAD will leave them
 alone — tell me which. If a title goes up with "#2" in step 8, pause
 uploads at once and tell me which title.
 
+## 116. YOUR OWN PICTURE ON A LIVE TITLE, AND NEXT NOT MARKED — v290
+
+**Where:** Approve Artwork.
+
+**What to click:**
+
+1. Find a design whose worker photo is poor and which is still live on
+   FineArtAmerica, for example Hamburg. Press USE MY OWN PICTURE and paste
+   your picture. It should now be accepted. The message should say the
+   FineArtAmerica listing now belongs to your picture, which goes up when
+   you RE-UPLOAD.
+2. Your picture should be painted even though Step 1 is off. When it comes
+   back, approve it. Nothing should be uploaded yet, because the old
+   listing is still live.
+3. After you delete the 417 and press RE-UPLOAD (item 115), Hamburg should
+   go up with YOUR picture, with a plain title.
+4. In a batch, mark a few designs. Type 1 in the number box and press
+   Enter. Press * (on the number pad, or Shift+8). It should skip every
+   design that is already marked and stop at the first one that is not.
+   The NEXT NOT MARKED button does the same.
+5. When every other design is marked, * should stay put and say no other
+   design is waiting.
+
+**What it means if it does not:** if step 1 still refuses, read me the
+message. If step 3 sends the worker's old picture, or the title has a "B"
+or "#2", pause uploads and tell me which title.
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** No longer needed at all — corrected

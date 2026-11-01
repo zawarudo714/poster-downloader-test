@@ -107,6 +107,11 @@
         <div class="review-nav">
           <button class="btn btn-ghost" data-action="review-prev">&larr; PREV</button>
           <button class="btn btn-ghost" data-action="review-next">NEXT &rarr;</button>
+          {# Skips designs that are already marked, so reruns that arrive
+             mid-sitting can be walked back to where he left off
+             (owner, 2026-11-01). #}
+          <button class="btn btn-ghost" data-action="review-next-unmarked"
+                  title="Go to the next design that still has a picture with no mark (key: *)">NEXT NOT MARKED <span class="mono">(*)</span></button>
           <span class="muted">or use the &larr; &rarr; keys</span>
         </div>
       </div>
@@ -141,6 +146,7 @@
         <span class="mono">V</span> or a number pick a generation ·
         <span class="mono">Z</span> big view ·
         <span class="mono">&larr; &rarr;</span> move ·
+        <span class="mono">*</span> next design not marked ·
         <span class="mono">Esc</span> back.
         Every one of these works in the big view too.
       </p>

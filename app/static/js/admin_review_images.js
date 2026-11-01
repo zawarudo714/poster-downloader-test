@@ -1311,6 +1311,17 @@
     return titles.findIndex((t) => t.images.some(
       (img) => imageFate(t, img) === 'unmarked'));
   }
+  // The next design AFTER `from` with a bare picture, going round to the
+  // start once; -1 when every other design is marked. NEXT NOT MARKED (*)
+  // uses it, so reruns that arrive mid-sitting are walked one by one and
+  // the next press lands where he left off (owner, 2026-11-01).
+  function nextUnmarkedIndex(from) {
+    for (let step = 1; step < titles.length; step += 1) {
+      const i = (from + step) % titles.length;
+      if (titles[i].images.some((img) => imageFate(titles[i], img) === 'unmarked')) return i;
+    }
+    return -1;
+  }
 
   function leftCount() {
     let out = 0;
@@ -1568,6 +1579,21 @@
     if (next < 0 || next >= titles.length) return;
     index = next;
     render();
+  }
+
+  // NEXT NOT MARKED (*): skips the designs that already have every mark.
+  // Held while a poster loads, like move().
+  function moveToNextUnmarked() {
+    if (advanceLock) return;
+    const at = nextUnmarkedIndex(index);
+    if (at < 0) {
+      if (window.toast) window.toast('No other design is waiting for a mark.');
+      return;
+    }
+    if (at < index && window.toast) window.toast('Back to the start of the batch.');
+    index = at;
+    render();
+    if (zoomOpen) syncZoom();
   }
 
   // The counter is editable: type a design number, press Enter (or click
@@ -2055,6 +2081,7 @@
         break;
       case 'review-prev':    move(-1); break;
       case 'review-next':    move(1);  break;
+      case 'review-next-unmarked': moveToNextUnmarked(); break;
       case 'review-clear-marks': clearTitleMarks(); break;
       // SAVE ONLY WHAT I MARKED — for stopping part-way through a batch.
       // Pictures with no mark are NOT released; they stay waiting.
@@ -2159,6 +2186,9 @@
     if (step2On && !topRowDigit && K(e, reviewKeys.step2)) {
       decideThisTitle('step2'); e.preventDefault(); return;
     }
+    // * (number pad, or Shift+8) jumps to the next design not marked yet.
+    // After the decision keys, so a key he sets to * on the dashboard wins.
+    if (e.key === '*') { moveToNextUnmarked(); e.preventDefault(); return; }
 
     if (e.key >= '1' && e.key <= '9') {
       pickVersionByNumber(Number(e.key));

@@ -372,6 +372,7 @@
       bits.push(d.replaced ? `Replaced ${d.replaced} picture(s)` : 'Picture added');
       if (d.unretired) bits.push('the title is back from retirement');
       bits.push(d.sent_to_painting ? 'sent to painting' : 'waiting for painting');
+      if (d.live_listing_kept) bits.push('its FineArtAmerica listing now belongs to your picture, which goes up when you RE-UPLOAD');
       busy = false;
       close();
       if (current.onDone) current.onDone(d, bits.join(' · ') + '.');

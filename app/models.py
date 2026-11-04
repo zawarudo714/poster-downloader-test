@@ -1736,6 +1736,12 @@ class AIBatch(Base):
     last_checked_at = Column(DateTime, nullable=True)
     collected_at    = Column(DateTime, nullable=True, index=True)
     cancel_requested_by = Column(String(64), nullable=True)
+    # When this batch's token counts were copied into ai_usage (v292). NULL
+    # on a collected batch means not yet, and ai_usage.sweep fetches its
+    # answer file again until it is set. `usage_note` says why a batch was
+    # closed off with no rows, for example its file is gone from OpenAI.
+    usage_recorded_at = Column(DateTime, nullable=True)
+    usage_note      = Column(String(255), nullable=True)
 
 
 class AIBatchItem(Base):
@@ -1756,3 +1762,42 @@ class AIBatchItem(Base):
     outcome         = Column(String(16), nullable=True)
     error           = Column(Text, nullable=True)
     finished_at     = Column(DateTime, nullable=True)
+
+
+class AIUsage(Base):
+    """
+    One row per PAID OpenAI answer, with OpenAI's own token counts (v292).
+    The Usage tab reads nothing else.
+
+    Batch answers are keyed by (batch_id, custom_id), so copying the same
+    answer file twice adds nothing. A live answer has no custom_id and is
+    written once, by gpt_images right after the call that cost the money.
+
+    `occurred_at` is OpenAI's `created` time for a batch answer, because the
+    usage dashboard buckets spend by that UTC day (MEASURED 2026-11-04: equal
+    to the cent on 7 of 7 days). `sent_at` is when the request left this
+    server, which decides which prompt it carried.
+    `kind`: 'first' or 'repaint' (the design already had a picture of this
+    stage before), or 'test' for a dashboard test generation.
+    """
+    __tablename__ = "ai_usage"
+    __table_args__ = (
+        UniqueConstraint("batch_id", "custom_id", name="ux_ai_usage_line"),
+    )
+
+    id              = Column(Integer, primary_key=True)
+    project_id      = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    occurred_at     = Column(DateTime, nullable=False, index=True)
+    sent_at         = Column(DateTime, nullable=True)
+    stage           = Column(Integer, nullable=False)          # 1 painting, 2 step 2
+    mode            = Column(String(8), nullable=False)        # 'batch' | 'live'
+    kind            = Column(String(8), nullable=False)        # 'first' | 'repaint' | 'test'
+    model           = Column(String(64), nullable=True)
+    saved_poster_id = Column(Integer, nullable=True, index=True)
+    batch_id        = Column(Integer, nullable=True, index=True)
+    custom_id       = Column(String(64), nullable=True)
+    text_in         = Column(Integer, nullable=False, default=0)
+    image_in        = Column(Integer, nullable=False, default=0)
+    image_out       = Column(Integer, nullable=False, default=0)
+    cost_usd        = Column(Float, nullable=False, default=0.0)
+    recorded_at     = Column(DateTime, default=datetime.utcnow, nullable=False)

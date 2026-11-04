@@ -3509,6 +3509,10 @@ DAY_BOUNDARY_ALLOWED = {
     # marketplace sale dates; an hour either side changes nothing.
     ("app/earnings/service.py",
      "start = max(start, datetime.combine(starts_on, datetime.min.time()))"),
+    # The Usage tab counts UTC days on purpose: OpenAI's usage page buckets
+    # spend by UTC day, and the two must agree to be compared (v292).
+    ("app/ai_usage.py",
+     "t0 = datetime.combine(floor, datetime.min.time())"),
 }
 
 

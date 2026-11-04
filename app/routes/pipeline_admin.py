@@ -829,8 +829,11 @@ def api_set_settings(
     target = project if scope == "project" else None
 
     applied = []
+    changed = []       # which keys really moved — the Usage tab marks them
     for key, value in updates.items():
         try:
+            if key not in SECRET_KEYS and key in P.DEFAULTS:
+                before = P.get_setting(db, key, project=target)
             if key in SECRET_KEYS and value:
                 # A blank submission means "leave it alone", not "erase it" —
                 # the form renders secrets masked, so an untouched field
@@ -840,6 +843,10 @@ def api_set_settings(
                 applied.append(f"{key} (unchanged)")
                 continue
             P.set_setting(db, key, value, project=target, by=admin.username)
+            if key not in SECRET_KEYS and key in P.DEFAULTS:
+                db.flush()
+                if str(P.get_setting(db, key, project=target)) != str(before):
+                    changed.append(key)
         except (KeyError, ValueError) as e:
             # KeyError: unknown key. ValueError: a number box holding a
             # non-number — refused at the door so it can never 500 one of
@@ -856,7 +863,8 @@ def api_set_settings(
         raise HTTPException(400, clash)
 
     log_activity(db, user=admin, action="pipeline_settings", target_type="pipeline",
-                 details={"keys": applied, "scope": scope, "project": project.slug})
+                 details={"keys": applied, "changed": changed, "scope": scope,
+                          "project": project.slug})
     db.commit()
     return JSONResponse({
         "ok": True, "applied": applied,
@@ -1962,7 +1970,8 @@ def api_test_gpt_process(
     started = datetime.utcnow()
     try:
         gen = G.generate(db, source=source, style=style, project=project,
-                         location=(title.title or ""), log_fn=emit)
+                         location=(title.title or ""), log_fn=emit,
+                         poster_id=poster.id, purpose="test")
     except G.PermanentFailure as e:
         return JSONResponse({"ok": False, "fatal": True, "kind": e.kind,
                              "categories": getattr(e, "categories", []),
@@ -1971,9 +1980,8 @@ def api_test_gpt_process(
         return JSONResponse({"ok": False, "fatal": False,
                              "error": str(e), "log": lines}, status_code=200)
 
-    # Spend metering removed in v172. The token counts are still reported,
-    # because they say something about the SIZE of the picture the model
-    # chose, which is worth seeing on a test even without a price attached.
+    # The commit keeps the token counts G.generate recorded: a test is paid
+    # for like any painting, and the Usage tab shows it as "test" (v292).
     db.commit()
     emit(f"generated in {gen.duration_ms} ms, "
          f"{gen.input_tokens} in / {gen.output_tokens} out tokens")

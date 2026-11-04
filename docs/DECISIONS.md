@@ -5,6 +5,11 @@ A replaced decision stays here, marked SUPERSEDED, never deleted.
 Older decisions are tagged `DECIDED <date>` where they apply (in the docs and
 in `AUDIT.md`); search for `DECIDED` to find them.
 
+- 2026-11-04 · The Usage tab counts spend from the site's own token counts
+  only, not OpenAI's admin usage API · owner's choice: the admin key would
+  mix in his test keys. Days are UTC days, to match OpenAI's usage page; a
+  repaint is any picture for a design that already had one of the same step
+  (v292) · `app/ai_usage.py`, `PIPELINE.md`, `AUDIT.md`
 - 2026-11-04 · The short "$60" painting prompt with the reworded title is the
   main prompt; the long one is deprecated and kept as a backup · it halves a
   painting's cost (about $60 a month at December volume) and letters about as

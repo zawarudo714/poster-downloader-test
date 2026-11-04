@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% from "_macros.html" import info %}
+{% block title %}Usage · Admin{% endblock %}
+
+{% block content %}
+{#
+   What this project's OpenAI key has cost, from OpenAI's own token counts on
+   every answer (v292). Numbers and charts only, by the owner's ask. Days are
+   UTC days, the same days as OpenAI's usage page, so the two can be compared.
+#}
+<div class="usage-grid" data-usage-root>
+
+  <div class="usage-filters" role="group" aria-label="Filters">
+    <div class="usage-range" data-usage-range>
+      <button type="button" class="btn btn-ghost btn-tiny" data-days="7">7 DAYS</button>
+      <button type="button" class="btn btn-ghost btn-tiny active" data-days="14">14 DAYS</button>
+      <button type="button" class="btn btn-ghost btn-tiny" data-days="30">30 DAYS</button>
+      <span class="usage-custom">
+        <input type="date" data-usage-start aria-label="From">
+        <span class="muted">→</span>
+        <input type="date" data-usage-end aria-label="To">
+      </span>
+    </div>
+    <label>STEP
+      <select data-usage-filter="stage">
+        <option value="all">Both</option><option value="1">1 · painting</option><option value="2">2</option>
+      </select>
+    </label>
+    <label>KIND
+      <select data-usage-filter="kind">
+        <option value="all">All</option><option value="first">First picture</option>
+        <option value="repaint">Repaint</option><option value="test">Test</option>
+      </select>
+    </label>
+    <label>SENT
+      <select data-usage-filter="mode">
+        <option value="all">Both</option><option value="batch">Batch</option><option value="live">Live</option>
+      </select>
+    </label>
+    <label>PROMPT
+      <select data-usage-filter="prompt"><option value="all">All</option></select>
+    </label>
+    {{ info("Every number comes from OpenAI's own token counts on this site's answers, priced at OpenAI's rates. Days are UTC days, the same as OpenAI's usage page. A repaint is a picture made for a design that already had one. The dashed lines mark days a prompt or picture setting changed.") }}
+  </div>
+
+  <section class="usage-tiles" data-usage-tiles>
+    <div class="muted">Loading…</div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><span>SPEND PER DAY</span><span class="muted mono" data-usage-total></span></div>
+    <div class="panel-body"><div class="usage-chart usage-chart-tall"><canvas data-usage-chart="spend"></canvas></div></div>
+  </section>
+
+  <div class="usage-pair">
+    <section class="panel">
+      <div class="panel-head"><span>REPAINT RATE</span></div>
+      <div class="panel-body"><div class="usage-chart"><canvas data-usage-chart="repaint"></canvas></div></div>
+    </section>
+    <section class="panel">
+      <div class="panel-head"><span>COST PER APPROVED DESIGN</span></div>
+      <div class="panel-body"><div class="usage-chart"><canvas data-usage-chart="approved"></canvas></div></div>
+    </section>
+  </div>
+
+  <div class="usage-pair">
+    <section class="panel">
+      <div class="panel-head"><span>PROMPT TOKENS PER PAINTING</span></div>
+      <div class="panel-body"><div class="usage-chart"><canvas data-usage-chart="tokens"></canvas></div></div>
+    </section>
+    <section class="panel">
+      <div class="panel-head"><span>PICTURES PER DAY</span></div>
+      <div class="panel-body"><div class="usage-chart"><canvas data-usage-chart="count"></canvas></div></div>
+    </section>
+  </div>
+
+  <details class="panel usage-table">
+    <summary class="panel-head"><span>TABLE</span></summary>
+    <div class="panel-body" data-usage-table></div>
+  </details>
+
+  <div class="muted mono usage-foot" data-usage-foot></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="/static/js/admin_usage.js?v={{ app_version }}"></script>
+{% endblock %}

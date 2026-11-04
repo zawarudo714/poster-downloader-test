@@ -1415,6 +1415,28 @@ batch, tell me which design and whether you reloaded or used another
 device. The batch is remembered by this browser only, so a phone or a
 second browser picks its own batch.
 
+## 118. THE USAGE TAB — v292
+
+**Where:** the Usage tab, in the JUST LOOKING band, next to Stats.
+
+**What to click:**
+
+1. Open the tab a few hours after the deploy. The server fills in the older
+   days one batch every two minutes, so the first hours look short.
+2. Press 7 DAYS, 14 DAYS and 30 DAYS, then pick two dates by hand. The
+   tiles and every chart should change with them.
+3. Change STEP, KIND, SENT and PROMPT one at a time. For example, KIND =
+   Repaint should show only the repaint part of the spend bars.
+4. Hover a bar in SPEND PER DAY. The box should show each part in dollars.
+5. Pick one finished day. Compare its spend with OpenAI's usage page for
+   the Travel Poster key on the same day. OpenAI counts days in UTC, and so
+   does this tab. The two should match within a few cents.
+6. Open TABLE at the bottom. Its numbers should match the charts.
+
+**What it means if it does not:** if a day is much lower than OpenAI's
+page, tell me the day. The footer says how many batches are still waiting
+to be counted; a day with a waiting batch is short until it is counted.
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** No longer needed at all — corrected

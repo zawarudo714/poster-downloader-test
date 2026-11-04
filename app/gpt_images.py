@@ -188,7 +188,8 @@ def _part(path: Path) -> tuple[str, bytes, str]:
 
 
 def generate(db: Session, *, source: Path, style: Path, project=None,
-             location: str = "", log_fn=None) -> Generation:
+             location: str = "", log_fn=None, poster_id: Optional[int] = None,
+             purpose: str = "picture") -> Generation:
     """
     Send one image through the style transfer and return the result.
 
@@ -223,7 +224,14 @@ def generate(db: Session, *, source: Path, style: Path, project=None,
          else "sending the photo only — the style reference is switched off")
     files = [("image[]", p) for p in parts]
     headers = {"Authorization": f"Bearer {api_key}"}
-    return _send_and_read(headers, data, files, emit)
+    gen = _send_and_read(headers, data, files, emit)
+    # Recorded HERE, the one place every live painting passes, so no caller
+    # can forget to (v292). A picture filed later from disk was paid for
+    # once, and is not recorded again.
+    from .ai_usage import record_live
+    record_live(db, project, stage=1, gen=gen, model=str(data.get("model") or ""),
+                poster_id=poster_id, purpose=purpose)
+    return gen
 
 
 def api_key_for(db: Session, project) -> str:
@@ -397,7 +405,7 @@ def step2_images(db: Session, project, *, painting_png: bytes,
 
 def generate_step2(db: Session, *, painting_png: bytes, input_size: tuple,
                    style: Path, project, sky: bool, location: str = "",
-                   log_fn=None) -> Generation:
+                   log_fn=None, poster_id: Optional[int] = None) -> Generation:
     """STEP 2, one at a time at full price (batch switched off)."""
     def emit(msg, level="info"):
         if log_fn:
@@ -408,7 +416,11 @@ def generate_step2(db: Session, *, painting_png: bytes, input_size: tuple,
     files = [("image[]", p) for p in step2_images(
         db, project, painting_png=painting_png, style=style)]
     headers = {"Authorization": f"Bearer {api_key}"}
-    return _send_and_read(headers, data, files, emit)
+    gen = _send_and_read(headers, data, files, emit)
+    from .ai_usage import record_live
+    record_live(db, project, stage=2, gen=gen, model=str(data.get("model") or ""),
+                poster_id=poster_id)
+    return gen
 
 
 # ════════════════════════════════════════════════════════════════════════════

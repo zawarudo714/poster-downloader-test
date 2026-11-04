@@ -48,6 +48,10 @@ app/
                        price, within 24 h. Send, poll, collect; every exit
                        puts its pictures back (v266) — except a send cut
                        short, which is looked up at OpenAI first (v286).
+  ai_usage.py          What the OpenAI key has cost: one `ai_usage` row per
+                       paid answer, from OpenAI's own token counts; the
+                       sweep that fills in old batches; the Usage tab's
+                       numbers (v292).
   listing_check.py     Is what we think is live on FineArtAmerica actually
                        there? 410 means removed, 404 means our ADDRESS is
                        wrong. Never collapse the two.
@@ -58,6 +62,7 @@ app/
     pipeline_api.py    Machine API,  /api/pipeline,    node bearer token
     pipeline_admin.py  Dashboard API, /admin/pipeline, admin session
     listing_admin.py   The Listing check tab.
+    usage_admin.py     The Usage tab, /admin/usage (v292). Read only.
   templates/           Jinja2. base.html holds the nav.
   static/js/           One file per page, vanilla JS, no build step.
 

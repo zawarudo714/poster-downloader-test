@@ -6593,3 +6593,25 @@ a.pulse-chip:hover {
 /* Quick note buttons in the zoom's title bar (v250). */
 .lb-quick-notes { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: auto; margin-right: 28px; align-self: center; }
 .lb-quick-notes:empty { display: none; }
+
+/* ── The Usage tab (v292) ─────────────────────────────────────────────── */
+.usage-grid { display: flex; flex-direction: column; gap: 14px; }
+.usage-filters { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center;
+  font-size: 11px; letter-spacing: 0.08em; color: var(--subtext); }
+.usage-filters select, .usage-filters input[type=date] { margin-left: 6px; }
+.usage-range { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.usage-range .btn.active { background: var(--accent); color: var(--bg); }
+.usage-custom { display: inline-flex; gap: 4px; align-items: center; }
+.usage-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.usage-tile-sub { font-size: 11px; margin-top: 4px; }
+.usage-delta.up { color: var(--error); }
+.usage-delta.down { color: var(--success); }
+.usage-chart { position: relative; height: 220px; }
+.usage-chart-tall { height: 300px; }
+.usage-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 900px) { .usage-pair { grid-template-columns: 1fr; } }
+.usage-table summary { cursor: pointer; list-style: none; }
+.usage-tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
+.usage-tbl th, .usage-tbl td { padding: 4px 8px; text-align: right; border-bottom: 1px solid var(--border); }
+.usage-tbl th:first-child, .usage-tbl td:first-child { text-align: left; }
+.usage-foot { font-size: 11px; }

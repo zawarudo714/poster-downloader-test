@@ -274,16 +274,14 @@ def process_one(db: Session, poster, title, project) -> bool:
         # instead, guessing e.g. "JAPAN" for Mount Fuji. The owner chose the
         # `title` column as the poster text.
         gen = G.generate(db, source=source, style=style, project=project,
-                         location=(title.title or ""))
+                         location=(title.title or ""), poster_id=poster.id)
     except (G.PermanentFailure, G.TransientFailure) as e:
         record_paint_failure(db, poster, title, project, e)
         db.commit()
         return False
 
-    # Spend metering was REMOVED in v172 at the owner's instruction. OpenAI's
-    # own usage page is where he reads what this costs, and our figure only
-    # ever duplicated it less accurately. The token counts OpenAI returns are
-    # still on `gen` if anything ever wants them again.
+    # Commits the token counts G.generate recorded (v292, the Usage tab)
+    # before filing, so a filing failure cannot lose what was paid for.
     db.commit()
     return file_painting(db, poster, title, project, gen)
 
@@ -736,7 +734,8 @@ def process_step2_one(db: Session, painting, poster, title, project) -> bool:
         gen = G.generate_step2(db, painting_png=png, input_size=size,
                                style=style, project=project,
                                sky=bool(painting.step2_sky),
-                               location=(title.title or ""))
+                               location=(title.title or ""),
+                               poster_id=poster.id)
     except StorageError as e:
         record_step2_failure(db, painting, project, G.TransientFailure(
             f"could not read the painting: {e}"))
@@ -746,6 +745,7 @@ def process_step2_one(db: Session, painting, poster, title, project) -> bool:
         record_step2_failure(db, painting, project, e)
         db.commit()
         return False
+    db.commit()       # the token counts, as for a painting (v292)
     return file_step2(db, painting, poster, title, project, gen)
 
 
@@ -857,6 +857,15 @@ def _cycle() -> bool:
                 db.rollback()
                 AB.note_error(project, f"checking batches: {type(e).__name__}: {e}")
                 log.error("Batch check failed for %s: %s", project.slug, e)
+
+            # TOKEN COUNTS of finished batches not yet copied (v292). Free:
+            # it only reads answer files, one batch every two minutes.
+            try:
+                from . import ai_usage as U
+                U.sweep(db, project)
+            except Exception as e:                       # noqa: BLE001
+                db.rollback()
+                log.error("Usage sweep failed for %s: %s", project.slug, e)
 
             # PICTURES ALREADY PAID FOR are filed before anything new is
             # sent or painted, paused or not — like collecting (v287).

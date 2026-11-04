@@ -615,6 +615,16 @@ def collect(db: Session, project, batch, *, api_key: str) -> bool:
             db.commit()
             dest.unlink(missing_ok=True)
             return filed_any          # the batch stays open; next poll retries
+        if file_id == batch.output_file_id:
+            # The token counts first, from the file already here (v292). A
+            # failure only leaves usage_recorded_at empty for the sweep to
+            # retry; it never holds up filing the pictures.
+            try:
+                from . import ai_usage as U
+                U.record_file(db, project, batch, dest)
+            except Exception as e:                       # noqa: BLE001
+                db.rollback()
+                log.error("Usage: batch %s not copied: %s", batch.id, e)
         try:
             with open(dest, encoding="utf-8") as fh:
                 for raw in fh:

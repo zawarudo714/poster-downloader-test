@@ -21,6 +21,7 @@ from .routes import listing_admin as listing_routes
 from .routes import auth as auth_routes
 from .routes import pipeline_admin as pipeline_admin_routes
 from .routes import pipeline_api as pipeline_api_routes
+from .routes import usage_admin as usage_routes
 from .routes import worker as worker_routes
 
 
@@ -329,6 +330,8 @@ app.include_router(pipeline_api_routes.router)
 # diagnostics rather than with the pipeline — nothing here dispatches work.
 app.include_router(earnings_routes.router)
 app.include_router(listing_routes.router)
+# Usage: per project, read only — what this site's OpenAI key has cost (v292).
+app.include_router(usage_routes.router)
 
 
 @app.get("/healthz")

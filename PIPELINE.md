@@ -122,6 +122,20 @@ For a GPT project the Process row above is two steps, both on the Linux VPS:
   `api_review_queue` returns those titles that are still waiting. A repaint
   joins the next batch, after a save from that door. Tested by
   `tools/test_review_batch.py`.
+- **What the key costs is counted per answer (v292).** Every paid answer
+  becomes one `ai_usage` row with OpenAI's own token counts: a batch in
+  `ai_batches.collect` (from its output file, `ai_usage.record_file`), a
+  live painting, step 2 or dashboard test in `gpt_images` (`record_live`).
+  Priced at batch rates (text in $2.50, image in $4, image out $15 per
+  million tokens), live twice that; it matched OpenAI's dashboard to the
+  cent on UTC days of each answer's `created`. Rows are unique on
+  (batch, answer), so counting a file twice adds nothing. A batch collected
+  before v292 is counted later by `ai_usage.sweep` in the GPT worker, one
+  every two minutes; `check_usage_recorded` warns when one is still not
+  counted 12 h after collection. The workflow reset wipes `ai_usage`, since
+  restarted batch ids would make new answers look already counted. Shown
+  on the Usage tab (`routes/usage_admin.py`). Tested by
+  `tools/test_ai_usage.py`.
 
 ---
 

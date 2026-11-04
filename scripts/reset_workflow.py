@@ -55,7 +55,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.config import BACKUPS_DIR, DB_PATH, WORKSPACE_DIR          # noqa: E402
 from app.db import SessionLocal                                      # noqa: E402
 from app.models import (                                             # noqa: E402
-    AIBatch, AIBatchItem, ActivityLog, ChatMessage, ChatReadState, ImportJob, LedgerEntry,
+    AIBatch, AIBatchItem, AIUsage, ActivityLog, ChatMessage, ChatReadState, ImportJob, LedgerEntry,
     ListingSweep, MarketplaceSnapshot, MasterTitle, PaymentRun, PipelineJob,
     ProcessedImage, Revision, SavedPoster, SearchCache, TitleAlias,
     UploadTracking, User,
@@ -191,6 +191,10 @@ def reset(db, *, wipe_titles: bool, dry_run: bool) -> None:
     tables = [
         ("upload tracking",  UploadTracking),
         # Batches at OpenAI describe paintings this reset deletes (v266).
+        # Spend rows go WITH the batches: they are keyed by batch id and
+        # custom id, and a restarted id sequence would make a new batch's
+        # answers look already counted (v292).
+        ("usage rows",       AIUsage),
         ("batch items",      AIBatchItem),
         ("batches",          AIBatch),
         ("processed images", ProcessedImage),

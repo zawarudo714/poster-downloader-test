@@ -3731,6 +3731,38 @@ def check_batches_are_answered_in_time(db: Session, scope: Scope) -> CheckResult
     )
 
 
+def check_usage_recorded(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: every collected batch has its token counts on the Usage tab
+    (usage_recorded_at set). collect() copies them from the file it has just
+    downloaded; ai_usage.sweep() fetches any it missed, one batch every two
+    minutes. A batch still missing after 12 hours means the sweep is not
+    running or every try fails, and the Usage tab is short by that batch.
+    """
+    from .models import AIBatch
+    cutoff = datetime.utcnow() - timedelta(hours=12)
+    q = db.query(AIBatch).filter(AIBatch.collected_at.isnot(None),
+                                 AIBatch.collected_at < cutoff,
+                                 AIBatch.usage_recorded_at.is_(None))
+    if scope.project_id:
+        q = q.filter(AIBatch.project_id == scope.project_id)
+    late = q.order_by(AIBatch.id.asc()).all()
+    rows = [Finding(f"batch record {b.id} (step {b.stage})",
+                    f"collected {b.collected_at:%Y-%m-%d %H:%M} UTC, "
+                    f"token counts not copied yet", "/admin/usage")
+            for b in late[:MAX_ROWS]]
+    return _result(
+        "usage_recorded",
+        f"{len(late)} batch(es) are missing from the Usage tab"
+        if late else "Every collected batch is counted on the Usage tab",
+        "The site copies each batch's token counts from OpenAI's answer file. "
+        "Right after v292 is deployed, the older batches are filled in at about "
+        "30 an hour, so a count that falls is fine. A count that stays means the "
+        "painting thread is down or OpenAI refuses the file download.",
+        "warn" if late else "ok", rows, len(late),
+    )
+
+
 def check_step2_work_can_move(db: Session, scope: Scope) -> CheckResult:
     """
     INVARIANT: a painting waiting for step 2 is in a project where step 2 is
@@ -3962,6 +3994,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_batch_claims_have_an_open_batch,
     check_batch_pictures_stay_in_their_batch,
     check_batches_are_answered_in_time,
+    check_usage_recorded,
     check_step2_work_can_move,
     check_queued_uploads_point_at_released_pictures,
     check_healed_versions_are_sound,

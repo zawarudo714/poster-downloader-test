@@ -215,6 +215,10 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     # RE-UPLOAD THE DELETED LISTINGS (v289). NULL on every existing row is
     # the truth: nothing was ever sent back up this way before.
     ("upload_tracking",  "relisted_at",    "DATETIME"),
+    # THE USAGE TAB (v292). NULL on every existing batch is the truth: none
+    # has had its token counts copied yet, so ai_usage.sweep fills them in.
+    ("ai_batches",       "usage_recorded_at", "DATETIME"),
+    ("ai_batches",       "usage_note",     "VARCHAR(255)"),
 ]
 
 # ════════════════════════════════════════════════════════════════════════════

@@ -130,6 +130,7 @@
             <div class="nav-band" data-nav-tint="looking">
               <span class="nav-band-head">JUST LOOKING</span>
               <a href="/admin/stats"     class="navlink {% if active_tab == 'stats' %}active{% endif %}">Stats</a>
+              <a href="/admin/usage"     class="navlink {% if active_tab == 'usage' %}active{% endif %}">Usage</a>
               <a href="/admin/peek"      class="navlink {% if active_tab == 'peek' %}active{% endif %}">Peek</a>
             </div>
           {% elif user.role == 'admin' %}

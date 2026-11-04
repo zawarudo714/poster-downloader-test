@@ -5,6 +5,11 @@ A replaced decision stays here, marked SUPERSEDED, never deleted.
 Older decisions are tagged `DECIDED <date>` where they apply (in the docs and
 in `AUDIT.md`); search for `DECIDED` to find them.
 
+- 2026-11-04 · The short "$60" painting prompt with the reworded title is the
+  main prompt; the long one is deprecated and kept as a backup · it halves a
+  painting's cost (about $60 a month at December volume) and letters about as
+  creatively (test round 017) · `prompts/README.md`,
+  `prompts/deprecated/painting_long_2026-11-01_NOTE.md`
 - 2026-11-02 · Replies are short and in whole plain sentences. Every reply
   still says, in one line, what was checked by running, by reading, and what
   was not checked · owner chose this when TOKEN-SAVER's short status format

@@ -134,6 +134,7 @@ both FineArtAmerica accounts were closed in 2026-08 (`docs/HISTORY.md`).
 | `ROADMAP.md` · `MEGA_AUDIT.md` · `OPEN_ISSUES.md` | What is outstanding · the 2026-09-06 audit · open defects |
 | `TITLE_RULES.md` | Before touching titles, the importer or the folder builder |
 | `PIPELINE.md` | Post-production: painting, step 2, uploading, the node |
+| `prompts/README.md` · `prompts/deprecated/painting_long_2026-11-01_NOTE.md` | The main painting prompt · why the long one was dropped |
 | `DEPLOY.md` · `SETUP_VPS.md` · `SETUP_WINDOWS_NODE.md` | Deploying; building a box from nothing |
 | `CLAUDE_CODE.md` | How the owner runs sessions on his machine |
 | `README.md` · `CHANGELOG.md` | For a newcomer · old released changes |

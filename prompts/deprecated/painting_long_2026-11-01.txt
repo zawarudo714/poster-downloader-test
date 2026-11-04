@@ -1,0 +1,444 @@
+{
+ "prompt": {
+  "type": "vivid_travel_poster_illustration",
+  "references": {
+   "photograph": "reference photograph — supplies ALL content: subject, geography, layout, terrain, materials, light, time of day",
+   "style_image": "'Reference Image.jpg' — supplies ONLY technique: shape language, mark-making, texture, edge quality. Do not use its colours. Show none of its content: no figure, face, features, horns or grey background."
+  },
+  "objective": "Create ONE finished vivid travel poster of the place in the reference photograph, painted in the technique of 'Reference Image.jpg', with the title {LOCATION} hand-lettered, huge, and woven into the scene.",
+  "output": {
+   "orientation": "portrait",
+   "aspect_ratio": "2:3",
+   "bleed": "full bleed, edge to edge",
+   "count": "one image only",
+   "exclude": [
+    "photographic panel",
+    "inset",
+    "side-by-side",
+    "border",
+    "margin"
+   ]
+  },
+  "title": {
+   "text": "{LOCATION}",
+   "rendering": "hand-drawn and hand-painted, never typed; a major visual form: huge, bold, highly graphic; expressive hand-painted lettering on every poster",
+   "placement": {
+    "zone": "the sky zone, filling it from near the top edge down into the tallest forms of the scene",
+    "rules": [
+     "leave no empty band of plain sky above or around the title",
+     "scene forms pass in front of parts of letters",
+     "letters slip behind forms and reappear"
+    ]
+   },
+   "size": {
+    "width": "nearly the full width, close to both edges",
+    "height": "name plus secondary line fill a third to a half of the poster's height",
+    "rules": [
+     "letters as tall as the space allows",
+     "lines packed tightly",
+     "no large empty sky around the title",
+     "the biggest graphic element in the image",
+     "the subject rises into or through the title",
+     "may extend beyond the subject on both sides, stack across lines, use unequal line lengths, or occupy several pockets"
+    ]
+   },
+   "lettering_character": {
+    "goal": "a distinctive, strong display alphabet invented for this place, built from what the photograph shows: architecture, geography, materials, climate, era, visual rhythm",
+    "devices": [
+     "unexpected proportions",
+     "large and small letters mixed",
+     "unusual counters",
+     "exaggerated crossbars",
+     "extended serifs",
+     "odd deliberate terminals",
+     "asymmetrical construction",
+     "interlocking letters",
+     "angular cuts mixed with rounded forms",
+     "structural details built into letters",
+     "eccentric silhouettes",
+     "surprising negative spaces",
+     "one or two hero letters that are larger or more decorated, but still complete letters"
+    ],
+    "when_in_doubt": "choose unusual over safe",
+    "hand": "drawn with a confident hand and visible momentum; every letter strong in silhouette"
+   },
+   "letter_finish": {
+    "default": "flat painted letters with no shadow side and no outline",
+    "optional_finishes": {
+     "shadow_side": "only if the photograph shows hard direct sunlight with sharp cast shadows: a short solid band along one side and the bottom of each letter, in a deeper tone of the letter's hue, pointing away from the light",
+     "contour": "only if the area behind the title is busy or close in value to the letters: a thin outline in a contrasting tone",
+     "inline": "only if the letters are very heavy: one thin light stroke inside the face"
+    },
+    "rules": [
+     "use at most ONE finish; never combine them",
+     "keep any finish hand-painted and graphic",
+     "no glossy, metallic or photoreal 3D",
+     "no perspective distortion",
+     "no soft blurred drop shadow"
+    ]
+   },
+   "scene_aware_geometry_system": {
+    "steps": [
+     "look at the subject's outline against the sky and decide which geometry dominates it",
+     "build every letter with that geometry's rules",
+     "if two geometries are strong, use the first for the main word and the second for the secondary line",
+     "push the chosen rules to their extreme"
+    ],
+    "geometries": {
+     "curved_and_swelling": "swelling full strokes that widen and narrow; near-circular bowls; stems that bulge toward the top; flared terminals tapering to soft points; letter tops echoing the subject's curves; counters shaped like the subject's openings",
+     "pointed_and_vertical": "tall narrow upright letters; stems as tall as possible; pointed or wedge-cut tops; sharp triangular apexes; very high crossbars; slim counters; tight rhythm of verticals",
+     "stepped_and_rectilinear": "square letters built from rectangles; square counters; stepped shoulders and terminals; crisp right angles; strong verticals; notches in letter tops where the subject's top line steps",
+     "dense_and_detailed": "high-contrast thick verticals and thin hairlines; forked or flared serifs; small decorative points on tops and ends; a flat decorative cut-out inside one or two letters echoing the subject's detail; all bold enough to print",
+     "irregular_and_rough": "uneven hand-hewn letters; varied stem widths; chipped faceted edges; slightly uneven baselines and sizes; wedge serifs; letters that look cut from the subject's material",
+     "long_and_low": "wide extended low letters; long horizontal strokes and crossbars; stretched across the full width; strong horizontal rhythm",
+     "sleek_and_sweeping": "clean geometric letters with dramatic sweeps; very thin and very thick strokes combined; sharp angled cuts; one letter echoing the subject's signature sweep or twist"
+    },
+    "for_every_title": [
+     "copy the subject's opening shapes into the counters",
+     "copy the subject's top ending onto the tops of at least two letters",
+     "keep every letter instantly readable and correctly spelled",
+     "the title must look impossible to use for any other place"
+    ],
+    "role": "use the geometry below only to set overall PROPORTIONS; the letter design itself comes from scene_born_lettering"
+   },
+   "secondary_line": "a contrasting character to the main word — different construction, weight, rhythm or flow (script, light, elegant, heavy or angular) — never a smaller copy",
+   "extremity": "push the scene-born construction hard: at least two, preferably three, strongly extreme traits of shape, scale, proportion or construction; extreme through shape, never through photoreal 3D",
+   "letter_construction": {
+    "rules": [
+     "design every letter individually; draw the word as one composition",
+     "vary stem thickness, counter size, corners, curve tension, serif size, terminal shape, width, height, crossbar height, bowl proportion",
+     "example: a broad B beside a compressed E; a near-circular or very wide O; an enormous sweeping S",
+     "related but never uniform"
+    ],
+    "counters": "designed shapes: slots, chambers, tall or wide openings, triangular, arched, circular or hand-cut",
+    "serifs": "none, or feet shaped like the way the subject meets the ground",
+    "terminals": "shaped like the way the subject's parts end against the sky",
+    "joins": "where two letters fit naturally, run a crossbar into the next, merge stems, tuck a bowl, share a counter edge, or let one shelter another; never forced; every letter recognisable"
+   },
+   "only_letters": "only letters in the title area, including the secondary line; no underlines, rules, loose swashes or extra marks outside the letters; patterns and cut details built INSIDE a letter's shape are allowed; lettering sits directly on the artwork",
+   "weaving": {
+    "importance": "the most ambitious and creative part of the poster; a title resting above the scene with only a spire poking into it, or simply set over the scene with a little edge-overlap, is the failure",
+    "intent": "invent, fresh for THIS image, a genuinely surprising way the letters and the scene share the same space, and push it further than feels safe; a viewer cannot tell whether the word or the scene was drawn first",
+    "depth": [
+     "the word and the scene occupy the SAME space in depth",
+     "drop the lettering INTO the scene: the lower half of the letters sinks behind the real skyline, ridge, trees or subject",
+     "real forms that already stand tall in the photograph pass in FRONT of the letters and cut across them",
+     "the subject itself stands clearly in front of the word"
+    ],
+    "occlusion": [
+     "cross, overlap or partly hide most letters — obvious, confident and deep, not a nick at the edge",
+     "real forms move through, across, behind and around the letters, not merely touching their edges",
+     "every hidden part continues behind the form and reappears on the other side"
+    ],
+    "devices": {
+     "layering": "some letters sit in front of one form and behind the next, giving the word a real depth order across several visual planes",
+     "slip_behind": "letters duck behind a real form and re-emerge",
+     "threading": "the word threads bodily through the structure of the scene, passing behind architecture, ridges or foliage",
+     "figure_ground": "a real form may pass BEHIND a counter or between two letters, while every letter stays fully drawn",
+     "alignment": "a letter stem may run parallel to a real vertical, or a crossbar sit level with a real ledge or horizon — the letter stays a letter",
+     "split_around_subject": "the name spreads across both sides of the focal subject so the subject rises through the middle of the word",
+     "staggered_depth": "letters sit at different depths and heights, the baseline broken and stepped to follow the scene"
+    },
+    "device_use": "combine at least three devices on every poster, chosen by what THIS scene's real forms make most striking",
+    "limit": "never hide more than about half of any letter; the name still reads clearly at a glance as one title",
+    "flatness": "the interaction stays flat graphic overlap: letters are never warped, melted, inflated, reflected or bent into perspective; every letter stays complete and correctly spelled underneath",
+    "no_invented_forms": [
+     "CRITICAL: every form in the poster comes from the reference photograph",
+     "add no structure near the lettering that the photograph does not contain",
+     "do not enlarge or move a real form to reach the letters",
+     "if nothing reaches the title, lower it toward the scene's real forms; only as a last resort let it sit clean — far better than an invented, wrongly scaled object"
+    ],
+    "edges": "the crossing object keeps its own clean edge; soft haze and gradient never bleed into the letters",
+    "layout": "compose the word freely across the whole scene, not as one tidy block parked in clear space: settle into negative-space pockets, spread across both sides of the subject, break the baseline, stagger the letters, split the word across pockets — whatever binds it most tightly into this scene",
+    "check": "if the title could be lifted off the scene without cutting through any real form, redo the weaving"
+   },
+   "texture_system": {
+    "steps": [
+     "look at the subject's dominant surface in the photograph and match it below",
+     "paint the letters with the matching texture, bold and obvious"
+    ],
+    "surfaces": {
+     "smooth_and_polished": "long sweeping dry-brush streaks running the full length of each stroke, with sharp lighter streaks and clean skips",
+     "rough_and_mineral": "heavy scumbled, stippled paint with chipped patches, pitted spots and grainy dragged edges",
+     "built_from_repeated_units": "short blocky stacked brush dabs in two close tones, laid in rows across each letter",
+     "soft_and_living": "loose layered dappled strokes in two or three close tones, overlapping in soft layers",
+     "reflective_and_luminous": "broken horizontal strokes with bright flecks and darker bands",
+     "aged_and_weathered": "worn, patchy, distressed ink with faded areas, scratches and cracked paint"
+    },
+    "for_every_title": [
+     "texture in at least two tones of the letter's colour",
+     "a darker underlayer showing through a lighter top layer",
+     "visible at a glance on every poster, including bright ones",
+     "any finish carries the same texture",
+     "no even speckle, noise or digital smoothness",
+     "limit: letters stay solid and readable; reduce texture if they look eroded or dirty"
+    ]
+   },
+   "edges": [
+    "confident silhouette with a slightly rough dry-brush edge",
+    "long sides of strokes firm",
+    "no blur, glow or fuzzy halo",
+    "background haze never bleeds into a letter",
+    "only solid scene objects with clean edges may cross letters",
+    "no stray strokes, splatters or marks outside the letters"
+   ],
+   "colour_system": {
+    "steps": [
+     "list every distinct coloured element visible in the photograph",
+     "remove the sky colour, the colour of open water, and the warm sunlit tone of lit walls, stone, sand or glass",
+     "from what remains, pick the element whose colour most identifies this place",
+     "use that element's exact hue for the title, made into a rich printing ink",
+     "if nothing remains, use the subject's shadow-side colour, made rich and deep"
+    ],
+    "rules": [
+     "every hue family is allowed: deep, cool, dark, pastel or unusual",
+     "never default to the sunlit warm tone",
+     "never default to a pale near-neutral",
+     "letters clearly lighter OR clearly darker than what is directly behind them",
+     "if they do not separate: deepen or lighten the same hue first, then add the permitted contour, only then pick the next element",
+     "never use a hue not in the photograph",
+     "no glow, gradient, emboss or bevel",
+     "nothing behind the title except an allowed finish: no block, panel, halo or backing shape"
+    ],
+    "second_ink": "optional; taken from a different element on the list; applied as a flat second print pass — part of each letter, part of the word, or shapes cut from the letters; overlaps make a deeper third tone; may colour the contour; one device only, flat and inside the letters; drop it if it confuses the letters"
+   },
+   "legibility": [
+    "instantly readable",
+    "spelled exactly, every letter present",
+    "every letter correct and complete, no dropped strokes",
+    "letters stay complete underneath crossing forms",
+    "no mirrored or upside-down letters",
+    "no letter is replaced, omitted or substituted by a building or scene object"
+   ],
+   "lettering_check": "redraw if it looks typed or like any familiar lettering style. Check: grown from the photograph's own lines, endings, openings, rhythm and surface; tallest letter echoes the subject; place guessable from the letters alone; texture matched; readable; expressive and clearly different in character from a plain poster alphabet; mixed characters across words allowed",
+   "scene_born_lettering": {
+    "principle": "do not pick a lettering style. GROW the letters out of the scene itself, so the alphabet is made from the same shapes, lines, rhythms and surfaces as the place in the photograph",
+    "method": [
+     "1. TRACE: find the strongest lines in the photograph — the subject's outline, its repeated openings, the edges of its roofs or ridges, the curve of its shore or road, the pattern of its surfaces",
+     "2. BORROW STROKES: build every stroke of every letter from those lines — a stem is drawn like the subject's main vertical, a bowl like its main curve, a crossbar like its main horizontal, a diagonal like its main slope",
+     "3. BORROW ENDINGS: every stroke ends the way the subject's parts end against the sky",
+     "4. BORROW OPENINGS: every counter is shaped like one of the subject's own openings or gaps",
+     "5. BORROW RHYTHM: the spacing and repetition of the letters copy the rhythm of the subject's repeated parts",
+     "6. BORROW WEIGHT AND STANCE: letters are as heavy or light, as tall or broad, as leaning or upright as the subject itself",
+     "7. BORROW SURFACE: the letter faces carry flat patterns and cut details copied from the subject's own surface, kept bold enough to print",
+     "8. ECHO, DON'T REPLACE: the letters may echo the character of the subject's forms in their strokes and endings, but every letter is still a complete letter drawn in ink"
+    ],
+    "result": "the letters carry the character of the place so strongly that a viewer could guess the place from the lettering alone — while every letter remains a complete, drawn letter",
+    "freshness": "invent the construction anew for every photograph; never fall back on a remembered alphabet or a standard lettering style; the only source of the letter design is the photograph",
+    "scope": "these borrowed shapes live only inside the letters; the scene itself shows nothing that is not in the photograph",
+    "legibility": "however far the borrowing goes, every letter stays instantly readable and correctly spelled"
+   },
+   "expressive_range": {
+    "principle": "the lettering must be SUPER expressive and vary dramatically from poster to poster; the scene-born construction can take on any character the place suggests",
+    "character_range": [
+     "flowing connected script with sweeping joined strokes",
+     "brush-calligraphy energy with tapering, pressure-driven strokes as if painted with an ink brush",
+     "ornate, richly decorated letters with swelling curves, pointed arches and carved detail",
+     "sharp, angular, cut-and-chiselled letters",
+     "tall, thin, soaring letters with dramatic height",
+     "wide, heavy, monumental letters",
+     "bouncy, playful, irregular letters with lively baselines",
+     "elegant high-contrast letters with hairline thins",
+     "rough, hand-hewn, raw letters",
+     "fluid, wave-like, organic letters",
+     "stacked, blocky, interlocking letters",
+     "Latin letters that carry the brush rhythm, stroke logic and ornament of the local script or writing culture visible in the photograph — for example flowing brush-stroke forms for East Asian places, curling ornamented forms for South Asian places, sweeping calligraphic forms for Arabic-speaking places — always as readable Latin letters"
+    ],
+    "rules": [
+     "these are directions of character, not a menu: pick, blend or go beyond them, whatever fits THIS photograph most strikingly",
+     "push the chosen character to its most extreme, expressive form",
+     "the character still grows from the scene's own lines and shapes (scene_born_lettering)"
+    ],
+    "mixing_within_the_title": [
+     "the title does not have to use one character throughout",
+     "when the name has two or more words, each word may take a different character — for example one word in flowing script and the other in heavy angular letters",
+     "the secondary line may take a contrasting character too — often a flowing script or a light elegant form works well against a heavy main word — but this is a possibility, not a rule",
+     "keep the mixed parts related in colour and texture so the title still reads as one designed piece",
+     "one word may also contain a single hero letter in a more extreme character than the rest"
+    ],
+    "legibility": "every character, however expressive, stays instantly readable and correctly spelled in Latin letters"
+   },
+   "letters_are_never_replaced": [
+    "CRITICAL: every letter of {LOCATION} is drawn in full as a letter, in the title's ink",
+    "never omit a letter and let a building, tower, tree, mast or any scene object stand in for it",
+    "never let a scene object form a stroke, stem, crossbar, bowl or dot of a letter",
+    "a scene object may pass in front of part of a letter, but the letter continues and is clearly drawn behind it",
+    "count the letters: the title shows every letter of {LOCATION}, each one drawn as a letter"
+   ]
+  },
+  "subject_identity": [
+   "CRITICAL: the poster shows ONLY what is in the reference photograph — the same subject, the same buildings, the same arrangement, terrain and materials",
+   "do not add any building, tower, landmark, bridge, monument or structure that is not in the photograph, even if the place is famous for it",
+   "do not paint famous landmarks of {LOCATION} that the photograph does not show; paint only this photograph",
+   "do not move, enlarge, stretch, duplicate or raise any building to fill the sky or reach the letters",
+   "keep the number, position and relative size of the main buildings as in the photograph",
+   "keep the subject's proportions, roofline or summit, and most recognisable feature",
+   "modest buildings stay modest; blunt landforms are not sharpened into peaks",
+   "if the photograph has an arrow, circle, pin or highlight, paint the subject it marks and never draw the mark"
+  ],
+  "painting_style": {
+   "technique_source": "copy the technique of 'Reference Image.jpg'",
+   "shapes": "large, simple, generous shapes with softly rounded sides; no grid, tile pattern, mosaic or even mesh; most shapes turn from light to shadow across their span; fully flat fills only for the boldest silhouettes; boundaries between large masses clear but soft",
+   "softness": "paint the scenery softly: smooth blended transitions inside shapes, gently rounded corners, edges that soften slightly where masses meet",
+   "edges": "soft and slightly irregular, like a loaded brush; no clean vector edges; major silhouettes stay readable",
+   "depth": [
+    "the poster looks deep, not flat",
+    "sky deepens with a luminous gradient",
+    "water bright near the light, dark away from it",
+    "every large form turns from a bright lit side to a deep shadow side",
+    "distant masses slightly lighter but just as saturated; near masses rich and saturated",
+    "smooth gradients inside shapes; masses clearly separated",
+    "no airless flat look, no photorealism"
+   ],
+   "texture": "a soft, even painterly grain inside the shapes, lighter than the title's texture; nothing perfectly smooth; the lettering has its own texture system",
+   "darks": "the darkest forms are solid silhouettes in a deep, fully saturated colour, with almost no detail",
+   "avoid": [
+    "photorealism",
+    "3D render",
+    "clean vector art",
+    "low-poly",
+    "mosaic",
+    "pixel art",
+    "watercolour bleed",
+    "outlines or drop shadows on scene forms (the title has its own rules)"
+   ]
+  },
+  "colour_palette": {
+   "count": "seven to nine colours only",
+   "character": "MAXIMUM saturation: pure, brilliant, fully saturated poster inks that pop off the wall",
+   "rules": [
+    "build the palette around the photograph's MOST DISTINCTIVE colour families; every poster has its own colour identity",
+    "push every hue from the photograph to its most saturated, most brilliant version — far beyond real life",
+    "every area of the poster is strongly coloured: sky, water, land, foliage, buildings and shadows alike",
+    "no dull, grey, muddy, dusty, faded, pastel or desaturated colour anywhere",
+    "shadows are rich, saturated coloured planes — a deeper, more intense hue, never greyed or darkened toward black",
+    "lit planes glow with clean, brilliant colour",
+    "set strongly contrasting hues directly side by side so each makes the other vibrate",
+    "the subject carries the most brilliant colour of all"
+   ]
+  },
+  "light": {
+   "rule": "identify the time of day in the photograph and make the poster read clearly as that time; take every hue from the photograph at its own time of day; the sky takes the photograph's own sky hue; choose one light and commit",
+   "modes": {
+    "high_sun": "strongly saturated sky, very light lit planes, short deep shadows",
+    "early_light": "brilliant clear sky, glowing lit planes, long saturated shadows",
+    "low_afternoon": "mid-toned sky, strongly lit planes, long deep shadows",
+    "evening": "deep sky, glowing lit planes, shadows near the darkest ink",
+    "overcast": "colour still fully saturated; contrast from the brilliant local colours of objects",
+    "hard_arid_sun": "bright hard sky, bleached ground, short dark shadows"
+   }
+  },
+  "values": [
+   "full range: include the darkest ink and the lightest tone",
+   "push each middle-value mass into light or dark so neighbours separate",
+   "smooth light-to-shadow turns inside a mass allowed",
+   "a few clearly distinct value zones",
+   "about a third of the canvas clearly below mid-value, as saturated coloured shadow, not the sky",
+   "at least 25% of the canvas in the most brilliant, fully saturated colour, concentrated on the subject's lit planes and key feature, the strongest highlight, and at most one small element elsewhere",
+   "accents truly bright, in whatever hue the scene suggests",
+   "temperature of lit planes and shadows taken from the photograph; no default warm lights and cool shadows (illustration only, not the title)",
+   "darkest tones a deep, fully saturated coloured ink, never neutral black or grey",
+   "subject, landscape and sky separated by at least two full values each",
+   "the subject holds both the darkest shadow and the brightest light",
+   "push contrast strongly: bright glowing lit planes against deep rich shadows",
+   "check: from across the room the poster reads as a few soft, simple, vividly saturated shapes with strong contrast; if dull, push saturation and contrast harder",
+   "saturation is the priority: every colour stays at full intensity in light, mid and dark values alike"
+  ],
+  "composition": {
+   "horizon": "about 58% of canvas height; sky fills a little under 60%",
+   "sky": "one clean, fully saturated colour field in the photograph's own sky hue, with grain and a soft deepening gradient; no clouds, sun disc, rays, birds or marks, even if the photograph has clouds",
+   "below_horizon": "the photograph's real content as large soft shapes, all the way to the bottom edge; no invented terrain, no empty strip, no solid bar along the bottom",
+   "subject_placement": "keep the subject where the photograph places it; do not move, enlarge or raise it to fit a layout",
+   "viewpoint": "low and level",
+   "skyline": "simple and true to the photograph; buildings keep their real heights — never stretched or raised to reach the title",
+   "detail": [
+    "the subject shows only its key features, painted simply and clearly",
+    "simplify everything else very hard: many small forms become two or three soft masses; a soft mass becomes one shape; a distant edge becomes one soft silhouette",
+    "remove fine detail everywhere: no small windows, tiles, textures or clutter; describe surfaces with broad tone only",
+    "delete anything smaller than a readable patch: wires, aerials, gutters, roof tiles, railings, signage"
+   ]
+  },
+  "exclude_from_scene": [
+   "people, crowds, human silhouettes, faces",
+   "cars, buses, trucks, trains, aircraft — roads empty",
+   "statues, monuments and reliefs are rendered as stone or metal architecture",
+   "animals from the photograph stay as small clean silhouettes",
+   "moored boats may stay, static",
+   "scale shown with the photograph's own small repeated details, as a few patches"
+  ],
+  "negative_prompt": [
+   "photorealism",
+   "3D render",
+   "CGI",
+   "clean vector art",
+   "low-poly",
+   "pixel art",
+   "watercolour bleed",
+   "outlines on scene forms",
+   "drop shadows on scene forms",
+   "clouds",
+   "sun disc",
+   "birds",
+   "people",
+   "vehicles",
+   "border",
+   "margin",
+   "inset photo",
+   "typed or typeset lettering",
+   "misspelled title",
+   "extra text",
+   "underlines or swashes",
+   "glossy, metallic or chrome letters",
+   "blurred drop shadow behind letters",
+   "panel or block behind the title",
+   "glow around letters",
+   "empty sky band above the title",
+   "invented structures",
+   "content from 'Reference Image.jpg'",
+   "title floating above the scene",
+   "title pasted on top of the scene with no overlap",
+   "desaturated colour",
+   "muted or dusty palette",
+   "grey shadows",
+   "faded vintage look",
+   "pastel colours",
+   "buildings or landmarks not in the photograph",
+   "famous landmarks added from memory",
+   "stretched or enlarged buildings",
+   "a building standing in for a letter",
+   "missing letters replaced by towers",
+   "scene objects forming letter strokes"
+  ],
+  "final_check": [
+   "one full-bleed portrait travel poster, artwork only",
+   "content only from the photograph; technique only from 'Reference Image.jpg'; no person, face or figure",
+   "soft simplified scenery with little fine detail, smooth blended gradients, softened edges, strong saturation and contrast",
+   "clean cloudless sky with a gradient; real content to the bottom edge",
+   "seven to nine fully saturated, brilliant inks; every area strongly coloured; saturated shadows; about a third below mid-value; at least 25% most brilliant colour; nothing dull, grey or faded",
+   "{LOCATION} spelled correctly, every letter present, instantly readable",
+   "lettering grown from the photograph's own lines, endings, openings, rhythm and surface — no familiar lettering style; secondary line in a contrasting construction",
+   "title HUGE: full width, filling the sky zone from near the top edge, no empty sky band",
+   "title woven ambitiously into the scene: subject in front of the word, most letters crossed or partly hidden by real forms, at least three weaving devices, nothing invented",
+   "title colour from the colour system: a real local colour, not the sky, water or sunlit tone; clearly separated in value",
+   "texture matched to the subject's surface, layered in two or more tones",
+   "mostly flat letters; at most one finish, only when its condition is met; no photoreal 3D, no blurred shadow, no panel behind",
+   "confident silhouettes with slight dry-brush edges; nothing bleeding into them",
+   "no smearing, blur, malformed letters or extra text",
+   "if anything fails, redraw the title and keep its distinctive character",
+   "lettering super expressive; words and the secondary line may each take a different character",
+   "only the buildings in the photograph, at their real positions and heights; nothing added from memory",
+   "every letter of {LOCATION} fully drawn; no building or object replaces any letter or stroke"
+  ],
+  "generation_priority": [
+   "1. Match the photograph's subject, arrangement and viewpoint",
+   "2. Paint ONLY the buildings in the photograph; add nothing; every title letter fully drawn, never replaced by a scene object",
+   "3. Title {LOCATION} huge, correctly spelled, filling the sky from near the top edge",
+   "4. Ambitious weaving: subject and tallest real forms in front of the letters, letters sinking behind the skyline, at least three weaving devices",
+   "5. Letters grown out of the scene's own shapes, rhythm and surface (scene_born_lettering)",
+   "6. Title colour from a distinctive local colour, clearly separated",
+   "7. Soft, simplified, vividly saturated scenery with strong contrast",
+   "8. Technique of 'Reference Image.jpg' without any of its content",
+   "9. Clean cloudless sky, no people or vehicles, full bleed"
+  ]
+ }
+}

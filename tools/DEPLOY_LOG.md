@@ -15,6 +15,7 @@ cost far more to read, answer a different question, and on a mounted working
 copy `git status` cannot refresh its index — it reports stale answers with
 no warning.
 
+- **2026-11-04 07:30** · `[178.105.34.144]` · `b7824680` · v292 · the Usage tab: what the OpenAI key costs, from its own token counts (tiles, spend and trend charts, filters); older batches filled in by a sweep
 - **2026-11-01 14:07** · `[178.105.34.144]` · `dc25adc6` · v291 · A review batch keeps its designs until it is saved: repaints wait for the next batch (CONTINUE THIS BATCH)
 - **2026-11-01 12:20** · `[178.105.34.144]` · `3e8e7c6e` · v290 · USE MY OWN PICTURE on a title still live (row moves, new picture goes up on RE-UPLOAD); NEXT NOT MARKED (*) on Approve Artwork
 - **2026-11-01 10:10** · `[178.105.34.144]` · `98d788d3` · v289 · RE-UPLOAD for the deleted 417, USE MY OWN PICTURE on Approve Artwork, swap removed (node 1.34.0 to copy)
@@ -44,4 +45,3 @@ no warning.
 - **2026-10-09 08:45** · `[178.105.34.144]` · `a2bbc632` · v253 · deploy v253
 - **2026-10-09 08:33** · `[178.105.34.144]` · `31f3bc98` · v251 · deploy v251
 - **2026-10-09 08:14** · `[178.105.34.144]` · `28b196e0` · v250 · deploy v250
-- **2026-09-29 12:46** · `[178.105.34.144]` · `45626c87` · v249 · deploy v249

@@ -389,6 +389,7 @@ def file_painting(db: Session, poster, title, project, gen) -> bool:
 
     width = int(get_setting(db, "upscale_width_px", project=project) or 4000)
     sharpen = int(get_setting(db, "upscale_sharpen", project=project) or 0)
+    grain = int(get_setting(db, "upscale_grain", project=project) or 0)
     quality = int(get_setting(db, "upscale_jpeg_quality", project=project) or 92)
 
     # ════════════════════════════════════════════════════════════════════
@@ -435,7 +436,7 @@ def file_painting(db: Session, poster, title, project, gen) -> bool:
         out_h = max(1, round(src_h * (width / src_w)))
         preview_source = flat
     else:
-        out_w, out_h = upscale_to_width(flat, width=width, sharpen=sharpen,
+        out_w, out_h = upscale_to_width(flat, width=width, sharpen=sharpen, grain=grain,
                                         quality=quality, dest=tmp)
         preview_source = tmp
 

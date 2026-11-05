@@ -18,7 +18,9 @@ The owner is a solo operator, not a developer. Full rules: `docs/PLAIN_WORDS.md`
 - Short: answer first; no long recaps (decided 2026-11-02, `docs/DECISIONS.md`).
 - Every reply after work says in one line what was checked by RUNNING,
   what by READING, and what was NOT checked. Name the test.
-- After every change say two things: "deploy this", and whether the node
+- After every finished change, deploy it yourself with
+  `python tools/deploy_cli.py "vNNN: …"` and say whether it went live; never
+  tell him to deploy (DECIDED 2026-11-05). Also say whether the node
   (`worker_service/`) needs copying — if it changed, bump `AGENT_VERSION`.
 - If his instruction would break something, say so and stop before building
   (`docs/rules/rule_1b.md`).

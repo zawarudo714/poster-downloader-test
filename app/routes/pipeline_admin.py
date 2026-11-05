@@ -1992,9 +1992,11 @@ def api_test_gpt_process(
 
     width = int(P.get_setting(db, "upscale_width_px", project=project) or 4000)
     sharpen = int(P.get_setting(db, "upscale_sharpen", project=project) or 0)
+    grain = int(P.get_setting(db, "upscale_grain", project=project) or 0)
     quality = int(P.get_setting(db, "upscale_jpeg_quality", project=project) or 92)
-    out_w, out_h = upscale_to_width(tmp, width=width, sharpen=sharpen, quality=quality)
-    emit(f"upscaled to {out_w}x{out_h} (sharpen {sharpen}, quality {quality})")
+    out_w, out_h = upscale_to_width(tmp, width=width, sharpen=sharpen, grain=grain,
+                                    quality=quality)
+    emit(f"upscaled to {out_w}x{out_h} (sharpen {sharpen}, grain {grain}, quality {quality})")
 
     preview_tmp = tmp.with_name(f"test_{poster.id}_preview.jpg")
     make_preview(tmp, preview_tmp)
@@ -4265,9 +4267,10 @@ def _build_print_file(db: Session, processed, color: str, project,
         flatten_onto(raw, flat, color)
         w = int(P.get_setting(db, "upscale_width_px", project=project) or 4000)
         sharpen = int(P.get_setting(db, "upscale_sharpen", project=project) or 0)
+        grain = int(P.get_setting(db, "upscale_grain", project=project) or 0)
         quality = int(P.get_setting(db, "upscale_jpeg_quality", project=project) or 92)
         overlay = (lambda im: SIG.paint(im, mark, place)) if place else None
-        out_w, out_h = upscale_to_width(flat, width=w, sharpen=sharpen,
+        out_w, out_h = upscale_to_width(flat, width=w, sharpen=sharpen, grain=grain,
                                         quality=quality, dest=out,
                                         overlay=overlay)
         make_preview(out, prev)

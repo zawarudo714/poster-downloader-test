@@ -5,6 +5,15 @@ A replaced decision stays here, marked SUPERSEDED, never deleted.
 Older decisions are tagged `DECIDED <date>` where they apply (in the docs and
 in `AUDIT.md`); search for `DECIDED` to find them.
 
+- 2026-11-05 · The AI session does every deploy, with `tools/deploy_cli.py`
+  (this computer's SSH key, the same proof checks as the deploy window); the
+  owner is never told to deploy. The node is still copied by the owner ·
+  owner's instruction · `CLAUDE.md`
+- 2026-11-05 · Every print file gets sharpening 80 and a grey grain of 4
+  after the Lanczos enlargement, instead of AI upscaling · Junique refused 4
+  of the first 10 as "upscaled"; this passed for all 4, costs nothing and
+  needs no graphics card (Real-ESRGAN also passed but needs Vulkan or ~30 s
+  of processor per poster) (v294) · `docs/FAILURES.md`
 - 2026-11-05 · The daily upload limit counts the last 24 hours, not a
   calendar day; the node stops a run on a log-out or after 3 failures in a
   row · owner's ask after 101 extra uploads just after midnight Nairobi got

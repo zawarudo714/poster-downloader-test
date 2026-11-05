@@ -474,7 +474,8 @@ def has_transparency(path: Path) -> bool:
 
 
 def upscale_to_width(path: Path, *, width: int, sharpen: int = 0,
-                     quality: int = 92, dest: "Path | None" = None,
+                     grain: int = 0, quality: int = 92,
+                     dest: "Path | None" = None,
                      overlay=None) -> tuple[int, int]:
     """
     Resize an image to `width`, height following in proportion, in place.
@@ -486,6 +487,11 @@ def upscale_to_width(path: Path, *, width: int, sharpen: int = 0,
     `sharpen` is 0-100 and applied AFTER the resize. It defaults to off
     because sharpening artefacts are permanent and the review gate is the
     only place they would ever be caught.
+
+    `grain` is the strength (sigma, in 0-255 levels) of a fine grey film
+    grain added after sharpening. Junique refuses plain Lanczos
+    enlargements as "upscaled"; sharpen 80 + grain 4 passed for all four
+    pictures it had refused (MEASURED 2026-11-05, docs/FAILURES.md).
 
     `overlay` is a callable given the finished full-size image, returning the
     image to save. It exists so the SIGNATURE can be painted at print
@@ -499,7 +505,7 @@ def upscale_to_width(path: Path, *, width: int, sharpen: int = 0,
     but the overlay and the save still happen, because "already big enough"
     must not silently mean "no signature".
     """
-    from PIL import Image, ImageFilter
+    from PIL import Image, ImageChops, ImageFilter
 
     img = Image.open(path)
     img.load()
@@ -521,6 +527,14 @@ def upscale_to_width(path: Path, *, width: int, sharpen: int = 0,
         # dashboard's 0-100 so the number means something to the operator.
         img = img.filter(ImageFilter.UnsharpMask(
             radius=2, percent=int(sharpen), threshold=3))
+
+    if grain and grain > 0:
+        # One grey noise layer for all three channels, so the grain is in
+        # brightness only and adds no coloured speckle. effect_noise is
+        # centred on 128, hence the -128 offset. Before the overlay, so the
+        # signature stays clean.
+        noise = Image.effect_noise(img.size, int(grain)).convert("RGB")
+        img = ImageChops.add(img, noise, scale=1.0, offset=-128)
 
     # ── QUALITY, TWO WAYS (2026-09-06) ───────────────────────────────────
     # subsampling=0 keeps full colour resolution (4:4:4). The default 4:2:0

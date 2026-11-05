@@ -92,6 +92,8 @@ Then:
     says it the node silently keeps running old code. If `worker_service/`
     changed at all, bump `AGENT_VERSION` and say so in the same breath as
     "deploy this".
+  * **SINCE 2026-11-05 THE SESSION DEPLOYS** (`tools/deploy_cli.py`); "deploy
+    this" below now means "deploy it yourself". The node is still his to copy.
   * **When he deploys, SAY WHETHER IT WORKED** — "v124 is live" or "v124
     failed, here is what it said" — then move the entry out of the waiting
     block and into the log. Never leave it ambiguous.

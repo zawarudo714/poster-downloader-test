@@ -360,6 +360,67 @@ def split_commands(text: str) -> list[str]:
 
 # ── The window ──────────────────────────────────────────────────────────────
 
+def record_deploy(host: str, sha: str, version: str, message: str, emit) -> None:
+    """Append one confirmed deploy to DEPLOY_LOG.md and empty PENDING_DEPLOY.md.
+    Shared by the window and tools/deploy_cli.py, so the two can never write
+    the log differently. Why each part is the way it is: DeployApp._record_deploy."""
+    from datetime import datetime
+
+    try:
+        existing = DEPLOY_LOG.read_text(encoding="utf-8")
+        entries = [l for l in existing.splitlines() if l.startswith("- ")]
+    except Exception:
+        entries = []
+
+    # A VERSION NUMBER THAT MEANS TWO DIFFERENT THINGS IS WORSE THAN NONE.
+    # On 2026-08-27 two different commits both shipped as "v124" because
+    # nothing bumps APP_VERSION between deploys and nothing noticed. The
+    # version now goes in the line as its own field so this is checkable
+    # rather than buried in whatever the commit message happened to say.
+    # Only compare against deploys to THIS server. A version being live
+    # on the test box says nothing about production, and warning on it
+    # would train the eye to ignore the warning that matters.
+    same_host = [e for e in entries if f"[{host}]" in e]
+    if version and same_host:
+        previous = same_host[0]
+        if f"· v{version} ·" in previous and f"`{sha[:8]}`" not in previous:
+            emit(
+                f"WARNING: v{version} is already in the log against a "
+                f"different commit. Two deploys now share one version "
+                f"number — bump APP_VERSION so they can be told apart.",
+                "err")
+
+    line = (f"- **{datetime.now():%Y-%m-%d %H:%M}** · `[{host}]` · "
+            f"`{sha[:8]}` · v{version or '?'} · "
+            f"{message or '(no message)'}")
+
+    # Same commit deployed twice TO THE SAME SERVER (a rebuild, say)
+    # replaces its own entry rather than adding a duplicate that says
+    # nothing new. The host is in the test because the same commit on a
+    # different server is a different, and interesting, fact.
+    entries = [e for e in entries
+               if not (f"`{sha[:8]}`" in e and f"[{host}]" in e)]
+    entries.insert(0, line)
+
+    try:
+        DEPLOY_LOG.write_text(
+            DEPLOY_LOG_HEADER + "\n".join(entries[:DEPLOY_LOG_KEEP]) + "\n",
+            encoding="utf-8")
+        emit(f"Logged to {DEPLOY_LOG.name}.", "dim")
+    except Exception as e:
+        emit(f"Could not write the deploy log: {e}", "err")
+
+    # The work is now on the server, so nothing is pending. Emptied rather
+    # than deleted: a missing file reads as "someone removed the
+    # mechanism", an empty one reads as "nothing is waiting", and only one
+    # of those is true.
+    try:
+        PENDING_FILE.write_text(PENDING_EMPTY, encoding="utf-8")
+        emit(f"Cleared {PENDING_FILE.name}.", "dim")
+    except Exception as e:
+        emit(f"Could not clear the pending file: {e}", "err")
+
+
 class DeployApp:
     def __init__(self, root: tk.Tk):
         self.root = root
@@ -588,67 +649,13 @@ class DeployApp:
         only one of them happened. The host is therefore part of the key,
         not just part of the text.
         """
-        from datetime import datetime
-
         version = local_app_version(Path(self.repo_var.get().strip()))
         try:
             _, host, _ = parse_ssh_target(self.ssh_var.get())
         except Exception:
             host = "?"
 
-        try:
-            existing = DEPLOY_LOG.read_text(encoding="utf-8")
-            entries = [l for l in existing.splitlines() if l.startswith("- ")]
-        except Exception:
-            entries = []
-
-        # A VERSION NUMBER THAT MEANS TWO DIFFERENT THINGS IS WORSE THAN NONE.
-        # On 2026-08-27 two different commits both shipped as "v124" because
-        # nothing bumps APP_VERSION between deploys and nothing noticed. The
-        # version now goes in the line as its own field so this is checkable
-        # rather than buried in whatever the commit message happened to say.
-        # Only compare against deploys to THIS server. A version being live
-        # on the test box says nothing about production, and warning on it
-        # would train the eye to ignore the warning that matters.
-        same_host = [e for e in entries if f"[{host}]" in e]
-        if version and same_host:
-            previous = same_host[0]
-            if f"· v{version} ·" in previous and f"`{sha[:8]}`" not in previous:
-                self._emit(
-                    f"WARNING: v{version} is already in the log against a "
-                    f"different commit. Two deploys now share one version "
-                    f"number — bump APP_VERSION so they can be told apart.",
-                    "err")
-
-        line = (f"- **{datetime.now():%Y-%m-%d %H:%M}** · `[{host}]` · "
-                f"`{sha[:8]}` · v{version or '?'} · "
-                f"{message or '(no message)'}")
-
-        # Same commit deployed twice TO THE SAME SERVER (a rebuild, say)
-        # replaces its own entry rather than adding a duplicate that says
-        # nothing new. The host is in the test because the same commit on a
-        # different server is a different, and interesting, fact.
-        entries = [e for e in entries
-                   if not (f"`{sha[:8]}`" in e and f"[{host}]" in e)]
-        entries.insert(0, line)
-
-        try:
-            DEPLOY_LOG.write_text(
-                DEPLOY_LOG_HEADER + "\n".join(entries[:DEPLOY_LOG_KEEP]) + "\n",
-                encoding="utf-8")
-            self._emit(f"Logged to {DEPLOY_LOG.name}.", "dim")
-        except Exception as e:
-            self._emit(f"Could not write the deploy log: {e}", "err")
-
-        # The work is now on the server, so nothing is pending. Emptied rather
-        # than deleted: a missing file reads as "someone removed the
-        # mechanism", an empty one reads as "nothing is waiting", and only one
-        # of those is true.
-        try:
-            PENDING_FILE.write_text(PENDING_EMPTY, encoding="utf-8")
-            self._emit(f"Cleared {PENDING_FILE.name}.", "dim")
-        except Exception as e:
-            self._emit(f"Could not clear the pending file: {e}", "err")
+        record_deploy(host, sha, version, message, self._emit)
 
     def _consume_note(self) -> None:
         """

@@ -782,10 +782,12 @@ DEFAULTS: dict[str, Any] = {
     #
     # Height scales in proportion: 1000x2000 at width 4000 becomes 4000x8000.
     "upscale_width_px":   4000,
-    # Applied AFTER the upscale. 0 = off, which is the default deliberately:
-    # sharpening artefacts are permanent and the review gate is the only
-    # place they would be caught. Raise it once you have seen a real print.
-    "upscale_sharpen":    0,
+    # Applied AFTER the upscale, sharpen first, then grain. Both were 0 until
+    # 2026-11-05, when Junique refused plain enlargements as "upscaled" and
+    # sharpen 80 + grain 4 passed for every one it had refused
+    # (DECIDED 2026-11-05 by the owner, docs/FAILURES.md).
+    "upscale_sharpen":    80,
+    "upscale_grain":      4,
     "upscale_jpeg_quality": 95,
 
     # The monthly spend cap and its warn/pause action lived here until v172.

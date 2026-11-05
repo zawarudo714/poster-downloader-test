@@ -182,6 +182,7 @@
     upscale: [
       ['upscale_width_px',  'number', 'Output width (px)', 'The processed image is resized to this width; height scales in proportion, so 1000x2000 becomes 4000x8000. Lanczos resampling.'],
       ['upscale_sharpen',   'number', 'Sharpening (0-100)','Applied after the upscale. 0 is off. Raise it slowly and judge on a real print — sharpening artefacts are baked in and the review gate is your only chance to catch them.'],
+      ['upscale_grain',     'number', 'Grain (0-20)',      'Fine grey film grain added after sharpening. 0 is off. Sharpening 80 with grain 4 is what Junique accepts; a plain enlargement is refused as "upscaled".'],
       ['upscale_jpeg_quality','number','JPEG quality (1-100)','Quality of the saved print file. 92 is visually lossless for photographic work; higher mostly buys file size.'],
     ],
     // Credentials live in their OWN panel. They were originally inside the

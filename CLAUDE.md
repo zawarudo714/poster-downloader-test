@@ -139,3 +139,4 @@ both FineArtAmerica accounts were closed in 2026-08 (`docs/HISTORY.md`).
 | `CLAUDE_CODE.md` | How the owner runs sessions on his machine |
 | `README.md` · `CHANGELOG.md` | For a newcomer · old released changes |
 | `extensions/poster_admin_extension/README_INSTALL.md` | The admin's Chrome add-on (master copy here) |
+| `extensions/upload_recorder/README.md` | Recorder of the owner's clicks on a new marketplace (Junique), for studying |

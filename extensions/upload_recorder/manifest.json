@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Upload Recorder",
+  "version": "1.0",
+  "description": "Records what you click, type and upload on ONE website, so the steps can be studied later. Off until you press Start.",
+
+  "permissions": ["storage", "unlimitedStorage", "webRequest", "webNavigation"],
+  "host_permissions": ["<all_urls>"],
+
+  "background": { "service_worker": "background.js" },
+
+  "action": { "default_popup": "popup.html", "default_title": "Upload Recorder" },
+
+  "commands": {
+    "toggle-recording": {
+      "suggested_key": { "default": "Alt+Shift+R" },
+      "description": "Start or stop recording"
+    }
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}

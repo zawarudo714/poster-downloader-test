@@ -20,6 +20,12 @@ powershell -ExecutionPolicy Bypass -File tools\junique\fetch_manual_uploads.ps1
 It copies each file from the Storage Box (`S:`) to
 `Downloads\Junique first designs`, named by title, and opens that folder.
 
+## Learning the upload steps
+
+The owner records a few uploads with `extensions/upload_recorder` and hands
+over the saved files. The steps found in them go into
+`docs/facts/JUNIQUE.md`, which the owner corrects before anything is built.
+
 ## Adding more
 
 Add a row per picture with the same columns. `storage_path` is

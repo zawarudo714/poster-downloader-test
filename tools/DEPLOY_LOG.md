@@ -15,6 +15,7 @@ cost far more to read, answer a different question, and on a mounted working
 copy `git status` cannot refresh its index — it reports stale answers with
 no warning.
 
+- **2026-11-05 18:46** · `[178.105.34.144]` · `11ef0262` · v295 · v295: record each print file's enlargement settings; remake old print files with sharpen 80 + grain 4 (app/print_remake.py); Diagnostics counts old ones
 - **2026-11-05 18:19** · `[178.105.34.144]` · `011951bb` · v294 · v294: print files get sharpening 80 and grain 4 so Junique accepts them; deploy_cli.py lets the session deploy
 - **2026-11-05 03:17** · `[178.105.34.144]` · `232c814e` · v293 · the daily upload limit counts the last 24 hours; the node stops on a log-out or 3 failures in a row (node 1.35.0 to copy)
 - **2026-11-04 07:30** · `[178.105.34.144]` · `b7824680` · v292 · the Usage tab: what the OpenAI key costs, from its own token counts (tiles, spend and trend charts, filters); older batches filled in by a sweep
@@ -44,4 +45,3 @@ no warning.
 - **2026-10-09 16:40** · `[178.105.34.144]` · `00d332a3` · v258 · deploy v258
 - **2026-10-09 14:24** · `[178.105.34.144]` · `985378a5` · v257 · deploy v257
 - **2026-10-09 09:02** · `[178.105.34.144]` · `93859df5` · v255 · deploy v255
-- **2026-10-09 08:45** · `[178.105.34.144]` · `a2bbc632` · v253 · deploy v253

@@ -20,11 +20,20 @@ powershell -ExecutionPolicy Bypass -File tools\junique\fetch_manual_uploads.ps1
 It copies each file from the Storage Box (`S:`) to
 `Downloads\Junique first designs`, named by title, and opens that folder.
 
-## Learning the upload steps
+## The tools (v296, on the laptop)
 
-The owner records a few uploads with `extensions/upload_recorder` and hands
-over the saved files. The steps found in them go into
-`docs/facts/JUNIQUE.md`, which the owner corrects before anything is built.
+| File | What it does |
+|---|---|
+| `junique_upload.py` | The window: Fetch, Open Chrome, Upload. Clicks through Junique in its own Chrome (`local/chrome_profile`, signed in once by hand). Stops before Publish unless "Publish by itself" is ticked |
+| `fetch.py` | The same Fetch from the command line: `python tools/junique/fetch.py 20` |
+| `ledger.py` | The record (`local/ledger.json`) and the queue rule: unfinished or failed first, then new in approval order; skips this CSV; gives up on a design after 3 failures |
+| `test_ledger.py` | Behaviour test of the queue, with the owner's 50/48/20 example |
+
+The list of ready designs comes from the server over SSH
+(`app/junique_list.py`): approved, current, and made with today's sharpen and
+grain. A design counts as uploaded only when Junique answers Publish.
+Everything in `local/` stays on the laptop (git-ignored). The page facts the
+tool relies on are in `docs/facts/JUNIQUE.md`.
 
 ## Adding more
 

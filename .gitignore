@@ -62,3 +62,6 @@ worker_service/config.json
 
 # The upload machine keeps receipts it could not send here (v287).
 worker_service/unsent_receipts.json
+
+# The Junique tools keep their record, Chrome profile and screenshots on the laptop (2026-11-05).
+tools/junique/local/

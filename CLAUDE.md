@@ -82,7 +82,7 @@ both FineArtAmerica accounts were closed in 2026-08 (`docs/HISTORY.md`).
 - Facts about the outside world, measured — do not re-derive:
   `docs/facts/FAA_BEHAVIOUR.md`, `docs/facts/FAA_LISTING_PAGES.md`,
   `docs/facts/FAA_TITLE_RULES.md`, `docs/facts/GPT_IMAGE.md`,
-  `docs/facts/TEEPUBLIC.md` (removed from the site).
+  `docs/facts/TEEPUBLIC.md` (removed from the site), `docs/facts/JUNIQUE.md`.
 
 ## Before saying done
 

@@ -105,8 +105,19 @@ before = len(WRITES)
 counts = remake(db, emit=lambda s: None)
 ok(counts["remade"] == 0 and len(WRITES) == before, "a second run remakes nothing")
 
+# The Junique list (v296) offers only files made with today's settings.
+from app.junique_list import ready, junique_title  # noqa: E402
+listed = ready(db)
+ok([d["processed_image_id"] for d in listed] == [live.id, queued.id]
+   and listed[0]["title"] == "Place 1" and listed[0]["storage_path"] == "p/1.jpg",
+   f"the Junique list holds the 2 remade files in order, not the unreviewed one ({listed})")
+long = "Saint Petersburg, the Church of the Savior on Spilled Blood, Russia"
+ok(junique_title(long) == "Saint Petersburg, the Church of the Savior on Spilled Blood"
+   and len(junique_title(long)) <= 60, f"a long title is cut at a word ({junique_title(long)!r})")
+
 P.set_setting(db, "upscale_grain", 5, project=proj)
 db.commit()
 ok(len(outdated(db)) == 2, "changing the grain makes both outdated again")
+ok(ready(db) == [], "an outdated file leaves the Junique list until it is remade")
 
 print("ALL PASS")

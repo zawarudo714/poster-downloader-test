@@ -1458,6 +1458,28 @@ The Nodes panel should then show agent 1.35.0.
 **What it means if it does not:** if more than 100 go up in 24 hours, or a
 run keeps going after "logged out of your account", tell me the time.
 
+## 120. THE JUNIQUE FETCH AND UPLOAD TOOLS — v296 (on this laptop)
+
+**What it is:** two tools in `tools/junique`. Fetch copies the next N print
+files from S: to `Downloads\Junique uploads` and remembers them; unfinished or
+failed ones come first. The upload window puts them on Junique by clicking in
+its own Chrome, and stops before Publish so you can check each one.
+
+**What to click:**
+
+1. Run `python tools\junique\junique_upload.py`. Press "Open Chrome (sign in
+   once)" and sign in to Junique in that Chrome.
+2. Type 1 in "How many" and press Fetch. One file should appear in
+   `Downloads\Junique uploads`.
+3. Press "Upload the fetched designs" and watch. When the log says READY,
+   check the products, the artboards, the black colour and the shower
+   curtain, then click Publish yourself. The log should then say PUBLISHED.
+4. If that looks right, do 3 more the same way, then try "Publish by itself".
+
+**What it means if it does not:** the log says FAILED with the reason and a
+screenshot path. Send me both. A draft it left on Junique is named in the log;
+delete it there by hand.
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** No longer needed at all — corrected

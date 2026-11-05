@@ -1446,9 +1446,11 @@ The Nodes panel should then show agent 1.35.0.
 
 1. Open the Upload tab. Each account card should say "N / 100 in 24 h"
    instead of a count for today.
-2. Set the daily limit back to 100. Until about 23:50 your time on 5 Nov
-   the card should still show about 100 used, because the 101 that went up
-   just after midnight Nairobi still count. Nothing should upload then.
+2. Set the daily limit back to 100. Nothing should upload until about
+   23:00 your time on 5 Nov. The card shows about 201 used until about
+   10:45 your time, when the morning's 100 drop out, and about 101 after
+   that. From about 23:00 the 101 from just after midnight Nairobi drop
+   out one by one, and uploads start again.
 3. After that, press RETRY on the Failures tab for the 117 that failed
    because FineArtAmerica had logged the account out.
 4. The next day, check that no more than 100 went up in any 24 hours.

@@ -14,7 +14,9 @@ commitments with dates.
 2. **More marketplaces.** A new one needs a reader module, an entry in
    `service.READERS` and a `CAPABILITIES` row — nothing else. (TeePublic is
    NOT a candidate any more: the owner runs everything TeePublic from a tool
-   on his own laptop — see the 2026-09-06 entry below.)
+   on his own laptop — see the 2026-09-06 entry below.) **Junique:** the
+   owner uploads by hand for now; an automation must skip every picture in
+   `tools/junique/MANUAL_UPLOADS.csv` (2026-11-05).
 3. **A second travel-adjacent project** if the sheet justifies splitting
    parks from cities. Deliberately one project for now.
 

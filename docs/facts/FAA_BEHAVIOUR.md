@@ -56,3 +56,15 @@ the claim while it still passes. `Current Balance` remains the authoritative
 "what you are owed" — never replace it with arithmetic, which is how the page
 once read "probably $1,477.21" against a real $298.28.
 
+
+**An upload that is not published leaves nothing behind.** The image is
+saved to the shop only when PUBLISH is pressed; leaving the submit page
+saves nothing, even though the page already has an artwork number in its
+address (`updateartwork2026.html?uniqueid=…`). Owner-reported 2026-11-05,
+after 117 uploads failed on that page: no unfinished uploads in the shop.
+
+**The upload limit is not a strict 100 in 24 hours.** `MEASURED 2026-11-05`:
+FineArtAmerica accepted 201 uploads on one account within about 14 hours
+(100 on 4 Nov 07:57–08:44 UTC, 101 on 4 Nov 21:01–21:48 UTC), then logged
+the account out ("logged out due to activity"); every later submit stayed
+on the form. Which clock or window it uses is still unmeasured.

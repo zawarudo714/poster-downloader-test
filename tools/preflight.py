@@ -3497,14 +3497,11 @@ def check_no_magic_absent_value() -> None:
 # is LOCAL midnight written as if it were UTC, so comparing a column with it
 # shifts the day by the zone's offset — the worker's TODAY ran 03:00-03:00
 # in Nairobi until v258 (2026-10-09). Use timeutil.utc_start_of_local_day.
-# The two uses left are on purpose and listed with why; any NEW one fails,
+# The uses left are on purpose and listed with why; any NEW one fails,
 # so the next counter has to make the decision instead of inheriting it.
+# (The marketplace's daily cap was one until v293. It let 101 extra uploads
+# through between 00:00 and 03:00 Nairobi and now counts the last 24 hours.)
 DAY_BOUNDARY_ALLOWED = {
-    # The marketplace's daily cap: FAA's day is FAA's, not Nairobi's, and
-    # we have never measured which clock it uses — changing it would be a
-    # guess (3c-bis), so it stays as it was.
-    ("app/pipeline.py",
-     "start = datetime.combine(day, datetime.min.time())"),
     # A date the owner typed as "the business starts here", compared with
     # marketplace sale dates; an hour either side changes nothing.
     ("app/earnings/service.py",

@@ -3345,20 +3345,29 @@ def ensure_upload_rows(
     return created
 
 
-def uploads_today(db: Session, account_id: int, *, day: Optional[date] = None) -> int:
+UPLOAD_LIMIT_WINDOW = timedelta(hours=24)
+
+
+def uploads_last_24h(db: Session, account_id: int, *,
+                     now: Optional[datetime] = None) -> int:
     """
-    Confirmed uploads for an account on a calendar day — the number the
-    marketplace's daily cap applies to.
+    Confirmed uploads for an account in the last 24 hours — the number the
+    daily limit applies to.
+
+    A rolling 24 hours since v293, not a calendar day. The calendar day was
+    the Nairobi date compared with UTC upload times, so from 00:00 to 03:00
+    Nairobi it counted nothing, and what went up then was never counted at
+    all. `MEASURED 2026-11-05`: 100 went up in the morning, 101 more just
+    after midnight, and FineArtAmerica logged the account out. The owner
+    knows the limit as "100 in 24 hours", and a rolling window can only
+    upload less than any calendar day, never more.
     """
-    day = day or local_today()
-    start = datetime.combine(day, datetime.min.time())
-    end = start + timedelta(days=1)
+    since = (now or datetime.utcnow()) - UPLOAD_LIMIT_WINDOW
     return (
         db.query(func.count(UploadTracking.id))
           .filter(UploadTracking.account_id == account_id,
                   UploadTracking.status == "uploaded",
-                  UploadTracking.uploaded_at >= start,
-                  UploadTracking.uploaded_at < end)
+                  UploadTracking.uploaded_at >= since)
           .scalar() or 0
     )
 
@@ -3371,11 +3380,12 @@ def upload_gap_state(db: Session, account: UploadAccount) -> dict:
     WHY THIS EXISTS — the owner, 2026-09-09
     ════════════════════════════════════════════════════════════════════════
     His words: *"I am finding out that the FAA upload limit is not exactly 24
-    hours."* The daily cap in `account_quota` counts uploads on a CALENDAR
-    day and resets at local midnight. If FineArtAmerica's own allowance
+    hours."* The daily cap in `account_quota` counted uploads on a CALENDAR
+    day and reset at local midnight. If FineArtAmerica's own allowance
     resets some interval after your last upload instead, then a midnight
     reset is the wrong shape entirely: it can let a second batch go at
-    00:01 when their clock has not turned over yet.
+    00:01 when their clock has not turned over yet. (Since v293 the cap
+    itself counts the last 24 hours; this gap still adds a wait on top.)
 
     So this is a plain gap. An account may not begin a new batch until N
     hours have passed since the last design it got onto the marketplace.
@@ -3459,8 +3469,9 @@ def upload_gap_state(db: Session, account: UploadAccount) -> dict:
     return out
 
 
-def account_quota(db: Session, account: UploadAccount, *, day: Optional[date] = None) -> dict[str, int]:
-    used = uploads_today(db, account.id, day=day)
+def account_quota(db: Session, account: UploadAccount, *,
+                  now: Optional[datetime] = None) -> dict[str, int]:
+    used = uploads_last_24h(db, account.id, now=now)
     # `or 100` here turned a deliberate ZERO into a hundred. Setting an
     # account's daily limit to 0 is the obvious way to say "do not upload to
     # this one today", and it did the exact opposite — silently, on a real
@@ -3905,7 +3916,7 @@ def claim_upload_batch(
 ) -> dict[str, Any]:
     """
     Hand a node its next upload batch for one account, capped by whatever the
-    account has left of today's quota.
+    account has left of its limit for the last 24 hours.
 
     Returns the account's credentials and effective settings alongside the
     items, so the node needs exactly one round trip to start working and

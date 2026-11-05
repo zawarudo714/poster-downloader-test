@@ -216,6 +216,24 @@ def looks_like_maintenance(page_source: str) -> bool:
     return any(m in lowered for m in MAINTENANCE_MARKERS)
 
 
+# FineArtAmerica's words when it ends the session mid-run, as saved on
+# 2026-11-05 after 201 uploads in about 14 hours: "You have been logged out
+# of your account due to inactivity.  Please login again.  Error Code: 2404"
+# (two spaces between sentences). It shows them on the upload form, so the
+# submit "did not complete" and, before v293, every remaining design was
+# tried and failed the same way, 117 of them, three times each.
+LOGGED_OUT_SIGNS = ("logged out of your account", "error code: 2404")
+LOGGED_OUT_PAUSE_MINUTES = 240
+# A run of failures in a row stops the run, whatever they are. Three
+# designs failing one after another is the account, not the designs.
+STOP_AFTER_FAILURES_IN_A_ROW = 3
+
+
+def logged_out(page_source: str) -> bool:
+    text = " ".join((page_source or "").lower().split())
+    return any(sign in text for sign in LOGGED_OUT_SIGNS)
+
+
 class UploadError(RuntimeError):
     """
     An upload failure.
@@ -1050,6 +1068,13 @@ class MarketplaceUploader:
         current_url = self.driver.current_url or ""
         if marker and marker.lower() in current_url.lower():
             shot = self.capture_evidence(f"submit_failed_{item['tracking_id']}")
+            if logged_out(self.driver.page_source):
+                raise UploadError(
+                    "FineArtAmerica logged the account out (Error Code 2404), "
+                    "usually after too many uploads. Stopping this run.",
+                    pause_minutes=LOGGED_OUT_PAUSE_MINUTES, fatal=True,
+                    pause_reason="FineArtAmerica logged the account out "
+                                 "(Error Code 2404)")
             raise UploadError(
                 f"Submit did not complete — still on the form ({current_url}). "
                 f"The site may have rejected the image or a required field.",
@@ -1202,7 +1227,7 @@ class UploadStage:
             self.client.job_log(
                 job_id,
                 f"Uploading {len(items)} image(s) to {account['name']} "
-                f"· {quota.get('remaining')} left of today's {quota.get('limit')}",
+                f"· {quota.get('remaining')} left of {quota.get('limit')} in 24 hours",
                 progress=2,
             )
 
@@ -1211,7 +1236,7 @@ class UploadStage:
             client=self.client, log=self.log, job_id=job_id,
         )
 
-        uploaded = failed = 0
+        uploaded = failed = in_a_row = 0
         gap = float(account["timings"].get("between_images", 3))
 
         try:
@@ -1271,6 +1296,7 @@ class UploadStage:
 
                 except UploadError as e:
                     failed += 1
+                    in_a_row += 1
                     shot = uploader.capture_evidence(f"fail_{item['tracking_id']}")
                     uploader.emit(f"  ✗ {e}", level="error")
                     self.client.report_upload_failure(
@@ -1285,15 +1311,26 @@ class UploadStage:
                             level="error",
                         )
                         break
+                    if in_a_row >= STOP_AFTER_FAILURES_IN_A_ROW:
+                        uploader.emit(
+                            f"Stopping this run — {in_a_row} failures in a row.",
+                            level="error")
+                        break
 
                 except Exception as e:
                     failed += 1
+                    in_a_row += 1
                     shot = uploader.capture_evidence(f"fail_{item['tracking_id']}")
                     uploader.emit(f"  ✗ unexpected: {e}", level="error")
                     self.client.report_upload_failure(
                         tracking_id=item["tracking_id"],
                         error=f"{type(e).__name__}: {e}", screenshot=shot,
                     )
+                    if in_a_row >= STOP_AFTER_FAILURES_IN_A_ROW:
+                        uploader.emit(
+                            f"Stopping this run — {in_a_row} failures in a row.",
+                            level="error")
+                        break
 
                 else:
                     # THE PICTURE IS LIVE. Report it immediately — never batch
@@ -1302,6 +1339,7 @@ class UploadStage:
                     # into the catch-all, which reported the live picture as
                     # FAILED, and the next run listed it a second time.
                     uploaded += 1
+                    in_a_row = 0
                     if not self._send_receipt(item["tracking_id"]):
                         uploader.emit(
                             "The server is not taking upload receipts. Stopping "

@@ -5,6 +5,11 @@ A replaced decision stays here, marked SUPERSEDED, never deleted.
 Older decisions are tagged `DECIDED <date>` where they apply (in the docs and
 in `AUDIT.md`); search for `DECIDED` to find them.
 
+- 2026-11-05 · The daily upload limit counts the last 24 hours, not a
+  calendar day; the node stops a run on a log-out or after 3 failures in a
+  row · owner's ask after 101 extra uploads just after midnight Nairobi got
+  the account logged out and 117 more failed (v293) · `PIPELINE.md`,
+  `docs/FAILURES.md`
 - 2026-11-04 · The Usage tab counts spend from the site's own token counts
   only, not OpenAI's admin usage API · owner's choice: the admin key would
   mix in his test keys. Days are UTC days, to match OpenAI's usage page; a

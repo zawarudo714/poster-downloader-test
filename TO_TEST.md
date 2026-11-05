@@ -1437,6 +1437,25 @@ second browser picks its own batch.
 page, tell me the day. The footer says how many batches are still waiting
 to be counted; a day with a waiting batch is short until it is counted.
 
+## 119. THE DAILY LIMIT COUNTS 24 HOURS — v293
+
+**Before you start:** copy the new `worker_service/` folder to win-vps-1.
+The Nodes panel should then show agent 1.35.0.
+
+**What to click:**
+
+1. Open the Upload tab. Each account card should say "N / 100 in 24 h"
+   instead of a count for today.
+2. Set the daily limit back to 100. Until about 23:50 your time on 5 Nov
+   the card should still show about 100 used, because the 101 that went up
+   just after midnight Nairobi still count. Nothing should upload then.
+3. After that, press RETRY on the Failures tab for the 117 that failed
+   because FineArtAmerica had logged the account out.
+4. The next day, check that no more than 100 went up in any 24 hours.
+
+**What it means if it does not:** if more than 100 go up in 24 hours, or a
+run keeps going after "logged out of your account", tell me the time.
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** No longer needed at all — corrected

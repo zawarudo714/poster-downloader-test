@@ -196,7 +196,7 @@
     upload: [
       ['upload_batch_size',   'number', 'Batch size',        'Images per upload run, capped by the account\'s remaining daily quota.'],
       ['upload_gap_enabled',  'bool',   'Wait between upload batches',
-       'Off by default. FineArtAmerica\'s allowance may not reset at midnight the way the daily cap assumes, so this makes an account wait a fixed gap after its last upload before starting another batch. It sits ON TOP of the daily cap — both have to allow it — so switching this on can only ever slow uploading down, never speed it up.'],
+       'Off by default. The daily cap counts the last 24 hours. This adds a fixed wait after an account\'s last upload before it starts another batch. It sits ON TOP of the daily cap — both have to allow it — so switching this on can only ever slow uploading down, never speed it up.'],
       ['upload_gap_hours',    'number', 'Hours to wait',
        'How long after the last design went up before the same account may start another batch. 12 by default. A batch already running is never interrupted; this only decides when the next one may begin. 0 is the same as switching it off.'],
       ['upload_max_attempts', 'number', 'Max attempts',      'Retries before an upload is parked for review.'],
@@ -703,7 +703,7 @@
             <span class="status-pill status-${esc(a.target_site)}">${esc(a.target_site)}</span>
             ${paused ? `<span class="status-pill status-error">PAUSED</span>` : ''}
             ${!a.is_enabled ? `<span class="status-pill">DISABLED</span>` : ''}
-            <span class="muted mono">${a.quota.used} / ${a.quota.limit} today · ${a.pending} queued</span>
+            <span class="muted mono">${a.quota.used} / ${a.quota.limit} in 24 h · ${a.pending} queued</span>
             ${a.gap && a.gap.waiting
               ? `<span class="status-pill status-pending">WAITING ${esc(a.gap.ready_at)}</span>`
               : ''}
@@ -1718,7 +1718,7 @@
           </div>
           <div class="account-stats mono">
             turn #${a.rotation_order ?? 100}, ${a.rotation_size || 'default'} per turn ·
-            today ${a.quota.used}/${a.quota.limit} ·
+            last 24 h ${a.quota.used}/${a.quota.limit} ·
             uploaded ${s.uploaded || 0} ·
             pending ${s.pending || 0} ·
             failed ${s.failed || 0} ·

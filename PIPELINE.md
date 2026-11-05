@@ -136,6 +136,17 @@ For a GPT project the Process row above is two steps, both on the Linux VPS:
   restarted batch ids would make new answers look already counted. Shown
   on the Usage tab (`routes/usage_admin.py`). Tested by
   `tools/test_ai_usage.py`.
+- **The daily limit counts the last 24 hours (v293).** `account_quota`
+  counts an account's uploads since 24 hours ago (`uploads_last_24h`), not
+  since midnight. The calendar-day count compared a Nairobi date with UTC
+  upload times, so from 00:00 to 03:00 Nairobi it counted nothing:
+  `MEASURED 2026-11-05`, 100 went up in the morning and 101 more just after
+  midnight, and FineArtAmerica logged the account out (Error Code 2404).
+  The node (1.35.0) now stops a run when the page says the account was
+  logged out, and parks the account for 4 hours. It also stops after 3
+  failures in a row of any kind. What it did not try goes back to the
+  queue through the stale-claim reaper. Tested by
+  `tools/test_upload_limit_24h.py`.
 
 ---
 
@@ -453,7 +464,9 @@ choosing MANUAL on the Greenlight tab had no effect on payment.
 
 Retries are automatic up to `upload_max_attempts`. `EXHAUSTED` means it needs
 a human. A systemic problem (bot wall, bad credentials, missing selector)
-pauses the whole account instead of burning the queue.
+pauses the whole account instead of burning the queue. A logged-out page
+(FineArtAmerica's Error Code 2404) pauses it for 4 hours, and any 3 failures
+in a row end the run (v293).
 
 ### When an account is banned
 1. Add a replacement account.

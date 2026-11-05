@@ -2191,6 +2191,36 @@ def check_place_check_is_answering(db: Session, scope: Scope) -> CheckResult:
     )
 
 
+def check_print_files_have_todays_enlargement(db: Session, scope: Scope) -> CheckResult:
+    """
+    INVARIANT: every approved print file was enlarged with today's settings.
+
+    Junique refuses a plain enlargement as "upscaled" (2026-11-05), so v294
+    added sharpening and grain and v295 records on each row how its file was
+    made (`print_treatment`). A file made with other settings will be
+    refused there. `app/print_remake.py` rebuilds them; this counts what is
+    left, through the same function, so the count and the remake agree.
+    """
+    from .print_remake import outdated
+    found = [p for p in outdated(db)
+             if scope.all_projects or p.project_id == scope.project_id]
+    rows = [Finding(f"picture record {p.saved_poster_id}",
+                    f"{p.storage_path} was made with "
+                    f"{p.print_treatment or 'the settings before v295'}",
+                    "/admin/pipeline/review")
+            for p in found[:MAX_ROWS]]
+    return _result(
+        "print_files_old_enlargement",
+        f"{len(found)} print file(s) made with old enlargement settings"
+        if found else "Every print file has today's sharpening and grain",
+        "These files were enlarged before the sharpening or grain settings "
+        "changed, so Junique may refuse them as upscaled. The session remakes "
+        "them with app/print_remake.py; the see-through original is kept, so "
+        "nothing is lost.",
+        "warn" if found else "ok", rows, len(found),
+    )
+
+
 def check_approved_without_a_print_file(db: Session, scope: Scope) -> CheckResult:
     """
     INVARIANT: an APPROVED image must have a print file to upload.
@@ -4000,6 +4030,7 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_healed_versions_are_sound,
     check_number_settings_hold_numbers,
     check_approved_without_a_print_file,
+    check_print_files_have_todays_enlargement,
     check_current_image_was_discarded,
     check_left_for_photoshop_is_reachable,
     check_titles_hold_too_many_pictures,

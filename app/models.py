@@ -1202,6 +1202,12 @@ class ProcessedImage(Base):
     # is how the rebuild decides whether it has anything to do.
     signature_applied = Column(Text, nullable=True)
 
+    # HOW THE PRINT FILE WAS ENLARGED (v295): width, sharpening, grain and
+    # JPEG quality as JSON, written by `_build_print_file`. NULL means the
+    # file predates the record, so it was made without the Junique sharpen
+    # and grain; `app/print_remake.py` rebuilds every row that differs.
+    print_treatment = Column(Text, nullable=True)
+
     # THE COLOUR THE ADMIN HAS CHOSEN BUT NOT YET RELEASED.
     #
     # `background_color` beside it is the colour actually FLATTENED INTO the

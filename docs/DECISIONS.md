@@ -5,6 +5,15 @@ A replaced decision stays here, marked SUPERSEDED, never deleted.
 Older decisions are tagged `DECIDED <date>` where they apply (in the docs and
 in `AUDIT.md`); search for `DECIDED` to find them.
 
+- 2026-11-05 · All 318 old print files are remade with sharpening 80 and
+  grain 4 (v295, `app/print_remake.py`); FineArtAmerica uses the same files
+  for everything not yet live. The 201 already live there are left as they
+  are · owner's instruction ("no need to complicate and separate things") ·
+  `docs/FAILURES.md`
+- 2026-11-05 · Junique uploads run from the owner's laptop, by clicking in a
+  visible Chrome he watches, never by sending requests; the record of what
+  went up stays on the laptop until the tool is proven, then moves to the
+  server · owner's instruction · `tools/junique/README.md`
 - 2026-11-05 · The AI session does every deploy, with `tools/deploy_cli.py`
   (this computer's SSH key, the same proof checks as the deploy window); the
   owner is never told to deploy. The node is still copied by the owner ·

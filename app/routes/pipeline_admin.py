@@ -4168,6 +4168,17 @@ def _review_cache_file(rel_path: str, variant: str):
     return cache_file(rel_path, variant)
 
 
+def print_treatment(width: int, sharpen: int, grain: int, quality: int) -> str:
+    """The enlargement settings a print file was made with, as one string.
+
+    `_build_print_file` writes it onto the row and compares it with what the
+    settings say now; `app/print_remake.py` counts the rows that differ.
+    """
+    return json.dumps({"width": int(width), "sharpen": int(sharpen),
+                       "grain": int(grain), "quality": int(quality)},
+                      sort_keys=True)
+
+
 def _build_print_file(db: Session, processed, color: str, project,
                       title=None) -> str:
     """
@@ -4190,11 +4201,13 @@ def _build_print_file(db: Session, processed, color: str, project,
     WHEN IT DOES NOTHING, AND WHY THAT LIST IS EXPLICIT
     ════════════════════════════════════════════════════════════════════════
     Work this expensive must be skipped whenever it would change nothing, so
-    the three reasons to DO it are named rather than implied:
+    the four reasons to DO it are named rather than implied:
 
       · the file does not exist yet (`storage_path` is empty)
       · the colour is different from the one baked in
       · the signature that would be painted differs from the one already on
+      · the enlargement settings differ from the ones it was made with
+        (`print_treatment`, v295 — the Junique sharpen and grain)
 
     The last is why `signature_applied` is written onto the row. Without a
     record of what was painted, every approval would have to rebuild just in
@@ -4235,7 +4248,19 @@ def _build_print_file(db: Session, processed, color: str, project,
     needs_colour = normalise_background(processed.background_color) \
         != normalise_background(color)
     needs_sig = (processed.signature_applied or "") != wanted_sig
-    if not (needs_file or needs_colour or needs_sig):
+
+    # HOW THE ENLARGEMENT IS DONE, recorded like the signature. Junique
+    # refused plain Lanczos enlargements as "upscaled" (v294 added sharpening
+    # and grain), so a print file made before a change of these settings is
+    # out of date even though nothing else about it changed. NULL is a file
+    # made before this record existed, which is exactly an old file.
+    w = int(P.get_setting(db, "upscale_width_px", project=project) or 4000)
+    sharpen = int(P.get_setting(db, "upscale_sharpen", project=project) or 0)
+    grain = int(P.get_setting(db, "upscale_grain", project=project) or 0)
+    quality = int(P.get_setting(db, "upscale_jpeg_quality", project=project) or 92)
+    wanted_treatment = print_treatment(w, sharpen, grain, quality)
+    needs_treatment = (processed.print_treatment or "") != wanted_treatment
+    if not (needs_file or needs_colour or needs_sig or needs_treatment):
         return ""
 
     rel = (processed.storage_path or "").strip()
@@ -4265,10 +4290,6 @@ def _build_print_file(db: Session, processed, color: str, project,
         # other way drags dark fringes along every soft edge. The signature
         # goes on AFTER the enlargement — see imagefetch.upscale_to_width().
         flatten_onto(raw, flat, color)
-        w = int(P.get_setting(db, "upscale_width_px", project=project) or 4000)
-        sharpen = int(P.get_setting(db, "upscale_sharpen", project=project) or 0)
-        grain = int(P.get_setting(db, "upscale_grain", project=project) or 0)
-        quality = int(P.get_setting(db, "upscale_jpeg_quality", project=project) or 92)
         overlay = (lambda im: SIG.paint(im, mark, place)) if place else None
         out_w, out_h = upscale_to_width(flat, width=w, sharpen=sharpen, grain=grain,
                                         quality=quality, dest=out,
@@ -4293,10 +4314,12 @@ def _build_print_file(db: Session, processed, color: str, project,
         processed.output_width, processed.output_height = out_w, out_h
         processed.file_size = out.stat().st_size
         processed.signature_applied = wanted_sig
+        processed.print_treatment = wanted_treatment
         what = []
         if needs_file: what.append("built")
         if needs_colour: what.append(f"colour {color}")
         if needs_sig and place: what.append("signature")
+        if needs_treatment and not needs_file: what.append("sharpen and grain")
         return " · ".join(what)
     finally:
         for f in (raw, flat, out, prev):

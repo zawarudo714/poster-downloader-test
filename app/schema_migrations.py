@@ -182,6 +182,9 @@ NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("processed_images", "signature_json", "TEXT"),
     ("processed_images", "signature_applied", "TEXT"),
     ("processed_images", "background_chosen", "VARCHAR(16)"),
+    # How the print file was enlarged (v295, Junique "upscaled" refusals).
+    # NULL truthfully reads "made before the record", i.e. an old file.
+    ("processed_images", "print_treatment", "TEXT"),
     # ── Re-listing a recalled title (2026-09-14) ────────────────────────
     # How many times this poster has gone fully live. The renderer reads it
     # to mark a re-sent title ("Kyoto B", "Kyoto C") so FAA does not silently

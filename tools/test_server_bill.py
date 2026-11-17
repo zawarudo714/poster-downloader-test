@@ -86,6 +86,8 @@ ok(not UA.bill_is_due("2026-11", date(2026, 11, 30)), "November ticked paid: hid
 ok(not UA.bill_is_due("2026-11", date(2026, 12, 23)), "23 Dec: still hidden")
 ok(UA.bill_is_due("2026-11", date(2026, 12, 24)), "24 Dec: back again")
 ok(UA.bill_is_due("", date(2026, 11, 2)), "never ticked: shows")
+TU.local_today = lambda: date(2026, 11, 17)
+ok(not body(UA.api_server_bill(admin=admin, db=db))["due"], "nothing ticked yet, 17 Nov: October counts as paid, no pill")
 
 # 2. Ticking Paid through the routes
 TU.local_today = lambda: date(2026, 11, 24)

@@ -15,6 +15,7 @@ cost far more to read, answer a different question, and on a mounted working
 copy `git status` cannot refresh its index — it reports stale answers with
 no warning.
 
+- **2026-11-17 11:17** · `[178.105.34.144]` · `e2470d2d` · v298 · v298: Usage keeps the project menu; server prices and worker pay by month on Usage; 24th server-bill pill with Paid tick; readable date boxes
 - **2026-11-17 10:55** · `[178.105.34.144]` · `7f38cb8a` · v297 · v297: remove the Google place check (version number)
 - **2026-11-17 10:53** · `[178.105.34.144]` · `c167a08c` · v296 · v297: remove the Google place check
 - **2026-11-05 19:18** · `[178.105.34.144]` · `9b50404e` · v296 · v296: Junique list for the laptop fetch tool; fetch and upload tools
@@ -44,4 +45,3 @@ no warning.
 - **2026-10-13 07:05** · `[178.105.34.144]` · `7b6e4c2a` · v262 · deploy v262
 - **2026-10-12 13:53** · `[178.105.34.144]` · `44a3f44a` · v261 · deploy v261
 - **2026-10-12 12:03** · `[178.105.34.144]` · `1b1e1919` · v260 · deploy v260
-- **2026-10-11 13:01** · `[178.105.34.144]` · `d431976f` · v259 · deploy v259

@@ -81,6 +81,9 @@ SERVER_PRICES = (
 )
 BILL_PAID_KEY = "server_bill_paid_month"   # "YYYY-MM" of the last bill ticked Paid
 BILL_DAY = 24                              # the reminder shows from this day
+# Before anything is ticked, October 2026 counts as paid: the owner had paid
+# it before this shipped (17 Nov), so the first pill is on 24 Nov.
+BILL_PAID_START = "2026-10"
 
 
 def _servers(db: Session) -> list[dict]:
@@ -165,7 +168,7 @@ def api_usage_costs(request: Request, admin: User = Depends(require_admin),
     return JSONResponse({
         "servers": _servers(db),
         "bill_day": BILL_DAY,
-        "paid_month": get_setting(db, BILL_PAID_KEY, ""),
+        "paid_month": get_setting(db, BILL_PAID_KEY, BILL_PAID_START),
         "rate_kes": str(rate),
         "project": project.slug if project else "",
         "workers": out_workers,
@@ -202,7 +205,7 @@ def api_server_bill(admin: User = Depends(require_admin), db: Session = Depends(
     from ..payments import get_setting
     from ..timeutil import local_today
     today = local_today()
-    paid_month = get_setting(db, BILL_PAID_KEY, "")
+    paid_month = get_setting(db, BILL_PAID_KEY, BILL_PAID_START)
     return JSONResponse({"due": bill_is_due(paid_month, today),
                          "month": bill_due_month(today),
                          "servers": _servers(db)})

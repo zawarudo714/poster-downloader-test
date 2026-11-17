@@ -1,6 +1,6 @@
 # Not yet deployed
 
-v298: Usage keeps the project menu; server prices and worker pay by month on Usage; the 24th server-bill pill with a Paid tick; date boxes readable site-wide.
+v299: the server-bill pill starts with October 2026 counted as paid, so it first shows on 24 Nov, not today.
 
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.

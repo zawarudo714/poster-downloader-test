@@ -47,13 +47,19 @@
 
   async function load() {
     try {
-      const r = await fetch('/admin/api/usage/costs', { credentials: 'same-origin', cache: 'no-store' });
+      // Never sit on "Loading" for ever: a slow answer says so (v301, the
+      // first version took 21 s on the live database).
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 20000);
+      const r = await fetch('/admin/api/usage/costs',
+        { credentials: 'same-origin', cache: 'no-store', signal: ctl.signal }).finally(() => clearTimeout(timer));
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
       drawServers(data.servers, data.bill_day, data.paid_month);
       drawPay(data);
     } catch (e) {
-      servers.innerHTML = pay.innerHTML = `<span class="muted">Could not load: ${esc(e.message)}</span>`;
+      const why = e.name === 'AbortError' ? 'no answer within 20 seconds' : e.message;
+      servers.innerHTML = pay.innerHTML = `<span class="muted">Could not load: ${esc(why)}. Reload the page to try again.</span>`;
     }
   }
 

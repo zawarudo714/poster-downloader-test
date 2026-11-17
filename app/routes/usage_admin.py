@@ -167,10 +167,13 @@ def api_usage_costs(request: Request, admin: User = Depends(require_admin),
         n = {m: 0 for m in months}
         paid = {m: Decimal(0) for m in months}
         owed = {m: 0 for m in months}
-        ids = sorted(rate_of)
-        for at in range(0, len(ids), 500):
-            for pid, day in in_project(db.query(SavedPoster.id, SavedPoster.original_save_date)
-                                         .filter(SavedPoster.id.in_(ids[at:at + 500]))).all():
+        # One pass over this worker's own pictures (a run only ever pays the
+        # worker's own: eligible_poster_ids filters on user_id). Looking the
+        # paid ids up 500 at a time took 21 s on the live database, because
+        # SQLite walked the titles table for each batch (2026-11-17).
+        for pid, day in in_project(db.query(SavedPoster.id, SavedPoster.original_save_date)
+                                     .filter(SavedPoster.user_id == w.id)).all():
+            if pid in rate_of:
                 m = _month_key(day)
                 if m in n:
                     n[m] += 1

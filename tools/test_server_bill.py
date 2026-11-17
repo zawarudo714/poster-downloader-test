@@ -160,6 +160,10 @@ ok(rows["2026-11"]["paid_kes"] == "0" and rows["2026-11"]["owed"] == 1 and rows[
    "November: nothing paid, 1 to pay at today's 7 KES")
 ok(data["servers"][0]["price"] == "15.20", "the costs answer carries the server prices")
 
+import inspect
+ok(".in_(" not in inspect.getsource(UA.api_usage_costs),
+   "the pay table reads the worker's pictures in one pass, no id batches (they took 21 s live)")
+
 # 5. Date inputs keep their colour scheme
 css = (ROOT / "app" / "static" / "css" / "style.css").read_text(encoding="utf-8")
 ok(re.search(r"input\[type=date\][^{]*\{[^}]*color-scheme:\s*dark", css) is not None,

@@ -18,6 +18,17 @@ find out about any blocker before spending on the expensive box.
 | 3 | **Contabo Windows VPS** (VPS M or better) | Photoshop + Chrome — the muscle | ~€13–17/mo |
 
 Hetzner raised cloud prices steeply during 2026, so confirm at checkout.
+
+**What is really running (the owner's Hetzner console, 2026-11-17):** the
+server is a **CPX22** ("ubuntu-4gb-nbg1-1": 2 vCPU, 4 GB, 75 GB disk), at
+most $9.49 a month plus $0.60 for its IP address, so $10.09 a month. The
+whole account's invoices: Jun $10.56, Jul $10.09, Aug $11.32, Sep $28.18,
+Oct $20.85 (billed on the 25th since October). The Oct invoice (for
+September) is: CPX22 $10.09, BX11 Storage Box $4.00, and a CPX12 in a project
+"Poster Downloader Fully Automated" for 299 hours, $6.76. That CPX12 is not
+in the November usage preview, so it was probably removed. **Running cost:
+$14.09 a month** (server $10.09 + Storage Box $4.00). The server is shared
+with the owner's second project (see `docs/SERVER.md`).
 Contabo's Windows licence is charged on top of the Linux price.
 
 ### Sizing, measured from the real data

@@ -9,6 +9,11 @@ page changes, fix this file first, then the tool.
 ## Rules of the shop (owner, 2026-11-05)
 
 - New shops are reviewed: 5–20 strong designs first. The 20 cap lifts after review.
+- After approval the cap is 100 designs per shop ("8 out of maximum 100 designs",
+  `MEASURED 2026-11-06`). Up to 3 shops are allowed (the "Add new shop" tooltip, read
+  2026-11-06). The owner says each shop holds its own 100; that is not yet confirmed.
+  The counter also counts deleted drafts. The owner is asking Junique by email whether
+  more is given on request, since some artists show 500+ designs (2026-11-06).
 - No Duplicate or Copy option exists; every design is set up from nothing.
 - No automation terms were found. Clicking only, in a visible Chrome (DECIDED).
 - The quality check refuses a plain enlargement as "upscaled"; v294 sharpen 80 +
@@ -49,8 +54,11 @@ page changes, fix this file first, then the tool.
 - On: Poster, both notebooks, Sticker, all apparel (adult, kids, baby), Tote
   Bag, Ceramic and Enamel Mug, Shower Curtain, Tea Towel, Beach towel (5:4),
   Fleece Blanket (1:1), Cushion (1:1), Backlit Film Print, PVC Banners,
-  Wallpaper. Off: Sticker Sheet, Phone case, Towel, Beach towel (16:9),
+  Wallpaper. Off: Baby Bib (added 2026-11-05), Sticker Sheet, Phone case, Towel, Beach towel (16:9),
   Fleece Blanket (4:3), Cushion (3:2), Doormat. (DECIDED by the owner.)
+- A product with no artboard shows no on/off switch; under the preview it has "Front" and a "+". The "+" opens "Choose an artboard for this product" with "#1 (2:3)" (`MEASURED 2026-11-05`, owner's screenshots of draft 705221; the tool's drafts open this way, the owner's own did not).
+- The handles (`MEASURED 2026-11-05`, draft 705231): the product cards are `div.ca-products > div.ca-products__product`, card = its 2nd child `.ca-customization-product` (`--disabled` while it has no artboard); the switch `input[type=checkbox][id^='id-']` sits in that card. The "+" is `.ca-change-canvas__add-canvas` inside the `.ca-preview-product-pages__product-page` whose `.product-page__page-label` is "Front". In the popup, click the tile `.ca-preview-page-thumb-tooltip__page-thumb`; its label `div.page-thumb-text` alone does nothing. A tile already chosen carries `--active`; clicking it does nothing and Escape does not close the box, but "Change" (`div.ca-change-canvas__change`) does (`MEASURED 2026-11-05`, draft 705270).
+- Preview layouts (Konva, stage W×H, then image rects x,y,w,h; `MEASURED 2026-11-05`): Shower Curtain 375×417, poster 0,-146,375,563 and frame -8,-8,391,433; Notebook 276×383, poster 0,-2,276,414 and frame -24,-14,314,412; T-Shirt 142×189, poster 8,0,126,189 and shirt photo -101,-90,344,412. Frames and photos stick out on the left; the poster does not.
 - Artboard: the Front row is `div.ca-change-canvas__text` ("#1 (2:3)") with
   `div.ca-change-canvas__change` beside it, which opens "Choose an artboard
   for this product" (options "#1 (2:3)", "Remove artboard"). Switching a

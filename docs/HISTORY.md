@@ -75,7 +75,11 @@ exists or a marketplace catalogue that has been taken down.
   and the place check (built believing a row's file was immutable) kept
   showing Google's verdict for the previous picture. The 09-15 audit
   caught it; the replace flow now clears every fact about the old bytes
-  — place-check fields and content_hash — and re-checks. The question to
+  — place-check fields and content_hash — and re-checks. (The place
+  check itself was removed in v297, 2026-11-17: `app/place_check.py` sent
+  each saved picture to Google Cloud Vision web detection and compared
+  Google's words with the title. The owner found it often wrong and checks
+  every picture by eye anyway.) The question to
   ask any new per-image fact: "what happens to me when replace_poster
   swaps the file under my row?"
   A FOURTH cousin, 2026-09-17, is the same shape in the BROWSER: an

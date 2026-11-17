@@ -1277,11 +1277,6 @@ def api_search_save(
                           "same_picture_confirmed": bool(confirm_same_picture)})
     db.commit()
 
-    # The place check runs on its own thread AFTER the commit, so the
-    # worker never waits on Google. Gated (toggle, key) inside the thread.
-    from ..place_check import launch_check
-    launch_check(sp.id)
-
     new_live = count_live_posters_for_master(db, t.id)
     return JSONResponse({
         "ok": True,
@@ -2244,11 +2239,6 @@ def save_image(
     )
     db.commit()
 
-    # Same as the search door: the place check runs after the commit on its
-    # own thread, so this save answers at once.
-    from ..place_check import launch_check
-    launch_check(sp.id)
-
     new_live = count_live_posters_for_master(db, t.id)
     return JSONResponse({
         "ok": True,
@@ -2610,21 +2600,14 @@ def replace_poster(
     sp.low_quality_url = 0
     sp.image_width     = img_w
     sp.image_height    = img_h
-    # DIFFERENT BYTES VOID EVERY FACT ABOUT THE OLD ONES — the place check
-    # and the content fingerprint included, not only the pipeline verdict
-    # below. This flow is the ONE place a row's picture changes in place
-    # (everywhere else a swap makes a successor row), and the place check
-    # shipped believing a row's file was immutable — so a replaced image
-    # kept showing Google's verdict for a picture that no longer existed
-    # (2026-09-15 audit). Cleared here, and re-checked after the commit.
-    # The fingerprint is the one fact re-stamped at once, from the NEW
-    # bytes: the same-picture check on the next save reads it.
+    # DIFFERENT BYTES VOID EVERY FACT ABOUT THE OLD ONES — the content
+    # fingerprint included, not only the pipeline verdict below. This flow
+    # is the ONE place a row's picture changes in place (everywhere else a
+    # swap makes a successor row). The fingerprint is re-stamped at once,
+    # from the NEW bytes: the same-picture check on the next save reads it.
+    # (The place_check_* columns are left alone: the Google place check was
+    # removed in v297 and nothing reads them.)
     sp.content_hash          = sha
-    sp.place_check_status    = None
-    sp.place_check_guess     = None
-    sp.place_check_error     = None
-    sp.place_check_at        = None
-    sp.place_check_acked_at  = None
     # The admin's K mark was earned by the OLD picture; the new one has not
     # been looked at. Cleared with the other facts, or a swapped-in image
     # would sit green in a review the admin believes is finished. WHEN a
@@ -2702,12 +2685,6 @@ def replace_poster(
                  "url": src_url, "size": written, "submitted_revisions": submitted_ids},
     )
     db.commit()
-
-    # The new picture gets its own place check, same as a fresh save — the
-    # fourth door an image can arrive through, missed when the first three
-    # were hooked (2026-09-15 audit).
-    from ..place_check import launch_check
-    launch_check(sp.id)
 
     return JSONResponse({
         "ok": True,

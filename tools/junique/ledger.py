@@ -58,13 +58,28 @@ def save(led: dict, path: Path = LEDGER) -> None:
     os.replace(tmp, path)                    # never a half-written ledger
 
 
-def manual_ids(path: Path = MANUAL) -> set[int]:
-    """The designs the owner uploaded by hand; never uploaded again."""
+FETCH_AGAIN = "fetch again"     # in junique_status: a hand pick Junique refused; the tool takes it
+
+
+def _manual_rows(path: Path = MANUAL) -> list[dict]:
     import csv
     if not path.exists():
-        return set()
+        return []
     with open(path, encoding="utf-8", newline="") as f:
-        return {int(r["saved_poster_id"]) for r in csv.DictReader(f) if r.get("saved_poster_id")}
+        return [r for r in csv.DictReader(f) if r.get("saved_poster_id")]
+
+
+def manual_ids(path: Path = MANUAL) -> set[int]:
+    """The designs the owner handles by hand; never uploaded by the tool."""
+    return {int(r["saved_poster_id"]) for r in _manual_rows(path)
+            if FETCH_AGAIN not in r.get("junique_status", "")}
+
+
+def manual_wanted(path: Path = MANUAL) -> list[int]:
+    """Hand picks Junique refused as "upscaled" (before v294's grain); the
+    owner wants the tool to fetch their remade files first (2026-11-05)."""
+    return [int(r["saved_poster_id"]) for r in _manual_rows(path)
+            if FETCH_AGAIN in r.get("junique_status", "")]
 
 
 def server_list() -> list[dict]:
@@ -77,8 +92,10 @@ def server_list() -> list[dict]:
     return json.loads(r.stdout)["designs"]
 
 
-def pick(led: dict, ready: list[dict], n: int, skip: set[int]) -> tuple[list[int], list[str]]:
+def pick(led: dict, ready: list[dict], n: int, skip: set[int],
+         prefer: list[int] = ()) -> tuple[list[int], list[str]]:
     """Which designs the next fetch of `n` takes, in order, and any notes.
+    `prefer` (the owner's own picks) go before other new designs.
     Pure: changes nothing, so the rule can be tested on its own."""
     by_id = {d["saved_poster_id"]: d for d in ready}
     notes = []
@@ -94,6 +111,15 @@ def pick(led: dict, ready: list[dict], n: int, skip: set[int]) -> tuple[list[int
         first.append(int(key))
     new = [d["saved_poster_id"] for d in ready
            if str(d["saved_poster_id"]) not in led["designs"] and d["saved_poster_id"] not in skip]
+    wanted = []
+    for spid in prefer:
+        if str(spid) in led["designs"] or spid in skip:
+            continue                         # already fetched: the rule above handles it
+        if spid not in by_id:
+            notes.append(f"Hand pick {spid}: not ready on the server now, left for later")
+            continue
+        wanted.append(spid)
+    new = wanted + [s for s in new if s not in wanted]
     return (first + new)[:max(0, n)], notes
 
 
@@ -108,9 +134,11 @@ def fetch(n: int, folder: Path = DEFAULT_FOLDER, *, ready: list[dict] | None = N
         raise RuntimeError("The Storage Box (S:) is not connected. Open S: in File Explorer, "
                            "type the Storage Box password, then fetch again.")
     led = load(ledger_path)
-    ready = server_list() if ready is None else ready
+    if ready is None:
+        emit("Asking the server which designs are ready (about 10 seconds)…")
+        ready = server_list()
     by_id = {d["saved_poster_id"]: d for d in ready}
-    chosen, notes = pick(led, ready, n, manual_ids())
+    chosen, notes = pick(led, ready, n, manual_ids(), manual_wanted())
     for note in notes:
         emit(note)
 
@@ -123,6 +151,8 @@ def fetch(n: int, folder: Path = DEFAULT_FOLDER, *, ready: list[dict] | None = N
 
     used: set[str] = set()
     batch, copied, missing = [], 0, 0
+    if chosen:
+        emit(f"Copying {len(chosen)} files from S: (a few seconds each)…")
     for spid in chosen:
         src_row = by_id[spid]
         key = str(spid)

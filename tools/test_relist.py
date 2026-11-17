@@ -224,8 +224,6 @@ ok(tr_o.status == P.RELIST_WAITING and sp_o.times_listed == 0,
 ok(A._picture_cannot_leave(sp_o) is None, "a re-uploaded picture is no longer held as live")
 
 A.current_project = lambda request, admin, db: proj
-import app.place_check as PC
-PC.launch_check = lambda poster_id: None
 buf = io.BytesIO(); Image.new("RGB", (1200, 1600), (30, 120, 200)).save(buf, "JPEG")
 buf.seek(0)
 res = A.admin_pick_title(t_o.id, request=None, url="", file=UploadFile(buf, filename="mine.jpg"),

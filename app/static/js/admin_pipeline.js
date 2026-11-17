@@ -97,8 +97,6 @@
       ['same_picture_mode', 'select', 'Same picture on two titles',
        'What happens when a worker saves the exact same picture file that is already saved for a DIFFERENT title. "warn" tells them which title already has it and lets them save anyway. "block" refuses the save, with no way round it. "off" never checks. It compares the file itself, so it catches the same picture found at a different address or on a different day. A resized or re-saved copy is a different file and is not caught.',
        ['warn', 'block', 'off']],
-      ['place_check_enabled', 'bool', 'Check each image is the right place',
-       'Every saved image is shown to Google (web detection) and Google\'s words are compared to the title, so a photo of the wrong place gets a loud pill on the Worker Images screen. Needs the Google Vision key in the KEYS panel. About $3.50 per 1,000 images after Google\'s free 1,000 a month; each image is only ever paid for once. The worker never waits on it — the check runs just after the save.'],
     ],
     gpt: [
       ['openai_model',    'text',   'Model',    'gpt-image-2 unless you have a reason.'],
@@ -192,7 +190,6 @@
       ['brave_api_key_free', 'password','Brave key — free plan', 'Used for NORMAL searches. 1 request/second, 2,000 a month.'],
       ['brave_api_key_paid', 'password','Brave key — paid plan', 'Used for DEEP searches, which fire two queries at once and would trip the free key\'s 1/second limit. Also the fallback when the free quota runs out.'],
       ['openai_api_key',     'password','OpenAI key',            'Generates the images.'],
-      ['google_vision_api_key','password','Google Vision key',   'For the place check on worker images. Make it in Google Cloud with the Vision API turned on, then paste it here.'],
     ],
     upload: [
       ['upload_batch_size',   'number', 'Batch size',        'Images per upload run, capped by the account\'s remaining daily quota.'],

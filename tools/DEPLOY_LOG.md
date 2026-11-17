@@ -15,6 +15,7 @@ cost far more to read, answer a different question, and on a mounted working
 copy `git status` cannot refresh its index — it reports stale answers with
 no warning.
 
+- **2026-11-05 19:18** · `[178.105.34.144]` · `9b50404e` · v296 · v296: Junique list for the laptop fetch tool; fetch and upload tools
 - **2026-11-05 18:46** · `[178.105.34.144]` · `11ef0262` · v295 · v295: record each print file's enlargement settings; remake old print files with sharpen 80 + grain 4 (app/print_remake.py); Diagnostics counts old ones
 - **2026-11-05 18:19** · `[178.105.34.144]` · `011951bb` · v294 · v294: print files get sharpening 80 and grain 4 so Junique accepts them; deploy_cli.py lets the session deploy
 - **2026-11-05 03:17** · `[178.105.34.144]` · `232c814e` · v293 · the daily upload limit counts the last 24 hours; the node stops on a log-out or 3 failures in a row (node 1.35.0 to copy)
@@ -44,4 +45,3 @@ no warning.
 - **2026-10-11 13:01** · `[178.105.34.144]` · `d431976f` · v259 · deploy v259
 - **2026-10-09 16:40** · `[178.105.34.144]` · `00d332a3` · v258 · deploy v258
 - **2026-10-09 14:24** · `[178.105.34.144]` · `985378a5` · v257 · deploy v257
-- **2026-10-09 09:02** · `[178.105.34.144]` · `93859df5` · v255 · deploy v255

@@ -147,11 +147,6 @@
 
   let titles = [];
   let titleIdx = 0;
-  // The place check's page-level facts, delivered by /admin/api/browse:
-  // whether it is on, whether a key exists, and this month's usage. The
-  // per-image verdicts ride on each poster in `titles`, so the pills and
-  // the panel read ONE set of data and can never disagree.
-  let placeCheck = { enabled: false, key_present: false, checked_this_month: 0 };
   // The "I have looked at this one" key. It comes from the dashboard via
   // /admin/api/browse and is the SAME setting as KEEP on Approve Artwork
   // (9 by default), so one key means "this one is fine" on both screens.
@@ -192,11 +187,9 @@
     // The project decides its own quality threshold; 0 means "don't warn".
     if (typeof data.min_width === 'number') MIN_WIDTH = data.min_width;
     titles = data.titles || [];
-    placeCheck = data.place_check || placeCheck;
     if (data.keep_key) keepKey = String(data.keep_key);
     if (data.paste_key) pasteKey = String(data.paste_key);
     renderPaid(data.pay);
-    updatePlaceButton();
     sortTitles();
     // Restore title index from URL if available and valid, else 0.
     titleIdx = (restoredIdx > 0 && restoredIdx < titles.length) ? restoredIdx : 0;
@@ -232,36 +225,10 @@
   function currentBrowseSort() {
     try {
       const v = localStorage.getItem(BROWSE_SORT_KEY) || 'number';
-      const ok = ['number', 'newest', 'flagged', 'place'].includes(v) ? v : 'number';
-      // 'place' only means anything while the place check is on. If it is
-      // off, fall back to number rather than offering an order that cannot
-      // sort by anything — a control that does nothing is worse than absent.
-      if (ok === 'place' && !placeCheck.enabled) return 'number';
-      return ok;
+      // A remembered 'place' (the Google place check, removed in v297)
+      // falls back to number like any other unknown value.
+      return ['number', 'newest', 'flagged'].includes(v) ? v : 'number';
     } catch (e) { return 'number'; }
-  }
-
-  // The worst (most-urgent) place verdict among a title's images, as a rank
-  // — lower is more urgent. Reuses placeVerdict() so this order and the
-  // PLACE CHECK panel's order are the SAME ordering read from one place, and
-  // cannot drift apart. A title with no images sorts as "no problem".
-  function worstPlaceRank(t) {
-    const ranks = (t.posters || []).map((p) => placeVerdict(p).rank);
-    return ranks.length ? Math.min(...ranks) : 99;
-  }
-
-  // One spelling of each pill, so the grid box and the zoomed view show the
-  // same thing. The source pill (Brave/Google/pasted) moved into
-  // poster_lightbox.js — LB.sourcePill — so Changes Requested says the same
-  // words; the place-check pill stays here because the place check is this
-  // page's feature.
-  function placePillNode(p) {
-    const v = placeVerdict(p);
-    const s = document.createElement('span');
-    s.className = 'place-pill ' + v.cls;
-    s.textContent = v.word;
-    s.title = v.tip;
-    return s;
   }
 
   // A title is DONE when every live picture on it carries the admin's K
@@ -456,12 +423,6 @@
       titles.sort((a, b) =>
         ((b.needs_revision ? 1 : 0) - (a.needs_revision ? 1 : 0))
         || (numOf(a) - numOf(b)));
-    } else if (mode === 'place') {
-      // Problems on top: worth-a-look, then no-read, then not-checked, then
-      // the fine ones — the same order as the PLACE CHECK panel. Sheet
-      // number breaks ties so the top group is still in a stable order.
-      titles.sort((a, b) => (worstPlaceRank(a) - worstPlaceRank(b))
-        || (numOf(a) - numOf(b)));
     } else {
       titles.sort((a, b) => numOf(a) - numOf(b));
     }
@@ -558,13 +519,6 @@
     // "saved 13 Oct" when the picture came on a later day than its title.
     const laterPill = LB.savedLaterPill(p);
     if (laterPill) pillsHost.appendChild(laterPill);
-    // The place check's verdict. A DOT marker rather than a rectangle, so
-    // at a glance it cannot be confused with the source pill beside it —
-    // "found via Google" and "Google says it is the right place" are two
-    // different facts. Absent entirely when the feature is off.
-    if (placeCheck.enabled) {
-      pillsHost.appendChild(placePillNode(p));
-    }
     if (p.added_by) {
       // The one spelling of the label, shared with the zoom.
       const pill = LB.adminPickPill(p);
@@ -718,7 +672,7 @@
   // ── Lightbox — the shared zoom, wired for THIS page ─────────────────────
   // The rendering, stepping and keyboard live in poster_lightbox.js. This
   // page supplies: the day's list (arrow through the whole day without
-  // closing — owner's ask 2026-09-06), the place-check pill, the resume
+  // closing — owner's ask 2026-09-06), the resume
   // memory, and which page-owned buttons exist here (all of them).
   LB.init({
     fileUrl: (p) => fileUrl(p.poster_id, p.size || p.filename),
@@ -727,7 +681,6 @@
       (titles || []).forEach((t) => (t.posters || []).forEach((p) => out.push({ t, p })));
       return out;
     },
-    extraPills: (t, p) => (placeCheck.enabled ? [placePillNode(p)] : []),
     // "(31 left)" beside the zoom's "2 / 102": pictures neither kept nor
     // flagged — the same pictureOwed the day's count uses.
     leftCount: () => allPosters().filter((r) => pictureOwed(r.p)).length,
@@ -740,8 +693,7 @@
     // title outline, the day count. Deliberately NOT re-sorted here: the
     // page must never reorder under the cursor mid-review; reviewed ones
     // sink on the next load or when the order dropdown is touched.
-    // The place panel too: keeping a picture now settles its place check.
-    onReviewed: () => { renderGallery(); refreshSummary(); renderPlacePanel(); },
+    onReviewed: () => { renderGallery(); refreshSummary(); },
     // USE MY OWN PICTURE, beside the zoomed picture — and PASTE PICTURE,
     // the same dialog opened ready for a picture copied in Google (owner,
     // 2026-10-09: "like Photopea"). Ctrl+V in the zoom does the same; see
@@ -761,10 +713,6 @@
       reviewKey: () => keepKey,
       flag: true,
       retire: true,
-      // Shown only for a verdict that CAN be acknowledged (Google
-      // disagreed, or had no opinion).
-      placeAck: (t, p) => placeCheck.enabled
-        && (p.place_status === 'mismatch' || p.place_status === 'no_opinion'),
     },
   });
   const openLightbox  = (t, p) => LB.open(t, p);
@@ -1052,41 +1000,6 @@
     }
   });
 
-  // Acknowledge the place check from inside the zoom, so you can arrow
-  // through the flagged ones and clear each without going back to the grid.
-  // Stays in the lightbox afterward — the point is to keep moving. The
-  // underlying poster object is updated in place, so the pill and the grid
-  // behind agree the moment you look at them. (CHECK GOOGLE itself is
-  // bound inside poster_lightbox.js — it is the same on every page.)
-  const lbPlaceAck = $('ib-lb-place-ack');
-  if (lbPlaceAck) {
-    lbPlaceAck.addEventListener('click', async () => {
-      const cur = LB.current();
-      if (!cur) return;
-      const { master, poster } = cur;
-      lbPlaceAck.disabled = true;
-      try {
-        const r = await fetch('/admin/api/place_check/ack', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ poster_id: poster.poster_id, on: !poster.place_acked }),
-        });
-        const d = await r.json();
-        if (r.ok && d.ok) {
-          poster.place_acked = d.acked;   // same object the grid renders
-          // Same late-answer guard as the flag button: refresh the pill
-          // and the button only if the zoom still shows this picture.
-          const cur = LB.current();
-          if (cur && cur.poster.poster_id === poster.poster_id) {
-            LB.open(master, poster);
-          }
-        } else {
-          alert('Could not save that: ' + (d.detail || r.status));
-        }
-      } finally { lbPlaceAck.disabled = false; }
-    });
-  }
-
   // Keyboard nav — the open zoom owns its own keys (Esc / arrows / K)
   // inside poster_lightbox.js, so this handler steps aside while it shows.
   document.addEventListener('keydown', (e) => {
@@ -1115,235 +1028,11 @@
   $('ib-prev-title').addEventListener('click', () => navTitle(-1));
   $('ib-next-title').addEventListener('click', () => navTitle(1));
 
-  // ── The place check ─────────────────────────────────────────────────────
-  // Each saved image was shown to Google, and Google's words are compared
-  // to the title. The pill on each box and the rows in this panel read the
-  // SAME per-poster fields off `titles`, so they cannot disagree. The fill
-  // loop below asks the server for one small chunk at a time and the stop
-  // signal is simply not asking again — nothing is ever queued server-side,
-  // so closing the panel IS the stop button.
-
-  // One spelling of each state's word, colour class and explanation, shared
-  // by the pill and the panel row.
-  function placeVerdict(p) {
-    if (p.place_status === 'match') {
-      return { cls: 'place-ok', word: 'place ✓', rank: 4,
-               tip: 'Google sees: ' + (p.place_guess || '(nothing)') };
-    }
-    if (p.place_status === 'mismatch' || p.place_status === 'no_opinion') {
-      if (p.place_acked) {
-        return { cls: 'place-acked', word: 'checked ✓', rank: 3,
-                 tip: 'You looked at this one and marked it fine. Google saw: '
-                      + (p.place_guess || 'nothing') };
-      }
-      if (p.place_status === 'mismatch') {
-        return { cls: 'place-warn', word: 'CHECK PLACE', rank: 0,
-                 tip: 'Google\'s words share nothing with the title. Google sees: '
-                      + (p.place_guess || '(nothing)') };
-      }
-      return { cls: 'place-none', word: 'no read', rank: 1,
-               tip: 'Google had no opinion on this picture — not a fault, just no answer.' };
-    }
-    if (p.place_error) {
-      return { cls: 'place-err', word: 'check failed', rank: 2,
-               tip: 'The check could not run. Open PLACE CHECK THIS DAY to see why and retry.' };
-    }
-    return { cls: 'place-wait', word: 'not checked', rank: 2,
-             tip: 'Not checked yet. Press PLACE CHECK THIS DAY to fill it in.' };
-  }
-
-  function updatePlaceButton() {
-    const btn = $('ib-place-btn');
-    if (btn) btn.hidden = !placeCheck.enabled;
-    // The "problems first" order only appears while the place check is on.
-    const opt = document.querySelector('[data-place-sort]');
-    if (opt) opt.hidden = !placeCheck.enabled;
-    // Keep the visible dropdown showing the order actually in use. The
-    // dropdown is first set at page load, before this page knows whether the
-    // place check is on, so a remembered 'place' choice could otherwise show
-    // 'number' in the menu while the grid really is sorted by place (or the
-    // reverse once it turns off). currentBrowseSort() is the one source of
-    // truth for both the menu and the sort.
-    const sel = $('ib-sort');
-    if (sel) sel.value = currentBrowseSort();
-  }
-
-  const placeModal = $('ib-place-modal');
-  let placeRunning = false;
-
+  // Every picture of the day with its title, in grid order.
   function allPosters() {
     const out = [];
     titles.forEach((t) => (t.posters || []).forEach((p) => out.push({ t, p })));
     return out;
-  }
-
-  function renderPlacePanel() {
-    if (!placeModal) return;
-    const rows = allPosters();
-    const unchecked = rows.filter((r) => r.p.place_status == null).length;
-    const worry = rows.filter((r) => placeVerdict(r.p).rank === 0).length;
-
-    $('ib-place-day').textContent = `${$('ib-worker').value} · ${$('ib-date').value}`;
-    $('ib-place-month').textContent =
-      `${placeCheck.checked_this_month} image(s) checked this month across all days · Google's first 1,000 each month are free`;
-
-    let summary;
-    if (!placeCheck.key_present) {
-      summary = 'No Google Vision key yet, so nothing can be checked. '
-        + 'Paste the key into the KEYS panel on the Pipeline page first.';
-    } else if (rows.length === 0) {
-      summary = 'Nothing saved on this day.';
-    } else {
-      summary = `${rows.length} image(s) on this day · ${worry} worth a look · ${unchecked} not checked yet. `
-        + 'Rows are ordered by how much they need you: Google disagreeing first, '
-        + 'then no answer, then the rest.';
-    }
-    $('ib-place-summary').textContent = summary;
-
-    const runBtn = $('ib-place-run');
-    runBtn.textContent = placeRunning
-      ? 'CHECKING…'
-      : `CHECK THE ${unchecked} UNCHECKED ON THIS DAY`;
-    runBtn.disabled = placeRunning || unchecked === 0 || !placeCheck.key_present;
-
-    const list = $('ib-place-list');
-    list.innerHTML = '';
-    rows
-      .map((r) => ({ ...r, v: placeVerdict(r.p) }))
-      .sort((a, b) => (a.v.rank - b.v.rank)
-        || ((a.t.external_id == null ? Infinity : a.t.external_id)
-          - (b.t.external_id == null ? Infinity : b.t.external_id)))
-      .forEach(({ t, p, v }) => {
-        const row = document.createElement('div');
-        row.className = 'place-row ' + v.cls;
-
-        const img = document.createElement('img');
-        img.src = fileUrl(p.poster_id, p.size || p.filename);
-        img.loading = 'lazy';
-        img.alt = '';
-        row.appendChild(img);
-
-        const body = document.createElement('div');
-        body.className = 'place-row-body';
-        const name = document.createElement('div');
-        name.className = 'place-row-title';
-        name.textContent = (t.external_id != null ? t.external_id + '. ' : '') + t.title;
-        body.appendChild(name);
-        const guess = document.createElement('div');
-        guess.className = 'place-row-guess muted';
-        if (p.place_status != null) {
-          guess.textContent = p.place_guess
-            ? 'Google sees: ' + p.place_guess
-            : 'Google had no opinion.';
-        } else if (p.place_error) {
-          guess.textContent = 'Check failed — press the button above to retry.';
-        } else {
-          guess.textContent = 'Not checked yet.';
-        }
-        body.appendChild(guess);
-        row.appendChild(body);
-
-        const chip = document.createElement('span');
-        chip.className = 'place-pill ' + v.cls;
-        chip.textContent = v.word;
-        row.appendChild(chip);
-
-        // The way OUT of the worth-a-look list, on the same screen as the
-        // flag — otherwise the count only ever climbs and stops being read.
-        if (p.place_status === 'mismatch' || p.place_status === 'no_opinion') {
-          const ack = document.createElement('button');
-          ack.type = 'button';
-          ack.className = 'btn btn-ghost btn-tiny';
-          ack.textContent = p.place_acked ? 'UNDO' : 'CHECKED, IT\'S FINE';
-          ack.addEventListener('click', async () => {
-            ack.disabled = true;
-            try {
-              const r = await fetch('/admin/api/place_check/ack', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ poster_id: p.poster_id, on: !p.place_acked }),
-              });
-              const d = await r.json();
-              if (r.ok && d.ok) { p.place_acked = d.acked; renderPlacePanel(); }
-              else alert('Could not save that: ' + (d.detail || r.status));
-            } finally { ack.disabled = false; }
-          });
-          row.appendChild(ack);
-        }
-        list.appendChild(row);
-      });
-  }
-
-  async function placeRunLoop() {
-    if (placeRunning) return;
-    placeRunning = true;
-    renderPlacePanel();
-    const statusEl = $('ib-place-status');
-    let done = 0;
-    try {
-      while (placeRunning) {
-        const r = await fetch('/admin/api/place_check/run', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ worker: $('ib-worker').value, date: $('ib-date').value }),
-        });
-        const d = await r.json();
-        if (!r.ok || !d.ok) {
-          statusEl.textContent = d.detail || ('The server answered ' + r.status + '.');
-          break;
-        }
-        let failed = '';
-        (d.results || []).forEach((res) => {
-          for (const { p } of allPosters()) {
-            if (p.poster_id === res.poster_id) {
-              p.place_status = res.status;
-              p.place_guess = res.guess;
-              p.place_error = !!res.error;
-              if (res.status != null) placeCheck.checked_this_month += 1;
-              if (res.error) failed = res.error;
-              break;
-            }
-          }
-        });
-        done += (d.results || []).length;
-        renderPlacePanel();
-        if (failed) {
-          // The server stops a chunk at the first failure so one broken
-          // key reports once instead of stamping every row. Stopping the
-          // loop too keeps the message on screen instead of repeating it.
-          statusEl.textContent = 'Stopped: ' + failed;
-          break;
-        }
-        if (!d.remaining) {
-          statusEl.textContent = `Done — ${done} checked just now.`;
-          break;
-        }
-        statusEl.textContent = `${done} checked · ${d.remaining} to go…`;
-      }
-    } catch (e) {
-      statusEl.textContent = 'Stopped: ' + (e && e.message ? e.message : e);
-    } finally {
-      // Whatever entered the busy state leaves it on every path.
-      placeRunning = false;
-      renderPlacePanel();
-    }
-  }
-
-  if ($('ib-place-btn') && placeModal) {
-    $('ib-place-btn').addEventListener('click', () => {
-      placeModal.hidden = false;
-      $('ib-place-status').textContent = '';
-      renderPlacePanel();
-    });
-    placeModal.querySelectorAll('[data-place-close]').forEach((el) => {
-      el.addEventListener('click', () => {
-        placeRunning = false;          // closing the panel IS the stop button
-        placeModal.hidden = true;
-        renderGallery();               // pills catch up with what was checked
-      });
-    });
-    $('ib-place-run').addEventListener('click', placeRunLoop);
-    updatePlaceButton();
   }
 
   // ── Date data (must come before saved-state restore) ────────────────────

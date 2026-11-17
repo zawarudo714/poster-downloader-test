@@ -12,9 +12,8 @@
        stepping with the arrows, the title/meta lines, the source pill,
        the reviewed (K) pill and its save, the flag-info panel, the
        CHECK GOOGLE button, and the keyboard (Esc / arrows / K).
-     - THE PAGE owns its decisions. Flagging, clearing a flag, the place
-       check's "checked, it's fine" and RETIRE TITLE are Worker Images
-       actions and stay bound in admin.js; Changes Requested decides with
+     - THE PAGE owns its decisions. Flagging, clearing a flag and RETIRE
+       TITLE are Worker Images actions and stay bound in admin.js; Changes Requested decides with
        APPROVE / REJECT on its cards instead — a second door to "send
        back" inside the zoom would be two paths to one action.
    The `features` switches below only show or hide those page-owned
@@ -174,16 +173,9 @@
     if (!r.ok) { alert('Could not save the mark: ' + r.status); return; }
     const d = await r.json();
     p.reviewed = !!d.reviewed;
-    // Keeping also settles the place check, and un-keeping takes back an
-    // ack the keep made (server: admin_toggle_reviewed). The pill and the
-    // CHECKED, IT'S FINE button are drawn by open(), so redraw the zoom
-    // when that answer changed rather than only the K pill.
-    const placeChanged = ('place_acked' in d) && !!p.place_acked !== !!d.place_acked;
-    if ('place_acked' in d) p.place_acked = !!d.place_acked;
     if (opts && opts.onReviewed) opts.onReviewed(t, p);
     if (current && current.poster.poster_id === p.poster_id) {
-      if (placeChanged) open(t, p);
-      else { renderReviewed(p); renderPos(p); }
+      renderReviewed(p); renderPos(p);
     }
   }
 
@@ -261,8 +253,8 @@
     $id('ib-lb-meta').textContent =
       `${t.title}${t.year ? ` (${t.year})` : ''} — ${p.filename}${dims}${lq}${from}`;
 
-    // Pills: the source pill is universal; the page adds its own after it
-    // (the place-check verdict on Worker Images). The reviewed pill is
+    // Pills: the source pill is universal; a page may add its own after it
+    // (opts.extraPills). The reviewed pill is
     // re-rendered last so it always sits at the end.
     const pillsHost = $id('ib-lb-pills');
     if (pillsHost) {
@@ -318,17 +310,6 @@
     }
     const retireBtn = $id('ib-lb-retire');
     if (retireBtn) retireBtn.hidden = !f.retire;
-    // "Checked, it's fine" — the page decides per image whether the verdict
-    // can be acknowledged at all (Worker Images only).
-    const ackBtn = $id('ib-lb-place-ack');
-    if (ackBtn) {
-      const ackable = !!(f.placeAck && f.placeAck(t, p));
-      ackBtn.hidden = !ackable;
-      if (ackable) {
-        ackBtn.textContent = p.place_acked ? 'UNDO — MARK IT A PROBLEM AGAIN'
-                                           : "CHECKED, IT'S FINE";
-      }
-    }
 
     // CHECK GOOGLE — shows Google Images for this place in the companion
     // tab, so the scenic view can be confirmed without leaving the zoom.
@@ -395,7 +376,7 @@
     if (next) next.addEventListener('click', () => step(1));
 
     // KEEP — the keep key as a button, for a phone (owner, 2026-10-09).
-    // Goes through the very same toggleReviewed, so the place check, the
+    // Goes through the very same toggleReviewed, so the
     // counts and the grid all follow exactly as they do for the key.
     const keepBtn = $id('ib-lb-keep');
     if (keepBtn) {

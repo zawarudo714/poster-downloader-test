@@ -1,6 +1,6 @@
 {# The shared image zoom — included by every admin page that loads
    static/js/poster_lightbox.js (Worker Images and Changes Requested).
-   The ids here are that script's markup contract; the flag / place-ack /
+   The ids here are that script's markup contract; the flag and
    retire buttons are shown or hidden per page by its `features`, and are
    BOUND only where the page's own script does so (admin.js). #}
 <div id="ib-lightbox" class="lightbox" hidden>
@@ -40,7 +40,6 @@
       <button class="btn btn-success" id="ib-lb-keep" hidden>KEEP</button>
       <button class="btn btn-error" id="ib-lb-flag-btn">FLAG FOR CHANGES</button>
       <button class="btn btn-ghost" id="ib-lb-unflag-btn" hidden>CLEAR FLAG</button>
-      <button class="btn btn-ghost" id="ib-lb-place-ack" hidden>CHECKED, IT'S FINE</button>
       <button class="btn btn-info" id="ib-lb-google" hidden
               title="Open Google Images for this place in a new tab, to confirm the picture and judge whether it is the most scenic view.">CHECK&nbsp;GOOGLE</button>
       <button class="btn btn-ghost btn-retire" id="ib-lb-retire"

@@ -62,7 +62,7 @@
     // Approving IS the "seen" mark on this page (the server stamps it), so
     // the K key is off here — one screen, one way to say it. The text box
     // becomes the verdict box, copied to the card when a button is pressed.
-    features: { flag: false, retire: false, placeAck: false,
+    features: { flag: false, retire: false,
                 reviewK: false,
                 commentPlaceholder: '(verdict — required for REJECT)' },
     // The zoomed picture's own decision buttons: exact proxies of the

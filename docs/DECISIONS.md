@@ -5,6 +5,21 @@ A replaced decision stays here, marked SUPERSEDED, never deleted.
 Older decisions are tagged `DECIDED <date>` where they apply (in the docs and
 in `AUDIT.md`); search for `DECIDED` to find them.
 
+- 2026-11-17 · The Google place check is removed (v297): no more Google
+  Vision call after each save, no place pill, no PLACE CHECK THIS DAY panel,
+  no "Google Vision key" or on/off box, no Diagnostics row. The
+  `place_check_*` columns stay, unused, so no migration is needed. It cost
+  about $5.60 in October (2,592 checks, 808 called "wrong place";
+  `MEASURED 2026-11-17`) · owner: "it has no use really when I have to
+  manually check anyway ... its not always accurate" · `AUDIT.md` Worker
+  Images rows; the deleted module is described in `docs/HISTORY.md`
+- 2026-11-05 · The Junique uploader waits only for the page, never a fixed
+  time: no 4 s wait for a switch on a card marked "--disabled", no 3 s after
+  the picture, checks every 0.1 s, and "Seconds between steps" 0.3 (was 1.0)
+  for the few settles left. A last read of every switch before Save catches a
+  click that landed on the wrong product. Target: 1 minute per design before
+  Publish (Istanbul took about 5) · owner: "Junique needs no moment after each
+  click" · `tools/junique/junique_upload.py`; the log's "took:" line measures it
 - 2026-11-05 · All 318 old print files are remade with sharpening 80 and
   grain 4 (v295, `app/print_remake.py`); FineArtAmerica uses the same files
   for everything not yet live. The 201 already live there are left as they

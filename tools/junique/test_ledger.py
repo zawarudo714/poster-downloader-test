@@ -23,7 +23,9 @@ for i in range(1, 121):
     ready.append({"saved_poster_id": i, "processed_image_id": 1000 + i,
                   "title": f"Place {i}", "storage_path": rel, "approved_at": None})
 manual = {3}                       # uploaded by hand: never fetched
+real_ids, real_wanted = L.manual_ids, L.manual_wanted
 L.manual_ids = lambda path=None: manual
+L.manual_wanted = lambda path=None: []   # never the owner's real CSV
 
 ok = lambda cond, msg: print(("PASS " if cond else "FAIL ") + msg) or (cond or sys.exit(1))
 quiet = lambda s: None
@@ -57,5 +59,16 @@ ready_now = [d for d in ready if d["saved_poster_id"] != 52]     # re-made: not 
 picked, notes = L.pick(L.load(led_path), ready_now, 3, manual)
 ok(52 not in picked and any("Place 52" in n for n in notes),
    "an unfinished design that is no longer ready is held back and named")
+
+# The owner's hand picks that Junique refused come first, ahead of other new ones.
+picked, _ = L.pick({"designs": {}}, ready, 4, {3}, prefer=[90, 7, 3])
+ok(picked == [90, 7, 1, 2], f"refused hand picks go first, a skipped one stays out ({picked})")
+rows = tmp / "manual.csv"
+rows.write_text("title,saved_poster_id,junique_status\nA,5,picked - upload by hand\n"
+                "B,6,refused as upscaled - fetch again\n", encoding="utf-8")
+ok(real_wanted(rows) == [6], "the CSV marks which hand picks the tool fetches")
+ok(real_ids(rows) == {5}, "a 'fetch again' pick is no longer skipped")
+ok(real_wanted() and not set(real_wanted()) & real_ids(),
+   f"the real CSV: the 4 refused picks are wanted and not skipped ({real_wanted()})")
 
 print("ALL PASS")

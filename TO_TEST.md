@@ -490,36 +490,6 @@ Added in v203:
 
 ---
 
-## 61. THE PLACE CHECK — v206
-
-- First, the key: make an API key in Google Cloud with the Vision API
-  turned on, and paste it into the KEYS panel on the Pipeline page
-  ("Google Vision key"). This is the one step only you can do.
-- Save a fresh image as a worker. The save itself should feel exactly as
-  fast as before. Refresh the Worker Images screen a few seconds later:
-  the new box should carry a small round dot — green "place ✓" if Google
-  agrees with the title, amber "CHECK PLACE" if it does not.
-- Press PLACE CHECK THIS DAY on the Worker Images screen. The panel should
-  list the day's images beside "Google sees: …", with the amber ones at
-  the top. Press the CHECK THE N UNCHECKED button and watch older images
-  on that day fill in a few at a time; closing the panel stops it.
-- On an amber row, press CHECKED, IT'S FINE — the row should drop down the
-  list and the box's dot should turn to a dashed green "checked ✓" after
-  you close the panel.
-- The honest failure: with the key box EMPTY and the toggle on, a fresh
-  save should show a red "check failed" dot (hover it), the panel should
-  say plainly that the key is missing, and Diagnostics should carry a
-  warning called "place check(s) could not run". Nothing anywhere should
-  pretend it is fine.
-- The wrong-place case that started this: save a picture of one city on a
-  different city's title — it should come up amber with Google naming the
-  real place, which is the whole feature.
-- The bill: the panel header should count "images checked this month" as
-  you go. Google's first 1,000 each month are free, then about $3.50 per
-  1,000.
-
----
-
 ## 62. IMAGES IN CHAT — v210
 
 - On the admin chat, open a worker thread, press the image button (🖼) by the
@@ -614,9 +584,6 @@ Added in v203:
   Activity Log. Have a worker save something and watch it update within ~15
   seconds.
 - The two audit fixes, same version:
-  · Replace a flagged image by pasting a URL. A few seconds later its
-    place-check dot should reflect the NEW picture (it re-checks), not the
-    verdict the old picture had.
   · Try adding a small image (under 350 on a side) through YOUR own + ADD
     box on Worker Images. It should refuse with the size message — the
     admin door now has the same floor as every worker door.
@@ -835,7 +802,7 @@ Open Changes Requested while anything is waiting (any section):
   source pill, CHECK GOOGLE — instead of a bare file in a new browser tab.
 - **Arrow keys** step through every picture on the page; Escape closes;
   **K** marks one as looked-at (green ring on the thumbnail too).
-- The zoom here deliberately has NO flag, retire or "checked, it's fine"
+- The zoom here deliberately has NO flag or retire
   buttons — decisions stay on the card (APPROVE / REJECT with your typed
   verdict).
 - **Approve = reviewed:** APPROVE (single fix) or APPROVE COMPLETION
@@ -1148,13 +1115,8 @@ On Changes Requested, click a thumbnail to zoom:
 - Open a picture's zoom on Changes Requested. The same buttons should be
   there.
 
-## 101. KEEP SETTLES THE PLACE CHECK, "LEFT" COUNTS, FOLDED PAID LIST — v251
+## 101. "LEFT" COUNTS, FOLDED PAID LIST — v251
 
-- Open a picture whose place check says it may be the wrong place, and
-  press the keep key. The place pill should change to checked as well.
-  Press the keep key again. Both should go back.
-- Press CHECKED, IT'S FINE on a picture first, then keep and un-keep it.
-  The CHECKED mark should stay, because you made it separately.
 - The counter under the gallery should read like "2 / 100 (61 left)", and
   the zoom like "2 / 102 (31 left)". Keeping or flagging one should lower
   the number left.
@@ -1479,6 +1441,21 @@ its own Chrome, and stops before Publish so you can check each one.
 **What it means if it does not:** the log says FAILED with the reason and a
 screenshot path. Send me both. A draft it left on Junique is named in the log;
 delete it there by hand.
+
+## 121. THE GOOGLE PLACE CHECK IS GONE — v297
+
+- Open Worker Images on a day with pictures. No round "place ✓" or "CHECK
+  PLACE" dot should show on any picture, and there should be no PLACE CHECK
+  THIS DAY button.
+- Open a picture in the zoom. There should be no CHECKED, IT'S FINE button.
+  CHECK GOOGLE should still open Google Images. Press the keep key: the
+  picture should be marked kept as before, and pressing it again unmarks it.
+- The order menu should offer three choices: sheet number, newest, flagged.
+- The Pipeline settings page should have no "Check each image is the right
+  place" box and no "Google Vision key" box.
+- Diagnostics should have no row about the place check.
+- You can now delete the Vision API key in Google Cloud (or switch the
+  Vision API off) so nothing can ever be charged there.
 
 ## NOT ON THIS LIST, ON PURPOSE
 

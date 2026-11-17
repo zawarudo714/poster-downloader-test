@@ -354,10 +354,12 @@ class SavedPoster(Base):
     # be per (poster, account); revisit before adding a second upload account.
     times_listed       = Column(Integer, nullable=False, default=0)
 
-    # ── The place check: does the photo show the place the title names? ────
-    # Google web detection is asked once per image (the file is immutable —
-    # a swap creates a successor row — so a row needs one verdict, ever).
-    # See app/place_check.py for the whole design.
+    # ── The place check (REMOVED in v297, 2026-11-17) ──────────────────────
+    # Google web detection used to be asked once per image and its verdict
+    # shown as a pill on Worker Images. The owner removed it: it was not
+    # always right and he checks every picture by eye anyway. Nothing reads
+    # or writes these columns now; they are kept so old rows stay readable
+    # and no migration is needed. The old code is in docs/HISTORY.md's note.
     #
     #   place_check_status   'match' | 'mismatch' | 'no_opinion' | NULL.
     #                        NULL = not answered yet: either never tried, or

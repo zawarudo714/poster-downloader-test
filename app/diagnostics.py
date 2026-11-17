@@ -2132,65 +2132,6 @@ def check_finished_titles_hold_no_unseen_replacement(db: Session, scope: Scope) 
         "warn" if total else "ok", rows[:MAX_ROWS], total,
     )
 
-def check_place_check_is_answering(db: Session, scope: Scope) -> CheckResult:
-    """
-    INVARIANT: while the place check is ON, "we could not ask Google" must
-    never sit quietly. A failed attempt leaves status NULL and an error on
-    the row (see app/place_check.py); those rows are invisible on the
-    screens except as a small "check failed" pill, so a dead API key or a
-    spent quota could otherwise go unnoticed for weeks while every new
-    image silently misses its check. This is the watcher every outside
-    number needs on day one — a cross-check that has gone blind reports
-    agreement for ever.
-
-    Findings are ONE PER IMAGE, each linking to that worker and day on the
-    Worker Images screen. They were grouped by error text at first — one
-    broken key, one row with a count — but a grouped row can only link to
-    the browse page's front door, and the owner clicked it expecting to land
-    on the problem (2026-09-18). A link that answers "which picture?" beats
-    a tidy count; the heading still carries the total, and MAX_ROWS keeps a
-    broken key from producing a page of rows.
-    """
-    from .pipeline import get_setting
-    try:
-        enabled = bool(int(get_setting(db, "place_check_enabled", project=scope.project) or 0))
-    except Exception:
-        enabled = False
-    if not enabled:
-        return _skipped(
-            "place_check_answering", "The place check is answering",
-            "The place check is switched off on the Pipeline settings page, "
-            "so there is nothing to watch.")
-
-    q = (db.query(SavedPoster)
-           .filter(SavedPoster.deleted_at.is_(None),
-                   SavedPoster.place_check_status.is_(None),
-                   SavedPoster.place_check_error.isnot(None))
-           .order_by(SavedPoster.id.desc()))
-    total = q.count()
-
-    rows = [Finding(
-                what=f"{sp.username} · {sp.title_folder_path} · {sp.filename}",
-                detail=f"failed with: {sp.place_check_error}",
-                link=f"/admin/browse?worker={sp.username}"
-                     f"&date={sp.original_save_date}",
-                project=scope.label(_project_of(db, sp)),
-            )
-            for sp in q.limit(MAX_ROWS).all()]
-    return _result(
-        "place_check_answering",
-        f"{total} place check(s) could not run"
-        if total else "Every attempted place check got an answer",
-        "These images were sent for the place check and the check itself "
-        "failed — a missing or refused Google key, a spent quota, or a "
-        "network fault. This is different from Google having no opinion, "
-        "which is a normal answer. Fix the cause (usually the key on the "
-        "Pipeline page), then press PLACE CHECK THIS DAY on the Worker "
-        "Images screen — the same button retries everything that failed.",
-        "warn" if total else "ok", rows, total,
-    )
-
-
 def check_print_files_have_todays_enlargement(db: Session, scope: Scope) -> CheckResult:
     """
     INVARIANT: every approved print file was enlarged with today's settings.
@@ -4051,7 +3992,6 @@ CHECKS: list[Callable[[Session, "Scope"], CheckResult]] = [
     check_needs_revision_matches_open_flags,
     check_finished_titles_hold_no_unseen_replacement,
     check_retired_titles_hold_nothing,
-    check_place_check_is_answering,
     check_backgrounds_are_readable,
     check_chosen_colour_was_painted,
     check_upload_gap_is_holding,

@@ -14,7 +14,7 @@ from pathlib import Path
 # Bumped on every deploy. Templates append `?v={APP_VERSION}` to every
 # <script> and <link rel="stylesheet"> URL, so deploys force browsers to
 # refetch JS/CSS automatically — no Ctrl+Shift+R needed by users.
-APP_VERSION = "301"
+APP_VERSION = "302"
 
 
 # ── Paths ────────────────────────────────────────────────────────────────────
@@ -25,6 +25,13 @@ APP_DIR = Path(__file__).resolve().parent
 # in production to put it on a larger volume.
 WORKSPACE_DIR = Path(os.environ.get("WORKSPACE_DIR", BASE_DIR / "workspace")).resolve()
 WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+
+# Worker pictures the owner turned down, kept instead of deleted (v302), so
+# a picture check can later be measured against his real decisions. It sits
+# BESIDE the workspace, never inside it: every folder in the workspace is
+# read as a worker or a project (utils.list_workers, workspace_migration).
+REJECTED_DIR = Path(os.environ.get("REJECTED_DIR",
+                                   WORKSPACE_DIR.parent / "rejected_originals")).resolve()
 
 # Database
 DATABASE_URL = os.environ.get("DATABASE_URL", f"sqlite:///{BASE_DIR / 'poster.db'}")

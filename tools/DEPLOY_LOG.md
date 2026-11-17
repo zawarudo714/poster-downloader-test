@@ -15,6 +15,7 @@ cost far more to read, answer a different question, and on a mounted working
 copy `git status` cannot refresh its index — it reports stale answers with
 no warning.
 
+- **2026-11-17 11:33** · `[178.105.34.144]` · `1c387916` · v301 · v301: Usage pay table loads in 0.07 s instead of 21 s; panels report a slow answer
 - **2026-11-17 11:27** · `[178.105.34.144]` · `b153b9f9` · v300 · v300: Usage worker pay counts Pay and Paid by save month at each run's rate; To pay column
 - **2026-11-17 11:19** · `[178.105.34.144]` · `91e09695` · v299 · v299: server-bill pill starts with October paid, first shows 24 Nov
 - **2026-11-17 11:17** · `[178.105.34.144]` · `e2470d2d` · v298 · v298: Usage keeps the project menu; server prices and worker pay by month on Usage; 24th server-bill pill with Paid tick; readable date boxes
@@ -44,4 +45,3 @@ no warning.
 - **2026-10-26 12:28** · `[178.105.34.144]` · `a39cf543` · v265 · deploy v265
 - **2026-10-23 12:56** · `[178.105.34.144]` · `98e09ed3` · v264 · deploy v264
 - **2026-10-18 16:47** · `[178.105.34.144]` · `e415db4c` · v263 · deploy v263
-- **2026-10-13 07:05** · `[178.105.34.144]` · `7b6e4c2a` · v262 · deploy v262

@@ -68,6 +68,7 @@ from ..projects import (
 )
 from ..timeutil import fmt_local, local_today
 from ..templating import templates, _flag_history
+from ..rejected_originals import remove_picture_file
 from ..utils import (
     count_live_posters_for_master,
     count_user_saves_for_date, count_user_saves_for_week,
@@ -2456,7 +2457,7 @@ def _withdraw_pictures(db: Session, posters: list, *, note: str,
             rv.resolved_at = now
             rv.admin_verdict = verdict
         fs_path = saved_poster_path(sp)
-        fs_path.unlink(missing_ok=True)
+        remove_picture_file(db, sp, fs_path, reason=note, by_owner=True)
         sp.deleted_at = now
         sp.delete_note = note
         if pay and not sp.added_by:

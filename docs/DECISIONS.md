@@ -5,6 +5,16 @@ A replaced decision stays here, marked SUPERSEDED, never deleted.
 Older decisions are tagged `DECIDED <date>` where they apply (in the docs and
 in `AUDIT.md`); search for `DECIDED` to find them.
 
+- 2026-11-17 · Worker pictures the owner turns down (any flagged one, and any
+  he deletes himself) are moved to `data/rejected_originals/` with a line in
+  `index.jsonl`, not deleted; the admin's own picks are still deleted · owner:
+  "Yes, sharpen rules" (keep flagged originals for a fair re-test of the AI
+  picture check) · costs about 175 KB a picture on disk · `app/rejected_originals.py` (v302)
+- 2026-11-17 · After every deploy that changes a page, Claude looks at it in the
+  desktop app's built-in browser pane, which is signed in as the owner, without
+  asking. Claude only looks and never ticks, edits, pays or saves unless asked.
+  The owner signs in there himself if it ever shows /login · owner: "look
+  always you dont need to ask" · v300 took 21 s live but 0.3 s on test data
 - 2026-11-17 · Usage's WORKER PAY table sorts both money columns by the
   month the pictures were SAVED (v300). Paid KES = pictures paid, each at its
   run's rate (taken-back advances excluded); Pay KES = that plus the pictures

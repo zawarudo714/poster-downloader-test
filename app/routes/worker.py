@@ -67,6 +67,7 @@ from ..projects import (
 from ..timeutil import fmt_local, local_today
 from ..parsing import IMAGE_EXT_RE, filename_for, folder_name_for, sanitize
 from ..templating import templates
+from ..rejected_originals import remove_picture_file
 from ..utils import (
     count_live_posters_for_master, count_titles_worked_today,
     live_flag_title_ids, pictures_awaiting_your_look,
@@ -1007,7 +1008,7 @@ def _stand_down_for_swap(db: Session, user: User, t: MasterTitle, *,
             return None              # the painter claimed it this instant
     paths = []
     for sp in existing:
-        paths.append(saved_poster_path(sp))
+        paths.append((sp, saved_poster_path(sp)))
         sp.deleted_at = datetime.utcnow()
         sp.delete_note = note
         log_activity(db, user=user, action="poster_replaced",
@@ -1228,8 +1229,8 @@ def api_search_save(
         return late
 
     # Every check has passed, so the pictures this swap stands down can go.
-    for old_path in stood_down_paths:
-        old_path.unlink(missing_ok=True)
+    for old_sp, old_path in stood_down_paths:
+        remove_picture_file(db, old_sp, old_path, reason="worker swapped it")
 
     # WHICH SEARCH FOUND IT. The site's own grid announces itself
     # ('brave'); the only other caller of this endpoint is the phone
@@ -2196,8 +2197,8 @@ def save_image(
         return late
 
     # Every check has passed, so the pictures this swap stands down can go.
-    for old_path in stood_down_paths:
-        old_path.unlink(missing_ok=True)
+    for old_sp, old_path in stood_down_paths:
+        remove_picture_file(db, old_sp, old_path, reason="worker swapped it")
 
     sp = SavedPoster(
         master_title_id    = t.id,
@@ -2360,7 +2361,7 @@ def delete_poster(
     if not picture_can_change(db, sp) or not take_out_of_pipeline(db, sp):
         raise HTTPException(409, _HELD_MESSAGE)
     fs_path = saved_poster_path(sp)
-    fs_path.unlink(missing_ok=True)
+    remove_picture_file(db, sp, fs_path, reason="worker deleted it")
 
     sp.deleted_at = datetime.utcnow()
     sp.delete_note = note.strip() or None
@@ -2583,7 +2584,7 @@ def replace_poster(
         if not take_out_of_pipeline(db, sp):
             tmp_target.unlink(missing_ok=True)
             raise HTTPException(409, _HELD_MESSAGE)
-        old_fs.unlink(missing_ok=True)
+        remove_picture_file(db, sp, old_fs, reason="worker replaced it")
         target = folder / new_name
         if target.exists() and target != tmp_target:
             target.unlink(missing_ok=True)
@@ -2912,7 +2913,7 @@ def title_skip(
     deleted_poster_ids: list[int] = []
     for sp in live_posters:
         fs = saved_poster_path(sp)
-        fs.unlink(missing_ok=True)
+        remove_picture_file(db, sp, fs, reason="title skipped")
         sp.deleted_at = datetime.utcnow()
         sp.delete_note = "auto-deleted: title skipped"
         deleted_poster_ids.append(sp.id)

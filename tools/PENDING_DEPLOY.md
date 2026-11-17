@@ -1,7 +1,6 @@
 # Not yet deployed
 
-v297: the version number for the Google place-check removal (the code went
-out a minute ago still calling itself v296). The node is unchanged.
+v298: Usage keeps the project menu; server prices and worker pay by month on Usage; the 24th server-bill pill with a Paid tick; date boxes readable site-wide.
 
 Whoever changes code writes here what is waiting and why; the deploy tool
 empties this file once the server is confirmed to be running it.

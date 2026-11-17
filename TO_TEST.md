@@ -1457,6 +1457,24 @@ delete it there by hand.
 - You can now delete the Vision API key in Google Cloud (or switch the
   Vision API off) so nothing can ever be charged there.
 
+## 122. USAGE STAYS IN THE PROJECT; SERVER BILLS; PAY BY MONTH; DATES — v298
+
+- Open your project, then click Usage in the left menu. The left menu should
+  stay on the project (Home, Worker Images ... Usage, Peek), not jump back to
+  All Projects.
+- Scroll to the bottom of Usage. A small SERVERS · MONTHLY line should show
+  Hetzner $14.09 and Contabo €24.50. Click "edit" next to one, type a new
+  price, and the line should show it. Nothing is paid from here.
+- Under it, WORKER PAY · MONTH BY MONTH should list Humphrey's pictures and
+  KES per month for this project, with "(so far)" on this month and Paid KES
+  for months a payment run ended in.
+- From 24 Nov a small "Pay servers: ..." pill should show in the top bar on
+  every admin page. Tick Paid: the pill should go and stay gone after a
+  reload. It should come back on 24 Dec.
+- Look at the date boxes on Usage, Payments, Earnings, Pipeline and Review
+  Images, in dark and in light mode. The date text and the calendar icon
+  should be easy to read.
+
 ## NOT ON THIS LIST, ON PURPOSE
 
 **Re-importing the catalogue.** No longer needed at all — corrected

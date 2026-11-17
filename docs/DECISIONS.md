@@ -5,6 +5,15 @@ A replaced decision stays here, marked SUPERSEDED, never deleted.
 Older decisions are tagged `DECIDED <date>` where they apply (in the docs and
 in `AUDIT.md`); search for `DECIDED` to find them.
 
+- 2026-11-17 · Usage shows the two server bills (Hetzner $14.09, Contabo
+  €24.50, editable, stored as app settings `server_cost_*`) and each worker's
+  pictures and KES per month, small, under the charts and never in them; a
+  top-bar pill reminds from the 24th until Paid is ticked
+  (`server_bill_paid_month`), then returns next 24th. Pay KES = payable
+  pictures × today's rate, so an older month at an older rate is shown at
+  today's rate; Paid KES is what runs ending that month really sent (v298)
+  · owner: "just like a small thing for me to see", "I can remove it only by
+  ticking Paid" · `tools/test_server_bill.py`
 - 2026-11-17 · The Google place check is removed (v297): no more Google
   Vision call after each save, no place pill, no PLACE CHECK THIS DAY panel,
   no "Google Vision key" or on/off box, no Diagnostics row. The

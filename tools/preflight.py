@@ -4134,6 +4134,46 @@ def check_status_menu_matches_filter() -> None:
              f"in routes/admin.py")
 
 
+def check_project_tabs_keep_the_project_menu() -> None:
+    """
+    Every page linked from the PROJECT menu must say it is a project page.
+
+    base.html draws the project menu only when the page template sets
+    `{% set nav_scope = 'project' %}`; a page that does not say falls back
+    to the main menu. The Usage tab (v292) never said it, so clicking Usage
+    inside a project swapped the menu back to All Projects (owner,
+    2026-11-17). The tab names are read from the project block of base.html
+    and matched to the templates the routes render with that `active_tab`.
+    """
+    base = (ROOT / "app" / "templates" / "base.html").read_text(encoding="utf-8")
+    start = base.index("{% if user.role == 'admin' and scope == 'project' and proj %}")
+    stop = base.index("{% elif user.role == 'admin' %}", start)
+    tabs = set(re.findall(r"active_tab == '([a-z_]+)'", base[start:stop]))
+    if not tabs:
+        fail("base.html: found no tabs in the project menu; this check is watching nothing")
+        return
+    by_tab: dict = {}
+    for path in sorted((ROOT / "app" / "routes").glob("*.py")):
+        src = path.read_text(encoding="utf-8")
+        for m in re.finditer(r'TemplateResponse\(\s*(?:request\s*,\s*)?"([^"]+\.html)"', src):
+            window = src[m.end():m.end() + 800]
+            t = re.search(r'"active_tab"\s*:\s*"([a-z_]+)"', window)
+            if t:
+                by_tab.setdefault(t.group(1), set()).add(m.group(1))
+    for tab in sorted(tabs):
+        # Admin pages only: a worker page can share a tab name (the workers'
+        # own "stats") and draws the worker menu, not either admin menu.
+        for name in sorted(n for n in by_tab.get(tab, ()) if n.startswith("admin_")):
+            text = (ROOT / "app" / "templates" / name).read_text(encoding="utf-8")
+            if not re.search(r"{%-?\s*set\s+nav_scope\s*=", text):
+                fail(f"app/templates/{name} is the '{tab}' tab of the project menu "
+                     f"but does not set nav_scope, so opening it shows the main "
+                     f"menu instead. Add {{% set nav_scope = 'project' %}} at the top.")
+    if not by_tab.get("usage"):
+        fail("no route renders a template with active_tab 'usage'; the "
+             "project-menu check can no longer see the page it was built for")
+
+
 CHECKS = [
     ("python compiles",           check_python_compiles),
     ("worker queue honours priority", check_claim_queue_orders_by_priority),
@@ -4196,6 +4236,7 @@ CHECKS = [
     ("saved posters declare their source",
      check_saved_posters_declare_their_source),
     ("password fields are secret", check_password_fields_are_secret),
+    ("project tabs keep the project menu", check_project_tabs_keep_the_project_menu),
 ]
 
 

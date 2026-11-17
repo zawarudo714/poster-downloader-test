@@ -6502,3 +6502,44 @@ a.pulse-chip:hover {
 .usage-tbl th, .usage-tbl td { padding: 4px 8px; text-align: right; border-bottom: 1px solid var(--border); }
 .usage-tbl th:first-child, .usage-tbl td:first-child { text-align: left; }
 .usage-foot { font-size: 11px; }
+
+/* ── Date inputs readable everywhere (v298, owner 2026-11-17) ────────────
+   The browser drew the date text and calendar icon for a LIGHT page on our
+   dark inputs, so "mm/dd/yyyy" was near invisible. color-scheme tells it the
+   real theme; the edit parts take the page's own text colour. */
+input[type=date], input[type=datetime-local], input[type=month], input[type=time] {
+  color: var(--text);
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-family: inherit;
+  color-scheme: dark;
+}
+html.theme-light input[type=date], html.theme-light input[type=datetime-local],
+html.theme-light input[type=month], html.theme-light input[type=time] { color-scheme: light; }
+input[type=date]::-webkit-datetime-edit,
+input[type=date]::-webkit-datetime-edit-fields-wrapper,
+input[type=date]::-webkit-datetime-edit-text,
+input[type=date]::-webkit-datetime-edit-month-field,
+input[type=date]::-webkit-datetime-edit-day-field,
+input[type=date]::-webkit-datetime-edit-year-field { color: var(--text); }
+input[type=date]::-webkit-calendar-picker-indicator { cursor: pointer; opacity: 0.85; }
+
+/* ── Usage: servers and worker pay, small, out of the charts (v298) ───── */
+.usage-small .panel-head { padding: 9px 16px; }
+.usage-small .panel-body { padding: 10px 16px; font-size: 12px; }
+.usage-servers { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline; }
+.usage-server b { font-weight: 600; }
+.link-btn { background: none; border: 0; padding: 0 2px; color: var(--subtext);
+  font: inherit; font-size: 11px; text-decoration: underline; cursor: pointer; }
+.link-btn:hover { color: var(--accent); }
+.usage-pay-worker { margin-bottom: 10px; max-width: 520px; }
+.usage-pay-name { font-weight: 600; margin-bottom: 4px; }
+.usage-pay-note { font-size: 11px; }
+
+/* The server-bill reminder in the top bar (v298): small, never in the way. */
+.bill-pill { display: inline-flex; align-items: center; gap: 5px; margin-right: 8px;
+  padding: 2px 9px; border: 1px solid var(--accent); border-radius: 999px;
+  font-size: 11px; color: var(--text); white-space: nowrap; cursor: pointer; }
+.bill-pill input { margin: 0; cursor: pointer; }

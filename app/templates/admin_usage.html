@@ -1,4 +1,7 @@
 {% extends "base.html" %}
+{# A project page: without this the menu falls back to All Projects
+   (owner, 2026-11-17). Guarded by preflight's project-menu check. #}
+{% set nav_scope = 'project' %}
 {% from "_macros.html" import info %}
 {% block title %}Usage · Admin{% endblock %}
 
@@ -79,6 +82,17 @@
     <div class="panel-body" data-usage-table></div>
   </details>
 
+  {# Fixed bills and wages, kept OUT of the charts (owner, 2026-11-17):
+     a small note to look at, filled by admin_usage_costs.js. #}
+  <section class="panel usage-small">
+    <div class="panel-head"><span>SERVERS · MONTHLY</span></div>
+    <div class="panel-body usage-servers" data-usage-servers><span class="muted">Loading…</span></div>
+  </section>
+  <section class="panel usage-small">
+    <div class="panel-head"><span>WORKER PAY · MONTH BY MONTH</span></div>
+    <div class="panel-body" data-usage-pay><span class="muted">Loading…</span></div>
+  </section>
+
   <div class="muted mono usage-foot" data-usage-foot></div>
 </div>
 {% endblock %}
@@ -86,4 +100,5 @@
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="/static/js/admin_usage.js?v={{ app_version }}"></script>
+<script src="/static/js/admin_usage_costs.js?v={{ app_version }}"></script>
 {% endblock %}

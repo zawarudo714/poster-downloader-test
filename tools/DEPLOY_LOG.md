@@ -15,6 +15,7 @@ cost far more to read, answer a different question, and on a mounted working
 copy `git status` cannot refresh its index — it reports stale answers with
 no warning.
 
+- **2026-11-17 10:53** · `[178.105.34.144]` · `c167a08c` · v296 · v297: remove the Google place check
 - **2026-11-05 19:18** · `[178.105.34.144]` · `9b50404e` · v296 · v296: Junique list for the laptop fetch tool; fetch and upload tools
 - **2026-11-05 18:46** · `[178.105.34.144]` · `11ef0262` · v295 · v295: record each print file's enlargement settings; remake old print files with sharpen 80 + grain 4 (app/print_remake.py); Diagnostics counts old ones
 - **2026-11-05 18:19** · `[178.105.34.144]` · `011951bb` · v294 · v294: print files get sharpening 80 and grain 4 so Junique accepts them; deploy_cli.py lets the session deploy
@@ -44,4 +45,3 @@ no warning.
 - **2026-10-12 12:03** · `[178.105.34.144]` · `1b1e1919` · v260 · deploy v260
 - **2026-10-11 13:01** · `[178.105.34.144]` · `d431976f` · v259 · deploy v259
 - **2026-10-09 16:40** · `[178.105.34.144]` · `00d332a3` · v258 · deploy v258
-- **2026-10-09 14:24** · `[178.105.34.144]` · `985378a5` · v257 · deploy v257

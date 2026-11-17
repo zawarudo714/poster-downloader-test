@@ -15,6 +15,7 @@ cost far more to read, answer a different question, and on a mounted working
 copy `git status` cannot refresh its index — it reports stale answers with
 no warning.
 
+- **2026-11-17 11:19** · `[178.105.34.144]` · `91e09695` · v299 · v299: server-bill pill starts with October paid, first shows 24 Nov
 - **2026-11-17 11:17** · `[178.105.34.144]` · `e2470d2d` · v298 · v298: Usage keeps the project menu; server prices and worker pay by month on Usage; 24th server-bill pill with Paid tick; readable date boxes
 - **2026-11-17 10:55** · `[178.105.34.144]` · `7f38cb8a` · v297 · v297: remove the Google place check (version number)
 - **2026-11-17 10:53** · `[178.105.34.144]` · `c167a08c` · v296 · v297: remove the Google place check
@@ -44,4 +45,3 @@ no warning.
 - **2026-10-18 16:47** · `[178.105.34.144]` · `e415db4c` · v263 · deploy v263
 - **2026-10-13 07:05** · `[178.105.34.144]` · `7b6e4c2a` · v262 · deploy v262
 - **2026-10-12 13:53** · `[178.105.34.144]` · `44a3f44a` · v261 · deploy v261
-- **2026-10-12 12:03** · `[178.105.34.144]` · `1b1e1919` · v260 · deploy v260

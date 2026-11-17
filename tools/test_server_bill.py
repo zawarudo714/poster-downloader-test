@@ -127,17 +127,20 @@ def picture(day, project=proj, **extra):
                          project_folder=project.slug, original_save_date=day,
                          title_folder_path=f"{n[0]}. Place {n[0]}", filename=f"{n[0]}.jpg",
                          source_url="u", **extra))
+    db.flush()
+    return db.query(M.SavedPoster).order_by(M.SavedPoster.id.desc()).first().id
 
 
-for _ in range(3):
-    picture(date(2026, 10, 5))
+october = [picture(date(2026, 10, 5)) for _ in range(3)]
 picture(date(2026, 11, 2))
 picture(date(2026, 11, 3), added_by=admin.id)                 # the owner's own: not pay
 picture(date(2026, 11, 4), deleted_at=datetime(2026, 11, 5))  # deleted: not pay
 picture(date(2026, 11, 6), project=other)                     # another project
-db.add(M.PaymentRun(worker_id=w.id, worker_username=w.username, period_start=date(2026, 10, 1),
-                    period_end=date(2026, 10, 31), poster_count=3, rate_kes="7", amount_kes="21",
-                    created_by=admin.id))
+# October's pictures were paid at the OLD rate by a run that ENDED in
+# November: the case that made Paid look like overpayment (owner, 2026-11-17).
+db.add(M.PaymentRun(worker_id=w.id, worker_username=w.username, period_start=date(2026, 9, 12),
+                    period_end=date(2026, 11, 1), poster_count=3, rate_kes="5", amount_kes="15",
+                    poster_ids_json=json.dumps(october), created_by=admin.id))
 db.commit()
 
 
@@ -148,10 +151,13 @@ def table():
 data = table()
 rows = {r["month"]: r for r in data["workers"][0]["rows"]}
 ok(data["workers"][0]["name"] == "humphrey" and len(rows) == 12, "one worker, twelve months")
-ok(rows["2026-10"]["pictures"] == 3 and rows["2026-10"]["pay_kes"] == "21", "October: 3 pictures, 21 KES at 7")
+ok(rows["2026-10"]["pictures"] == 3 and rows["2026-10"]["paid_kes"] == "15",
+   "October: 3 pictures, paid 15 KES at the 5 KES they were paid at, though the run ended in November")
+ok(rows["2026-10"]["pay_kes"] == "15" and rows["2026-10"]["owed"] == 0, "October fully paid: Pay equals Paid")
 ok(rows["2026-11"]["pictures"] == 1, "November: the admin-added, deleted and other-project ones are left out")
 ok(rows["2026-11"]["so_far"] and not rows["2026-10"]["so_far"], "only the current month is 'so far'")
-ok(rows["2026-10"]["paid_kes"] == "21" and rows["2026-11"]["paid_kes"] == "0", "Paid sums the run ending in October")
+ok(rows["2026-11"]["paid_kes"] == "0" and rows["2026-11"]["owed"] == 1 and rows["2026-11"]["pay_kes"] == "7",
+   "November: nothing paid, 1 to pay at today's 7 KES")
 ok(data["servers"][0]["price"] == "15.20", "the costs answer carries the server prices")
 
 # 5. Date inputs keep their colour scheme

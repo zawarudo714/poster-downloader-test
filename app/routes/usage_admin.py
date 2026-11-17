@@ -122,10 +122,11 @@ def _last_months(today: date, n: int) -> list[str]:
 def api_usage_costs(request: Request, admin: User = Depends(require_admin),
                     db: Session = Depends(get_db)):
     """Server prices, plus each worker's pictures and pay per month (12 months)."""
+    import json
     from decimal import Decimal, InvalidOperation
-    from sqlalchemy import func
     from ..models import MasterTitle, PaymentRun, SavedPoster
-    from ..payments import get_rate_kes, payable_criteria
+    from ..payments import (deducted_advance_ids, get_rate_kes, payable_criteria,
+                            unpayable_reasons)
     from ..projects import scope_titles
     from ..timeutil import local_today
     from .admin import current_project
@@ -139,30 +140,60 @@ def api_usage_costs(request: Request, admin: User = Depends(require_admin),
         rate = Decimal(0)
     workers = (db.query(User).filter(User.role == "worker", User.is_deleted == 0)
                  .order_by(User.username).all())
+    # Both money columns are sorted by the month the pictures were SAVED
+    # (owner, 2026-11-17: sorting Paid by the month a run ended made Paid
+    # look like over- and under-payment, because runs pay older work and
+    # pay ahead). Each paid picture is valued at the rate of the run that
+    # paid it, so a 5 KES September stays 5 KES. A picture whose money a
+    # later run took back counts as not paid.
+    gone = deducted_advance_ids(db)
     out_workers = []
     for w in workers:
-        q = (db.query(SavedPoster.original_save_date, func.count(SavedPoster.id))
-               .join(MasterTitle, MasterTitle.id == SavedPoster.master_title_id)
-               .filter(*payable_criteria(w.id),
-                       SavedPoster.original_save_date >= first))
-        q = scope_titles(q, project)
-        pictures: dict[str, int] = {}
-        for day, n in q.group_by(SavedPoster.original_save_date).all():
-            pictures[_month_key(day)] = pictures.get(_month_key(day), 0) + n
-        paid: dict[str, Decimal] = {}
-        for end, amount in (db.query(PaymentRun.period_end, PaymentRun.amount_kes)
-                              .filter(PaymentRun.worker_id == w.id,
-                                      PaymentRun.period_end >= first).all()):
+        rate_of: dict[int, Decimal] = {}
+        for raw, run_rate in (db.query(PaymentRun.poster_ids_json, PaymentRun.rate_kes)
+                                .filter(PaymentRun.worker_id == w.id).all()):
             try:
-                paid[_month_key(end)] = paid.get(_month_key(end), Decimal(0)) + Decimal(amount)
-            except (InvalidOperation, TypeError):
-                pass
-        rows = [{"month": m, "pictures": pictures.get(m, 0),
-                 "pay_kes": str((rate * pictures.get(m, 0)).quantize(Decimal("1"))),
-                 "paid_kes": str(paid.get(m, Decimal(0)).quantize(Decimal("1"))),
+                ids, r_rate = json.loads(raw or "[]"), Decimal(run_rate)
+            except (TypeError, ValueError, InvalidOperation):
+                continue
+            for i in ids:
+                if isinstance(i, int) and i not in gone:
+                    rate_of[i] = r_rate
+
+        def in_project(q):
+            return scope_titles(q.join(MasterTitle, MasterTitle.id == SavedPoster.master_title_id)
+                                 .filter(SavedPoster.original_save_date >= first), project)
+
+        n = {m: 0 for m in months}
+        paid = {m: Decimal(0) for m in months}
+        owed = {m: 0 for m in months}
+        ids = sorted(rate_of)
+        for at in range(0, len(ids), 500):
+            for pid, day in in_project(db.query(SavedPoster.id, SavedPoster.original_save_date)
+                                         .filter(SavedPoster.id.in_(ids[at:at + 500]))).all():
+                m = _month_key(day)
+                if m in n:
+                    n[m] += 1
+                    paid[m] += rate_of[pid]
+        unpaid = {pid: day for pid, day in
+                  in_project(db.query(SavedPoster.id, SavedPoster.original_save_date)
+                               .filter(*payable_criteria(w.id))).all()
+                  if pid not in rate_of}
+        # "title already paid" is never paid, so it is not owed either; a flag
+        # or a replacement waiting for your look still is.
+        never = {pid for pid, why in unpayable_reasons(db, w.id, set(unpaid)).items()
+                 if why in ("paid", "title_paid")}
+        for pid, day in unpaid.items():
+            m = _month_key(day)
+            if pid not in never and m in n:
+                n[m] += 1
+                owed[m] += 1
+        rows = [{"month": m, "pictures": n[m], "owed": owed[m],
+                 "pay_kes": str((paid[m] + rate * owed[m]).quantize(Decimal("1"))),
+                 "paid_kes": str(paid[m].quantize(Decimal("1"))),
                  "so_far": m == months[0]}
                 for m in months]
-        if any(r["pictures"] or r["paid_kes"] != "0" for r in rows):
+        if any(r["pictures"] for r in rows):
             out_workers.append({"name": w.username, "rows": rows})
     from ..payments import get_setting
     return JSONResponse({

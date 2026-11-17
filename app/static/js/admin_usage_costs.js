@@ -26,19 +26,23 @@
   function drawPay(data) {
     if (!data.workers.length) { pay.innerHTML = '<span class="muted">No worker pictures in the last 12 months.</span>'; return; }
     pay.innerHTML = data.workers.map(w => {
-      const rows = w.rows.filter(r => r.pictures || r.paid_kes !== '0');
+      const rows = w.rows.filter(r => r.pictures);
       const body = rows.map(r =>
         `<tr><td>${esc(monthName(r.month))}${r.so_far ? ' <span class="muted">(so far)</span>' : ''}</td>` +
         `<td class="mono">${kes(r.pictures)}</td><td class="mono">${kes(r.pay_kes)}</td>` +
-        `<td class="mono">${r.paid_kes === '0' ? '<span class="muted">—</span>' : kes(r.paid_kes)}</td></tr>`).join('');
+        `<td class="mono">${r.paid_kes === '0' ? '<span class="muted">—</span>' : kes(r.paid_kes)}</td>` +
+        `<td class="mono">${r.owed ? kes(r.owed) : '<span class="muted">—</span>'}</td></tr>`).join('');
       return `<div class="usage-pay-worker"><div class="usage-pay-name">${esc(w.name)}</div>` +
         '<table class="usage-tbl"><thead><tr><th>Month</th><th>Pictures</th>' +
-        `<th title="Pictures × today's rate (${esc(data.rate_kes)} KES)">Pay KES</th>` +
-        '<th title="What payment runs ending that month actually sent, all projects">Paid KES</th></tr></thead>' +
+        '<th title="What the pictures saved this month come to: paid ones at the rate they were paid, the rest at the rate today">Pay KES</th>' +
+        '<th title="Money already sent for the pictures saved this month, whenever it was sent">Paid KES</th>' +
+        '<th title="Pictures from this month not paid yet">To pay</th></tr></thead>' +
         `<tbody>${body}</tbody></table></div>`;
     }).join('') +
-    `<div class="muted usage-pay-note">Pictures that count toward pay, by the day they were saved, in this project. ` +
-    `Pay KES = pictures × today's rate (${esc(data.rate_kes)} KES). Paid KES = what was actually sent.</div>`;
+    `<div class="muted usage-pay-note">Every column is by the month the pictures were saved, in this project. ` +
+    `Paid KES is the money already sent for them, at the rate they were paid, whenever it was sent. ` +
+    `Pay KES adds the ones still to pay at today's rate (${esc(data.rate_kes)} KES). ` +
+    `When a month is fully paid the two match.</div>`;
   }
 
   async function load() {

@@ -1466,8 +1466,10 @@ delete it there by hand.
   Hetzner $14.09 and Contabo €24.50. Click "edit" next to one, type a new
   price, and the line should show it. Nothing is paid from here.
 - Under it, WORKER PAY · MONTH BY MONTH should list Humphrey's pictures and
-  KES per month for this project, with "(so far)" on this month and Paid KES
-  for months a payment run ended in.
+  KES per month for this project, with "(so far)" on this month. Since v300
+  every column is by the month the pictures were saved: September and
+  October should show Pay KES equal to Paid KES (5,165 and 12,217), and
+  November should show To pay for the pictures not paid yet.
 - From 24 Nov a small "Pay servers: ..." pill should show in the top bar on
   every admin page. Tick Paid: the pill should go and stay gone after a
   reload. It should come back on 24 Dec.
